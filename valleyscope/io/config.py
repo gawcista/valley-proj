@@ -6,8 +6,9 @@ from typing import Any
 
 import numpy as np
 import yaml
+import h5py
 
-from valleyscope.geometry.lattice import read_poscar_lattice
+from valleyscope.geometry.lattice import read_poscar_lattice, reciprocal_from_direct
 from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector
 
 
@@ -101,6 +102,30 @@ def _parse_lattices(raw: dict[str, Any]) -> dict[str, np.ndarray]:
     return result
 
 
+def _read_h5_direct_cart(path: Path) -> np.ndarray | None:
+    if not path.exists():
+        return None
+    with h5py.File(path, "r") as h5:
+        if "metadata/lattice/direct_cart" not in h5:
+            return None
+        direct = np.asarray(h5["metadata/lattice/direct_cart"][()], dtype=float)
+    if direct.shape != (3, 3):
+        raise ValueError("metadata/lattice/direct_cart must have shape [3,3]")
+    return direct
+
+
+def _moire_direct_cart(base: Path, input_raw: dict[str, Any]) -> np.ndarray | None:
+    if "wavefunction_h5" in input_raw:
+        direct = _read_h5_direct_cart(_path(base, input_raw["wavefunction_h5"]))
+        if direct is not None:
+            return direct
+    if input_raw.get("poscar") is not None:
+        poscar = _path(base, input_raw.get("poscar"))
+        if poscar is not None and poscar.exists():
+            return read_poscar_lattice(str(poscar)).direct_cart
+    return None
+
+
 def _rotation_z_row(degrees: float) -> np.ndarray:
     angle = np.deg2rad(float(degrees))
     c = float(np.cos(angle))
@@ -128,7 +153,23 @@ def _layer_reciprocal(
     lattices: dict[str, np.ndarray],
     monolayer_poscars: dict[str, Path],
     transforms: dict[str, dict[str, Any]],
+    moire_direct_cart: np.ndarray | None,
 ) -> np.ndarray:
+    transform = transforms.get(layer or "", {})
+    if "supercell_matrix" in transform:
+        if "rotation_deg" in transform:
+            raise ValueError(
+                f"layer_transforms.{layer}.supercell_matrix and rotation_deg are mutually exclusive"
+            )
+        if moire_direct_cart is None:
+            raise ValueError(
+                f"layer_transforms.{layer}.supercell_matrix requires input.wavefunction_h5 or input.poscar "
+                "with a moire direct lattice"
+            )
+        supercell = _supercell_matrix(transform["supercell_matrix"])
+        layer_direct = np.linalg.inv(supercell).T @ np.asarray(moire_direct_cart, dtype=float)
+        return reciprocal_from_direct(layer_direct)
+
     if layer is not None and layer in lattices:
         reciprocal = lattices[layer]
     elif "default" in lattices:
@@ -137,9 +178,21 @@ def _layer_reciprocal(
         reciprocal = read_poscar_lattice(str(monolayer_poscars[layer])).reciprocal_cart
     else:
         reciprocal = _fallback_reciprocal(lattices, monolayer_poscars)
-    transform = transforms.get(layer or "", {})
     rotation = _rotation_z_row(float(transform.get("rotation_deg", 0.0)))
     return np.asarray(reciprocal, dtype=float) @ rotation
+
+
+def _supercell_matrix(raw: Any) -> np.ndarray:
+    matrix = np.asarray(raw, dtype=float)
+    if matrix.shape == (2, 2):
+        full = np.eye(3)
+        full[:2, :2] = matrix
+        matrix = full
+    if matrix.shape != (3, 3):
+        raise ValueError("supercell_matrix must have shape [2,2] or [3,3]")
+    if abs(float(np.linalg.det(matrix))) < 1e-14:
+        raise ValueError("supercell_matrix must be nonsingular")
+    return matrix
 
 
 def _parse_centers(
@@ -147,12 +200,13 @@ def _parse_centers(
     lattices: dict[str, np.ndarray],
     monolayer_poscars: dict[str, Path],
     transforms: dict[str, dict[str, Any]],
+    moire_direct_cart: np.ndarray | None,
 ) -> list[ValleyCenter]:
     coordinate_mode = str(raw.get("coordinate_mode", "cart"))
     centers: list[ValleyCenter] = []
     for item in raw.get("centers", []):
         layer = item.get("layer")
-        reciprocal = _layer_reciprocal(layer, lattices, monolayer_poscars, transforms)
+        reciprocal = _layer_reciprocal(layer, lattices, monolayer_poscars, transforms, moire_direct_cart)
         if coordinate_mode == "cart":
             if "cart" not in item:
                 raise ValueError(f"valley center {item.get('name')} must define cart")
@@ -188,11 +242,13 @@ def load_config(path: str | Path) -> AppConfig:
     }
     monolayer_lattices = _parse_lattices(raw.get("monolayer_lattices", {}))
     layer_transforms = dict(raw.get("layer_transforms", {}))
+    moire_direct = _moire_direct_cart(base, input_raw)
     centers = _parse_centers(
         raw.get("valley_centers", {}),
         monolayer_lattices,
         monolayer_poscars,
         layer_transforms,
+        moire_direct,
     )
     sectors = [ValleySector(item["name"], list(item["centers"])) for item in raw.get("valley_sectors", [])]
     analysis_raw = raw.get("analysis", {})

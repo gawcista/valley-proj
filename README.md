@@ -183,7 +183,7 @@ Band indices in YAML use VASP 1-based convention. The code converts to Python in
 
 ### YAML Configuration
 
-Use `examples/config_template.yaml` as a starting point. The monolayer reciprocal lattice must come from either explicit `monolayer_lattices.*.reciprocal_cart` entries or user-provided `monolayer_poscars` plus `layer_transforms`. The moire POSCAR is used for symmetry diagnostics; it is not the default source of monolayer reciprocal lattice vectors.
+Use `examples/config_template.yaml` as a starting point. For a commensurate twisted bilayer, prefer `layer_transforms.*.supercell_matrix`: the integer matrix `P` should satisfy `M_moire = P^T A_layer` in row-vector lattice convention, matching the `twist_generator` convention. The analyzer then derives each layer's rotated primitive reciprocal lattice from the HDF5/POSCAR moire lattice. `rotation_deg` remains available for simple tests, but it is less reliable for generated commensurate cells because the final moire cell may include an overall basis rotation.
 
 Key sections are:
 
@@ -198,10 +198,11 @@ analysis:
   degeneracy_tol_meV: 1.0
 
 valley_centers:
-  coordinate_mode: cart
+  coordinate_mode: layer_frac
   centers:
     - name: top_K
-      cart: [...]
+      layer: top
+      frac: [0.333333333333, 0.333333333333, 0.0]
 
 valley_sectors:
   - name: K_sector
@@ -445,7 +446,7 @@ YAML 配置中的 band index 使用 VASP 1-based convention，代码内部再转
 
 ### YAML 配置
 
-建议从 `examples/config_template.yaml` 开始。monolayer reciprocal lattice 必须来自显式的 `monolayer_lattices.*.reciprocal_cart`，或来自用户提供的 `monolayer_poscars` 与 `layer_transforms`。moire POSCAR 用于 symmetry diagnostics，不默认作为 monolayer reciprocal lattice 的来源。
+建议从 `examples/config_template.yaml` 开始。对 commensurate twisted bilayer，优先使用 `layer_transforms.*.supercell_matrix`：整数矩阵 `P` 应满足 row-vector lattice convention 下的 `M_moire = P^T A_layer`，这与 `twist_generator` 的约定一致。程序会从 HDF5/POSCAR 的 moire lattice 反推出每层旋转后的 primitive reciprocal lattice。`rotation_deg` 仍可用于简单测试，但对生成的公度超胞不够稳健，因为最终 moire cell 可能带有整体 basis rotation。
 
 关键配置段如下：
 
@@ -460,10 +461,11 @@ analysis:
   degeneracy_tol_meV: 1.0
 
 valley_centers:
-  coordinate_mode: cart
+  coordinate_mode: layer_frac
   centers:
     - name: top_K
-      cart: [...]
+      layer: top
+      frac: [0.333333333333, 0.333333333333, 0.0]
 
 valley_sectors:
   - name: K_sector

@@ -7,21 +7,22 @@ input:
 
 layer_transforms:
   top:
-    rotation_deg: 0.0
+    # For a twist_generator-style commensurate cell, use the integer matrix P
+    # satisfying M_moire = P^T A_layer in row-vector lattice convention.
+    supercell_matrix:
+      - [9, -5, 0]
+      - [5, 4, 0]
+      - [0, 0, 1]
   bottom:
-    rotation_deg: 0.0
+    supercell_matrix:
+      - [9, -4, 0]
+      - [4, 5, 0]
+      - [0, 0, 1]
 
 analysis:
   kpoints: [GammaM, KM, MM]
   target_bands_vasp: [101, 102]
   degeneracy_tol_meV: 1.0
-
-monolayer_lattices:
-  default:
-    reciprocal_cart:
-      - [1.0, 0.0, 0.0]
-      - [0.0, 1.0, 0.0]
-      - [0.0, 0.0, 1.0]
 
 valley_centers:
   coordinate_mode: layer_frac

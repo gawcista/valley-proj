@@ -30,6 +30,17 @@ def write_fixture(path: Path):
         kp["band_indices_vasp"] = np.array([101])
 
 
+def write_fixture_with_lattice(path: Path, direct_cart: np.ndarray):
+    with h5py.File(path, "w") as h5:
+        meta = h5.create_group("metadata")
+        lattice = meta.create_group("lattice")
+        lattice["direct_cart"] = np.asarray(direct_cart, dtype=float)
+        lattice["reciprocal_cart"] = np.eye(3)
+        meta["spinor"] = False
+        meta["source"] = "toy"
+        meta["vasp_band_index_base"] = 1
+
+
 def write_config(path: Path, h5_path: Path, out_dir: Path):
     config = {
         "input": {"wavefunction_h5": str(h5_path), "poscar": "CONTCAR"},
@@ -117,6 +128,42 @@ def test_config_loader_builds_layer_rotated_fractional_valley_centers(tmp_path):
     assert centers["top_K"].cart == pytest.approx([0.0, 1.0, 0.0])
     assert centers["bottom_K"].cart == pytest.approx([0.0, -1.0, 0.0])
     assert centers["top_K"].reciprocal_cart[0] == pytest.approx([0.0, 2.0, 0.0])
+
+
+def test_config_loader_derives_layer_reciprocal_from_supercell_matrix(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    primitive_direct = np.diag([2.0, 3.0, 5.0])
+    supercell = np.array([[2, 1, 0], [0, 1, 0], [0, 0, 1]], dtype=float)
+    moire_direct = supercell.T @ primitive_direct
+    write_fixture_with_lattice(h5_path, moire_direct)
+    config = {
+        "input": {"wavefunction_h5": str(h5_path)},
+        "analysis": {"kpoints": [], "target_bands_vasp": []},
+        "layer_transforms": {
+            "top": {
+                "supercell_matrix": [[2, 1, 0], [0, 1, 0], [0, 0, 1]],
+            },
+        },
+        "valley_centers": {
+            "coordinate_mode": "layer_frac",
+            "centers": [
+                {"name": "top_K", "layer": "top", "frac": [0.5, 0.0, 0.0]},
+            ],
+        },
+        "valley_sectors": [{"name": "K_sector", "centers": ["top_K"]}],
+        "output": {"directory": str(tmp_path / "out")},
+    }
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    config = load_config(config_path)
+    center = config.valley_centers[0]
+
+    np.testing.assert_allclose(
+        center.reciprocal_cart,
+        [[np.pi, 0.0, 0.0], [0.0, 2.0 * np.pi / 3.0, 0.0], [0.0, 0.0, 2.0 * np.pi / 5.0]],
+    )
+    assert center.cart == pytest.approx([0.5 * np.pi, 0.0, 0.0])
 
 
 def test_analyze_hsp_writes_csv_json_and_diagnostics_h5(tmp_path):
