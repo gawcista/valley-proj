@@ -27,7 +27,23 @@ def minimum_periodic_distance(
 ) -> np.ndarray:
     q = np.asarray(q_cart, dtype=float)
     center = np.asarray(center_cart, dtype=float)
-    shifts = reciprocal_grid(reciprocal_cart, shell=shell, use_2d=use_2d)
+    basis = np.asarray(reciprocal_cart, dtype=float)
+    if basis.shape != (3, 3):
+        raise ValueError("reciprocal_cart must have shape [3,3]")
+    if use_2d:
+        basis_2d = basis[:2, :2]
+        if abs(float(np.linalg.det(basis_2d))) > 1e-14:
+            deltas = q[:, :2] - center[:2]
+            frac = deltas @ np.linalg.inv(basis_2d)
+            wrapped = frac - np.rint(frac)
+            return np.linalg.norm(wrapped @ basis_2d, axis=1)
+    elif abs(float(np.linalg.det(basis))) > 1e-14:
+        deltas = q - center
+        frac = deltas @ np.linalg.inv(basis)
+        wrapped = frac - np.rint(frac)
+        return np.linalg.norm(wrapped @ basis, axis=1)
+
+    shifts = reciprocal_grid(basis, shell=shell, use_2d=use_2d)
     deltas = q[:, None, :] - (center[None, None, :] + shifts[None, :, :])
     if use_2d:
         deltas = deltas.copy()

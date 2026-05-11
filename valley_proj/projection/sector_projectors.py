@@ -43,10 +43,13 @@ def build_sector_projectors(
     center_masks: dict[str, np.ndarray] = {}
 
     for center in centers:
+        center_reciprocal = center.reciprocal_cart
+        if center_reciprocal is None:
+            center_reciprocal = monolayer_reciprocal_cart
         distances = minimum_periodic_distance(
             q,
             center.cart,
-            monolayer_reciprocal_cart,
+            center_reciprocal,
             shell=g_search_shell,
             use_2d=use_2d,
         )

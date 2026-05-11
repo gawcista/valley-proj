@@ -154,12 +154,12 @@ class WavecarReader:
         gcut = np.sqrt(self.header.encut_eV / HBAR2_OVER_2M_EV_A2)
         max_indices = np.ceil(gcut * np.linalg.norm(direct, axis=1) / (2.0 * np.pi)).astype(int) + 1
         vectors: list[list[int]] = []
-        for i_raw in range(2 * max_indices[0] + 1):
-            i = _wrap_fft_index(i_raw, max_indices[0])
+        for k_raw in range(2 * max_indices[2] + 1):
+            k = _wrap_fft_index(k_raw, max_indices[2])
             for j_raw in range(2 * max_indices[1] + 1):
                 j = _wrap_fft_index(j_raw, max_indices[1])
-                for k_raw in range(2 * max_indices[2] + 1):
-                    k = _wrap_fft_index(k_raw, max_indices[2])
+                for i_raw in range(2 * max_indices[0] + 1):
+                    i = _wrap_fft_index(i_raw, max_indices[0])
                     g_frac = np.array([i, j, k], dtype=float)
                     q_cart = (g_frac + k_frac) @ reciprocal
                     energy = HBAR2_OVER_2M_EV_A2 * float(q_cart @ q_cart)

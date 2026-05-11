@@ -101,6 +101,82 @@ def _parse_lattices(raw: dict[str, Any]) -> dict[str, np.ndarray]:
     return result
 
 
+def _rotation_z_row(degrees: float) -> np.ndarray:
+    angle = np.deg2rad(float(degrees))
+    c = float(np.cos(angle))
+    s = float(np.sin(angle))
+    return np.array([[c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0]], dtype=float)
+
+
+def _fallback_reciprocal(
+    lattices: dict[str, np.ndarray],
+    monolayer_poscars: dict[str, Path],
+) -> np.ndarray:
+    if "default" in lattices:
+        return lattices["default"]
+    if lattices:
+        return next(iter(lattices.values()))
+    if monolayer_poscars:
+        return read_poscar_lattice(str(next(iter(monolayer_poscars.values())))).reciprocal_cart
+    raise ValueError(
+        "No monolayer reciprocal lattice configured; provide monolayer_lattices or monolayer_poscars"
+    )
+
+
+def _layer_reciprocal(
+    layer: str | None,
+    lattices: dict[str, np.ndarray],
+    monolayer_poscars: dict[str, Path],
+    transforms: dict[str, dict[str, Any]],
+) -> np.ndarray:
+    if layer is not None and layer in lattices:
+        reciprocal = lattices[layer]
+    elif "default" in lattices:
+        reciprocal = lattices["default"]
+    elif layer is not None and layer in monolayer_poscars:
+        reciprocal = read_poscar_lattice(str(monolayer_poscars[layer])).reciprocal_cart
+    else:
+        reciprocal = _fallback_reciprocal(lattices, monolayer_poscars)
+    transform = transforms.get(layer or "", {})
+    rotation = _rotation_z_row(float(transform.get("rotation_deg", 0.0)))
+    return np.asarray(reciprocal, dtype=float) @ rotation
+
+
+def _parse_centers(
+    raw: dict[str, Any],
+    lattices: dict[str, np.ndarray],
+    monolayer_poscars: dict[str, Path],
+    transforms: dict[str, dict[str, Any]],
+) -> list[ValleyCenter]:
+    coordinate_mode = str(raw.get("coordinate_mode", "cart"))
+    centers: list[ValleyCenter] = []
+    for item in raw.get("centers", []):
+        layer = item.get("layer")
+        reciprocal = _layer_reciprocal(layer, lattices, monolayer_poscars, transforms)
+        if coordinate_mode == "cart":
+            if "cart" not in item:
+                raise ValueError(f"valley center {item.get('name')} must define cart")
+            cart = np.asarray(item["cart"], dtype=float)
+        elif coordinate_mode in {"frac", "layer_frac"}:
+            if "frac" not in item:
+                raise ValueError(f"valley center {item.get('name')} must define frac")
+            frac = np.asarray(item["frac"], dtype=float)
+            if frac.shape != (3,):
+                raise ValueError(f"valley center {item.get('name')}.frac must have shape [3]")
+            cart = frac @ reciprocal
+        else:
+            raise ValueError(f"Unsupported valley_centers.coordinate_mode: {coordinate_mode}")
+        centers.append(
+            ValleyCenter(
+                name=item["name"],
+                cart=cart,
+                layer=layer,
+                reciprocal_cart=reciprocal,
+            )
+        )
+    return centers
+
+
 def load_config(path: str | Path) -> AppConfig:
     config_path = Path(path)
     base = config_path.parent
@@ -110,15 +186,14 @@ def load_config(path: str | Path) -> AppConfig:
         str(name): _path(base, str(value))
         for name, value in (input_raw.get("monolayer_poscars") or {}).items()
     }
-    centers_raw = raw.get("valley_centers", {}).get("centers", [])
-    centers = [
-        ValleyCenter(
-            name=item["name"],
-            cart=np.asarray(item["cart"], dtype=float),
-            layer=item.get("layer"),
-        )
-        for item in centers_raw
-    ]
+    monolayer_lattices = _parse_lattices(raw.get("monolayer_lattices", {}))
+    layer_transforms = dict(raw.get("layer_transforms", {}))
+    centers = _parse_centers(
+        raw.get("valley_centers", {}),
+        monolayer_lattices,
+        monolayer_poscars,
+        layer_transforms,
+    )
     sectors = [ValleySector(item["name"], list(item["centers"])) for item in raw.get("valley_sectors", [])]
     analysis_raw = raw.get("analysis", {})
     projection_raw = raw.get("projection", {})
@@ -169,6 +244,6 @@ def load_config(path: str | Path) -> AppConfig:
             write_csv=bool(output_raw.get("write_csv", True)),
             write_hdf5_basis_transform=bool(output_raw.get("write_hdf5_basis_transform", True)),
         ),
-        monolayer_lattices=_parse_lattices(raw.get("monolayer_lattices", {})),
-        layer_transforms=dict(raw.get("layer_transforms", {})),
+        monolayer_lattices=monolayer_lattices,
+        layer_transforms=layer_transforms,
     )

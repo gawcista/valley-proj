@@ -144,3 +144,15 @@ def test_qcut_scan_reports_plateau_for_stable_weights():
 
     assert [entry.qcut for entry in results.entries] == [0.2, 0.3, 0.4]
     assert results.has_plateau is True
+
+
+def test_projector_uses_reciprocal_torus_wrapping_for_far_g_vectors():
+    centers = [ValleyCenter("K", np.array([1.0, 1.0, 0.0]))]
+    sectors = [ValleySector("K_sector", ["K"])]
+    q_cart = np.array([[1.0 + 40.0, 1.0 - 30.0, 0.0]])
+
+    projectors = build_sector_projectors(q_cart, centers, sectors, RECIP, qcut=0.2)
+    result = compute_valley_weights(coeffs_for([1.0]), projectors)[0]
+
+    assert projectors.center_masks["K"].tolist() == [True]
+    assert result.w_val == pytest.approx(1.0)

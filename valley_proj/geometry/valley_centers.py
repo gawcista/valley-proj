@@ -10,11 +10,17 @@ class ValleyCenter:
     name: str
     cart: np.ndarray
     layer: str | None = None
+    reciprocal_cart: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "cart", np.asarray(self.cart, dtype=float))
         if self.cart.shape != (3,):
             raise ValueError("ValleyCenter.cart must have shape [3]")
+        if self.reciprocal_cart is not None:
+            reciprocal = np.asarray(self.reciprocal_cart, dtype=float)
+            if reciprocal.shape != (3, 3):
+                raise ValueError("ValleyCenter.reciprocal_cart must have shape [3,3]")
+            object.__setattr__(self, "reciprocal_cart", reciprocal)
 
 
 @dataclass(frozen=True)

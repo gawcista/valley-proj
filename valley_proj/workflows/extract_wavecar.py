@@ -41,6 +41,7 @@ def extract_wavecar_to_h5(config_path: str | Path) -> Path:
         metadata["wavecar_rtag"] = reader.header.rtag
         metadata["wavecar_record_length"] = reader.header.record_length
         metadata["wavecar_nspin"] = reader.header.nspin
+        metadata["g_vector_order"] = "vasp_z_y_x"
         kpoints_group = h5.create_group("kpoints")
 
         spinor_seen = False

@@ -21,6 +21,7 @@ from valley_proj.projection.weights import classify_valley_weights, compute_vall
 from valley_proj.reports.csv_report import weight_row, write_valley_weights_csv
 from valley_proj.reports.h5_report import write_basis_transform_h5, write_diagnostics_h5
 from valley_proj.reports.json_report import write_json
+from valley_proj.subspace.valley_basis import build_two_valley_adapted_basis
 from valley_proj.symmetry.little_group import is_little_group_operation
 from valley_proj.symmetry.operation_classifier import classify_operation
 from valley_proj.symmetry.plane_wave_action import build_plane_wave_representation
@@ -29,7 +30,11 @@ from valley_proj.symmetry.spglib_finder import find_symmetry_operations
 from valley_proj.symmetry.valley_preservation import map_valley_sectors
 
 
-def _resolve_qcut(config: AppConfig, moire_reciprocal_cart: np.ndarray) -> float:
+def _resolve_qcut(
+    config: AppConfig,
+    moire_reciprocal_cart: np.ndarray,
+    monolayer_reciprocal_cart: np.ndarray,
+) -> float:
     projection = config.projection
     if projection.qcut_mode == "absolute":
         if projection.qcut_Ainv is None:
@@ -38,7 +43,13 @@ def _resolve_qcut(config: AppConfig, moire_reciprocal_cart: np.ndarray) -> float
     if projection.qcut_mode == "moire_shell":
         return qcut_from_moire_shell(moire_reciprocal_cart, projection.qcut_shell)
     if projection.qcut_mode == "relative_min_sector_distance":
-        return qcut_from_min_sector_distance(config.valley_centers, config.valley_sectors, projection.qcut_fraction)
+        return qcut_from_min_sector_distance(
+            config.valley_centers,
+            config.valley_sectors,
+            projection.qcut_fraction,
+            monolayer_reciprocal_cart,
+            use_2d=projection.use_2d_momentum_only,
+        )
     raise ValueError(f"Unsupported qcut_mode: {projection.qcut_mode}")
 
 
@@ -58,7 +69,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, Path]:
     output_dir = config.output.directory
     output_dir.mkdir(parents=True, exist_ok=True)
     monolayer_recip = config.default_monolayer_reciprocal()
-    qcut = _resolve_qcut(config, wavefunctions.metadata.lattice.reciprocal_cart)
+    qcut = _resolve_qcut(config, wavefunctions.metadata.lattice.reciprocal_cart, monolayer_recip)
 
     rows: list[dict[str, object]] = []
     rotation_rows: list[str] = [
@@ -70,6 +81,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, Path]:
     }
     projectors_by_kpoint: dict[str, SectorProjectors] = {}
     qcut_scan_payload: dict[str, object] = {}
+    basis_transforms: dict[str, dict[str, np.ndarray]] = {}
     symmetry_payload: dict[str, object] = _prepare_symmetry_payload(config, monolayer_recip)
 
     for kpoint_name in config.analysis.kpoints:
@@ -100,7 +112,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, Path]:
                     sector_names=sector_names,
                 )
             )
-        subspace_payload["kpoints"][kpoint_name] = {
+        kpoint_subspace = {
             "qcut": qcut,
             "warnings": projectors.warnings,
             "weights": [
@@ -121,10 +133,27 @@ def analyze_hsp(config_path: str | Path) -> dict[str, Path]:
                 for idx, result in enumerate(weights)
             ],
         }
+        _add_valley_subspace_diagnostic(
+            kpoint_subspace,
+            basis_transforms,
+            kpoint_name,
+            kpoint.band_indices_vasp[positions],
+            kpoint.energies_eV[positions],
+            coefficients,
+            projectors,
+            config.analysis.degeneracy_tol_meV,
+        )
+        subspace_payload["kpoints"][kpoint_name] = kpoint_subspace
         if config.projection.qcut_scan:
             scan_qcuts = config.projection.qcut_scan
             if config.projection.qcut_mode == "relative_min_sector_distance":
-                min_qcut = qcut_from_min_sector_distance(config.valley_centers, config.valley_sectors, 1.0)
+                min_qcut = qcut_from_min_sector_distance(
+                    config.valley_centers,
+                    config.valley_sectors,
+                    1.0,
+                    monolayer_recip,
+                    use_2d=config.projection.use_2d_momentum_only,
+                )
                 scan_qcuts = [fraction * min_qcut for fraction in config.projection.qcut_scan]
             scan = scan_qcut(
                 q_cart,
@@ -140,6 +169,24 @@ def analyze_hsp(config_path: str | Path) -> dict[str, Path]:
                 "has_plateau": scan.has_plateau,
                 "qcuts": [entry.qcut for entry in scan.entries],
                 "ambiguous_count": [entry.ambiguous_count for entry in scan.entries],
+                "band_indices_vasp": kpoint.band_indices_vasp[positions],
+                "sector_names": np.asarray(projectors.sector_names, dtype="S"),
+                "w_val": [
+                    [result.w_val for result in entry.weights]
+                    for entry in scan.entries
+                ],
+                "purity": [
+                    [result.purity for result in entry.weights]
+                    for entry in scan.entries
+                ],
+                "eta": [
+                    [np.nan if result.eta is None else result.eta for result in entry.weights]
+                    for entry in scan.entries
+                ],
+                "ambiguous_weight": [
+                    [result.ambiguous_weight for result in entry.weights]
+                    for entry in scan.entries
+                ],
             }
         if symmetry_payload["status"] == "ok":
             rotation_rows.extend(
@@ -166,8 +213,62 @@ def analyze_hsp(config_path: str | Path) -> dict[str, Path]:
     }
     outputs["rotation_eigenvalues_csv"].write_text("".join(rotation_rows), encoding="utf-8")
     if config.output.write_hdf5_basis_transform:
-        outputs["valley_basis_transform_h5"] = write_basis_transform_h5(output_dir / "valley_basis_transform.h5", {})
+        outputs["valley_basis_transform_h5"] = write_basis_transform_h5(
+            output_dir / "valley_basis_transform.h5",
+            basis_transforms,
+        )
     return outputs
+
+
+def _add_valley_subspace_diagnostic(
+    payload: dict[str, object],
+    basis_transforms: dict[str, dict[str, np.ndarray]],
+    kpoint_name: str,
+    band_indices_vasp: np.ndarray,
+    energies_eV: np.ndarray,
+    coefficients: np.ndarray,
+    projectors: SectorProjectors,
+    degeneracy_tol_meV: float,
+) -> None:
+    sector_names = projectors.sector_names
+    energy_span_meV = float((np.max(energies_eV) - np.min(energies_eV)) * 1000.0)
+    diagnostic: dict[str, object] = {
+        "band_indices_vasp": np.asarray(band_indices_vasp, dtype=int),
+        "energy_span_meV": energy_span_meV,
+        "status": "not_evaluated",
+    }
+    if len(sector_names) != 2:
+        diagnostic["status"] = "requires_two_valley_sectors"
+    elif coefficients.shape[0] < 2:
+        diagnostic["status"] = "single_band"
+    elif energy_span_meV > degeneracy_tol_meV:
+        diagnostic["status"] = "not_degenerate"
+    else:
+        result = build_two_valley_adapted_basis(
+            coefficients,
+            projectors.sector_masks,
+            sector_names[0],
+            sector_names[1],
+        )
+        diagnostic.update(
+            {
+                "status": "two_valley_adapted",
+                "sectors": sector_names,
+                "eta": result.eta,
+                "s_eigenvalues": np.linalg.eigvalsh(result.s_matrix),
+                "v_eigenvalues": np.linalg.eigvalsh(result.v_matrix),
+                "transform_h5_group": kpoint_name,
+            }
+        )
+        basis_transforms[kpoint_name] = {
+            "transform": result.transform,
+            "eta": result.eta,
+            "s_matrix": result.s_matrix,
+            "v_matrix": result.v_matrix,
+            "band_indices_vasp": np.asarray(band_indices_vasp, dtype=int),
+            "sectors": np.asarray(sector_names, dtype="S"),
+        }
+    payload["valley_adapted_subspace"] = diagnostic
 
 
 def _prepare_symmetry_payload(config: AppConfig, monolayer_recip: np.ndarray) -> dict[str, object]:

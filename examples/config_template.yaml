@@ -24,20 +24,20 @@ monolayer_lattices:
       - [0.0, 0.0, 1.0]
 
 valley_centers:
-  coordinate_mode: cart
+  coordinate_mode: layer_frac
   centers:
     - name: top_K
       layer: top
-      cart: [0.0, 0.0, 0.0]
+      frac: [0.333333333333, 0.333333333333, 0.0]
     - name: bottom_K
       layer: bottom
-      cart: [0.0, 0.0, 0.0]
+      frac: [0.333333333333, 0.333333333333, 0.0]
     - name: top_Kp
       layer: top
-      cart: [0.5, 0.0, 0.0]
+      frac: [-0.333333333333, -0.333333333333, 0.0]
     - name: bottom_Kp
       layer: bottom
-      cart: [0.5, 0.0, 0.0]
+      frac: [-0.333333333333, -0.333333333333, 0.0]
 
 valley_sectors:
   - name: K_sector

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from valley_proj.geometry.reciprocal import minimum_periodic_distance
 from valley_proj.geometry.valley_centers import ValleyCenter, ValleySector
 from valley_proj.projection.sector_projectors import build_sector_projectors
 from valley_proj.projection.weights import ValleyWeightResult, compute_valley_weights
@@ -69,6 +70,9 @@ def qcut_from_min_sector_distance(
     centers: list[ValleyCenter],
     sectors: list[ValleySector],
     fraction: float,
+    reciprocal_cart: np.ndarray | None = None,
+    *,
+    use_2d: bool = True,
 ) -> float:
     center_map = {center.name: center for center in centers}
     sector_points: list[tuple[str, np.ndarray]] = []
@@ -79,7 +83,43 @@ def qcut_from_min_sector_distance(
     for idx, (sector_a, point_a) in enumerate(sector_points):
         for sector_b, point_b in sector_points[idx + 1 :]:
             if sector_a != sector_b:
-                distances.append(float(np.linalg.norm(point_a[:2] - point_b[:2])))
+                basis_a = _basis_for_point(point_a, centers, reciprocal_cart)
+                basis_b = _basis_for_point(point_b, centers, reciprocal_cart)
+                candidates = [float(np.linalg.norm(point_a[:2] - point_b[:2]))]
+                if basis_a is not None:
+                    candidates.append(
+                        float(
+                            minimum_periodic_distance(
+                                point_a.reshape(1, 3),
+                                point_b,
+                                basis_a,
+                                use_2d=use_2d,
+                            )[0]
+                        )
+                    )
+                if basis_b is not None:
+                    candidates.append(
+                        float(
+                            minimum_periodic_distance(
+                                point_a.reshape(1, 3),
+                                point_b,
+                                basis_b,
+                                use_2d=use_2d,
+                            )[0]
+                        )
+                    )
+                distances.append(min(candidates))
     if not distances:
         raise ValueError("relative_min_sector_distance requires at least two sectors")
     return float(fraction * min(distances))
+
+
+def _basis_for_point(
+    point: np.ndarray,
+    centers: list[ValleyCenter],
+    fallback: np.ndarray | None,
+) -> np.ndarray | None:
+    for center in centers:
+        if np.allclose(center.cart, point, atol=1e-12):
+            return center.reciprocal_cart if center.reciprocal_cart is not None else fallback
+    return fallback

@@ -8,13 +8,12 @@ from valley_proj.workflows.extract_wavecar import extract_wavecar_to_h5
 from valley_proj.cli import main
 
 
-def write_synthetic_wavecar(path: Path, *, header_nplane: int = 1, coeffs=None):
+def write_synthetic_wavecar(path: Path, *, header_nplane: int = 1, coeffs=None, encut: float = 0.01):
     recl = 256
     nspin = 1
     rtag = 45200
     nkpts = 1
     nbands = 1
-    encut = 0.01
     lattice = np.eye(3) * 20.0
     kvec = np.array([0.0, 0.0, 0.0])
     if coeffs is None:
@@ -118,3 +117,19 @@ def test_extract_wavecar_accepts_spinor_count_in_nplane_record(tmp_path):
         kp = h5["kpoints/0"]
         assert kp["coefficients"].shape == (1, 2, 1)
         assert np.isclose(np.sum(np.abs(kp["coefficients"][()]) ** 2), 1.0)
+
+
+def test_wavecar_g_vectors_follow_vasp_record_order(tmp_path):
+    wavecar = tmp_path / "WAVECAR"
+    write_synthetic_wavecar(wavecar, header_nplane=7, encut=0.5)
+
+    from valley_proj.io.wavecar import WavecarReader
+
+    with WavecarReader(wavecar) as reader:
+        header = reader.read_band_header(0)
+        gvecs = reader.generate_g_vectors_frac(header.k_frac, header.nplane_record)
+
+    raw = np.where(gvecs >= 0, gvecs, gvecs + 3)
+    order_keys = list(zip(raw[:, 2], raw[:, 1], raw[:, 0]))
+
+    assert order_keys == sorted(order_keys)
