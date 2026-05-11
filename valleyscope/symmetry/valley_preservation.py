@@ -4,8 +4,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from valley_proj.geometry.reciprocal import equivalent_mod_reciprocal
-from valley_proj.geometry.valley_centers import ValleyCenter, ValleySector, centers_by_name
+from valleyscope.geometry.reciprocal import equivalent_mod_reciprocal
+from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector, centers_by_name
 
 
 @dataclass(frozen=True)

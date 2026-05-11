@@ -6,7 +6,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from valley_proj.geometry.lattice import Lattice
+from valleyscope.geometry.lattice import Lattice
 
 
 @dataclass(frozen=True)

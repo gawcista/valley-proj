@@ -4,10 +4,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from valley_proj.geometry.reciprocal import minimum_periodic_distance
-from valley_proj.geometry.valley_centers import ValleyCenter, ValleySector
-from valley_proj.projection.sector_projectors import build_sector_projectors
-from valley_proj.projection.weights import ValleyWeightResult, compute_valley_weights
+from valleyscope.geometry.reciprocal import minimum_periodic_distance
+from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector
+from valleyscope.projection.sector_projectors import build_sector_projectors
+from valleyscope.projection.weights import ValleyWeightResult, compute_valley_weights
 
 
 @dataclass(frozen=True)

@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from valley_proj.subspace.valley_basis import (
+from valleyscope.subspace.valley_basis import (
     build_two_valley_adapted_basis,
     diagnose_multivalley_subspace,
 )

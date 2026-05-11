@@ -4,8 +4,8 @@ import h5py
 import numpy as np
 import yaml
 
-from valley_proj.workflows.extract_wavecar import extract_wavecar_to_h5
-from valley_proj.cli import main
+from valleyscope.workflows.extract_wavecar import extract_wavecar_to_h5
+from valleyscope.cli import main
 
 
 def write_synthetic_wavecar(path: Path, *, header_nplane: int = 1, coeffs=None, encut: float = 0.01):
@@ -123,7 +123,7 @@ def test_wavecar_g_vectors_follow_vasp_record_order(tmp_path):
     wavecar = tmp_path / "WAVECAR"
     write_synthetic_wavecar(wavecar, header_nplane=7, encut=0.5)
 
-    from valley_proj.io.wavecar import WavecarReader
+    from valleyscope.io.wavecar import WavecarReader
 
     with WavecarReader(wavecar) as reader:
         header = reader.read_band_header(0)

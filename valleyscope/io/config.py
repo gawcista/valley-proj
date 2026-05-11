@@ -7,8 +7,8 @@ from typing import Any
 import numpy as np
 import yaml
 
-from valley_proj.geometry.lattice import read_poscar_lattice
-from valley_proj.geometry.valley_centers import ValleyCenter, ValleySector
+from valleyscope.geometry.lattice import read_poscar_lattice
+from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector
 
 
 @dataclass(frozen=True)

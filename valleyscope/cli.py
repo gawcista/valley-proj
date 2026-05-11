@@ -3,12 +3,12 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from valley_proj.workflows.extract_wavecar import extract_wavecar_to_h5
-from valley_proj.workflows.analyze_hsp import analyze_hsp
+from valleyscope.workflows.extract_wavecar import extract_wavecar_to_h5
+from valleyscope.workflows.analyze_hsp import analyze_hsp
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="valley-proj")
+    parser = argparse.ArgumentParser(prog="valleyscope")
     subparsers = parser.add_subparsers(dest="command", required=True)
     analyze = subparsers.add_parser("analyze-hsp", help="Run HSP valley projection diagnostics")
     analyze.add_argument("config", type=Path)

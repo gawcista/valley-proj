@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from valley_proj.symmetry.plane_wave_action import unitarity_deviation
+from valleyscope.symmetry.plane_wave_action import unitarity_deviation
 
 
 @dataclass(frozen=True)

@@ -4,30 +4,30 @@ from pathlib import Path
 
 import numpy as np
 
-from valley_proj.geometry.lattice import (
+from valleyscope.geometry.lattice import (
     cart_rotation_from_fractional,
     cart_translation_from_fractional,
     read_poscar_cell,
 )
-from valley_proj.io.config import AppConfig, load_config
-from valley_proj.io.h5_reader import read_wavefunction_h5
-from valley_proj.projection.qcut_scan import (
+from valleyscope.io.config import AppConfig, load_config
+from valleyscope.io.h5_reader import read_wavefunction_h5
+from valleyscope.projection.qcut_scan import (
     qcut_from_min_sector_distance,
     qcut_from_moire_shell,
     scan_qcut,
 )
-from valley_proj.projection.sector_projectors import SectorProjectors, build_sector_projectors
-from valley_proj.projection.weights import classify_valley_weights, compute_valley_weights
-from valley_proj.reports.csv_report import weight_row, write_valley_weights_csv
-from valley_proj.reports.h5_report import write_basis_transform_h5, write_diagnostics_h5
-from valley_proj.reports.json_report import write_json
-from valley_proj.subspace.valley_basis import build_two_valley_adapted_basis
-from valley_proj.symmetry.little_group import is_little_group_operation
-from valley_proj.symmetry.operation_classifier import classify_operation
-from valley_proj.symmetry.plane_wave_action import build_plane_wave_representation
-from valley_proj.symmetry.rotation_eigenvalues import extract_rotation_eigenvalues
-from valley_proj.symmetry.spglib_finder import find_symmetry_operations
-from valley_proj.symmetry.valley_preservation import map_valley_sectors
+from valleyscope.projection.sector_projectors import SectorProjectors, build_sector_projectors
+from valleyscope.projection.weights import classify_valley_weights, compute_valley_weights
+from valleyscope.reports.csv_report import weight_row, write_valley_weights_csv
+from valleyscope.reports.h5_report import write_basis_transform_h5, write_diagnostics_h5
+from valleyscope.reports.json_report import write_json
+from valleyscope.subspace.valley_basis import build_two_valley_adapted_basis
+from valleyscope.symmetry.little_group import is_little_group_operation
+from valleyscope.symmetry.operation_classifier import classify_operation
+from valleyscope.symmetry.plane_wave_action import build_plane_wave_representation
+from valleyscope.symmetry.rotation_eigenvalues import extract_rotation_eigenvalues
+from valleyscope.symmetry.spglib_finder import find_symmetry_operations
+from valleyscope.symmetry.valley_preservation import map_valley_sectors
 
 
 def _resolve_qcut(

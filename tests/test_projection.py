@@ -1,10 +1,10 @@
 import numpy as np
 import pytest
 
-from valley_proj.geometry.valley_centers import ValleyCenter, ValleySector
-from valley_proj.projection.sector_projectors import build_sector_projectors
-from valley_proj.projection.weights import classify_valley_weights, compute_valley_weights
-from valley_proj.projection.qcut_scan import scan_qcut
+from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector
+from valleyscope.projection.sector_projectors import build_sector_projectors
+from valleyscope.projection.weights import classify_valley_weights, compute_valley_weights
+from valleyscope.projection.qcut_scan import scan_qcut
 
 
 RECIP = np.array(

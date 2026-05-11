@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "valley-proj"
+name = "valleyscope"
 version = "0.1.0"
-description = "HSP-only valley projection and rotation-eigenvalue diagnostics"
+description = "Valley-resolved wavefunction, subspace, and symmetry diagnostics"
 requires-python = ">=3.10"
 dependencies = [
   "numpy",
@@ -18,10 +18,10 @@ dependencies = [
 test = ["pytest"]
 
 [project.scripts]
-valley-proj = "valley_proj.cli:main"
+valleyscope = "valleyscope.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["valley_proj*"]
+include = ["valleyscope*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

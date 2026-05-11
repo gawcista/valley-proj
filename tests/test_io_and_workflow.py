@@ -5,9 +5,9 @@ import numpy as np
 import pytest
 import yaml
 
-from valley_proj.io.config import load_config
-from valley_proj.io.h5_reader import read_wavefunction_h5
-from valley_proj.workflows.analyze_hsp import analyze_hsp
+from valleyscope.io.config import load_config
+from valleyscope.io.h5_reader import read_wavefunction_h5
+from valleyscope.workflows.analyze_hsp import analyze_hsp
 
 
 def write_fixture(path: Path):

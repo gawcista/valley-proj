@@ -1,12 +1,12 @@
 import numpy as np
 import pytest
 
-from valley_proj.geometry.valley_centers import ValleyCenter, ValleySector
-from valley_proj.symmetry.little_group import is_little_group_operation
-from valley_proj.symmetry.operation_classifier import classify_operation, operation_order
-from valley_proj.symmetry.plane_wave_action import build_plane_wave_representation, spin_rotation_matrix
-from valley_proj.symmetry.spglib_finder import find_symmetry_operations
-from valley_proj.symmetry.valley_preservation import map_valley_sectors
+from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector
+from valleyscope.symmetry.little_group import is_little_group_operation
+from valleyscope.symmetry.operation_classifier import classify_operation, operation_order
+from valleyscope.symmetry.plane_wave_action import build_plane_wave_representation, spin_rotation_matrix
+from valleyscope.symmetry.spglib_finder import find_symmetry_operations
+from valleyscope.symmetry.valley_preservation import map_valley_sectors
 
 
 RECIP = np.array(

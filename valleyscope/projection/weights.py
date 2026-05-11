@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from valley_proj.projection.sector_projectors import SectorProjectors
+from valleyscope.projection.sector_projectors import SectorProjectors
 
 
 DEFAULT_THRESHOLDS = {

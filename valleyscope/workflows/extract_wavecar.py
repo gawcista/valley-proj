@@ -6,7 +6,7 @@ import h5py
 import numpy as np
 import yaml
 
-from valley_proj.io.wavecar import WavecarReader
+from valleyscope.io.wavecar import WavecarReader
 
 
 def extract_wavecar_to_h5(config_path: str | Path) -> Path:

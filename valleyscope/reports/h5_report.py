@@ -5,7 +5,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from valley_proj.projection.sector_projectors import SectorProjectors
+from valleyscope.projection.sector_projectors import SectorProjectors
 
 
 def write_diagnostics_h5(

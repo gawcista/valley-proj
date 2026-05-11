@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-from valley_proj.geometry.lattice import Lattice, reciprocal_from_direct
+from valleyscope.geometry.lattice import Lattice, reciprocal_from_direct
 
 HBAR2_OVER_2M_EV_A2 = 3.80998212
 

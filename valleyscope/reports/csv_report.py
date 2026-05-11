@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from valley_proj.projection.weights import ValleyWeightResult
+from valleyscope.projection.weights import ValleyWeightResult
 
 
 def write_valley_weights_csv(path: str | Path, rows: list[dict[str, object]], sector_names: list[str]) -> Path:
