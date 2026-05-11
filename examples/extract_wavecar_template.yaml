@@ -1,0 +1,20 @@
+input:
+  wavecar: ./WAVECAR
+
+extract:
+  # VASP 1-based k-point indices in WAVECAR.
+  kpoints:
+    - name: GammaM
+      vasp_index: 1
+    - name: KM
+      vasp_index: 2
+
+  # VASP 1-based band indices to copy into selected_wavefunctions.h5.
+  bands_vasp: [101, 102]
+
+  # For collinear ISPIN=2 WAVECAR files, extract one spin channel at a time.
+  # Noncollinear/SOC spinor records are detected from coefficient record length.
+  spin_index: 1
+
+output:
+  wavefunction_h5: ./selected_wavefunctions.h5

@@ -1,0 +1,73 @@
+input:
+  wavefunction_h5: ./selected_wavefunctions.h5
+  poscar: ./CONTCAR
+  monolayer_poscars:
+    top: ./monolayer.vasp
+    bottom: ./monolayer.vasp
+
+layer_transforms:
+  top:
+    rotation_deg: 0.0
+  bottom:
+    rotation_deg: 0.0
+
+analysis:
+  kpoints: [GammaM, KM, MM]
+  target_bands_vasp: [101, 102]
+  degeneracy_tol_meV: 1.0
+
+monolayer_lattices:
+  default:
+    reciprocal_cart:
+      - [1.0, 0.0, 0.0]
+      - [0.0, 1.0, 0.0]
+      - [0.0, 0.0, 1.0]
+
+valley_centers:
+  coordinate_mode: cart
+  centers:
+    - name: top_K
+      layer: top
+      cart: [0.0, 0.0, 0.0]
+    - name: bottom_K
+      layer: bottom
+      cart: [0.0, 0.0, 0.0]
+    - name: top_Kp
+      layer: top
+      cart: [0.5, 0.0, 0.0]
+    - name: bottom_Kp
+      layer: bottom
+      cart: [0.5, 0.0, 0.0]
+
+valley_sectors:
+  - name: K_sector
+    centers: [top_K, bottom_K]
+  - name: Kp_sector
+    centers: [top_Kp, bottom_Kp]
+
+projection:
+  use_2d_momentum_only: true
+  qcut_mode: relative_min_sector_distance
+  qcut_fraction: 0.30
+  qcut_scan: [0.20, 0.25, 0.30, 0.35, 0.40]
+  ambiguous_cross_sector: warn_exclude
+  thresholds:
+    W_val_min: 0.8
+    P_v_clean: 0.95
+    P_v_approx: 0.85
+
+symmetry:
+  source: spglib
+  symprec: 1.0e-3
+  symprec_scan: [1.0e-5, 3.0e-5, 1.0e-4, 3.0e-4, 1.0e-3]
+  angle_tolerance: -1.0
+  allowed_orders: [2, 3, 4, 6]
+  proper_rotations_only: true
+  little_group_check: true
+  valley_preservation_check: true
+
+output:
+  directory: ./valley_analysis
+  write_json: true
+  write_csv: true
+  write_hdf5_basis_transform: true

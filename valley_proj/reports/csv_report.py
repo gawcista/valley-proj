@@ -1,0 +1,40 @@
+from __future__ import annotations
+
+import csv
+from pathlib import Path
+
+from valley_proj.projection.weights import ValleyWeightResult
+
+
+def write_valley_weights_csv(path: str | Path, rows: list[dict[str, object]], sector_names: list[str]) -> Path:
+    out = Path(path)
+    fieldnames = ["kpoint", "band_vasp", "energy_eV", *sector_names, "W_val", "P_v", "eta", "leakage", "ambiguous_weight"]
+    with out.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+    return out
+
+
+def weight_row(
+    *,
+    kpoint: str,
+    band_vasp: int,
+    energy_eV: float,
+    result: ValleyWeightResult,
+    sector_names: list[str],
+) -> dict[str, object]:
+    row: dict[str, object] = {
+        "kpoint": kpoint,
+        "band_vasp": band_vasp,
+        "energy_eV": energy_eV,
+        "W_val": result.w_val,
+        "P_v": result.purity,
+        "eta": "" if result.eta is None else result.eta,
+        "leakage": result.leakage,
+        "ambiguous_weight": result.ambiguous_weight,
+    }
+    for sector in sector_names:
+        row[sector] = result.sector_weights.get(sector, 0.0)
+    return row
