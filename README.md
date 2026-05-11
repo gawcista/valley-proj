@@ -12,108 +12,79 @@ V1 is intentionally not a black-box Chern-number code. It reports checkable inte
 
 For a moire Bloch state at moire momentum $\mathbf k_M$, the plane-wave expansion is
 
-$$
-\psi_{n\mathbf k_M}(\mathbf r)
-=
-\sum_{\mathbf G_M,s}
-c_{n,\mathbf k_M+\mathbf G_M,s}
-e^{i(\mathbf k_M+\mathbf G_M)\cdot \mathbf r}
-|s\rangle .
-$$
+```math
+\psi_{n\mathbf k_M}(\mathbf r) = \sum_{\mathbf G_M,s} c_{n,\mathbf k_M+\mathbf G_M,s} e^{i(\mathbf k_M+\mathbf G_M)\cdot \mathbf r} |s\rangle .
+```
 
 Here $\mathbf G_M$ is a moire reciprocal lattice vector, $s$ is the spinor index, and
 
-$$
+```math
 \mathbf q = \mathbf k_M+\mathbf G_M
-$$
+```
 
 is the actual plane-wave momentum. Valley projection uses the in-plane component $\mathbf q_\parallel$. The valley label refers to a monolayer valley sector, not to a high-symmetry point of the moire Brillouin zone.
 
 A valley center $\mathbf Q_a$ is a monolayer valley momentum after the appropriate layer rotation and coordinate conversion. The distance from a plane-wave component to that center is
 
-$$
-d_a(\mathbf q)
-=
-\min_{\mathbf G_{\rm mono}}
-\left|
-\mathbf q_\parallel
--
-(\mathbf Q_a+\mathbf G_{\rm mono})
-\right|.
-$$
+```math
+d_a(\mathbf q) = \min_{\mathbf G_{\rm mono}} \left| \mathbf q_\parallel - (\mathbf Q_a+\mathbf G_{\rm mono}) \right|.
+```
 
 The corresponding momentum window is
 
-$$
+```math
 \Omega_a(q_{\rm cut})=\{\mathbf q: d_a(\mathbf q)<q_{\rm cut}\}.
-$$
+```
 
 For a valley sector $\mathcal V$ containing several centers, for example top and bottom layer centers belonging to the same monolayer valley, the sector window is the union
 
-$$
-\Omega_{\mathcal V}
-=
-\bigcup_{a\in\mathcal V}\Omega_a .
-$$
+```math
+\Omega_{\mathcal V} = \bigcup_{a\in\mathcal V}\Omega_a .
+```
 
 The sector projector is therefore
 
-$$
-P_{\mathcal V}
-=
-\sum_{\mathbf q\in\Omega_{\mathcal V},s}
-|\mathbf q,s\rangle\langle \mathbf q,s|.
-$$
+```math
+P_{\mathcal V} = \sum_{\mathbf q\in\Omega_{\mathcal V},s} |\mathbf q,s\rangle\langle \mathbf q,s|.
+```
 
 The union is important: if two centers inside the same sector overlap, a plane-wave component is counted once. If a component lies in windows belonging to different sectors, V1 treats it as a cross-sector overlap. With the default `ambiguous_cross_sector: warn_exclude`, that component is excluded from all sector weights and reported separately.
 
 For a normalized state $|\psi\rangle$, the sector weight is
 
-$$
-W_{\mathcal V_i}
-=
-\langle\psi|P_{\mathcal V_i}|\psi\rangle .
-$$
+```math
+W_{\mathcal V_i} = \langle\psi|P_{\mathcal V_i}|\psi\rangle .
+```
 
 The total weight inside the user-defined valley manifold is
 
-$$
-W_{\rm val}
-=
-\sum_i W_{\mathcal V_i},
-$$
+```math
+W_{\rm val} = \sum_i W_{\mathcal V_i},
+```
 
 and the multi-sector valley purity is
 
-$$
-P_v
-=
-\frac{\max_i W_{\mathcal V_i}}{\sum_i W_{\mathcal V_i}},
-\qquad
-\sum_i W_{\mathcal V_i}>0 .
-$$
+```math
+P_v = \frac{\max_i W_{\mathcal V_i}}{\sum_i W_{\mathcal V_i}}, \qquad \sum_i W_{\mathcal V_i}>0 .
+```
 
 For two sectors $K$ and $K'$, the signed valley polarization is also reported:
 
-$$
-\eta
-=
-\frac{W_K-W_{K'}}{W_K+W_{K'}} .
-$$
+```math
+\eta = \frac{W_K-W_{K'}}{W_K+W_{K'}} .
+```
 
 If cross-sector overlaps are excluded, the output field `ambiguous_weight` should be read as the cross-sector overlap weight
 
-$$
-W_\times
-=
-\langle\psi|P_\times|\psi\rangle,
-$$
+```math
+W_\times = \langle\psi|P_\times|\psi\rangle,
+```
 
 where $P_\times$ projects onto plane-wave components selected by more than one valley sector under the chosen $q_{\rm cut}$. The reported `leakage` is the weight outside the selected valley windows after separating this overlap:
 
-$$
+```math
 L_{\rm out}=1-W_{\rm val}-W_\times .
-$$
+```
 
 The total weight not assigned to any sector is therefore $1-W_{\rm val}=L_{\rm out}+W_\times$. Thus $W_\times$ is a numerical diagnostic of the valley-window definition, not a new condensed-matter observable. In prose, use "cross-sector overlap weight"; `ambiguous_weight` is the current serialized output key.
 
@@ -123,46 +94,31 @@ For an isolated nondegenerate eigenstate, the original VASP eigenvector can be a
 
 For a two-sector subspace spanned by $\{|\psi_i\rangle\}_{i=1}^N$, V1 constructs
 
-$$
-S_{ij}
-=
-\langle\psi_i|P_K+P_{K'}|\psi_j\rangle ,
-$$
+```math
+S_{ij} = \langle\psi_i|P_K+P_{K'}|\psi_j\rangle ,
+```
 
-$$
-V_{ij}
-=
-\langle\psi_i|P_K-P_{K'}|\psi_j\rangle .
-$$
+```math
+V_{ij} = \langle\psi_i|P_K-P_{K'}|\psi_j\rangle .
+```
 
 Diagonalizing $V$, or the corresponding $S$-orthogonalized problem when needed, gives valley-adapted combinations
 
-$$
-|\phi_\alpha\rangle
-=
-\sum_i |\psi_i\rangle U_{i\alpha}.
-$$
+```math
+|\phi_\alpha\rangle = \sum_i |\psi_i\rangle U_{i\alpha}.
+```
 
 Their valley-manifold weight and signed polarization are
 
-$$
-W_\alpha
-=
-\langle\phi_\alpha|S|\phi_\alpha\rangle ,
-\qquad
-\eta_\alpha
-=
-\frac{\langle\phi_\alpha|V|\phi_\alpha\rangle}
-{\langle\phi_\alpha|S|\phi_\alpha\rangle}.
-$$
+```math
+W_\alpha = \langle\phi_\alpha|S|\phi_\alpha\rangle , \qquad \eta_\alpha = \frac{\langle\phi_\alpha|V|\phi_\alpha\rangle} {\langle\phi_\alpha|S|\phi_\alpha\rangle}.
+```
 
 For more than two sectors, V1 uses the projected sector matrices
 
-$$
-M_{\mathcal V_i}
-=
-P_{\rm tar}P_{\mathcal V_i}P_{\rm tar},
-$$
+```math
+M_{\mathcal V_i} = P_{\rm tar}P_{\mathcal V_i}P_{\rm tar},
+```
 
 where $P_{\rm tar}$ is the projector onto the target band subspace.
 
@@ -170,43 +126,35 @@ where $P_{\rm tar}$ is the projector onto the target band subspace.
 
 Symmetry operations are read from `spglib` using the moire POSCAR/CONTCAR. In direct fractional coordinates, `spglib` uses
 
-$$
+```math
 \mathbf x' = W\mathbf x+\mathbf w .
-$$
+```
 
 For reciprocal fractional momenta, V1 applies
 
-$$
+```math
 \mathbf k' = W^{-T}\mathbf k .
-$$
+```
 
 An operation belongs to the little group of a target high-symmetry point $\mathbf k$ only if
 
-$$
+```math
 W^{-T}\mathbf k-\mathbf k \in \mathbb Z^3
-$$
+```
 
 within tolerance. Before using a rotation for a single-valley eigenvalue, V1 also checks valley preservation:
 
-$$
+```math
 gP_{\mathcal V}g^{-1}\approx P_{\mathcal V}.
-$$
+```
 
 Operations that map the target sector to another sector are reported but rejected for single-valley rotation-eigenvalue analysis.
 
 For valley-adapted states, the rotation representation matrix is
 
-$$
-D^{(\tau)}_{mn}(g;\mathbf k)
-=
-\langle
-\phi_m^\tau(g\mathbf k)
-|
-\hat g
-|
-\phi_n^\tau(\mathbf k)
-\rangle .
-$$
+```math
+D^{(\tau)}_{mn}(g;\mathbf k) = \langle \phi_m^\tau(g\mathbf k) | \hat g | \phi_n^\tau(\mathbf k) \rangle .
+```
 
 At a high-symmetry point where $g\mathbf k=\mathbf k+\mathbf G_M$, the eigenvalues of $D^{(\tau)}$ are the reported rotation eigenvalues. These data can constrain $C_\tau \bmod n$ for a compatible $C_n$ formula, but they do not determine a full integer Chern number by themselves.
 
@@ -326,108 +274,79 @@ V1 不是黑箱 Chern number 计算器。它输出可检查的中间物理量：
 
 moire 超胞 Bloch 态在 $\mathbf k_M$ 处的平面波展开写为
 
-$$
-\psi_{n\mathbf k_M}(\mathbf r)
-=
-\sum_{\mathbf G_M,s}
-c_{n,\mathbf k_M+\mathbf G_M,s}
-e^{i(\mathbf k_M+\mathbf G_M)\cdot \mathbf r}
-|s\rangle .
-$$
+```math
+\psi_{n\mathbf k_M}(\mathbf r) = \sum_{\mathbf G_M,s} c_{n,\mathbf k_M+\mathbf G_M,s} e^{i(\mathbf k_M+\mathbf G_M)\cdot \mathbf r} |s\rangle .
+```
 
 其中 $\mathbf G_M$ 是 moire 倒格矢，$s$ 是 spinor index，
 
-$$
+```math
 \mathbf q = \mathbf k_M+\mathbf G_M
-$$
+```
 
 是实际平面波动量。valley projection 只使用面内动量 $\mathbf q_\parallel$。这里的 valley 指 monolayer valley sector，不是 moire Brillouin zone 中的高对称点。
 
 valley center $\mathbf Q_a$ 是经过层旋转和坐标转换后的单层 valley 动量。平面波分量到该 center 的距离定义为
 
-$$
-d_a(\mathbf q)
-=
-\min_{\mathbf G_{\rm mono}}
-\left|
-\mathbf q_\parallel
--
-(\mathbf Q_a+\mathbf G_{\rm mono})
-\right|.
-$$
+```math
+d_a(\mathbf q) = \min_{\mathbf G_{\rm mono}} \left| \mathbf q_\parallel - (\mathbf Q_a+\mathbf G_{\rm mono}) \right|.
+```
 
 对应的 valley window 为
 
-$$
+```math
 \Omega_a(q_{\rm cut})=\{\mathbf q: d_a(\mathbf q)<q_{\rm cut}\}.
-$$
+```
 
 一个 valley sector $\mathcal V$ 可以包含多个 centers，例如同一 monolayer valley 的 top/bottom layer centers。该 sector 的窗口取并集：
 
-$$
-\Omega_{\mathcal V}
-=
-\bigcup_{a\in\mathcal V}\Omega_a .
-$$
+```math
+\Omega_{\mathcal V} = \bigcup_{a\in\mathcal V}\Omega_a .
+```
 
 sector projector 定义为
 
-$$
-P_{\mathcal V}
-=
-\sum_{\mathbf q\in\Omega_{\mathcal V},s}
-|\mathbf q,s\rangle\langle \mathbf q,s|.
-$$
+```math
+P_{\mathcal V} = \sum_{\mathbf q\in\Omega_{\mathcal V},s} |\mathbf q,s\rangle\langle \mathbf q,s|.
+```
 
 并集计数可以避免同一 sector 内的重叠窗口重复统计。如果某个 plane-wave component 同时落入不同 valley sectors 的窗口，V1 将其视为跨 sector 重叠。默认 `ambiguous_cross_sector: warn_exclude` 会把该分量从所有 sector weights 中排除，并单独报告。
 
 对归一化态 $|\psi\rangle$，sector weight 为
 
-$$
-W_{\mathcal V_i}
-=
-\langle\psi|P_{\mathcal V_i}|\psi\rangle .
-$$
+```math
+W_{\mathcal V_i} = \langle\psi|P_{\mathcal V_i}|\psi\rangle .
+```
 
 用户定义的 valley manifold 中的总权重为
 
-$$
-W_{\rm val}
-=
-\sum_i W_{\mathcal V_i},
-$$
+```math
+W_{\rm val} = \sum_i W_{\mathcal V_i},
+```
 
 多 sector 情形下的 valley purity 定义为
 
-$$
-P_v
-=
-\frac{\max_i W_{\mathcal V_i}}{\sum_i W_{\mathcal V_i}},
-\qquad
-\sum_i W_{\mathcal V_i}>0 .
-$$
+```math
+P_v = \frac{\max_i W_{\mathcal V_i}}{\sum_i W_{\mathcal V_i}}, \qquad \sum_i W_{\mathcal V_i}>0 .
+```
 
 两 valley 情形还输出有符号 valley polarization：
 
-$$
-\eta
-=
-\frac{W_K-W_{K'}}{W_K+W_{K'}} .
-$$
+```math
+\eta = \frac{W_K-W_{K'}}{W_K+W_{K'}} .
+```
 
 如果跨 sector 重叠被排除，输出字段 `ambiguous_weight` 应理解为 cross-sector overlap weight：
 
-$$
-W_\times
-=
-\langle\psi|P_\times|\psi\rangle,
-$$
+```math
+W_\times = \langle\psi|P_\times|\psi\rangle,
+```
 
 其中 $P_\times$ 投影到在当前 $q_{\rm cut}$ 下被多个 valley sectors 同时选中的 plane-wave components。此时报告中的 `leakage` 是分离出该重叠后、位于所选 valley windows 之外的权重：
 
-$$
+```math
 L_{\rm out}=1-W_{\rm val}-W_\times .
-$$
+```
 
 因此，总的未分配到任何 sector 的权重为 $1-W_{\rm val}=L_{\rm out}+W_\times$。$W_\times$ 是对 valley-window 选择的数值诊断，不是新的凝聚态物理可观测量。自然语言中建议称为“cross-sector overlap weight”或“跨 sector 重叠权重”；`ambiguous_weight` 只是当前输出文件中的字段名。
 
@@ -437,46 +356,31 @@ $$
 
 设两 valley sector 子空间由 $\{|\psi_i\rangle\}_{i=1}^N$ 张成，V1 构造
 
-$$
-S_{ij}
-=
-\langle\psi_i|P_K+P_{K'}|\psi_j\rangle ,
-$$
+```math
+S_{ij} = \langle\psi_i|P_K+P_{K'}|\psi_j\rangle ,
+```
 
-$$
-V_{ij}
-=
-\langle\psi_i|P_K-P_{K'}|\psi_j\rangle .
-$$
+```math
+V_{ij} = \langle\psi_i|P_K-P_{K'}|\psi_j\rangle .
+```
 
 对 $V$ 或相应的 $S$-正交化问题对角化，得到 valley-adapted basis：
 
-$$
-|\phi_\alpha\rangle
-=
-\sum_i |\psi_i\rangle U_{i\alpha}.
-$$
+```math
+|\phi_\alpha\rangle = \sum_i |\psi_i\rangle U_{i\alpha}.
+```
 
 每个新基矢的 valley-manifold weight 和有符号 polarization 为
 
-$$
-W_\alpha
-=
-\langle\phi_\alpha|S|\phi_\alpha\rangle ,
-\qquad
-\eta_\alpha
-=
-\frac{\langle\phi_\alpha|V|\phi_\alpha\rangle}
-{\langle\phi_\alpha|S|\phi_\alpha\rangle}.
-$$
+```math
+W_\alpha = \langle\phi_\alpha|S|\phi_\alpha\rangle , \qquad \eta_\alpha = \frac{\langle\phi_\alpha|V|\phi_\alpha\rangle} {\langle\phi_\alpha|S|\phi_\alpha\rangle}.
+```
 
 多 valley sector 情形使用 projected sector matrices：
 
-$$
-M_{\mathcal V_i}
-=
-P_{\rm tar}P_{\mathcal V_i}P_{\rm tar},
-$$
+```math
+M_{\mathcal V_i} = P_{\rm tar}P_{\mathcal V_i}P_{\rm tar},
+```
 
 其中 $P_{\rm tar}$ 是目标 band 子空间的投影算符。
 
@@ -484,43 +388,35 @@ $$
 
 对称操作由 `spglib` 从 moire POSCAR/CONTCAR 识别。在 direct fractional coordinates 中，`spglib` 的约定是
 
-$$
+```math
 \mathbf x' = W\mathbf x+\mathbf w .
-$$
+```
 
 对 reciprocal fractional momenta，V1 使用
 
-$$
+```math
 \mathbf k' = W^{-T}\mathbf k .
-$$
+```
 
 一个操作属于目标高对称点 $\mathbf k$ 的 little group，当且仅当
 
-$$
+```math
 W^{-T}\mathbf k-\mathbf k \in \mathbb Z^3
-$$
+```
 
 在给定容差内成立。进一步，在使用某个旋转计算 single-valley eigenvalue 前，还必须检查 valley preservation：
 
-$$
+```math
 gP_{\mathcal V}g^{-1}\approx P_{\mathcal V}.
-$$
+```
 
 如果该操作把目标 valley sector 映射到另一个 sector，程序会报告该映射，但不会用它计算 single-valley rotation eigenvalue。
 
 对 valley-adapted states，旋转表示矩阵定义为
 
-$$
-D^{(\tau)}_{mn}(g;\mathbf k)
-=
-\langle
-\phi_m^\tau(g\mathbf k)
-|
-\hat g
-|
-\phi_n^\tau(\mathbf k)
-\rangle .
-$$
+```math
+D^{(\tau)}_{mn}(g;\mathbf k) = \langle \phi_m^\tau(g\mathbf k) | \hat g | \phi_n^\tau(\mathbf k) \rangle .
+```
 
 在满足 $g\mathbf k=\mathbf k+\mathbf G_M$ 的高对称点处，$D^{(\tau)}$ 的本征值就是输出的 rotation eigenvalues。这些本征值可以在适用的 $C_n$ 公式中约束 $C_\tau \bmod n$，但不能单独给出完整整数 Chern number。
 
