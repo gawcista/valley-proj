@@ -23,7 +23,7 @@ class WavecarHeader:
 
 @dataclass(frozen=True)
 class WavecarBandHeader:
-    nplane: int
+    nplane_record: int
     k_frac: np.ndarray
     energies_eV: np.ndarray
     occupations: np.ndarray
@@ -111,7 +111,7 @@ class WavecarReader:
         values = self._read_record_raw(record_index, 4 + 3 * self.header.nbands, np.float64)
         bands = values[4:].reshape(self.header.nbands, 3)
         return WavecarBandHeader(
-            nplane=int(round(values[0])),
+            nplane_record=int(round(values[0])),
             k_frac=np.asarray(values[1:4], dtype=float),
             energies_eV=np.asarray(bands[:, 0], dtype=float),
             occupations=np.asarray(bands[:, 2], dtype=float),
@@ -148,11 +148,11 @@ class WavecarReader:
                 data = data / norm
         return WavecarBandData(coefficients=data.astype(np.complex128), nspinor=nspinor)
 
-    def generate_g_vectors_frac(self, k_frac: np.ndarray, nplane_expected: int) -> np.ndarray:
+    def generate_g_vectors_frac(self, k_frac: np.ndarray, nplane_record: int) -> np.ndarray:
         reciprocal = self.header.lattice.reciprocal_cart
-        lengths = np.linalg.norm(reciprocal, axis=1)
+        direct = self.header.lattice.direct_cart
         gcut = np.sqrt(self.header.encut_eV / HBAR2_OVER_2M_EV_A2)
-        max_indices = np.ceil(gcut / lengths).astype(int) + 1
+        max_indices = np.ceil(gcut * np.linalg.norm(direct, axis=1) / (2.0 * np.pi)).astype(int) + 1
         vectors: list[list[int]] = []
         for i_raw in range(2 * max_indices[0] + 1):
             i = _wrap_fft_index(i_raw, max_indices[0])
@@ -166,12 +166,22 @@ class WavecarReader:
                     if energy < self.header.encut_eV:
                         vectors.append([i, j, k])
         arr = np.asarray(vectors, dtype=int)
-        if len(arr) != nplane_expected:
+        if len(arr) == nplane_record:
+            return arr
+        if nplane_record % 2 == 0 and len(arr) == nplane_record // 2:
+            return arr
+        expected_text = f"{nplane_record} or {nplane_record // 2} for spinor-count records"
+        if nplane_record % 2 != 0:
+            expected_text = str(nplane_record)
+        if nplane_record % 2 == 0:
             raise ValueError(
-                f"Generated {len(arr)} G-vectors but WAVECAR reports {nplane_expected}. "
-                "Unsupported WAVECAR variant or cutoff/G-list convention mismatch."
+                f"Generated {len(arr)} G-vectors but WAVECAR reports {nplane_record} "
+                f"({expected_text}). Unsupported WAVECAR variant or cutoff/G-list convention mismatch."
             )
-        return arr
+        raise ValueError(
+            f"Generated {len(arr)} G-vectors but WAVECAR reports {nplane_record}. "
+            "Unsupported WAVECAR variant or cutoff/G-list convention mismatch."
+        )
 
 
 def _wrap_fft_index(raw: int, max_index: int) -> int:

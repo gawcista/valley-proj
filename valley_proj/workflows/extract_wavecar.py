@@ -48,7 +48,7 @@ def extract_wavecar_to_h5(config_path: str | Path) -> Path:
             name = str(item["name"])
             kpoint_index = int(item["vasp_index"]) - 1
             header = reader.read_band_header(kpoint_index, spin_index=spin_index)
-            g_frac = reader.generate_g_vectors_frac(header.k_frac, header.nplane)
+            g_frac = reader.generate_g_vectors_frac(header.k_frac, header.nplane_record)
             g_cart = g_frac @ reader.header.lattice.reciprocal_cart
             coeffs = []
             energies = []
@@ -57,7 +57,7 @@ def extract_wavecar_to_h5(config_path: str | Path) -> Path:
                 band = reader.read_band_coefficients(
                     kpoint_index,
                     band_index,
-                    header.nplane,
+                    len(g_frac),
                     spin_index=spin_index,
                 )
                 spinor_seen = spinor_seen or band.nspinor == 2
