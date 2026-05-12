@@ -31,16 +31,14 @@ A monolayer valley center $a$ is specified in a monolayer reciprocal coordinate 
 ```math
 d_a(\mathbf q)=
 \min_{\mathbf G_{\rm mono}}
-\left|
+\lvert
 \mathbf q_\parallel-
-\left(\mathbf Q_a+\mathbf G_{\rm mono}\right)
-\right|,
+(\mathbf Q_a+\mathbf G_{\rm mono})
+\rvert ,
 ```
 ```math
 \Omega_a(q_{\rm cut})=
-\left\{
-\mathbf q:\ d_a(\mathbf q)<q_{\rm cut}
-\right\}.
+\{\,\mathbf q\mid d_a(\mathbf q)<q_{\rm cut}\,\}.
 ```
 A valley-sector projector is built from a union of such windows. For a two-valley twisted bilayer example,
 
@@ -59,10 +57,9 @@ Let $P_i$ be the valley-sector projector for sector $i$. With the default policy
 
 ```math
 \Omega_\times=
-\left\{
-\mathbf q:\ \mathbf q\in\Omega_i\cap\Omega_j
-\ {\rm for\ some}\ i\ne j
-\right\},
+\{\,\mathbf q\mid
+\mathbf q\in\Omega_i\cap\Omega_j
+\ \text{for some}\ i\ne j\,\},
 ```
 ```math
 P_i=
@@ -465,16 +462,14 @@ monolayer valley center $a$ 在单层倒空间坐标中给出，并通过 layer 
 ```math
 d_a(\mathbf q)=
 \min_{\mathbf G_{\rm mono}}
-\left|
+\lvert
 \mathbf q_\parallel-
-\left(\mathbf Q_a+\mathbf G_{\rm mono}\right)
-\right|,
+(\mathbf Q_a+\mathbf G_{\rm mono})
+\rvert ,
 ```
 ```math
 \Omega_a(q_{\rm cut})=
-\left\{
-\mathbf q:\ d_a(\mathbf q)<q_{\rm cut}
-\right\}.
+\{\,\mathbf q\mid d_a(\mathbf q)<q_{\rm cut}\,\}.
 ```
 valley-sector projector 由一组 windows 的并集构造。以两 valley 的 twisted bilayer 为例，
 
@@ -493,10 +488,9 @@ YAML 中的 `K_sector` 这类名称只是用户定义的标签。物理上应理
 
 ```math
 \Omega_\times=
-\left\{
-\mathbf q:\ \mathbf q\in\Omega_i\cap\Omega_j
-\ {\rm for\ some}\ i\ne j
-\right\},
+\{\,\mathbf q\mid
+\mathbf q\in\Omega_i\cap\Omega_j
+\ \text{for some}\ i\ne j\,\},
 ```
 ```math
 P_i=
