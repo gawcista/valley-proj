@@ -65,7 +65,8 @@ def write_config(path: Path, h5_path: Path, out_dir: Path):
             "use_2d_momentum_only": True,
             "qcut_mode": "absolute",
             "qcut_Ainv": 0.5,
-            "ambiguous_cross_sector": "warn_exclude",
+            "qcut_scan": [0.5],
+            "overlap_cross_sector": "warn_exclude",
         },
         "output": {"directory": str(out_dir), "write_json": True, "write_csv": True, "write_hdf5_basis_transform": True},
     }
@@ -94,6 +95,7 @@ def test_config_loader_parses_core_schema(tmp_path):
 
     assert config.analysis.target_bands_vasp == [101]
     assert config.projection.qcut_mode == "absolute"
+    assert config.projection.overlap_cross_sector == "warn_exclude"
     assert config.valley_sectors[0].name == "K_sector"
 
 
@@ -216,8 +218,8 @@ def test_analyze_hsp_writes_csv_json_and_diagnostics_h5(tmp_path):
         "W_val",
         "P_v",
         "eta",
+        "W_overlap",
         "W_res",
-        "ambiguous_weight",
     ]
     subspace = json.loads(outputs["valley_subspace_json"].read_text(encoding="utf-8"))
     weight = subspace["kpoints"]["GammaM"]["weights"][0]
@@ -228,9 +230,18 @@ def test_analyze_hsp_writes_csv_json_and_diagnostics_h5(tmp_path):
         "W_val",
         "P_v",
         "eta",
+        "W_overlap",
         "W_res",
-        "ambiguous_weight",
     }
+    with h5py.File(outputs["diagnostics_h5"], "r") as h5:
+        projector_group = h5["projectors"]["GammaM"]
+        assert "overlap_mask" in projector_group
+        assert "ambiguous_mask" not in projector_group
+        scan_group = h5["qcut_scan"]["GammaM"]
+        assert "W_overlap" in scan_group
+        assert "overlap_count" in scan_group
+        assert "ambiguous_weight" not in scan_group
+        assert "ambiguous_count" not in scan_group
 
 
 def test_analyze_hsp_writes_two_valley_subspace_transform_for_degenerate_pair(tmp_path):

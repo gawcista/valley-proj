@@ -19,7 +19,7 @@ def write_diagnostics_h5(
         for kpoint_name, projectors in projectors_by_kpoint.items():
             group = projectors_group.create_group(kpoint_name)
             group.attrs["qcut"] = projectors.qcut
-            group["ambiguous_mask"] = projectors.ambiguous_mask.astype(np.uint8)
+            group["overlap_mask"] = projectors.overlap_mask.astype(np.uint8)
             sectors = group.create_group("sector_masks")
             for name, mask in projectors.sector_masks.items():
                 sectors[name] = mask.astype(np.uint8)

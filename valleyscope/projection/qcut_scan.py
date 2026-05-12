@@ -14,7 +14,7 @@ from valleyscope.projection.weights import ValleyWeightResult, compute_valley_we
 class QcutScanEntry:
     qcut: float
     weights: list[ValleyWeightResult]
-    ambiguous_count: int
+    overlap_count: int
 
 
 @dataclass(frozen=True)
@@ -32,7 +32,7 @@ def scan_qcut(
     qcuts: list[float],
     *,
     use_2d: bool = True,
-    ambiguous_policy: str = "warn_exclude",
+    overlap_policy: str = "warn_exclude",
     plateau_tol: float = 1e-2,
 ) -> QcutScanResult:
     entries: list[QcutScanEntry] = []
@@ -44,13 +44,13 @@ def scan_qcut(
             monolayer_reciprocal_cart,
             qcut,
             use_2d=use_2d,
-            ambiguous_policy=ambiguous_policy,
+            overlap_policy=overlap_policy,
         )
         entries.append(
             QcutScanEntry(
                 qcut=float(qcut),
                 weights=compute_valley_weights(coefficients, projectors),
-                ambiguous_count=int(projectors.ambiguous_mask.sum()),
+                overlap_count=int(projectors.overlap_mask.sum()),
             )
         )
     has_plateau = False

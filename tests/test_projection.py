@@ -106,19 +106,19 @@ def test_cross_sector_overlap_is_excluded_and_reported():
     sectors = [ValleySector("A_sector", ["A"]), ValleySector("B_sector", ["B"])]
     q_cart = np.array([[0.1, 0.0, 0.0]])
 
-    with pytest.warns(UserWarning, match="ambiguous"):
+    with pytest.warns(UserWarning, match="overlap"):
         projectors = build_sector_projectors(
             q_cart,
             centers,
             sectors,
             RECIP,
             qcut=0.3,
-            ambiguous_policy="warn_exclude",
+            overlap_policy="warn_exclude",
         )
     result = compute_valley_weights(coeffs_for([1.0]), projectors)[0]
 
-    assert projectors.ambiguous_mask.tolist() == [True]
-    assert result.ambiguous_weight == pytest.approx(1.0)
+    assert projectors.overlap_mask.tolist() == [True]
+    assert result.overlap_weight == pytest.approx(1.0)
     assert result.w_val == pytest.approx(0.0)
 
 
@@ -143,6 +143,7 @@ def test_qcut_scan_reports_plateau_for_stable_weights():
     )
 
     assert [entry.qcut for entry in results.entries] == [0.2, 0.3, 0.4]
+    assert [entry.overlap_count for entry in results.entries] == [0, 0, 0]
     assert results.has_plateau is True
 
 

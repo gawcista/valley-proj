@@ -13,7 +13,7 @@ from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector, cent
 class SectorProjectors:
     sector_masks: dict[str, np.ndarray]
     center_masks: dict[str, np.ndarray]
-    ambiguous_mask: np.ndarray
+    overlap_mask: np.ndarray
     qcut: float
     warnings: list[str]
 
@@ -31,7 +31,7 @@ def build_sector_projectors(
     *,
     use_2d: bool = True,
     g_search_shell: int = 2,
-    ambiguous_policy: str = "warn_exclude",
+    overlap_policy: str = "warn_exclude",
 ) -> SectorProjectors:
     q = np.asarray(q_cart, dtype=float)
     if q.ndim != 2 or q.shape[1] != 3:
@@ -67,29 +67,29 @@ def build_sector_projectors(
     memberships = np.zeros(q.shape[0], dtype=int)
     for mask in sector_masks.values():
         memberships += mask.astype(int)
-    ambiguous = memberships > 1
+    overlap = memberships > 1
     messages: list[str] = []
-    if ambiguous.any():
+    if overlap.any():
         message = (
-            f"{int(ambiguous.sum())} plane-wave components are ambiguous across valley sectors; "
+            f"{int(overlap.sum())} plane-wave components overlap across valley sectors; "
             "try smaller qcut or check valley centers and monolayer lattice"
         )
         messages.append(message)
-        if ambiguous_policy == "error":
+        if overlap_policy == "error":
             raise ValueError(message)
-        if ambiguous_policy == "warn_exclude":
+        if overlap_policy == "warn_exclude":
             warnings.warn(message, UserWarning, stacklevel=2)
             for name in list(sector_masks):
-                sector_masks[name] = sector_masks[name] & ~ambiguous
-        elif ambiguous_policy == "include":
+                sector_masks[name] = sector_masks[name] & ~overlap
+        elif overlap_policy == "include":
             pass
         else:
-            raise ValueError(f"Unsupported ambiguous_cross_sector policy: {ambiguous_policy}")
+            raise ValueError(f"Unsupported overlap_cross_sector policy: {overlap_policy}")
 
     return SectorProjectors(
         sector_masks=sector_masks,
         center_masks=center_masks,
-        ambiguous_mask=ambiguous,
+        overlap_mask=overlap,
         qcut=float(qcut),
         warnings=messages,
     )

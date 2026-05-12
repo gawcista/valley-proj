@@ -51,7 +51,7 @@ projection:
   qcut_mode: relative_min_sector_distance
   qcut_fraction: 0.30
   qcut_scan: [0.20, 0.25, 0.30, 0.35, 0.40]
-  ambiguous_cross_sector: warn_exclude
+  overlap_cross_sector: warn_exclude
   thresholds:
     W_val_min: 0.8
     P_v_clean: 0.95

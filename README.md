@@ -98,14 +98,19 @@ For a two-valley subspace ordered as K-valley followed by K'-valley, the signed 
 =
 \frac{W_K-W_{K'}}{W_{\rm val}} .
 ```
-The residual weight outside the target valley subspace is
+The projector-window overlap weight is
 
 ```math
-W_{\rm res}=1-W_{\rm val}-W_\times,
-\qquad
-W_\times=\langle\psi|P_\times|\psi\rangle .
+W_{\rm overlap}=\langle\psi|P_\times|\psi\rangle .
 ```
-In prose, $W_{\rm res}$ is the out-of-valley residual weight. In the V1 CSV output, the column `W_res` stores this quantity. The column `ambiguous_weight` stores $W_\times$, the cross-sector projector-window overlap weight. A large overlap weight is a warning about the chosen windows or cutoff, not evidence for a new physical valley.
+It measures the weight in plane-wave components that fall into more than one valley-sector window. With the default exclusion policy, this weight is not assigned to any valley sector.
+
+The residual weight outside both the target valley subspace and the overlap region is
+
+```math
+W_{\rm res}=1-W_{\rm val}-W_{\rm overlap}.
+```
+For a normalized state, V1 therefore reports the decomposition $W_{\rm val}+W_{\rm overlap}+W_{\rm res}=1$. In CSV and JSON output, `W_overlap` stores $W_{\rm overlap}$ and `W_res` stores the out-of-valley residual weight. A large overlap weight is a warning about the chosen windows or cutoff, not evidence for a new physical valley.
 
 ### Gauge Fixing in a Near-Degenerate Subspace
 
@@ -283,7 +288,7 @@ projection:
   qcut_mode: relative_min_sector_distance
   qcut_fraction: 0.30
   qcut_scan: [0.20, 0.25, 0.30, 0.35]
-  ambiguous_cross_sector: warn_exclude
+  overlap_cross_sector: warn_exclude
   thresholds:
     W_val_min: 0.8
     P_v_clean: 0.95
@@ -348,10 +353,10 @@ diagnostics.h5
 This CSV contains one row per raw VASP band:
 
 ```text
-kpoint, band_vasp, energy_eV, K_sector, Kp_sector, W_val, P_v, eta, W_res, ambiguous_weight
+kpoint, band_vasp, energy_eV, K_sector, Kp_sector, W_val, P_v, eta, W_overlap, W_res
 ```
 
-The sector columns are YAML labels. `W_val`, `P_v`, and `eta` store the target-valley-subspace weight, valley purity, and signed valley polarization. `W_res` stores the out-of-valley residual weight. `ambiguous_weight` stores the cross-sector projector-window overlap weight.
+The sector columns are YAML labels. `W_val`, `P_v`, and `eta` store the target-valley-subspace weight, valley purity, and signed valley polarization. `W_overlap` stores the cross-sector projector-window overlap weight. `W_res` stores the out-of-valley residual weight.
 
 Use this file for a first scan. For near-degenerate target states, the raw band rows are gauge-dependent and should not be the final interpretation.
 
@@ -403,12 +408,13 @@ This file stores projector masks and q-cut scan data:
 ```text
 /projectors/<kpoint>/sector_masks
 /projectors/<kpoint>/center_masks
-/projectors/<kpoint>/ambiguous_mask
+/projectors/<kpoint>/overlap_mask
 /qcut_scan/<kpoint>/qcuts
 /qcut_scan/<kpoint>/w_val
 /qcut_scan/<kpoint>/purity
 /qcut_scan/<kpoint>/eta
-/qcut_scan/<kpoint>/ambiguous_weight
+/qcut_scan/<kpoint>/W_overlap
+/qcut_scan/<kpoint>/overlap_count
 ```
 
 Use it when tuning `qcut_fraction` or checking whether the projector windows select the expected momenta.
@@ -529,14 +535,19 @@ P_v=\frac{\max_i W_i}{W_{\rm val}},
 =
 \frac{W_K-W_{K'}}{W_{\rm val}} .
 ```
-谷外剩余权重（out-of-valley residual weight）为
+投影窗口重叠权重（projector-window overlap weight）为
 
 ```math
-W_{\rm res}=1-W_{\rm val}-W_\times,
-\qquad
-W_\times=\langle\psi|P_\times|\psi\rangle .
+W_{\rm overlap}=\langle\psi|P_\times|\psi\rangle .
 ```
-在 CSV 输出中，`W_res` 保存 $W_{\rm res}$。`ambiguous_weight` 保存 $W_\times$，即跨扇区投影窗口重叠权重（cross-sector projector-window overlap weight）。大的重叠权重通常说明投影窗口或截断半径需要检查，而不是出现了新的物理谷。
+它衡量落入多个谷扇区投影窗口的平面波分量权重。在默认排除策略下，这部分权重不会分配给任何谷扇区。
+
+谷外剩余权重（out-of-valley residual weight）定义为目标谷子空间和重叠区域之外的剩余部分：
+
+```math
+W_{\rm res}=1-W_{\rm val}-W_{\rm overlap}.
+```
+对归一化态，V1 因而报告分解 $W_{\rm val}+W_{\rm overlap}+W_{\rm res}=1$。在 CSV 和 JSON 输出中，`W_overlap` 保存 $W_{\rm overlap}$，`W_res` 保存谷外剩余权重。大的重叠权重通常说明投影窗口或截断半径需要检查，而不是出现了新的物理谷。
 
 ### 近简并子空间中的规范固定（Gauge Fixing）
 
@@ -714,7 +725,7 @@ projection:
   qcut_mode: relative_min_sector_distance
   qcut_fraction: 0.30
   qcut_scan: [0.20, 0.25, 0.30, 0.35]
-  ambiguous_cross_sector: warn_exclude
+  overlap_cross_sector: warn_exclude
   thresholds:
     W_val_min: 0.8
     P_v_clean: 0.95
@@ -779,10 +790,10 @@ diagnostics.h5
 这个 CSV 每行对应一个原始 VASP 能带：
 
 ```text
-kpoint, band_vasp, energy_eV, K_sector, Kp_sector, W_val, P_v, eta, W_res, ambiguous_weight
+kpoint, band_vasp, energy_eV, K_sector, Kp_sector, W_val, P_v, eta, W_overlap, W_res
 ```
 
-扇区列名是 YAML 标签。`W_val`、`P_v` 和 `eta` 分别保存目标谷子空间权重、谷纯度和有符号谷极化。`W_res` 保存谷外剩余权重。`ambiguous_weight` 保存跨扇区投影窗口重叠权重。
+扇区列名是 YAML 标签。`W_val`、`P_v` 和 `eta` 分别保存目标谷子空间权重、谷纯度和有符号谷极化。`W_overlap` 保存跨扇区投影窗口重叠权重。`W_res` 保存谷外剩余权重。
 
 这个文件适合做第一眼检查。对近简并目标态，逐条原始能带结果是规范依赖的，不能作为最终物理解释。
 
@@ -834,12 +845,13 @@ kpoint, band_vasp, energy_eV, K_sector, Kp_sector, W_val, P_v, eta, W_res, ambig
 ```text
 /projectors/<kpoint>/sector_masks
 /projectors/<kpoint>/center_masks
-/projectors/<kpoint>/ambiguous_mask
+/projectors/<kpoint>/overlap_mask
 /qcut_scan/<kpoint>/qcuts
 /qcut_scan/<kpoint>/w_val
 /qcut_scan/<kpoint>/purity
 /qcut_scan/<kpoint>/eta
-/qcut_scan/<kpoint>/ambiguous_weight
+/qcut_scan/<kpoint>/W_overlap
+/qcut_scan/<kpoint>/overlap_count
 ```
 
 调 `qcut_fraction` 或检查投影窗口是否选中了预期动量时，优先看这个文件。

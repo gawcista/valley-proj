@@ -96,7 +96,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, Path]:
             monolayer_recip,
             qcut,
             use_2d=config.projection.use_2d_momentum_only,
-            ambiguous_policy=config.projection.ambiguous_cross_sector,
+            overlap_policy=config.projection.overlap_cross_sector,
         )
         projectors_by_kpoint[kpoint_name] = projectors
         weights = compute_valley_weights(coefficients, projectors)
@@ -127,8 +127,8 @@ def analyze_hsp(config_path: str | Path) -> dict[str, Path]:
                     "W_val": result.w_val,
                     "P_v": result.purity,
                     "eta": result.eta,
+                    "W_overlap": result.overlap_weight,
                     "W_res": result.residual_weight,
-                    "ambiguous_weight": result.ambiguous_weight,
                 }
                 for idx, result in enumerate(weights)
             ],
@@ -163,12 +163,12 @@ def analyze_hsp(config_path: str | Path) -> dict[str, Path]:
                 monolayer_recip,
                 scan_qcuts,
                 use_2d=config.projection.use_2d_momentum_only,
-                ambiguous_policy=config.projection.ambiguous_cross_sector,
+                overlap_policy=config.projection.overlap_cross_sector,
             )
             qcut_scan_payload[kpoint_name] = {
                 "has_plateau": scan.has_plateau,
                 "qcuts": [entry.qcut for entry in scan.entries],
-                "ambiguous_count": [entry.ambiguous_count for entry in scan.entries],
+                "overlap_count": [entry.overlap_count for entry in scan.entries],
                 "band_indices_vasp": kpoint.band_indices_vasp[positions],
                 "sector_names": np.asarray(projectors.sector_names, dtype="S"),
                 "w_val": [
@@ -183,8 +183,8 @@ def analyze_hsp(config_path: str | Path) -> dict[str, Path]:
                     [np.nan if result.eta is None else result.eta for result in entry.weights]
                     for entry in scan.entries
                 ],
-                "ambiguous_weight": [
-                    [result.ambiguous_weight for result in entry.weights]
+                "W_overlap": [
+                    [result.overlap_weight for result in entry.weights]
                     for entry in scan.entries
                 ],
             }

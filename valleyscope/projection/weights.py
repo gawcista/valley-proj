@@ -21,7 +21,7 @@ class ValleyWeightResult:
     w_val: float
     purity: float
     residual_weight: float
-    ambiguous_weight: float
+    overlap_weight: float
     eta: float | None
     norm: float
     diagnostics: dict[str, object] = field(default_factory=dict)
@@ -40,8 +40,8 @@ def compute_valley_weights(coefficients: np.ndarray, projectors: SectorProjector
     for name, mask in projectors.sector_masks.items():
         if mask.shape != (n_g,):
             raise ValueError(f"Sector mask {name} does not match coefficient nG")
-    if projectors.ambiguous_mask.shape != (n_g,):
-        raise ValueError("ambiguous_mask does not match coefficient nG")
+    if projectors.overlap_mask.shape != (n_g,):
+        raise ValueError("overlap_mask does not match coefficient nG")
 
     results: list[ValleyWeightResult] = []
     sector_names = list(projectors.sector_masks)
@@ -52,8 +52,8 @@ def compute_valley_weights(coefficients: np.ndarray, projectors: SectorProjector
             for name, mask in projectors.sector_masks.items()
         }
         w_val = float(sum(sector_weights.values()))
-        ambiguous_weight = float(np.sum(probs[projectors.ambiguous_mask]))
-        residual_weight = float(max(0.0, norm - w_val - ambiguous_weight))
+        overlap_weight = float(np.sum(probs[projectors.overlap_mask]))
+        residual_weight = float(max(0.0, norm - w_val - overlap_weight))
         purity = float(max(sector_weights.values()) / w_val) if w_val > 0.0 else 0.0
         eta = None
         if len(sector_names) == 2 and w_val > 0.0:
@@ -65,7 +65,7 @@ def compute_valley_weights(coefficients: np.ndarray, projectors: SectorProjector
                 w_val=w_val,
                 purity=purity,
                 residual_weight=residual_weight,
-                ambiguous_weight=ambiguous_weight,
+                overlap_weight=overlap_weight,
                 eta=eta,
                 norm=norm,
             )

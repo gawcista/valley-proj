@@ -8,7 +8,7 @@ from valleyscope.projection.weights import ValleyWeightResult
 
 def write_valley_weights_csv(path: str | Path, rows: list[dict[str, object]], sector_names: list[str]) -> Path:
     out = Path(path)
-    fieldnames = ["kpoint", "band_vasp", "energy_eV", *sector_names, "W_val", "P_v", "eta", "W_res", "ambiguous_weight"]
+    fieldnames = ["kpoint", "band_vasp", "energy_eV", *sector_names, "W_val", "P_v", "eta", "W_overlap", "W_res"]
     with out.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
@@ -32,8 +32,8 @@ def weight_row(
         "W_val": result.w_val,
         "P_v": result.purity,
         "eta": "" if result.eta is None else result.eta,
+        "W_overlap": result.overlap_weight,
         "W_res": result.residual_weight,
-        "ambiguous_weight": result.ambiguous_weight,
     }
     for sector in sector_names:
         row[sector] = result.sector_weights.get(sector, 0.0)

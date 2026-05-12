@@ -34,7 +34,7 @@ class ProjectionConfig:
     qcut_Ainv: float | None = None
     qcut_fraction: float = 0.3
     qcut_scan: list[float] = field(default_factory=list)
-    ambiguous_cross_sector: str = "warn_exclude"
+    overlap_cross_sector: str = "warn_exclude"
     thresholds: dict[str, float] = field(default_factory=dict)
 
 
@@ -281,7 +281,12 @@ def load_config(path: str | Path) -> AppConfig:
             qcut_Ainv=projection_raw.get("qcut_Ainv"),
             qcut_fraction=float(projection_raw.get("qcut_fraction", 0.3)),
             qcut_scan=[float(value) for value in projection_raw.get("qcut_scan", [])],
-            ambiguous_cross_sector=str(projection_raw.get("ambiguous_cross_sector", "warn_exclude")),
+            overlap_cross_sector=str(
+                projection_raw.get(
+                    "overlap_cross_sector",
+                    projection_raw.get("ambiguous_cross_sector", "warn_exclude"),
+                )
+            ),
             thresholds=dict(projection_raw.get("thresholds", {})),
         ),
         symmetry=SymmetryConfig(
