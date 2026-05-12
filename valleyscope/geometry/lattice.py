@@ -27,13 +27,20 @@ def reciprocal_from_direct(direct_cart: np.ndarray) -> np.ndarray:
 
 
 def read_poscar_lattice(path: str) -> Lattice:
-    lines = [line.strip() for line in open(path, encoding="utf-8") if line.strip()]
+    lines = _read_poscar_lines(path)
     if len(lines) < 5:
         raise ValueError(f"POSCAR file is too short: {path}")
     scale = float(lines[1].split()[0])
     direct = np.array([[float(x) for x in lines[i].split()[:3]] for i in range(2, 5)], dtype=float)
     direct *= scale
     return Lattice(direct_cart=direct, reciprocal_cart=reciprocal_from_direct(direct))
+
+
+def _read_poscar_lines(path: str) -> list[str]:
+    lines = [line.rstrip() for line in open(path, encoding="utf-8")]
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return lines
 
 
 def cart_rotation_from_fractional(rotation_frac: np.ndarray, direct_cart: np.ndarray) -> np.ndarray:
@@ -47,7 +54,7 @@ def cart_translation_from_fractional(translation_frac: np.ndarray, direct_cart: 
 
 
 def read_poscar_cell(path: str):
-    lines = [line.rstrip() for line in open(path, encoding="utf-8") if line.strip()]
+    lines = _read_poscar_lines(path)
     if len(lines) < 8:
         raise ValueError(f"POSCAR file is too short: {path}")
     scale = float(lines[1].split()[0])

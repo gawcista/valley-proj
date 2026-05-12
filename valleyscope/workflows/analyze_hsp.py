@@ -277,7 +277,11 @@ def _prepare_symmetry_payload(config: AppConfig, monolayer_recip: np.ndarray) ->
         return {
             "source": config.symmetry.source,
             "status": "skipped",
-            "reason": "POSCAR/CONTCAR path is missing or does not exist",
+            "reason": (
+                "input.poscar is missing or does not exist. "
+                "Symmetry analysis requires the moire/bilayer POSCAR or CONTCAR; "
+                "input.monolayer_poscars are used for valley-center geometry, not for spglib symmetry."
+            ),
         }
     cell = read_poscar_cell(str(poscar))
     dataset = find_symmetry_operations(cell, config.symmetry.symprec, config.symmetry.angle_tolerance)

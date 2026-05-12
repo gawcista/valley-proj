@@ -7,6 +7,7 @@ import yaml
 
 from valleyscope.io.config import load_config
 from valleyscope.io.h5_reader import read_wavefunction_h5
+from valleyscope.geometry.lattice import read_poscar_cell, read_poscar_lattice
 from valleyscope.workflows.analyze_hsp import analyze_hsp
 
 
@@ -93,6 +94,31 @@ def test_config_loader_parses_core_schema(tmp_path):
     assert config.analysis.target_bands_vasp == [101]
     assert config.projection.qcut_mode == "absolute"
     assert config.valley_sectors[0].name == "K_sector"
+
+
+def test_poscar_readers_accept_blank_title_line(tmp_path):
+    poscar = tmp_path / "POSCAR"
+    poscar.write_text(
+        "\n"
+        "1.0\n"
+        "2.0 0.0 0.0\n"
+        "0.0 3.0 0.0\n"
+        "0.0 0.0 4.0\n"
+        "Mo Te\n"
+        "1 2\n"
+        "Direct\n"
+        "0.0 0.0 0.0\n"
+        "0.5 0.0 0.0\n"
+        "0.0 0.5 0.0\n",
+        encoding="utf-8",
+    )
+
+    lattice = read_poscar_lattice(poscar)
+    cell = read_poscar_cell(poscar)
+
+    assert lattice.direct_cart[0].tolist() == [2.0, 0.0, 0.0]
+    assert cell[0][1].tolist() == [0.0, 3.0, 0.0]
+    assert cell[2].tolist() == [1, 2, 2]
 
 
 def test_config_loader_builds_layer_rotated_fractional_valley_centers(tmp_path):
