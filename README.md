@@ -21,55 +21,50 @@ The V1 workflow answers that question at selected HSPs. It also checks whether a
 
 For a VASP moire-supercell Bloch state at moire momentum $\mathbf k_M$, each plane-wave component carries the physical momentum
 
-$$
+```math
 \mathbf q=\mathbf k_M+\mathbf G_M ,
-$$
-
+```
 where $\mathbf G_M$ is a moire reciprocal lattice vector. ValleyScope uses only the in-plane component $\mathbf q_\parallel$ for valley assignment.
 
 A monolayer valley center $a$ is specified in a monolayer reciprocal coordinate system and mapped into the moire frame through the layer transform. Its projector window is defined by the minimum distance to the monolayer reciprocal-lattice star:
 
-$$
+```math
 d_a(\mathbf q)=
 \min_{\mathbf G_{\rm mono}}
 \left|
 \mathbf q_\parallel-
 \left(\mathbf Q_a+\mathbf G_{\rm mono}\right)
 \right|,
-$$
-
-$$
+```
+```math
 \Omega_a(q_{\rm cut})=
 \left\{
 \mathbf q:\ d_a(\mathbf q)<q_{\rm cut}
 \right\}.
-$$
-
+```
 A valley-sector projector is built from a union of such windows. For a two-valley twisted bilayer example,
 
-$$
+```math
 \Omega_K=
 \Omega_{{\rm top},K}\cup\Omega_{{\rm bottom},K},
 \qquad
 \Omega_{K'}=
 \Omega_{{\rm top},K'}\cup\Omega_{{\rm bottom},K'} .
-$$
-
+```
 The labels used in YAML, such as `K_sector`, are only user-chosen names for these physical sectors. They should be read as “K-valley sector” or “K'-valley sector,” not as special code-defined physical objects.
 
 ### Weights and Intervalley-Mixing Diagnostics
 
 Let $P_i$ be the valley-sector projector for sector $i$. With the default policy, plane-wave components that fall into projector windows belonging to more than one sector are removed from all sector projectors and collected in the overlap projector $P_\times$:
 
-$$
+```math
 \Omega_\times=
 \left\{
 \mathbf q:\ \mathbf q\in\Omega_i\cap\Omega_j
 \ {\rm for\ some}\ i\ne j
 \right\},
-$$
-
-$$
+```
+```math
 P_i=
 \sum_{\mathbf q\in\Omega_i\setminus\Omega_\times,\ s}
 |\mathbf q,s\rangle\langle\mathbf q,s|,
@@ -77,48 +72,42 @@ P_i=
 P_\times=
 \sum_{\mathbf q\in\Omega_\times,\ s}
 |\mathbf q,s\rangle\langle\mathbf q,s| .
-$$
-
+```
 For a normalized state $|\psi\rangle$, the monolayer-valley-resolved weight in sector $i$ is
 
-$$
+```math
 W_i=\langle\psi|P_i|\psi\rangle .
-$$
-
+```
 The target-valley-manifold weight is
 
-$$
+```math
 W_{\rm val}=\sum_i W_i .
-$$
-
+```
 It measures how much of the state lies in the user-defined target valley manifold. It depends on the valley centers and projection radius; it is not a topological invariant.
 
 The valley purity is
 
-$$
+```math
 P_v=\frac{\max_i W_i}{W_{\rm val}},
 \qquad W_{\rm val}>0 .
-$$
-
+```
 It measures whether the assigned valley weight is concentrated in one valley sector or distributed among several sectors.
 
 For a two-valley manifold ordered as K-valley followed by K'-valley, the signed valley polarization is
 
-$$
+```math
 \eta=
 \frac{W_K-W_{K'}}{W_K+W_{K'}}
 =
 \frac{W_K-W_{K'}}{W_{\rm val}} .
-$$
-
+```
 The out-of-valley residual weight is
 
-$$
+```math
 L_{\rm out}=1-W_{\rm val}-W_\times,
 \qquad
 W_\times=\langle\psi|P_\times|\psi\rangle .
-$$
-
+```
 In the CSV output, `leakage` stores $L_{\rm out}$. The column `ambiguous_weight` stores $W_\times$, the cross-sector projector-window overlap weight. A large overlap weight is a warning about the chosen windows or cutoff, not evidence for a new physical valley.
 
 ### Gauge Fixing in a Near-Degenerate Subspace
@@ -127,14 +116,13 @@ For an isolated nondegenerate band, the single-state quantities above can be rea
 
 V1 instead projects the target subspace and constructs the projected valley operator. For a two-valley manifold spanned by raw VASP states $\{|\psi_m\rangle\}$,
 
-$$
+```math
 S_{mn}=
 \langle\psi_m|(P_K+P_{K'})|\psi_n\rangle,
 \qquad
 V_{mn}=
 \langle\psi_m|(P_K-P_{K'})|\psi_n\rangle .
-$$
-
+```
 The matrix $S$ tests whether the target subspace lies in the chosen valley manifold. The matrix $V$ fixes a valley-adapted basis inside the target subspace. In practice, the `valley_subspace.json` and `valley_basis_transform.h5` files are the primary outputs for near-degenerate states.
 
 ### Symmetry Diagnostics
@@ -467,55 +455,50 @@ V1 工作流在选定 HSP 上回答这个问题。它还会检查候选对称操
 
 对 moire 超胞中动量为 $\mathbf k_M$ 的 VASP Bloch state，每个 plane-wave component 的物理动量为
 
-$$
+```math
 \mathbf q=\mathbf k_M+\mathbf G_M ,
-$$
-
+```
 其中 $\mathbf G_M$ 是 moire 超胞倒格矢。ValleyScope 只使用面内分量 $\mathbf q_\parallel$ 进行 valley assignment。
 
 monolayer valley center $a$ 在单层倒空间坐标中给出，并通过 layer transform 映射到 moire frame。它对应的 projector window 由到单层倒格矢星的最小距离定义：
 
-$$
+```math
 d_a(\mathbf q)=
 \min_{\mathbf G_{\rm mono}}
 \left|
 \mathbf q_\parallel-
 \left(\mathbf Q_a+\mathbf G_{\rm mono}\right)
 \right|,
-$$
-
-$$
+```
+```math
 \Omega_a(q_{\rm cut})=
 \left\{
 \mathbf q:\ d_a(\mathbf q)<q_{\rm cut}
 \right\}.
-$$
-
+```
 valley-sector projector 由一组 windows 的并集构造。以两 valley 的 twisted bilayer 为例，
 
-$$
+```math
 \Omega_K=
 \Omega_{{\rm top},K}\cup\Omega_{{\rm bottom},K},
 \qquad
 \Omega_{K'}=
 \Omega_{{\rm top},K'}\cup\Omega_{{\rm bottom},K'} .
-$$
-
+```
 YAML 中的 `K_sector` 这类名称只是用户定义的标签。物理上应理解为 K-valley sector 或 K'-valley sector，而不是代码内置的特殊物理对象。
 
 ### Weights 与 Intervalley-Mixing Diagnostics
 
 设 $P_i$ 是第 $i$ 个 valley sector 的投影算符。默认策略下，如果某个 plane-wave component 同时落入多个 sector 的 projector windows，它会从所有 sector projectors 中移除，并放入 overlap projector $P_\times$：
 
-$$
+```math
 \Omega_\times=
 \left\{
 \mathbf q:\ \mathbf q\in\Omega_i\cap\Omega_j
 \ {\rm for\ some}\ i\ne j
 \right\},
-$$
-
-$$
+```
+```math
 P_i=
 \sum_{\mathbf q\in\Omega_i\setminus\Omega_\times,\ s}
 |\mathbf q,s\rangle\langle\mathbf q,s|,
@@ -523,48 +506,42 @@ P_i=
 P_\times=
 \sum_{\mathbf q\in\Omega_\times,\ s}
 |\mathbf q,s\rangle\langle\mathbf q,s| .
-$$
-
+```
 对归一化态 $|\psi\rangle$，第 $i$ 个 sector 的 monolayer-valley-resolved weight 为
 
-$$
+```math
 W_i=\langle\psi|P_i|\psi\rangle .
-$$
-
+```
 target-valley-manifold weight 为
 
-$$
+```math
 W_{\rm val}=\sum_i W_i .
-$$
-
+```
 它衡量该态有多少权重落在用户定义的 target valley manifold 中。它依赖 valley centers 和 projection radius，不是拓扑不变量。
 
 valley purity 定义为
 
-$$
+```math
 P_v=\frac{\max_i W_i}{W_{\rm val}},
 \qquad W_{\rm val}>0 .
-$$
-
+```
 它衡量已经分配到 valley manifold 的权重是否集中在单一 valley sector 中。
 
 对按 K-valley、K'-valley 排列的两 valley manifold，signed valley polarization 为
 
-$$
+```math
 \eta=
 \frac{W_K-W_{K'}}{W_K+W_{K'}}
 =
 \frac{W_K-W_{K'}}{W_{\rm val}} .
-$$
-
+```
 out-of-valley residual weight 为
 
-$$
+```math
 L_{\rm out}=1-W_{\rm val}-W_\times,
 \qquad
 W_\times=\langle\psi|P_\times|\psi\rangle .
-$$
-
+```
 在 CSV 输出中，`leakage` 保存 $L_{\rm out}$。`ambiguous_weight` 保存 $W_\times$，即 cross-sector projector-window overlap weight。大的 overlap weight 通常说明 projector windows 或 cutoff 选择需要检查，而不是出现了新的物理 valley。
 
 ### 近简并子空间中的 Gauge Fixing
@@ -573,14 +550,13 @@ $$
 
 V1 会投影整个目标子空间并构造 projected valley operator。对由 VASP 原始态 $\{|\psi_m\rangle\}$ 张成的两 valley manifold，
 
-$$
+```math
 S_{mn}=
 \langle\psi_m|(P_K+P_{K'})|\psi_n\rangle,
 \qquad
 V_{mn}=
 \langle\psi_m|(P_K-P_{K'})|\psi_n\rangle .
-$$
-
+```
 矩阵 $S$ 检查目标子空间是否落在选定 valley manifold 中。矩阵 $V$ 在目标子空间内选出 valley-adapted basis。实际读取近简并态时，应主要看 `valley_subspace.json` 和 `valley_basis_transform.h5`。
 
 ### Symmetry Diagnostics
