@@ -233,12 +233,13 @@ This file is useful for a quick scan of individual VASP bands. In a near-degener
 
 This is the main diagnostic for near-degenerate target states. For a two-valley problem, the analyzer projects the target VASP subspace and constructs:
 
-```text
-S = P_K + P_Kp
-V = P_K - P_Kp
-```
+$$
+S_{mn}=\langle \psi_m | (P_K+P_{K'}) | \psi_n\rangle,
+\qquad
+V_{mn}=\langle \psi_m | (P_K-P_{K'}) | \psi_n\rangle .
+$$
 
-Here `P_K` and `P_Kp` denote the projectors onto the K-valley and K'-valley sectors selected by the YAML configuration. `S` measures how much of the target subspace lies in the selected valley manifold. `V` is the projected valley-polarization operator used to choose a valley-adapted basis. The reported `eta` values in this file are therefore properties of the subspace after gauge fixing, not arbitrary properties of the raw VASP eigenvectors.
+Here $P_K$ and $P_{K'}$ denote the projectors onto the K-valley and K'-valley sectors selected by the YAML configuration, and $\{|\psi_m\rangle\}$ is the raw target-band basis from VASP. $S$ measures how much of the target subspace lies in the selected valley manifold. $V$ is the projected valley-polarization operator used to choose a valley-adapted basis. The reported `eta` values in this file are therefore properties of the subspace after gauge fixing, not arbitrary properties of the raw VASP eigenvectors.
 
 For example:
 
@@ -309,79 +310,110 @@ Use this file when tuning `qcut_fraction` or checking whether a projector mask i
 
 For a VASP moire-supercell Bloch state at moire momentum `k_moire`, the plane-wave basis is labeled by:
 
-```text
-q = k_moire + G_moire
-```
+$$
+\mathbf q=\mathbf k_M+\mathbf G_M .
+$$
 
-where `G_moire` is a reciprocal lattice vector of the moire supercell. Valley projection uses only the in-plane component `q_parallel`. The out-of-plane component is ignored when assigning a plane-wave component to a monolayer valley window.
+Here $\mathbf G_M$ is a reciprocal lattice vector of the moire supercell. Valley projection uses only the in-plane component $\mathbf q_\parallel$. The out-of-plane component is ignored when assigning a plane-wave component to a monolayer valley window.
 
 ### Valley centers, windows, and sectors
 
 A valley center is a momentum point in a monolayer Brillouin zone after the layer transform has been applied. For each center `a`, the code defines a momentum window by folding `q_parallel` with the appropriate monolayer reciprocal lattice and testing whether the minimum folded distance is smaller than `qcut`:
 
-```text
-d_a(q) = min_Gmono | q_parallel - (Q_a + G_mono) |
-Omega_a = { q : d_a(q) < qcut }
-```
+$$
+d_a(\mathbf q)=
+\min_{\mathbf G_{\rm mono}}
+\left|
+\mathbf q_\parallel-\left(\mathbf Q_a+\mathbf G_{\rm mono}\right)
+\right| ,
+$$
+
+$$
+\Omega_a(q_{\rm cut})=
+\left\{
+\mathbf q:\ d_a(\mathbf q)<q_{\rm cut}
+\right\}.
+$$
 
 A valley sector is a user-defined union of one or more such windows that are meant to represent the same physical monolayer valley. For twisted bilayer MoTe2, a typical K-valley sector contains both layer centers:
 
-```text
-K-valley sector  = union(top_K window, bottom_K window)
-K'-valley sector = union(top_Kp window, bottom_Kp window)
-```
+$$
+\Omega_K=\Omega_{\mathrm{top},K}\cup\Omega_{\mathrm{bottom},K},
+\qquad
+\Omega_{K'}=\Omega_{\mathrm{top},K'}\cup\Omega_{\mathrm{bottom},K'} .
+$$
 
 The top and bottom centers are in the same K-valley sector because interlayer hybridization within the same monolayer valley does not destroy the valley quantum number. A layer is not a valley, and a moire-BZ K point is not automatically the monolayer K valley.
 
 Overlaps between windows inside the same valley sector are counted once by taking the union. If a plane-wave component lies in windows belonging to different valley sectors, it is a cross-window overlap. With the default `ambiguous_cross_sector: warn_exclude`, that component is removed from all valley-sector projectors and tracked separately.
 
+$$
+\Omega_\times=
+\left\{
+\mathbf q:\ \mathbf q\in\Omega_i\cap\Omega_j
+\ \mathrm{for\ some}\ i\ne j
+\right\}.
+$$
+
 ### Weights and diagnostics
 
 Let `P_i` be the projector onto valley sector `i` after applying the cross-window policy, and let `P_x` be the projector onto the cross-window overlap mask. For a normalized state `psi`, the sector weight is:
 
-```text
-W_i = <psi|P_i|psi>
-```
+$$
+P_i=\sum_{\mathbf q\in \Omega_i\setminus\Omega_\times,\ s}
+|\mathbf q,s\rangle\langle \mathbf q,s|,
+\qquad
+P_\times=\sum_{\mathbf q\in \Omega_\times,\ s}
+|\mathbf q,s\rangle\langle \mathbf q,s| ,
+$$
+
+$$
+W_i=\langle \psi | P_i | \psi\rangle .
+$$
 
 The total assigned valley-manifold weight is:
 
-```text
-W_val = sum_i W_i
-```
+$$
+W_{\rm val}=\sum_i W_i .
+$$
 
 `W_val` measures how much of the state is assigned to the user-defined valley manifold. It is not a topological invariant and depends on the chosen valley centers and `qcut`.
 
 The valley purity is:
 
-```text
-P_v = max_i W_i / W_val
-```
+$$
+P_v=\frac{\max_i W_i}{W_{\rm val}},
+\qquad W_{\rm val}>0 .
+$$
 
-when `W_val > 0`. It measures whether the assigned valley weight is concentrated in one valley sector or spread across several sectors.
+It measures whether the assigned valley weight is concentrated in one valley sector or spread across several sectors.
 
 For a two-valley configuration ordered as K-valley sector followed by K'-valley sector, the signed valley polarization is:
 
-```text
-eta = (W_K - W_Kp) / W_val
-```
+$$
+\eta=
+\frac{W_K-W_{K'}}{W_K+W_{K'}}
+=
+\frac{W_K-W_{K'}}{W_{\rm val}} .
+$$
 
 In the general two-sector case, the sign follows the order of `valley_sectors` in the YAML file.
 
 With the default `warn_exclude` policy, `ambiguous_weight` is the cross-window overlap weight:
 
-```text
-ambiguous_weight = <psi|P_x|psi>
-```
+$$
+W_\times=\langle \psi | P_\times | \psi\rangle .
+$$
 
-It measures weight in plane-wave components selected by windows from more than one valley sector. It is a diagnostic of the projection-window definition and cutoff choice, not a separate physical valley.
+The output field `ambiguous_weight` stores $W_\times$. It measures weight in plane-wave components selected by windows from more than one valley sector. It is a diagnostic of the projection-window definition and cutoff choice, not a separate physical valley.
 
 With the same default policy, `leakage` is the out-of-valley residual weight:
 
-```text
-leakage = 1 - W_val - ambiguous_weight
-```
+$$
+L_{\rm out}=1-W_{\rm val}-W_\times .
+$$
 
-Equivalently, for numerically normalized states, it is the part of the wavefunction weight that is neither assigned to any valley sector nor marked as cross-window overlap.
+The output field `leakage` stores $L_{\rm out}$. Equivalently, for numerically normalized states, it is the part of the wavefunction weight that is neither assigned to any valley sector nor marked as cross-window overlap.
 
 ### Near-degenerate subspaces
 
@@ -391,10 +423,11 @@ For a degenerate or near-degenerate group of target bands, individual VASP eigen
 
 For two valleys, ValleyScope forms:
 
-```text
-S = P_K + P_Kp
-V = P_K - P_Kp
-```
+$$
+S_{mn}=\langle \psi_m | (P_K+P_{K'}) | \psi_n\rangle,
+\qquad
+V_{mn}=\langle \psi_m | (P_K-P_{K'}) | \psi_n\rangle .
+$$
 
 inside the selected target-band subspace. `S` tests whether the subspace is contained in the valley manifold, and `V` selects the valley-adapted basis. This is why `valley_subspace.json`, together with `valley_basis_transform.h5`, is the main output to inspect for nearly degenerate states.
 
@@ -674,12 +707,13 @@ kpoint, band_vasp, energy_eV, K_sector, Kp_sector, W_val, P_v, eta, leakage, amb
 
 这是近简并目标态最重要的物理诊断。两 valley 情形下，程序在目标 VASP 子空间内构造：
 
-```text
-S = P_K + P_Kp
-V = P_K - P_Kp
-```
+$$
+S_{mn}=\langle \psi_m | (P_K+P_{K'}) | \psi_n\rangle,
+\qquad
+V_{mn}=\langle \psi_m | (P_K-P_{K'}) | \psi_n\rangle .
+$$
 
-这里 `P_K` 和 `P_Kp` 分别表示 YAML 所定义的 K-valley sector 与 K'-valley sector 的投影算符。`S` 衡量目标子空间有多少落在所选 valley manifold 中。`V` 是 projected valley-polarization operator，用来选择 valley-adapted basis。因此，这个文件中的 `eta` 是经过子空间 gauge fixing 后的诊断量，不是原始 VASP 单个本征矢的任意属性。
+这里 $P_K$ 和 $P_{K'}$ 分别表示 YAML 所定义的 K-valley sector 与 K'-valley sector 的投影算符，$\{|\psi_m\rangle\}$ 是 VASP 输出的原始目标 band basis。$S$ 衡量目标子空间有多少落在所选 valley manifold 中。$V$ 是 projected valley-polarization operator，用来选择 valley-adapted basis。因此，这个文件中的 `eta` 是经过子空间 gauge fixing 后的诊断量，不是原始 VASP 单个本征矢的任意属性。
 
 例如：
 
@@ -750,79 +784,110 @@ GammaM S   = 0.9967, 0.9967
 
 对 moire 超胞中动量为 `k_moire` 的 VASP Bloch state，plane-wave basis 的动量标签是：
 
-```text
-q = k_moire + G_moire
-```
+$$
+\mathbf q=\mathbf k_M+\mathbf G_M .
+$$
 
-其中 `G_moire` 是 moire 超胞倒格矢。valley projection 只使用面内分量 `q_parallel`；判断 valley 时不使用面外动量分量。
+其中 $\mathbf G_M$ 是 moire 超胞倒格矢。valley projection 只使用面内分量 $\mathbf q_\parallel$；判断 valley 时不使用面外动量分量。
 
 ### Valley centers、windows 和 sectors
 
 一个 valley center 是经过 layer transform 后的 monolayer BZ 动量点。对每个 center `a`，程序把 `q_parallel` 按对应单层倒格矢折回，并用最小折回距离定义 window：
 
-```text
-d_a(q) = min_Gmono | q_parallel - (Q_a + G_mono) |
-Omega_a = { q : d_a(q) < qcut }
-```
+$$
+d_a(\mathbf q)=
+\min_{\mathbf G_{\rm mono}}
+\left|
+\mathbf q_\parallel-\left(\mathbf Q_a+\mathbf G_{\rm mono}\right)
+\right| ,
+$$
+
+$$
+\Omega_a(q_{\rm cut})=
+\left\{
+\mathbf q:\ d_a(\mathbf q)<q_{\rm cut}
+\right\}.
+$$
 
 一个 valley sector 是用户定义的一组 windows 的并集，用来表示同一个物理 monolayer valley。对 twisted bilayer MoTe2，典型定义是：
 
-```text
-K-valley sector  = union(top_K window, bottom_K window)
-K'-valley sector = union(top_Kp window, bottom_Kp window)
-```
+$$
+\Omega_K=\Omega_{\mathrm{top},K}\cup\Omega_{\mathrm{bottom},K},
+\qquad
+\Omega_{K'}=\Omega_{\mathrm{top},K'}\cup\Omega_{\mathrm{bottom},K'} .
+$$
 
 top 和 bottom centers 属于同一个 K-valley sector，是因为同一个 monolayer valley 内的层间杂化不破坏 valley quantum number。layer 不是 valley，moire BZ 的 K 点也不自动等于 monolayer K valley。
 
 同一 valley sector 内部的 window overlap 通过取并集只计数一次。如果某个 plane-wave component 同时落入不同 valley sectors 的 windows，它就是 cross-window overlap。默认 `ambiguous_cross_sector: warn_exclude` 会把该 component 从所有 valley-sector projectors 中排除，并单独记录。
 
+$$
+\Omega_\times=
+\left\{
+\mathbf q:\ \mathbf q\in\Omega_i\cap\Omega_j
+\ \mathrm{for\ some}\ i\ne j
+\right\}.
+$$
+
 ### Weights 和 diagnostics
 
 设 `P_i` 是应用 cross-window policy 后第 `i` 个 valley sector 的投影算符，`P_x` 是 cross-window overlap mask 对应的投影算符。对归一化态 `psi`，sector weight 为：
 
-```text
-W_i = <psi|P_i|psi>
-```
+$$
+P_i=\sum_{\mathbf q\in \Omega_i\setminus\Omega_\times,\ s}
+|\mathbf q,s\rangle\langle \mathbf q,s|,
+\qquad
+P_\times=\sum_{\mathbf q\in \Omega_\times,\ s}
+|\mathbf q,s\rangle\langle \mathbf q,s| ,
+$$
+
+$$
+W_i=\langle \psi | P_i | \psi\rangle .
+$$
 
 总的 assigned valley-manifold weight 定义为：
 
-```text
-W_val = sum_i W_i
-```
+$$
+W_{\rm val}=\sum_i W_i .
+$$
 
 `W_val` 表示该态有多少权重被分配到用户定义的 valley manifold 中。它不是拓扑不变量，并且依赖 valley centers 与 `qcut` 的选择。
 
 valley purity 定义为：
 
-```text
-P_v = max_i W_i / W_val
-```
+$$
+P_v=\frac{\max_i W_i}{W_{\rm val}},
+\qquad W_{\rm val}>0 .
+$$
 
-其中要求 `W_val > 0`。它衡量已分配到 valley manifold 的权重是否集中在单一 valley sector 中。
+它衡量已分配到 valley manifold 的权重是否集中在单一 valley sector 中。
 
 对 YAML 顺序为 K-valley sector、K'-valley sector 的两 valley 配置，有符号 valley polarization 为：
 
-```text
-eta = (W_K - W_Kp) / W_val
-```
+$$
+\eta=
+\frac{W_K-W_{K'}}{W_K+W_{K'}}
+=
+\frac{W_K-W_{K'}}{W_{\rm val}} .
+$$
 
 一般两 sector 情形下，`eta` 的符号遵循 YAML 中 `valley_sectors` 的顺序。
 
 默认 `warn_exclude` 策略下，`ambiguous_weight` 是 cross-window overlap weight：
 
-```text
-ambiguous_weight = <psi|P_x|psi>
-```
+$$
+W_\times=\langle \psi | P_\times | \psi\rangle .
+$$
 
-它表示 plane-wave component 同时被不同 valley sectors 的 windows 选中所贡献的权重。它是 projection window 和 cutoff 选择的诊断量，不是额外的物理 valley。
+输出字段 `ambiguous_weight` 保存 $W_\times$。它表示 plane-wave component 同时被不同 valley sectors 的 windows 选中所贡献的权重。它是 projection window 和 cutoff 选择的诊断量，不是额外的物理 valley。
 
 同一默认策略下，`leakage` 是 out-of-valley residual weight：
 
-```text
-leakage = 1 - W_val - ambiguous_weight
-```
+$$
+L_{\rm out}=1-W_{\rm val}-W_\times .
+$$
 
-也就是说，对数值归一化的态，`leakage` 是既没有分配给任何 valley sector、也没有被标记为 cross-window overlap 的剩余波函数权重。
+输出字段 `leakage` 保存 $L_{\rm out}$。也就是说，对数值归一化的态，`leakage` 是既没有分配给任何 valley sector、也没有被标记为 cross-window overlap 的剩余波函数权重。
 
 ### 近简并子空间
 
@@ -832,10 +897,11 @@ leakage = 1 - W_val - ambiguous_weight
 
 两 valley 情形下，ValleyScope 在目标 band 子空间内构造：
 
-```text
-S = P_K + P_Kp
-V = P_K - P_Kp
-```
+$$
+S_{mn}=\langle \psi_m | (P_K+P_{K'}) | \psi_n\rangle,
+\qquad
+V_{mn}=\langle \psi_m | (P_K-P_{K'}) | \psi_n\rangle .
+$$
 
 `S` 检查目标子空间是否落在所选 valley manifold 内，`V` 用于选择 valley-adapted basis。因此，对近简并态应主要查看 `valley_subspace.json` 和 `valley_basis_transform.h5`，而不是只看逐条 band 的 projection。
 
