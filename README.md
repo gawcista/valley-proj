@@ -5,7 +5,7 @@
 
 ValleyScope is a VASP post-processing tool for valley projection and symmetry diagnostics in moire supercells. The current version focuses on one practical workflow: take selected high-symmetry-point wavefunction coefficients, project them onto user-defined monolayer valley sectors, build a valley-adapted basis for near-degenerate bands, and write the diagnostics needed before any rotation-eigenvalue analysis.
 
-It is not a black-box Chern-number code. V1 deliberately writes intermediate quantities that can be checked: valley weights, leakage, cross-sector overlap, valley-adapted basis transforms, spglib operations, little-group checks, and valley-preservation checks.
+It is not a black-box Chern-number code. V1 deliberately writes intermediate quantities that can be checked: valley weights, out-of-valley residual weight, cross-window overlap weight, valley-adapted basis transforms, spglib operations, little-group checks, and valley-preservation checks.
 
 ## Install
 
@@ -225,18 +225,20 @@ One row per original VASP band:
 kpoint, band_vasp, energy_eV, K_sector, Kp_sector, W_val, P_v, eta, leakage, ambiguous_weight
 ```
 
-This is useful for a quick scan. For near-degenerate target bands, do not interpret a single original VASP eigenvector too literally: the vectors can be mixed by an arbitrary unitary rotation inside the degenerate subspace.
+The sector columns are serialized from the names in `valley_sectors`. In the example above, `K_sector` and `Kp_sector` are YAML labels for the K-valley sector and the K'-valley sector; they are not special physical keywords in the code.
+
+This file is useful for a quick scan of individual VASP bands. In a near-degenerate target subspace, however, row-by-row projection of VASP eigenvectors is gauge-dependent: any unitary rotation within the subspace gives an equally valid set of VASP eigenvectors. In that case, use `valley_subspace.json` as the primary diagnostic.
 
 ### `valley_subspace.json`
 
-This is usually the most useful physics summary. For each k point, it includes the original band weights and the valley-adapted subspace. In a two-valley case:
+This is the main diagnostic for near-degenerate target states. For a two-valley problem, the analyzer projects the target VASP subspace and constructs:
 
 ```text
 S = P_K + P_Kp
 V = P_K - P_Kp
 ```
 
-`s_eigenvalues` measure how well the target subspace lies inside the chosen valley manifold. `eta` gives the signed valley polarization in the valley-adapted basis.
+Here `P_K` and `P_Kp` denote the projectors onto the K-valley and K'-valley sectors selected by the YAML configuration. `S` measures how much of the target subspace lies in the selected valley manifold. `V` is the projected valley-polarization operator used to choose a valley-adapted basis. The reported `eta` values in this file are therefore properties of the subspace after gauge fixing, not arbitrary properties of the raw VASP eigenvectors.
 
 For example:
 
@@ -301,36 +303,112 @@ Low-level projector and scan data:
 
 Use this file when tuning `qcut_fraction` or checking whether a projector mask is selecting the expected momentum components.
 
-## Physical Picture
+## Physical Definitions
 
-For each moire Bloch state, ValleyScope looks at the actual plane-wave momentum:
+### Plane-wave momenta
+
+For a VASP moire-supercell Bloch state at moire momentum `k_moire`, the plane-wave basis is labeled by:
 
 ```text
 q = k_moire + G_moire
 ```
 
-Only the in-plane part is used for valley projection. The code folds `q_parallel` with the corresponding monolayer reciprocal lattice and checks whether it lies inside a window around a valley center.
+where `G_moire` is a reciprocal lattice vector of the moire supercell. Valley projection uses only the in-plane component `q_parallel`. The out-of-plane component is ignored when assigning a plane-wave component to a monolayer valley window.
 
-A valley sector can contain multiple centers. For twisted bilayer MoTe2, a typical definition is:
+### Valley centers, windows, and sectors
+
+A valley center is a momentum point in a monolayer Brillouin zone after the layer transform has been applied. For each center `a`, the code defines a momentum window by folding `q_parallel` with the appropriate monolayer reciprocal lattice and testing whether the minimum folded distance is smaller than `qcut`:
 
 ```text
-K_sector  = [top_K, bottom_K]
-Kp_sector = [top_Kp, bottom_Kp]
+d_a(q) = min_Gmono | q_parallel - (Q_a + G_mono) |
+Omega_a = { q : d_a(q) < qcut }
 ```
 
-This is intentional: top/bottom hybridization inside the same monolayer valley does not destroy the valley quantum number. A layer is not a valley, and a moire-BZ K point is not automatically the monolayer K valley.
+A valley sector is a user-defined union of one or more such windows that are meant to represent the same physical monolayer valley. For twisted bilayer MoTe2, a typical K-valley sector contains both layer centers:
+
+```text
+K-valley sector  = union(top_K window, bottom_K window)
+K'-valley sector = union(top_Kp window, bottom_Kp window)
+```
+
+The top and bottom centers are in the same K-valley sector because interlayer hybridization within the same monolayer valley does not destroy the valley quantum number. A layer is not a valley, and a moire-BZ K point is not automatically the monolayer K valley.
+
+Overlaps between windows inside the same valley sector are counted once by taking the union. If a plane-wave component lies in windows belonging to different valley sectors, it is a cross-window overlap. With the default `ambiguous_cross_sector: warn_exclude`, that component is removed from all valley-sector projectors and tracked separately.
+
+### Weights and diagnostics
+
+Let `P_i` be the projector onto valley sector `i` after applying the cross-window policy, and let `P_x` be the projector onto the cross-window overlap mask. For a normalized state `psi`, the sector weight is:
+
+```text
+W_i = <psi|P_i|psi>
+```
+
+The total assigned valley-manifold weight is:
+
+```text
+W_val = sum_i W_i
+```
+
+`W_val` measures how much of the state is assigned to the user-defined valley manifold. It is not a topological invariant and depends on the chosen valley centers and `qcut`.
+
+The valley purity is:
+
+```text
+P_v = max_i W_i / W_val
+```
+
+when `W_val > 0`. It measures whether the assigned valley weight is concentrated in one valley sector or spread across several sectors.
+
+For a two-valley configuration ordered as K-valley sector followed by K'-valley sector, the signed valley polarization is:
+
+```text
+eta = (W_K - W_Kp) / W_val
+```
+
+In the general two-sector case, the sign follows the order of `valley_sectors` in the YAML file.
+
+With the default `warn_exclude` policy, `ambiguous_weight` is the cross-window overlap weight:
+
+```text
+ambiguous_weight = <psi|P_x|psi>
+```
+
+It measures weight in plane-wave components selected by windows from more than one valley sector. It is a diagnostic of the projection-window definition and cutoff choice, not a separate physical valley.
+
+With the same default policy, `leakage` is the out-of-valley residual weight:
+
+```text
+leakage = 1 - W_val - ambiguous_weight
+```
+
+Equivalently, for numerically normalized states, it is the part of the wavefunction weight that is neither assigned to any valley sector nor marked as cross-window overlap.
+
+### Near-degenerate subspaces
+
+For an isolated nondegenerate state, `W_val`, `P_v`, `eta`, `leakage`, and `ambiguous_weight` can be read directly from `valley_weights.csv`.
+
+For a degenerate or near-degenerate group of target bands, individual VASP eigenvectors are not unique. Any unitary rotation inside the target subspace represents the same physical eigenspace, so row-wise projection of individual bands is gauge-dependent. The physically meaningful V1 diagnostic is obtained by projecting the whole target subspace.
+
+For two valleys, ValleyScope forms:
+
+```text
+S = P_K + P_Kp
+V = P_K - P_Kp
+```
+
+inside the selected target-band subspace. `S` tests whether the subspace is contained in the valley manifold, and `V` selects the valley-adapted basis. This is why `valley_subspace.json`, together with `valley_basis_transform.h5`, is the main output to inspect for nearly degenerate states.
 
 ## Common Questions
 
 ### What is `ambiguous_weight`?
 
-If a plane-wave component falls into windows belonging to different valley sectors, it is a cross-sector overlap. With the default `ambiguous_cross_sector: warn_exclude`, that component is excluded from all sector weights and written to `ambiguous_weight`.
+It is the cross-window overlap weight. A plane-wave component contributes to `ambiguous_weight` when it lies inside windows from more than one valley sector. With the default `ambiguous_cross_sector: warn_exclude`, that component is excluded from all sector weights and stored separately.
 
 Small values are usually a cutoff-boundary effect. Large values mean you should check the valley centers, layer transforms, and `qcut_fraction`.
 
 ### Why are the raw bands mixed but the subspace is clean?
 
-Near-degenerate VASP eigenvectors have gauge freedom. A pair of raw eigenvectors can be arbitrary mixtures of K and Kp. In that case, read the `valley_adapted_subspace` section in `valley_subspace.json`, especially `eta` and `s_eigenvalues`.
+Near-degenerate VASP eigenvectors have gauge freedom. A pair of raw eigenvectors can be arbitrary mixtures of K-valley and K'-valley character. In that case, read the `valley_adapted_subspace` section in `valley_subspace.json`, especially `eta` and `s_eigenvalues`, rather than the row-by-row band projection alone.
 
 ### When should I write `reciprocal_cart` manually?
 
@@ -368,7 +446,7 @@ The priority is to make HSP valley projection, valley-adapted subspaces, and sym
 
 ValleyScope 是一个面向 VASP moire 超胞波函数的 valley projection 与 symmetry diagnostics 工具。当前版本主要解决一个实际问题：从已选出的高对称点波函数系数出发，投影到用户定义的 monolayer valley sectors，在近简并目标能带中构造 valley-adapted basis，并输出 rotation-eigenvalue 分析前必须检查的诊断量。
 
-它不是黑箱 Chern number 程序。V1 会把中间量明确写出来，包括 valley weights、leakage、cross-sector overlap、valley-adapted basis transform、spglib operations、little-group check 和 valley-preservation check。
+它不是黑箱 Chern number 程序。V1 会把中间量明确写出来，包括 valley weights、out-of-valley residual weight、cross-window overlap weight、valley-adapted basis transform、spglib operations、little-group check 和 valley-preservation check。
 
 ## 安装
 
@@ -588,18 +666,20 @@ diagnostics.h5
 kpoint, band_vasp, energy_eV, K_sector, Kp_sector, W_val, P_v, eta, leakage, ambiguous_weight
 ```
 
-这个文件适合快速浏览。对近简并目标 bands，不要过度解释单个原始 VASP 本征矢，因为简并子空间内的本征矢可以被任意酉变换混合。
+其中 sector 列名来自 YAML 中的 `valley_sectors` 名称。上面的 `K_sector` 和 `Kp_sector` 是序列化输出中的标签，对应物理上的 K-valley sector 和 K'-valley sector；它们不是代码内置的特殊物理术语。
+
+这个文件适合快速浏览逐条 VASP band 的投影结果。对近简并目标 bands，不要过度解释单个原始 VASP 本征矢，因为简并子空间内的本征矢可以被任意酉变换混合；逐条 band projection 是 gauge-dependent 的。此时应把 `valley_subspace.json` 作为主要诊断。
 
 ### `valley_subspace.json`
 
-这通常是最重要的物理摘要。每个 k point 下包含原始 band weights 和 valley-adapted subspace。两 valley 情形下程序构造：
+这是近简并目标态最重要的物理诊断。两 valley 情形下，程序在目标 VASP 子空间内构造：
 
 ```text
 S = P_K + P_Kp
 V = P_K - P_Kp
 ```
 
-`s_eigenvalues` 衡量目标子空间有多少落在用户定义的 valley manifold 中。`eta` 是 valley-adapted basis 中的 signed valley polarization。
+这里 `P_K` 和 `P_Kp` 分别表示 YAML 所定义的 K-valley sector 与 K'-valley sector 的投影算符。`S` 衡量目标子空间有多少落在所选 valley manifold 中。`V` 是 projected valley-polarization operator，用来选择 valley-adapted basis。因此，这个文件中的 `eta` 是经过子空间 gauge fixing 后的诊断量，不是原始 VASP 单个本征矢的任意属性。
 
 例如：
 
@@ -664,36 +744,112 @@ GammaM S   = 0.9967, 0.9967
 
 调 `qcut_fraction` 或检查 projector mask 是否合理时，优先看这个文件。
 
-## 物理图像
+## 物理定义
 
-对每个 moire Bloch state，ValleyScope 使用实际 plane-wave momentum：
+### Plane-wave momentum
+
+对 moire 超胞中动量为 `k_moire` 的 VASP Bloch state，plane-wave basis 的动量标签是：
 
 ```text
 q = k_moire + G_moire
 ```
 
-valley projection 只看面内分量。程序把 `q_parallel` 按对应层的 monolayer reciprocal lattice 折回，然后判断它是否落在某个 valley center 附近的 window 中。
+其中 `G_moire` 是 moire 超胞倒格矢。valley projection 只使用面内分量 `q_parallel`；判断 valley 时不使用面外动量分量。
 
-一个 valley sector 可以包含多个 centers。对 twisted bilayer MoTe2，常见定义是：
+### Valley centers、windows 和 sectors
+
+一个 valley center 是经过 layer transform 后的 monolayer BZ 动量点。对每个 center `a`，程序把 `q_parallel` 按对应单层倒格矢折回，并用最小折回距离定义 window：
 
 ```text
-K_sector  = [top_K, bottom_K]
-Kp_sector = [top_Kp, bottom_Kp]
+d_a(q) = min_Gmono | q_parallel - (Q_a + G_mono) |
+Omega_a = { q : d_a(q) < qcut }
 ```
 
-这是有意这样定义的：同一个 monolayer valley 内的 top/bottom hybridization 不破坏 valley quantum number。layer 不是 valley，moire BZ 的 K 点也不自动等于 monolayer K valley。
+一个 valley sector 是用户定义的一组 windows 的并集，用来表示同一个物理 monolayer valley。对 twisted bilayer MoTe2，典型定义是：
+
+```text
+K-valley sector  = union(top_K window, bottom_K window)
+K'-valley sector = union(top_Kp window, bottom_Kp window)
+```
+
+top 和 bottom centers 属于同一个 K-valley sector，是因为同一个 monolayer valley 内的层间杂化不破坏 valley quantum number。layer 不是 valley，moire BZ 的 K 点也不自动等于 monolayer K valley。
+
+同一 valley sector 内部的 window overlap 通过取并集只计数一次。如果某个 plane-wave component 同时落入不同 valley sectors 的 windows，它就是 cross-window overlap。默认 `ambiguous_cross_sector: warn_exclude` 会把该 component 从所有 valley-sector projectors 中排除，并单独记录。
+
+### Weights 和 diagnostics
+
+设 `P_i` 是应用 cross-window policy 后第 `i` 个 valley sector 的投影算符，`P_x` 是 cross-window overlap mask 对应的投影算符。对归一化态 `psi`，sector weight 为：
+
+```text
+W_i = <psi|P_i|psi>
+```
+
+总的 assigned valley-manifold weight 定义为：
+
+```text
+W_val = sum_i W_i
+```
+
+`W_val` 表示该态有多少权重被分配到用户定义的 valley manifold 中。它不是拓扑不变量，并且依赖 valley centers 与 `qcut` 的选择。
+
+valley purity 定义为：
+
+```text
+P_v = max_i W_i / W_val
+```
+
+其中要求 `W_val > 0`。它衡量已分配到 valley manifold 的权重是否集中在单一 valley sector 中。
+
+对 YAML 顺序为 K-valley sector、K'-valley sector 的两 valley 配置，有符号 valley polarization 为：
+
+```text
+eta = (W_K - W_Kp) / W_val
+```
+
+一般两 sector 情形下，`eta` 的符号遵循 YAML 中 `valley_sectors` 的顺序。
+
+默认 `warn_exclude` 策略下，`ambiguous_weight` 是 cross-window overlap weight：
+
+```text
+ambiguous_weight = <psi|P_x|psi>
+```
+
+它表示 plane-wave component 同时被不同 valley sectors 的 windows 选中所贡献的权重。它是 projection window 和 cutoff 选择的诊断量，不是额外的物理 valley。
+
+同一默认策略下，`leakage` 是 out-of-valley residual weight：
+
+```text
+leakage = 1 - W_val - ambiguous_weight
+```
+
+也就是说，对数值归一化的态，`leakage` 是既没有分配给任何 valley sector、也没有被标记为 cross-window overlap 的剩余波函数权重。
+
+### 近简并子空间
+
+对孤立非简并态，可以直接从 `valley_weights.csv` 读取 `W_val`、`P_v`、`eta`、`leakage` 和 `ambiguous_weight`。
+
+对简并或近简并的一组目标 bands，单个 VASP eigenvector 不是唯一的。目标子空间内部的任意酉变换都表示同一个物理本征子空间，所以逐条 VASP band 的 projection 是 gauge-dependent 的。V1 中有物理意义的主要诊断来自整个目标子空间的投影。
+
+两 valley 情形下，ValleyScope 在目标 band 子空间内构造：
+
+```text
+S = P_K + P_Kp
+V = P_K - P_Kp
+```
+
+`S` 检查目标子空间是否落在所选 valley manifold 内，`V` 用于选择 valley-adapted basis。因此，对近简并态应主要查看 `valley_subspace.json` 和 `valley_basis_transform.h5`，而不是只看逐条 band 的 projection。
 
 ## 常见问题
 
 ### `ambiguous_weight` 是什么？
 
-如果某个 plane-wave component 同时落入不同 valley sectors 的窗口，它就是 cross-sector overlap。默认 `ambiguous_cross_sector: warn_exclude` 会把这个 component 从所有 sector weights 里排除，并把权重写入 `ambiguous_weight`。
+它是 cross-window overlap weight。如果某个 plane-wave component 同时落入不同 valley sectors 的 windows，它会贡献到 `ambiguous_weight`。默认 `ambiguous_cross_sector: warn_exclude` 会把该 component 从所有 sector weights 中排除，并单独保存。
 
 小的 `ambiguous_weight` 往往只是 cutoff 边界效应。如果它很大，应检查 valley centers、layer transforms 和 `qcut_fraction`。
 
 ### 为什么原始 bands 混合，但子空间很干净？
 
-近简并 VASP eigenvectors 有 gauge freedom。两个原始本征矢可以是 K 和 Kp 的任意线性组合。这时应看 `valley_subspace.json` 中的 `valley_adapted_subspace`，尤其是 `eta` 和 `s_eigenvalues`。
+近简并 VASP eigenvectors 有 gauge freedom。两个原始本征矢可以是 K-valley 与 K'-valley character 的任意线性组合。这时应看 `valley_subspace.json` 中的 `valley_adapted_subspace`，尤其是 `eta` 和 `s_eigenvalues`，而不是只看逐条 band projection。
 
 ### 什么时候需要手写 `reciprocal_cart`？
 
