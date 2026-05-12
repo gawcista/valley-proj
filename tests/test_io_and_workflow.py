@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import h5py
@@ -204,7 +205,32 @@ def test_analyze_hsp_writes_csv_json_and_diagnostics_h5(tmp_path):
     assert outputs["valley_weights_csv"].exists()
     assert outputs["valley_subspace_json"].exists()
     assert outputs["diagnostics_h5"].exists()
-    assert "K_sector" in outputs["valley_weights_csv"].read_text(encoding="utf-8")
+    csv_text = outputs["valley_weights_csv"].read_text(encoding="utf-8")
+    csv_header = csv_text.splitlines()[0].split(",")
+    assert csv_header == [
+        "kpoint",
+        "band_vasp",
+        "energy_eV",
+        "K_sector",
+        "Kp_sector",
+        "W_val",
+        "P_v",
+        "eta",
+        "W_res",
+        "ambiguous_weight",
+    ]
+    subspace = json.loads(outputs["valley_subspace_json"].read_text(encoding="utf-8"))
+    weight = subspace["kpoints"]["GammaM"]["weights"][0]
+    assert set(weight) == {
+        "band_vasp",
+        "classification",
+        "sector_weights",
+        "W_val",
+        "P_v",
+        "eta",
+        "W_res",
+        "ambiguous_weight",
+    }
 
 
 def test_analyze_hsp_writes_two_valley_subspace_transform_for_degenerate_pair(tmp_path):

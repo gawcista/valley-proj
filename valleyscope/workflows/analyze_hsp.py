@@ -127,7 +127,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, Path]:
                     "W_val": result.w_val,
                     "P_v": result.purity,
                     "eta": result.eta,
-                    "leakage": result.leakage,
+                    "W_res": result.residual_weight,
                     "ambiguous_weight": result.ambiguous_weight,
                 }
                 for idx, result in enumerate(weights)

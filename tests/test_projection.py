@@ -44,7 +44,7 @@ def test_pure_target_sector_state_has_unit_weight():
     assert result.sector_weights["Kp_sector"] == pytest.approx(0.0)
     assert result.w_val == pytest.approx(1.0)
     assert result.purity == pytest.approx(1.0)
-    assert result.leakage == pytest.approx(0.0)
+    assert result.residual_weight == pytest.approx(0.0)
 
 
 def test_opposite_sector_state_has_negative_two_valley_eta():
@@ -71,7 +71,7 @@ def test_equal_weight_mixed_state_has_half_purity_and_zero_eta():
     assert result.eta == pytest.approx(0.0)
 
 
-def test_leakage_state_reports_non_valley_weight():
+def test_residual_weight_reports_non_valley_weight():
     centers, sectors = two_sector_setup()
     q_cart = np.array([[0.0, 0.0, 0.0], [2.5, 2.5, 0.0]])
 
@@ -79,7 +79,7 @@ def test_leakage_state_reports_non_valley_weight():
     result = compute_valley_weights(coeffs_for([1.0, 1.0]), projectors)[0]
 
     assert result.w_val == pytest.approx(0.5)
-    assert result.leakage == pytest.approx(0.5)
+    assert result.residual_weight == pytest.approx(0.5)
 
 
 def test_same_sector_overlapping_windows_are_counted_once():

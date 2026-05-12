@@ -11,7 +11,7 @@ The code is not a black-box Chern-number calculator. V1 is an HSP-only diagnosti
 
 In a moire calculation, the Bloch momentum belongs to the moire Brillouin zone. The valley label of interest, however, is usually inherited from the monolayer Brillouin zone. A state at a moire high-symmetry point is therefore not “a K-valley state” just because the moire momentum is at a moire $K_M$ point. ValleyScope treats valley as a monolayer-valley sector resolved through the plane-wave momenta contained in the moire wavefunction.
 
-For twisted bilayers, top and bottom layer momenta associated with the same monolayer valley are allowed to hybridize. Such top/bottom hybridization does not by itself destroy the valley quantum number. The relevant question is whether the target state or target subspace remains confined to a chosen valley manifold, or whether there is appreciable intervalley mixing or weight outside the selected valley windows.
+For twisted bilayers, top and bottom layer momenta associated with the same monolayer valley are allowed to hybridize. Such top/bottom hybridization does not by itself destroy the valley quantum number. The relevant question is whether the target state or target subspace remains confined to a chosen valley subspace, or whether there is appreciable intervalley mixing or weight outside the selected valley windows.
 
 The V1 workflow answers that question at selected HSPs. It also checks whether a candidate symmetry operation belongs to the little group of the HSP and whether it preserves the target valley sector before reporting rotation eigenvalues. These eigenvalues are useful symmetry diagnostics, but by themselves they do not prove a complete integer Chern number.
 
@@ -75,12 +75,12 @@ For a normalized state $|\psi\rangle$, the monolayer-valley-resolved weight in s
 ```math
 W_i=\langle\psi|P_i|\psi\rangle .
 ```
-The target-valley-manifold weight is
+The target-valley-subspace weight is
 
 ```math
 W_{\rm val}=\sum_i W_i .
 ```
-It measures how much of the state lies in the user-defined target valley manifold. It depends on the valley centers and projection radius; it is not a topological invariant.
+It measures how much of the state lies in the user-defined target valley subspace. It depends on the valley centers and projection radius; it is not a topological invariant.
 
 The valley purity is
 
@@ -90,7 +90,7 @@ P_v=\frac{\max_i W_i}{W_{\rm val}},
 ```
 It measures whether the assigned valley weight is concentrated in one valley sector or distributed among several sectors.
 
-For a two-valley manifold ordered as K-valley followed by K'-valley, the signed valley polarization is
+For a two-valley subspace ordered as K-valley followed by K'-valley, the signed valley polarization is
 
 ```math
 \eta=
@@ -98,20 +98,20 @@ For a two-valley manifold ordered as K-valley followed by K'-valley, the signed 
 =
 \frac{W_K-W_{K'}}{W_{\rm val}} .
 ```
-The out-of-valley residual weight is
+The residual weight outside the target valley subspace is
 
 ```math
-L_{\rm out}=1-W_{\rm val}-W_\times,
+W_{\rm res}=1-W_{\rm val}-W_\times,
 \qquad
 W_\times=\langle\psi|P_\times|\psi\rangle .
 ```
-In the CSV output, `leakage` stores $L_{\rm out}$. The column `ambiguous_weight` stores $W_\times$, the cross-sector projector-window overlap weight. A large overlap weight is a warning about the chosen windows or cutoff, not evidence for a new physical valley.
+In prose, $W_{\rm res}$ is the out-of-valley residual weight. In the V1 CSV output, the column `W_res` stores this quantity. The column `ambiguous_weight` stores $W_\times$, the cross-sector projector-window overlap weight. A large overlap weight is a warning about the chosen windows or cutoff, not evidence for a new physical valley.
 
 ### Gauge Fixing in a Near-Degenerate Subspace
 
 For an isolated nondegenerate band, the single-state quantities above can be read directly. For a near-degenerate target subspace, raw VASP eigenvectors are gauge-dependent: any unitary rotation inside the degenerate subspace gives an equally valid set of eigenvectors. Row-by-row projection of individual VASP bands is therefore not the main physical diagnostic.
 
-V1 instead projects the target subspace and constructs the projected valley operator. For a two-valley manifold spanned by raw VASP states $\{|\psi_m\rangle\}$,
+V1 instead projects the target subspace and constructs the projected valley operator. For a two-valley subspace spanned by raw VASP states $\{|\psi_m\rangle\}$,
 
 ```math
 S_{mn}=
@@ -120,7 +120,7 @@ S_{mn}=
 V_{mn}=
 \langle\psi_m|(P_K-P_{K'})|\psi_n\rangle .
 ```
-The matrix $S$ tests whether the target subspace lies in the chosen valley manifold. The matrix $V$ fixes a valley-adapted basis inside the target subspace. In practice, the `valley_subspace.json` and `valley_basis_transform.h5` files are the primary outputs for near-degenerate states.
+The matrix $S$ tests whether the target subspace lies in the chosen valley subspace. The matrix $V$ fixes a valley-adapted basis inside the target subspace. In practice, the `valley_subspace.json` and `valley_basis_transform.h5` files are the primary outputs for near-degenerate states.
 
 ### Symmetry Diagnostics
 
@@ -348,16 +348,16 @@ diagnostics.h5
 This CSV contains one row per raw VASP band:
 
 ```text
-kpoint, band_vasp, energy_eV, K_sector, Kp_sector, W_val, P_v, eta, leakage, ambiguous_weight
+kpoint, band_vasp, energy_eV, K_sector, Kp_sector, W_val, P_v, eta, W_res, ambiguous_weight
 ```
 
-The sector columns are YAML labels. `W_val`, `P_v`, and `eta` store the target-valley-manifold weight, valley purity, and signed valley polarization. `leakage` stores the out-of-valley residual weight. `ambiguous_weight` stores the cross-sector projector-window overlap weight.
+The sector columns are YAML labels. `W_val`, `P_v`, and `eta` store the target-valley-subspace weight, valley purity, and signed valley polarization. `W_res` stores the out-of-valley residual weight. `ambiguous_weight` stores the cross-sector projector-window overlap weight.
 
 Use this file for a first scan. For near-degenerate target states, the raw band rows are gauge-dependent and should not be the final interpretation.
 
 ### `valley_subspace.json`
 
-This is the primary summary for near-degenerate states. It records the projected valley operator, the valley-adapted basis diagnostics, and the eigenvalues indicating how well the target subspace lies in the selected valley manifold.
+This is the primary summary for near-degenerate states. It records the projected valley operator, the valley-adapted basis diagnostics, and the eigenvalues indicating how well the target subspace lies in the selected valley subspace.
 
 ### `valley_basis_transform.h5`
 
@@ -434,30 +434,30 @@ The priority is to make HSP valley projection, valley-adapted subspaces, and sym
 
 **语言:** [English](#english) | 中文
 
-ValleyScope 是一套面向 VASP moire 超胞波函数的 momentum-space valley projection 与 symmetry diagnostics 后处理流程。它适用于这样一类问题：低能态的 valley character 来自底层单层布里渊区，但实际第一性原理计算是在大型 moire 超胞中完成的。
+ValleyScope 是一套面向 VASP moire 超胞波函数的动量空间谷投影（momentum-space valley projection）与对称性诊断（symmetry diagnostics）后处理流程。它适用于这样一类问题：低能态的谷特征（valley character）来自底层单层布里渊区，但实际第一性原理计算是在大型 moire 超胞中完成的。
 
-它不是黑箱 Chern number 程序。V1 是 HSP-only diagnostic：它只分析用户选定的高对称点，在 plane-wave Hilbert space 中构造 monolayer-valley projectors，对近简并目标子空间进行 valley gauge fixing，并输出 rotation-eigenvalue diagnostics 所需的对称性信息。严格的 valley-resolved topology 判断仍然需要后续 full-mBZ validation。
+它不是黑箱陈数（Chern number）程序。V1 是只针对高对称点的诊断（HSP-only diagnostic）：它只分析用户选定的高对称点，在平面波希尔伯特空间（plane-wave Hilbert space）中构造单层谷投影算符（monolayer-valley projectors），对近简并目标子空间进行谷规范固定（valley gauge fixing），并输出旋转本征值诊断（rotation-eigenvalue diagnostics）所需的对称性信息。严格的谷分辨拓扑判断仍然需要后续全 moire 布里渊区验证（full-mBZ validation）。
 
 ## 物理动机
 
-在 moire 计算中，Bloch momentum 属于 moire Brillouin zone。但我们关心的 valley label 通常继承自 monolayer Brillouin zone。因此，某个态位于 moire 高对称点并不意味着它就是某个 monolayer valley 态。ValleyScope 把 valley 定义为通过 moire 波函数中的 plane-wave momenta 解析出的 monolayer-valley sector。
+在 moire 计算中，布洛赫动量（Bloch momentum）属于 moire 布里渊区。但我们关心的谷标记（valley label）通常继承自单层布里渊区（monolayer Brillouin zone）。因此，某个态位于 moire 高对称点并不意味着它就是某个单层谷态。ValleyScope 把谷定义为通过 moire 波函数中的平面波动量（plane-wave momenta）解析出的单层谷扇区（monolayer-valley sector）。
 
-对 twisted bilayer，同一个 monolayer valley 中的 top 与 bottom layer momenta 可以发生杂化。这种 top/bottom layer hybridization 本身不破坏 valley quantum number。真正需要诊断的是目标态或目标子空间是否仍然局限在选定的 valley manifold 中，还是出现了明显 intervalley mixing 或 out-of-valley residual weight。
+对转角双层体系（twisted bilayer），同一个单层谷中的上下层动量可以发生杂化。这种层间杂化（top/bottom layer hybridization）本身不破坏谷量子数。真正需要诊断的是目标态或目标子空间是否仍然局限在选定的谷子空间（valley subspace）中，还是出现了明显的谷间混合（intervalley mixing）或谷外剩余权重（out-of-valley residual weight）。
 
-V1 工作流在选定 HSP 上回答这个问题。它还会检查候选对称操作是否属于该 HSP 的 little group，以及是否 preserve target valley sector，然后才报告 rotation eigenvalue。此类本征值是有用的 symmetry diagnostic，但单独并不能证明完整整数 Chern number。
+V1 工作流在选定高对称点上回答这个问题。它还会检查候选对称操作是否属于该高对称点的小群（little group），以及是否保持目标谷扇区（preserve target valley sector），然后才报告旋转本征值（rotation eigenvalue）。此类本征值是有用的对称性诊断，但单独并不能证明完整整数陈数。
 
 ## 物理定义
 
-### Momentum-Space Valley Projection
+### 动量空间谷投影（Momentum-Space Valley Projection）
 
-对 moire 超胞中动量为 $\mathbf k_M$ 的 VASP Bloch state，每个 plane-wave component 的物理动量为
+对 moire 超胞中动量为 $\mathbf k_M$ 的 VASP 布洛赫态，每个平面波分量的物理动量为
 
 ```math
 \mathbf q=\mathbf k_M+\mathbf G_M ,
 ```
-其中 $\mathbf G_M$ 是 moire 超胞倒格矢。ValleyScope 只使用面内分量 $\mathbf q_\parallel$ 进行 valley assignment。
+其中 $\mathbf G_M$ 是 moire 超胞倒格矢。ValleyScope 只使用面内分量 $\mathbf q_\parallel$ 进行谷归属（valley assignment）。
 
-monolayer valley center $a$ 在单层倒空间坐标中给出，并通过 layer transform 映射到 moire frame。它对应的 projector window 由到单层倒格矢星的最小距离定义：
+单层谷中心（monolayer valley center）$a$ 在单层倒空间坐标中给出，并通过层变换（layer transform）映射到 moire 坐标系。它对应的投影窗口（projector window）由到单层倒格矢星的最小距离定义：
 
 ```math
 d_a(\mathbf q)=
@@ -471,7 +471,7 @@ d_a(\mathbf q)=
 \Omega_a(q_{\rm cut})=
 \{\,\mathbf q\mid d_a(\mathbf q)<q_{\rm cut}\,\}.
 ```
-valley-sector projector 由一组 windows 的并集构造。以两 valley 的 twisted bilayer 为例，
+谷扇区投影算符（valley-sector projector）由一组窗口的并集构造。以含两个谷的转角双层为例，
 
 ```math
 \Omega_K=
@@ -480,11 +480,11 @@ valley-sector projector 由一组 windows 的并集构造。以两 valley 的 tw
 \Omega_{K'}=
 \Omega_{{\rm top},K'}\cup\Omega_{{\rm bottom},K'} .
 ```
-YAML 中的 `K_sector` 这类名称只是用户定义的标签。物理上应理解为 K-valley sector 或 K'-valley sector，而不是代码内置的特殊物理对象。
+YAML 中的 `K_sector` 这类名称只是用户定义的标签。物理上应理解为 K 谷扇区（K-valley sector）或 K' 谷扇区（K'-valley sector），而不是代码内置的特殊物理对象。
 
-### Weights 与 Intervalley-Mixing Diagnostics
+### 权重与谷间混合诊断（Weights and Intervalley-Mixing Diagnostics）
 
-设 $P_i$ 是第 $i$ 个 valley sector 的投影算符。默认策略下，如果某个 plane-wave component 同时落入多个 sector 的 projector windows，它会从所有 sector projectors 中移除，并放入 overlap projector $P_\times$：
+设 $P_i$ 是第 $i$ 个谷扇区的投影算符。默认策略下，如果某个平面波分量同时落入多个扇区的投影窗口，它会从所有谷扇区投影算符中移除，并放入重叠投影算符（overlap projector）$P_\times$：
 
 ```math
 \Omega_\times=
@@ -501,27 +501,27 @@ P_\times=
 \sum_{\mathbf q\in\Omega_\times,\ s}
 |\mathbf q,s\rangle\langle\mathbf q,s| .
 ```
-对归一化态 $|\psi\rangle$，第 $i$ 个 sector 的 monolayer-valley-resolved weight 为
+对归一化态 $|\psi\rangle$，第 $i$ 个扇区的单层谷分辨权重（monolayer-valley-resolved weight）为
 
 ```math
 W_i=\langle\psi|P_i|\psi\rangle .
 ```
-target-valley-manifold weight 为
+目标谷子空间权重（target-valley-subspace weight）为
 
 ```math
 W_{\rm val}=\sum_i W_i .
 ```
-它衡量该态有多少权重落在用户定义的 target valley manifold 中。它依赖 valley centers 和 projection radius，不是拓扑不变量。
+它衡量该态有多少权重落在用户定义的目标谷子空间中。它依赖谷中心和投影半径，不是拓扑不变量。
 
-valley purity 定义为
+谷纯度（valley purity）定义为
 
 ```math
 P_v=\frac{\max_i W_i}{W_{\rm val}},
 \qquad W_{\rm val}>0 .
 ```
-它衡量已经分配到 valley manifold 的权重是否集中在单一 valley sector 中。
+它衡量已经分配到谷子空间的权重是否集中在单一谷扇区中。
 
-对按 K-valley、K'-valley 排列的两 valley manifold，signed valley polarization 为
+对按 K 谷、K' 谷排列的两谷子空间，有符号谷极化（signed valley polarization）为
 
 ```math
 \eta=
@@ -529,20 +529,20 @@ P_v=\frac{\max_i W_i}{W_{\rm val}},
 =
 \frac{W_K-W_{K'}}{W_{\rm val}} .
 ```
-out-of-valley residual weight 为
+谷外剩余权重（out-of-valley residual weight）为
 
 ```math
-L_{\rm out}=1-W_{\rm val}-W_\times,
+W_{\rm res}=1-W_{\rm val}-W_\times,
 \qquad
 W_\times=\langle\psi|P_\times|\psi\rangle .
 ```
-在 CSV 输出中，`leakage` 保存 $L_{\rm out}$。`ambiguous_weight` 保存 $W_\times$，即 cross-sector projector-window overlap weight。大的 overlap weight 通常说明 projector windows 或 cutoff 选择需要检查，而不是出现了新的物理 valley。
+在 CSV 输出中，`W_res` 保存 $W_{\rm res}$。`ambiguous_weight` 保存 $W_\times$，即跨扇区投影窗口重叠权重（cross-sector projector-window overlap weight）。大的重叠权重通常说明投影窗口或截断半径需要检查，而不是出现了新的物理谷。
 
-### 近简并子空间中的 Gauge Fixing
+### 近简并子空间中的规范固定（Gauge Fixing）
 
-对孤立非简并 band，可以直接读取上述单态诊断。对近简并目标子空间，raw VASP eigenvectors 是 gauge-dependent 的：子空间内部任意酉变换都会给出同样合法的本征矢集合。因此，逐条 VASP band projection 不是主要物理诊断。
+对孤立非简并能带，可以直接读取上述单态诊断。对近简并目标子空间，VASP 原始本征矢是规范依赖的（gauge-dependent）：子空间内部任意酉变换都会给出同样合法的本征矢集合。因此，逐条 VASP 能带投影不是主要物理诊断。
 
-V1 会投影整个目标子空间并构造 projected valley operator。对由 VASP 原始态 $\{|\psi_m\rangle\}$ 张成的两 valley manifold，
+V1 会投影整个目标子空间并构造投影谷算符（projected valley operator）。对由 VASP 原始态 $\{|\psi_m\rangle\}$ 张成的两谷子空间，
 
 ```math
 S_{mn}=
@@ -551,16 +551,16 @@ S_{mn}=
 V_{mn}=
 \langle\psi_m|(P_K-P_{K'})|\psi_n\rangle .
 ```
-矩阵 $S$ 检查目标子空间是否落在选定 valley manifold 中。矩阵 $V$ 在目标子空间内选出 valley-adapted basis。实际读取近简并态时，应主要看 `valley_subspace.json` 和 `valley_basis_transform.h5`。
+矩阵 $S$ 检查目标子空间是否落在选定谷子空间中。矩阵 $V$ 在目标子空间内选出谷适配基（valley-adapted basis）。实际读取近简并态时，应主要看 `valley_subspace.json` 和 `valley_basis_transform.h5`。
 
-### Symmetry Diagnostics
+### 对称性诊断（Symmetry Diagnostics）
 
-ValleyScope 使用 moire POSCAR/CONTCAR 调用 `spglib` 得到候选对称操作。只有通过两项检查后，程序才报告 rotation eigenvalue：
+ValleyScope 使用 moire POSCAR/CONTCAR 调用 `spglib` 得到候选对称操作。只有通过两项检查后，程序才报告旋转本征值：
 
-1. 该操作属于目标 HSP 的 little group。
-2. 该操作 preserve target valley sector。
+1. 该操作属于目标高对称点的小群。
+2. 该操作保持目标谷扇区。
 
-得到的矩阵是 valley-adapted subspace 中的 little-group representation。其本征值是 rotation eigenvalue diagnostic。它们可用于 symmetry-based topology 公式中的约束，但 V1 不自动推断完整整数 Chern number。
+得到的矩阵是谷适配子空间中的小群表示（little-group representation）。其本征值是旋转本征值诊断。它们可用于基于对称性的拓扑公式中的约束，但 V1 不自动推断完整整数陈数。
 
 ## 运行流程
 
@@ -594,13 +594,13 @@ valleyscope --help
 valleyscope extract-wavecar extract.yaml
 ```
 
-第二步，分析选定的 HSP 波函数：
+第二步，分析选定的高对称点（HSP）波函数：
 
 ```bash
 valleyscope analyze-hsp analyze.yaml
 ```
 
-主分析流程读取 HDF5，而不是反复直接读取完整 `WAVECAR`。这样可以把物理分析和大型二进制解析分开，也更方便检查具体抽取了哪些 k 点和 band。
+主分析流程读取 HDF5，而不是反复直接读取完整 `WAVECAR`。这样可以把物理分析和大型二进制解析分开，也更方便检查具体抽取了哪些 k 点和能带。
 
 ### 从 WAVECAR 抽取
 
@@ -635,7 +635,7 @@ output:
 valleyscope extract-wavecar extract.yaml
 ```
 
-抽取后，应检查 HDF5 中的 k 点、band 和数组形状。最重要的数据集是：
+抽取后，应检查 HDF5 中的 k 点、能带和数组形状。最重要的数据集是：
 
 ```text
 /metadata/g_vector_order
@@ -647,11 +647,11 @@ valleyscope extract-wavecar extract.yaml
 /kpoints/N/band_indices_vasp
 ```
 
-如果 extractor 报 G-vector 数量不匹配，不要强行继续。这通常表示当前版本还不支持该 WAVECAR variant 或 G-list convention。
+如果抽取器报 G-vector 数量不匹配，不要强行继续。这通常表示当前版本还不支持该 `WAVECAR` 变体或 G-vector 列表约定。
 
-### 分析 HSP 波函数
+### 分析高对称点（HSP）波函数
 
-对 twisted bilayer，`analyze.yaml` 里最容易出错的是 layer transform。如果结构来自整数公度矩阵，优先使用 `supercell_matrix`，不要只根据转角手写 `rotation_deg`。实际 moire cell 可能带有整体 basis rotation，单独的 twist angle 往往不够。
+对转角双层体系，`analyze.yaml` 里最容易出错的是层变换（layer transform）。如果结构来自整数公度矩阵，优先使用 `supercell_matrix`，不要只根据转角手写 `rotation_deg`。实际 moire 超胞可能带有整体基矢旋转，单独的转角往往不够。
 
 以 `generate_hexagonal_210(9, 5, ...)` 这类结构为例：
 
@@ -755,11 +755,11 @@ input:
     bottom: ./2dm-5370.vasp
 ```
 
-`input.poscar` 是 moire 或 bilayer 的 POSCAR/CONTCAR，用于 `spglib` 识别 symmetry operations。如果缺少它或路径写错，`symmetry_report.json` 会显示 symmetry analysis 被跳过。
+`input.poscar` 是 moire 或双层结构的 POSCAR/CONTCAR，用于 `spglib` 识别对称操作。如果缺少它或路径写错，`symmetry_report.json` 会显示对称性分析被跳过。
 
-`input.monolayer_poscars` 是单层结构，用于构造各层 reciprocal lattice，并解释 `layer_frac` valley centers。设置了单层 POSCAR 后，通常不需要手写 `monolayer_lattices.*.reciprocal_cart`。
+`input.monolayer_poscars` 是单层结构，用于构造各层倒格矢，并解释 `layer_frac` 谷中心。设置了单层 POSCAR 后，通常不需要手写 `monolayer_lattices.*.reciprocal_cart`。
 
-单层 POSCAR 不能替代 moire POSCAR 做 symmetry。moire POSCAR 也不应该被程序默认拿来当成单层 reciprocal lattice。
+单层 POSCAR 不能替代 moire POSCAR 做对称性分析。moire POSCAR 也不应该被程序默认拿来当成单层倒格矢来源。
 
 ## 读取输出
 
@@ -776,23 +776,23 @@ diagnostics.h5
 
 ### `valley_weights.csv`
 
-这个 CSV 每行对应一个原始 VASP band：
+这个 CSV 每行对应一个原始 VASP 能带：
 
 ```text
-kpoint, band_vasp, energy_eV, K_sector, Kp_sector, W_val, P_v, eta, leakage, ambiguous_weight
+kpoint, band_vasp, energy_eV, K_sector, Kp_sector, W_val, P_v, eta, W_res, ambiguous_weight
 ```
 
-sector 列名是 YAML 标签。`W_val`、`P_v` 和 `eta` 分别保存 target-valley-manifold weight、valley purity 和 signed valley polarization。`leakage` 保存 out-of-valley residual weight。`ambiguous_weight` 保存 cross-sector projector-window overlap weight。
+扇区列名是 YAML 标签。`W_val`、`P_v` 和 `eta` 分别保存目标谷子空间权重、谷纯度和有符号谷极化。`W_res` 保存谷外剩余权重。`ambiguous_weight` 保存跨扇区投影窗口重叠权重。
 
-这个文件适合做第一眼检查。对近简并目标态，逐条 raw band 结果是 gauge-dependent 的，不能作为最终物理解释。
+这个文件适合做第一眼检查。对近简并目标态，逐条原始能带结果是规范依赖的，不能作为最终物理解释。
 
 ### `valley_subspace.json`
 
-这是近简并态的主要摘要文件。它记录 projected valley operator、valley-adapted basis diagnostics，以及目标子空间落在所选 valley manifold 中的程度。
+这是近简并态的主要摘要文件。它记录投影谷算符、谷适配基诊断，以及目标子空间落在所选谷子空间中的程度。
 
 ### `valley_basis_transform.h5`
 
-这里保存从原始 VASP band basis 到 valley-adapted basis 的变换矩阵：
+这里保存从原始 VASP 能带基到谷适配基的变换矩阵：
 
 ```text
 /GammaM/transform
@@ -803,11 +803,11 @@ sector 列名是 YAML 标签。`W_val`、`P_v` 和 `eta` 分别保存 target-val
 /GammaM/sectors
 ```
 
-后续要在 valley-adapted subspace 中计算 representation 时，应使用这里的 transform。
+后续要在谷适配子空间中计算表示（representation）时，应使用这里的变换矩阵。
 
 ### `symmetry_report.json`
 
-这里记录从 `input.poscar` 得到的 `spglib` operations，包括操作类型、rotation matrix、translation、是否是候选 rotation，以及 little-group / valley-preservation diagnostics。
+这里记录从 `input.poscar` 得到的 `spglib` 对称操作，包括操作类型、旋转矩阵、平移、是否是候选旋转，以及小群与谷保持检查结果。
 
 如果看到：
 
@@ -821,15 +821,15 @@ sector 列名是 YAML 标签。`W_val`、`P_v` 和 `eta` 分别保存 target-val
 
 只有操作同时通过 V1 的三个过滤条件时才会写入：
 
-1. 是 proper rotation，阶数在 `[2, 3, 4, 6]`。
-2. 属于目标 HSP 的 little group。
-3. preserve target valley sector。
+1. 是真旋转（proper rotation），阶数在 `[2, 3, 4, 6]`。
+2. 属于目标高对称点的小群。
+3. 保持目标谷扇区。
 
-如果这个文件只有表头，不一定是错误。它往往表示当前 HSP 和 valley sector 下没有操作通过这些检查。
+如果这个文件只有表头，不一定是错误。它往往表示当前高对称点和谷扇区下没有操作通过这些检查。
 
 ### `diagnostics.h5`
 
-这里保存 projector masks 与 q-cut scan data：
+这里保存投影掩码（projector masks）与 q-cut 扫描数据：
 
 ```text
 /projectors/<kpoint>/sector_masks
@@ -842,18 +842,18 @@ sector 列名是 YAML 标签。`W_val`、`P_v` 和 `eta` 分别保存 target-val
 /qcut_scan/<kpoint>/ambiguous_weight
 ```
 
-调 `qcut_fraction` 或检查 projector windows 是否选中了预期 momenta 时，优先看这个文件。
+调 `qcut_fraction` 或检查投影窗口是否选中了预期动量时，优先看这个文件。
 
 ## V1 边界
 
 当前 V1 不包含：
 
-- full-mBZ valley-goodness validation；
-- Berry curvature；
-- Wilson loops；
-- 自动完整整数 Chern number 判断；
-- 真正 layer-resolved projection；
-- 自动 monolayer VBM/CBM valley 搜索；
+- 全 moire 布里渊区谷有效性验证（full-mBZ valley-goodness validation）；
+- Berry 曲率；
+- Wilson 回路（Wilson loops）；
+- 自动完整整数陈数判断；
+- 真正的层分辨投影（layer-resolved projection）；
+- 自动单层 VBM/CBM 谷搜索；
 - 对所有 WAVECAR variant 的完整支持。
 
-V1 的优先级是把 HSP valley projection、valley-adapted subspaces 和 symmetry diagnostics 做到可复现、可检查。
+V1 的优先级是把高对称点谷投影、谷适配子空间和对称性诊断做到可复现、可检查。

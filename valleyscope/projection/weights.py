@@ -20,7 +20,7 @@ class ValleyWeightResult:
     sector_weights: dict[str, float]
     w_val: float
     purity: float
-    leakage: float
+    residual_weight: float
     ambiguous_weight: float
     eta: float | None
     norm: float
@@ -53,7 +53,7 @@ def compute_valley_weights(coefficients: np.ndarray, projectors: SectorProjector
         }
         w_val = float(sum(sector_weights.values()))
         ambiguous_weight = float(np.sum(probs[projectors.ambiguous_mask]))
-        leakage = float(max(0.0, norm - w_val - ambiguous_weight))
+        residual_weight = float(max(0.0, norm - w_val - ambiguous_weight))
         purity = float(max(sector_weights.values()) / w_val) if w_val > 0.0 else 0.0
         eta = None
         if len(sector_names) == 2 and w_val > 0.0:
@@ -64,7 +64,7 @@ def compute_valley_weights(coefficients: np.ndarray, projectors: SectorProjector
                 sector_weights=sector_weights,
                 w_val=w_val,
                 purity=purity,
-                leakage=leakage,
+                residual_weight=residual_weight,
                 ambiguous_weight=ambiguous_weight,
                 eta=eta,
                 norm=norm,
