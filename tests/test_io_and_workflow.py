@@ -99,6 +99,20 @@ def test_config_loader_parses_core_schema(tmp_path):
     assert config.valley_sectors[0].name == "K_sector"
 
 
+def test_config_loader_rejects_unknown_projection_keys(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["projection"]["stale_projection_key"] = "warn_exclude"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Unsupported projection keys"):
+        load_config(config_path)
+
+
 def test_poscar_readers_accept_blank_title_line(tmp_path):
     poscar = tmp_path / "POSCAR"
     poscar.write_text(

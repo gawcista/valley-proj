@@ -253,6 +253,19 @@ def load_config(path: str | Path) -> AppConfig:
     sectors = [ValleySector(item["name"], list(item["centers"])) for item in raw.get("valley_sectors", [])]
     analysis_raw = raw.get("analysis", {})
     projection_raw = raw.get("projection", {})
+    allowed_projection_keys = {
+        "use_2d_momentum_only",
+        "qcut_mode",
+        "qcut_shell",
+        "qcut_Ainv",
+        "qcut_fraction",
+        "qcut_scan",
+        "overlap_cross_sector",
+        "thresholds",
+    }
+    unknown_projection_keys = sorted(set(projection_raw) - allowed_projection_keys)
+    if unknown_projection_keys:
+        raise ValueError(f"Unsupported projection keys: {unknown_projection_keys}")
     symmetry_raw = raw.get("symmetry", {})
     output_raw = raw.get("output", {})
     if "wavefunction_h5" not in input_raw:
@@ -281,12 +294,7 @@ def load_config(path: str | Path) -> AppConfig:
             qcut_Ainv=projection_raw.get("qcut_Ainv"),
             qcut_fraction=float(projection_raw.get("qcut_fraction", 0.3)),
             qcut_scan=[float(value) for value in projection_raw.get("qcut_scan", [])],
-            overlap_cross_sector=str(
-                projection_raw.get(
-                    "overlap_cross_sector",
-                    projection_raw.get("ambiguous_cross_sector", "warn_exclude"),
-                )
-            ),
+            overlap_cross_sector=str(projection_raw.get("overlap_cross_sector", "warn_exclude")),
             thresholds=dict(projection_raw.get("thresholds", {})),
         ),
         symmetry=SymmetryConfig(
