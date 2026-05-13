@@ -7,6 +7,7 @@ from valleyscope.symmetry.little_group import is_little_group_operation
 from valleyscope.symmetry.operation_classifier import classify_operation, operation_order, rotation_axis_angle
 from valleyscope.symmetry.plane_wave_action import build_plane_wave_representation, spin_rotation_matrix
 from valleyscope.symmetry.rotation_eigenvalues import nearest_root_of_unity
+from valleyscope.symmetry.rotation_selection import resolve_rotation_order
 from valleyscope.symmetry.spglib_finder import find_symmetry_operations
 from valleyscope.symmetry.valley_preservation import map_valley_sectors
 from valleyscope.analysis.rotation_diagnostic import rotation_diagnostics_for_kpoint
@@ -307,6 +308,138 @@ def test_spinor_rotation_rows_are_diagnostic_only_without_convention_benchmark()
     assert rows[0]["diagnostic_only"] is True
     assert rows[0]["topology_input_ready"] is False
     assert rows[0]["topology_ready"] is False
+
+
+def test_spinful_c3_root_diagnostic_uses_double_group_order():
+    angle = 2.0 * np.pi / 3.0
+    rotation_cart = np.array(
+        [
+            [np.cos(angle), -np.sin(angle), 0.0],
+            [np.sin(angle), np.cos(angle), 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    coefficients = np.array([[[1.0 + 0.0j], [0.0 + 0.0j]]], dtype=np.complex128)
+    symmetry_payload = {
+        "detected_operations": [
+            {
+                "operation_id": 0,
+                "candidate_rotation": True,
+                "rotation_frac": np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]]),
+                "rotation_cart": rotation_cart,
+                "translation_cart": np.zeros(3),
+                "preserved": {"K_sector": True},
+                "order": 3,
+                "kind": "C3",
+            }
+        ]
+    }
+    rotation_payload: dict[str, object] = {}
+
+    rows = rotation_diagnostics_for_kpoint(
+        kpoint_name="GammaM",
+        k_frac=np.zeros(3),
+        q_cart=np.zeros((1, 3)),
+        coefficients=coefficients,
+        symmetry_payload=symmetry_payload,
+        basis_payload=None,
+        rotation_payload=rotation_payload,
+    )
+
+    assert rows[0]["nearest_root_of_unity"] == "exp(2pii*5/6)"
+    assert rows[0]["root_deviation"] == pytest.approx(0.0, abs=1e-12)
+
+
+def test_rotation_ready_tolerates_small_truncation_unitarity_error():
+    coefficients = np.array([[[np.sqrt(0.99999) + 0.0j]]], dtype=np.complex128)
+    symmetry_payload = {
+        "detected_operations": [
+            {
+                "operation_id": 0,
+                "candidate_rotation": True,
+                "rotation_frac": np.diag([-1, -1, 1]),
+                "rotation_cart": np.diag([-1.0, -1.0, 1.0]),
+                "translation_cart": np.zeros(3),
+                "preserved": {"K_sector": True},
+                "order": 2,
+                "kind": "C2",
+            }
+        ]
+    }
+    rows = rotation_diagnostics_for_kpoint(
+        kpoint_name="GammaM",
+        k_frac=np.zeros(3),
+        q_cart=np.zeros((1, 3)),
+        coefficients=coefficients,
+        symmetry_payload=symmetry_payload,
+        basis_payload=None,
+        rotation_payload={},
+    )
+
+    assert rows[0]["unitarity_deviation"] < 1.0e-4
+    assert rows[0]["rotation_ready"] is True
+
+
+def test_plane_wave_mapping_uses_local_lookup_not_dense_all_pairs(monkeypatch):
+    original_norm = np.linalg.norm
+
+    def guarded_norm(value, *args, **kwargs):
+        array = np.asarray(value)
+        if array.ndim == 2 and array.shape[0] > 64:
+            raise AssertionError("dense all-pairs q-vector matching is too expensive")
+        return original_norm(value, *args, **kwargs)
+
+    monkeypatch.setattr(np.linalg, "norm", guarded_norm)
+    n_pairs = 128
+    q_positive = np.column_stack(
+        [
+            np.arange(1, n_pairs + 1, dtype=float),
+            np.zeros(n_pairs),
+            np.zeros(n_pairs),
+        ]
+    )
+    q_cart = np.vstack([q_positive, -q_positive])
+    coefficients = np.zeros((1, 1, 2 * n_pairs), dtype=np.complex128)
+    coefficients[0, 0, 0] = 1.0
+
+    result = build_plane_wave_representation(
+        coefficients,
+        q_cart,
+        np.diag([-1.0, -1.0, 1.0]),
+        np.zeros(3),
+    )
+
+    assert result.mapping_miss_count == 0
+    assert result.mapping[0] == n_pairs
+
+
+def test_plane_wave_mapping_default_tolerance_handles_real_wavecar_roundoff():
+    q_cart = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [-1.0 + 2.0e-7, 0.0, 0.0],
+        ]
+    )
+    coefficients = np.array([[[1.0 + 0.0j, 0.0 + 0.0j]]], dtype=np.complex128)
+
+    result = build_plane_wave_representation(
+        coefficients,
+        q_cart,
+        np.diag([-1.0, -1.0, 1.0]),
+        np.zeros(3),
+    )
+
+    assert result.mapping_miss_count == 0
+    assert result.mapping[0] == 1
+
+
+def test_rotation_order_selection_from_user_value_and_spacegroup():
+    assert resolve_rotation_order(3, international="P422", candidate_orders=[2, 3, 4]) == 3
+    assert resolve_rotation_order("none", international="P321", candidate_orders=[3]) is None
+    assert resolve_rotation_order("None", international="P321", candidate_orders=[3]) is None
+    assert resolve_rotation_order("auto", international="P321", candidate_orders=[2, 3]) == 3
+    assert resolve_rotation_order("AUTO", international="P312", candidate_orders=[2, 3]) == 3
+    assert resolve_rotation_order("auto", international="P422", candidate_orders=[2, 4]) == 4
 
 
 def test_nearest_root_of_unity_diagnostic():

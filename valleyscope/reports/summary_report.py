@@ -135,6 +135,9 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     sym = summary["symmetry_diagnostics"]
     lines.append(f"status: {sym['status']}")
     lines.append(f"detected candidate operations: {sym['detected_operation_count']}")
+    lines.append(f"space group: {sym.get('international')} ({sym.get('spacegroup_number')})")
+    lines.append(f"requested rotation order: {sym.get('requested_rotation_order')}")
+    lines.append(f"resolved rotation order: {sym.get('resolved_rotation_order')}")
     lines.append(f"operation types: {sym['kind_counts']}")
     lines.append(f"candidate proper rotations: {len(sym['candidate_rotations'])}")
     lines.append(f"little-group check: {sym['little_group_check']['status']}")
@@ -295,6 +298,11 @@ def _symmetry_summary(symmetry_payload: dict[str, Any]) -> dict[str, Any]:
         "status": symmetry_payload.get("status"),
         "operation_detection_backend": symmetry_payload.get("operation_detection_backend"),
         "structure_file": symmetry_payload.get("structure_file"),
+        "spacegroup_number": symmetry_payload.get("spacegroup_number"),
+        "international": symmetry_payload.get("international"),
+        "requested_rotation_order": symmetry_payload.get("requested_rotation_order"),
+        "resolved_rotation_order": symmetry_payload.get("resolved_rotation_order"),
+        "rotation_eigenvalue_enabled": symmetry_payload.get("rotation_eigenvalue_enabled"),
         "detected_operation_count": symmetry_payload.get("detected_operation_count", 0),
         "candidate_rotations": symmetry_payload.get("candidate_rotations", []),
         "symprec_scan_summary": symmetry_payload.get("symprec_scan_summary", []),

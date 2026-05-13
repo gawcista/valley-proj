@@ -37,7 +37,7 @@ def build_plane_wave_representation(
     translation_cart: np.ndarray,
     *,
     spin_rotation: np.ndarray | None = None,
-    tolerance: float = 1e-8,
+    tolerance: float = 1e-6,
 ) -> PlaneWaveRepresentationResult:
     coeffs = np.asarray(coefficients, dtype=np.complex128)
     q = np.asarray(q_cart, dtype=float)
@@ -55,13 +55,11 @@ def build_plane_wave_representation(
         if spin.shape != (n_spinor, n_spinor):
             raise ValueError("spin_rotation shape must match nspinor")
 
+    lookup = _q_vector_lookup(q, tolerance)
     mapping = np.full(n_g, -1, dtype=int)
     for source_idx, q_source in enumerate(q):
         q_target = rot @ q_source
-        distances = np.linalg.norm(q - q_target[None, :], axis=1)
-        target_idx = int(np.argmin(distances))
-        if distances[target_idx] <= tolerance:
-            mapping[source_idx] = target_idx
+        mapping[source_idx] = _lookup_q_vector(q_target, q, lookup, tolerance)
 
     transformed = np.zeros_like(coeffs)
     for source_idx, target_idx in enumerate(mapping):
@@ -80,3 +78,40 @@ def build_plane_wave_representation(
         mapping=mapping,
         mapping_miss_count=int(np.sum(mapping < 0)),
     )
+
+
+def _q_vector_lookup(q_cart: np.ndarray, tolerance: float) -> dict[tuple[int, int, int], list[int]]:
+    lookup: dict[tuple[int, int, int], list[int]] = {}
+    for idx, vector in enumerate(q_cart):
+        lookup.setdefault(_q_key(vector, tolerance), []).append(idx)
+    return lookup
+
+
+def _lookup_q_vector(
+    target: np.ndarray,
+    q_cart: np.ndarray,
+    lookup: dict[tuple[int, int, int], list[int]],
+    tolerance: float,
+) -> int:
+    base_key = _q_key(target, tolerance)
+    best_idx = -1
+    best_distance_sq = float("inf")
+    tol_sq = tolerance * tolerance
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            for dz in (-1, 0, 1):
+                key = (base_key[0] + dx, base_key[1] + dy, base_key[2] + dz)
+                for idx in lookup.get(key, []):
+                    diff = q_cart[idx] - target
+                    distance_sq = float(diff @ diff)
+                    if distance_sq <= tol_sq and distance_sq < best_distance_sq:
+                        best_idx = idx
+                        best_distance_sq = distance_sq
+    return best_idx
+
+
+def _q_key(vector: np.ndarray, tolerance: float) -> tuple[int, int, int]:
+    if tolerance <= 0.0:
+        raise ValueError("tolerance must be positive")
+    scaled = np.rint(np.asarray(vector, dtype=float) / tolerance).astype(np.int64)
+    return (int(scaled[0]), int(scaled[1]), int(scaled[2]))

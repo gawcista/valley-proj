@@ -23,6 +23,7 @@ from valleyscope.reports.analysis_outputs import write_analysis_outputs
 from valleyscope.reports.csv_report import weight_row
 from valleyscope.subspace.valley_basis import build_two_valley_adapted_basis
 from valleyscope.symmetry.operation_classifier import classify_operation
+from valleyscope.symmetry.rotation_selection import resolve_rotation_order
 from valleyscope.symmetry.spglib_finder import find_symmetry_operations
 from valleyscope.symmetry.valley_preservation import map_valley_sectors
 
@@ -295,7 +296,11 @@ def _prepare_symmetry_payload(config: AppConfig, monolayer_recip: np.ndarray) ->
         "filters": {
             "proper_rotations_only": symmetry.filters.proper_rotations_only,
             "allowed_orders": symmetry.filters.allowed_orders,
+            "rotation_order": symmetry.filters.rotation_order,
         },
+        "rotation_eigenvalue_enabled": False,
+        "requested_rotation_order": symmetry.filters.rotation_order,
+        "resolved_rotation_order": None,
         "little_group_check": {"required": True, "status": "not_run"},
         "valley_preservation_check": {"required": True, "status": "not_run"},
     }
@@ -312,9 +317,16 @@ def _prepare_symmetry_payload(config: AppConfig, monolayer_recip: np.ndarray) ->
     cell = read_poscar_cell(str(structure_file))
     dataset = find_symmetry_operations(cell, symmetry.tolerance.symprec, symmetry.tolerance.angle_tolerance)
     lattice = np.asarray(cell[0], dtype=float)
+    candidate_orders = _candidate_rotation_orders(dataset.rotations)
+    resolved_rotation_order = resolve_rotation_order(
+        symmetry.filters.rotation_order,
+        international=dataset.international,
+        candidate_orders=candidate_orders,
+    )
+    effective_allowed_orders = [] if resolved_rotation_order is None else [resolved_rotation_order]
     operations = []
     for op_id, (rotation, translation) in enumerate(zip(dataset.rotations, dataset.translations)):
-        info = classify_operation(rotation, translation, allowed_orders=symmetry.filters.allowed_orders)
+        info = classify_operation(rotation, translation, allowed_orders=effective_allowed_orders)
         rotation_cart = cart_rotation_from_fractional(rotation, lattice)
         translation_cart = cart_translation_from_fractional(translation, lattice)
         valley_mapping = map_valley_sectors(
@@ -353,6 +365,9 @@ def _prepare_symmetry_payload(config: AppConfig, monolayer_recip: np.ndarray) ->
         "structure_file": str(structure_file),
         "spacegroup_number": dataset.spacegroup_number,
         "international": dataset.international,
+        "rotation_eigenvalue_enabled": resolved_rotation_order is not None,
+        "requested_rotation_order": symmetry.filters.rotation_order,
+        "resolved_rotation_order": resolved_rotation_order,
         "symprec_scan_summary": symprec_scan_summary,
         "detected_operation_count": len(operations),
         "candidate_rotations": candidate_rotations,
@@ -373,11 +388,18 @@ def _symprec_scan_summary(config: AppConfig, cell: tuple) -> list[dict[str, obje
             )
             candidate_count = 0
             order_counts: dict[str, int] = {}
+            detected_orders = _candidate_rotation_orders(dataset.rotations)
+            resolved_rotation_order = resolve_rotation_order(
+                config.symmetry.filters.rotation_order,
+                international=dataset.international,
+                candidate_orders=detected_orders,
+            )
+            effective_allowed_orders = [] if resolved_rotation_order is None else [resolved_rotation_order]
             for rotation, translation in zip(dataset.rotations, dataset.translations):
                 info = classify_operation(
                     rotation,
                     translation,
-                    allowed_orders=config.symmetry.filters.allowed_orders,
+                    allowed_orders=effective_allowed_orders,
                 )
                 order_key = "none" if info.order is None else str(info.order)
                 order_counts[order_key] = order_counts.get(order_key, 0) + 1
@@ -389,6 +411,8 @@ def _symprec_scan_summary(config: AppConfig, cell: tuple) -> list[dict[str, obje
                     "status": "ok",
                     "spacegroup_number": dataset.spacegroup_number,
                     "international": dataset.international,
+                    "requested_rotation_order": config.symmetry.filters.rotation_order,
+                    "resolved_rotation_order": resolved_rotation_order,
                     "n_operations": len(dataset.rotations),
                     "n_candidate_rotations": candidate_count,
                     "order_counts": order_counts,
@@ -405,3 +429,12 @@ def _symprec_scan_summary(config: AppConfig, cell: tuple) -> list[dict[str, obje
                 }
             )
     return summary
+
+
+def _candidate_rotation_orders(rotations: list[np.ndarray]) -> list[int]:
+    orders: list[int] = []
+    for rotation in rotations:
+        info = classify_operation(rotation, np.zeros(3), allowed_orders=[2, 3, 4, 6])
+        if info.det == 1 and info.order in {2, 3, 4, 6}:
+            orders.append(int(info.order))
+    return orders

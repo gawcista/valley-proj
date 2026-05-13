@@ -302,6 +302,7 @@ symmetry:
   filters:
     proper_rotations_only: true
     allowed_orders: [2, 3, 4, 6]
+    rotation_order: auto
 
 output:
   directory: ./valley_analysis
@@ -392,6 +393,12 @@ symmetry:
 `symmetry.operations.structure_file` is the moire or bilayer POSCAR/CONTCAR used for candidate real-space symmetry-operation detection. If it is missing or the path is wrong, `symmetry_report.json` will show that detection was skipped.
 
 A monolayer POSCAR cannot replace the moire POSCAR for symmetry-operation detection. The moire POSCAR also should not be silently reused as a monolayer reciprocal lattice.
+
+`symmetry.filters.rotation_order` controls which rotation eigenvalue is attempted:
+
+- `auto`: infer the target order from the detected moire space group and candidate rotations. For example, `P321` / `P312` resolves to `C3`, and `P422` resolves to `C4`.
+- integer `n`: analyze only `C_n`, currently with `n = 2, 3, 4, 6`.
+- `None` / `none`: detect and report symmetry operations, but skip rotation-eigenvalue extraction.
 
 ## Reading the Outputs
 
@@ -822,6 +829,7 @@ symmetry:
   filters:
     proper_rotations_only: true
     allowed_orders: [2, 3, 4, 6]
+    rotation_order: auto
 
 output:
   directory: ./valley_analysis
@@ -912,6 +920,12 @@ symmetry:
 `symmetry.operations.structure_file` 是用于识别候选实空间对称操作的 moire 或双层 POSCAR/CONTCAR。如果缺少它或路径写错，`symmetry_report.json` 会显示对称操作识别被跳过。
 
 单层 POSCAR 不能替代 moire POSCAR 做对称操作识别。moire POSCAR 也不应该被程序默认拿来当成单层倒格矢来源。
+
+`symmetry.filters.rotation_order` 控制尝试计算哪一个旋转本征值：
+
+- `auto`：从检测到的 moire 空间群和候选旋转操作推断目标阶数。例如 `P321` / `P312` 解析为 `C3`，`P422` 解析为 `C4`。
+- 整数 `n`：只分析 `C_n`，目前支持 `n = 2, 3, 4, 6`。
+- `None` / `none`：仍检测并报告对称操作，但跳过旋转本征值提取。
 
 ## 读取输出
 

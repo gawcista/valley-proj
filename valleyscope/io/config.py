@@ -11,6 +11,7 @@ import h5py
 
 from valleyscope.geometry.lattice import read_poscar_lattice, reciprocal_from_direct
 from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector
+from valleyscope.symmetry.rotation_selection import parse_rotation_order
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,7 @@ class SymmetryToleranceConfig:
 class SymmetryFilterConfig:
     proper_rotations_only: bool = True
     allowed_orders: list[int] = field(default_factory=lambda: [2, 3, 4, 6])
+    rotation_order: int | str | None = "auto"
 
 
 @dataclass(frozen=True)
@@ -142,6 +144,7 @@ def _parse_symmetry_config(
             "angle_tolerance",
             "allowed_orders",
             "proper_rotations_only",
+            "rotation_order",
             "little_group_check",
             "valley_preservation_check",
         )
@@ -172,6 +175,9 @@ def _parse_symmetry_config(
         symprec_scan = [float(value) for value in tolerance_raw.get("symprec_scan", [])]
         proper_rotations_only = bool(filters_raw.get("proper_rotations_only", True))
         allowed_orders = [int(value) for value in filters_raw.get("allowed_orders", [2, 3, 4, 6])]
+        rotation_order = parse_rotation_order(
+            filters_raw.get("rotation_order", symmetry_raw.get("rotation_order", "auto"))
+        )
     else:
         structure_file = _path(base, input_raw.get("poscar"))
         backend = str(symmetry_raw.get("source", "spglib"))
@@ -181,6 +187,7 @@ def _parse_symmetry_config(
         symprec_scan = [float(value) for value in symmetry_raw.get("symprec_scan", [])]
         proper_rotations_only = bool(symmetry_raw.get("proper_rotations_only", True))
         allowed_orders = [int(value) for value in symmetry_raw.get("allowed_orders", [2, 3, 4, 6])]
+        rotation_order = parse_rotation_order(symmetry_raw.get("rotation_order", "auto"))
 
     if mode != "auto":
         raise ValueError("symmetry.operations.mode currently supports only 'auto'")
@@ -201,6 +208,7 @@ def _parse_symmetry_config(
         filters=SymmetryFilterConfig(
             proper_rotations_only=proper_rotations_only,
             allowed_orders=allowed_orders,
+            rotation_order=rotation_order,
         ),
         little_group_check=True,
         valley_preservation_check=True,

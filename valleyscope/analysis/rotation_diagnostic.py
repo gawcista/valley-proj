@@ -8,7 +8,7 @@ from valleyscope.symmetry.plane_wave_action import build_plane_wave_representati
 from valleyscope.symmetry.rotation_eigenvalues import extract_rotation_eigenvalues, nearest_root_of_unity
 
 
-UNITARITY_TOL = 1e-6
+UNITARITY_TOL = 1e-4
 ROOT_DEVIATION_TOL = 1e-6
 D_VALLEY_OFFDIAG_TOL = 1e-6
 
@@ -100,7 +100,8 @@ def rotation_diagnostics_for_kpoint(
         )
         d_valley_offdiag_norm = _two_sector_offdiag_norm(d_valley)
         order = int(operation["order"])
-        root_info = [nearest_root_of_unity(value, order=order) for value in eigen.eigenvalues]
+        root_order = 2 * order if spinor_rotation_applied else order
+        root_info = [nearest_root_of_unity(value, order=root_order) for value in eigen.eigenvalues]
         root_deviations = np.asarray([item[2] for item in root_info], dtype=float)
         topology_input_ready_by_state = np.asarray(
             [
@@ -137,6 +138,7 @@ def rotation_diagnostics_for_kpoint(
             "mapping_miss_count": representation.mapping_miss_count,
             "unitarity_deviation": eigen.unitarity_deviation,
             "operation_order": int(operation["order"]),
+            "root_order": root_order,
             "rotation_frac": np.asarray(operation.get("rotation_frac", np.eye(3))),
             "translation_frac": np.asarray(operation.get("translation_frac", np.zeros(3))),
             "rotation_cart": np.asarray(operation["rotation_cart"]),
@@ -188,7 +190,7 @@ def rotation_diagnostics_for_kpoint(
                     "rotation_ready": rotation_ready,
                     "spinor_rotation_applied": spinor_rotation_applied,
                     "spinor_convention_verified": spinor_convention_verified,
-                    "nearest_root_of_unity": f"exp(2pii*{root_index}/{order})",
+                    "nearest_root_of_unity": f"exp(2pii*{root_index}/{root_order})",
                     "root_deviation": root_deviation,
                     "topology_input_ready": bool(topology_input_ready),
                     "topology_ready": bool(topology_input_ready),

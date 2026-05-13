@@ -36,15 +36,13 @@ def classify_operation(
     trans = np.asarray(translation, dtype=float)
     det = int(round(np.linalg.det(rot)))
     order = operation_order(rot)
-    if det == 1 and order in allowed_orders and order != 1:
+    if det == 1 and order is not None and order != 1:
         kind = f"C{order}"
-        allowed = True
     elif det == 1:
         kind = "proper_rotation"
-        allowed = False
     else:
         kind = "improper_or_reflection"
-        allowed = False
+    allowed = bool(det == 1 and order in allowed_orders and order != 1)
     return OperationInfo(rot, trans, det, order, kind, allowed)
 
 

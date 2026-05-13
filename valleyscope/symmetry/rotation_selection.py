@@ -1,0 +1,75 @@
+from __future__ import annotations
+
+from typing import Iterable
+
+
+RotationOrder = int | str | None
+
+SUPPORTED_ROTATION_ORDERS = {2, 3, 4, 6}
+
+
+def parse_rotation_order(value: object, *, default: RotationOrder = "auto") -> RotationOrder:
+    if value is _MISSING:
+        return default
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError("rotation_order must be an integer, 'auto', or 'none'")
+    if isinstance(value, int):
+        return _validate_order(value)
+    if isinstance(value, str):
+        text = value.strip()
+        lowered = text.lower()
+        if lowered == "auto":
+            return "auto"
+        if lowered == "none":
+            return None
+        if lowered.startswith("c") and lowered[1:].isdigit():
+            return _validate_order(int(lowered[1:]))
+        if lowered.isdigit():
+            return _validate_order(int(lowered))
+    raise ValueError("rotation_order must be an integer, 'auto', or 'none'")
+
+
+def resolve_rotation_order(
+    requested: RotationOrder,
+    *,
+    international: str,
+    candidate_orders: Iterable[int],
+) -> int | None:
+    if requested is None:
+        return None
+    if isinstance(requested, int):
+        return requested
+    lowered = str(requested).strip().lower()
+    if lowered == "none":
+        return None
+    if lowered != "auto":
+        raise ValueError("requested rotation order must be an integer, 'auto', or None")
+    symbol = _normalize_spacegroup_symbol(international)
+    if symbol.startswith(("P321", "P312")):
+        return 3
+    if symbol.startswith("P422"):
+        return 4
+    available = set(candidate_orders)
+    for order in (6, 4, 3, 2):
+        if order in available:
+            return order
+    return None
+
+
+def _validate_order(value: int) -> int:
+    if value not in SUPPORTED_ROTATION_ORDERS:
+        raise ValueError("rotation_order currently supports only 2, 3, 4, or 6")
+    return value
+
+
+def _normalize_spacegroup_symbol(symbol: str) -> str:
+    return "".join(str(symbol).upper().replace("_", " ").replace("-", " ").split())
+
+
+class _Missing:
+    pass
+
+
+_MISSING = _Missing()

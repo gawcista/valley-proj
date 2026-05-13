@@ -153,6 +153,7 @@ def test_config_loader_parses_core_schema(tmp_path):
     assert config.symmetry.tolerance.symprec_scan == [1.0e-5, 1.0e-3]
     assert config.symmetry.filters.proper_rotations_only is True
     assert config.symmetry.filters.allowed_orders == [2, 3, 4, 6]
+    assert config.symmetry.filters.rotation_order == "auto"
     assert config.valley_sectors[0].name == "K_sector"
 
 
@@ -185,6 +186,29 @@ def test_config_loader_accepts_legacy_symmetry_schema_with_deprecation_warning(t
     assert config.symmetry.tolerance.angle_tolerance == pytest.approx(0.5)
     assert config.symmetry.tolerance.symprec_scan == [1.0e-5, 3.0e-4]
     assert config.symmetry.filters.allowed_orders == [3]
+    assert config.symmetry.filters.rotation_order == "auto"
+
+
+def test_config_loader_accepts_rotation_order_integer_and_none(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "rotation_order.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["symmetry"]["filters"]["rotation_order"] = 3
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    config = load_config(config_path)
+
+    assert config.symmetry.filters.rotation_order == 3
+
+    raw["symmetry"]["filters"]["rotation_order"] = "None"
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    config = load_config(config_path)
+
+    assert config.symmetry.filters.rotation_order is None
 
 
 def test_config_loader_prefers_new_symmetry_schema_over_legacy_fields(tmp_path):
@@ -508,6 +532,7 @@ def test_readme_symmetry_example_uses_parser_schema(tmp_path):
     assert config.symmetry.operations.backend == "spglib"
     assert config.symmetry.tolerance.symprec == pytest.approx(1.0e-3)
     assert config.symmetry.filters.allowed_orders == [2, 3, 4, 6]
+    assert config.symmetry.filters.rotation_order == "auto"
 
 
 def test_analyze_hsp_writes_two_valley_subspace_transform_for_degenerate_pair(tmp_path):
@@ -625,7 +650,7 @@ def test_rotation_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp
         "symmetry": {
             "operations": {"mode": "auto", "structure_file": str(structure), "backend": "spglib"},
             "tolerance": {"symprec": 1.0e-5, "angle_tolerance": -1.0},
-            "filters": {"proper_rotations_only": True, "allowed_orders": [2, 4]},
+            "filters": {"proper_rotations_only": True, "allowed_orders": [2, 4], "rotation_order": 2},
         },
         "output": {"directory": str(out_dir), "write_json": True, "write_csv": True, "write_hdf5_basis_transform": True},
     }
