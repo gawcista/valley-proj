@@ -7,7 +7,7 @@ from valleyscope.symmetry.little_group import is_little_group_operation
 from valleyscope.symmetry.operation_classifier import classify_operation, operation_order, rotation_axis_angle
 from valleyscope.symmetry.plane_wave_action import build_plane_wave_representation, spin_rotation_matrix
 from valleyscope.symmetry.rotation_eigenvalues import nearest_root_of_unity
-from valleyscope.symmetry.rotation_selection import resolve_rotation_order
+from valleyscope.symmetry.rotation_selection import mark_rotation_generators, resolve_rotation_order
 from valleyscope.symmetry.spglib_finder import find_symmetry_operations
 from valleyscope.symmetry.valley_preservation import map_valley_sectors
 from valleyscope.analysis.rotation_diagnostic import rotation_diagnostics_for_kpoint
@@ -440,6 +440,26 @@ def test_rotation_order_selection_from_user_value_and_spacegroup():
     assert resolve_rotation_order("auto", international="P321", candidate_orders=[2, 3]) == 3
     assert resolve_rotation_order("AUTO", international="P312", candidate_orders=[2, 3]) == 3
     assert resolve_rotation_order("auto", international="P422", candidate_orders=[2, 4]) == 4
+
+
+def test_rotation_generator_filter_keeps_one_cyclic_generator():
+    c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]])
+    c3_squared = c3 @ c3
+    operations = [
+        {"operation_id": 1, "rotation_frac": c3, "order": 3, "candidate_rotation": True},
+        {"operation_id": 2, "rotation_frac": c3_squared, "order": 3, "candidate_rotation": True},
+        {"operation_id": 3, "rotation_frac": np.diag([-1, -1, 1]), "order": 2, "candidate_rotation": False},
+    ]
+
+    mark_rotation_generators(operations)
+
+    assert [op["operation_id"] for op in operations if op["candidate_rotation"]] == [1]
+    assert operations[0]["rotation_generator_operation_id"] == 1
+    assert operations[0]["rotation_power_of_generator"] == 1
+    assert operations[1]["rotation_generator_operation_id"] == 1
+    assert operations[1]["rotation_power_of_generator"] == 2
+    assert operations[1]["candidate_rotation"] is False
+    assert operations[1]["candidate_rejection_reason"] == "power_of_rotation_generator"
 
 
 def test_nearest_root_of_unity_diagnostic():

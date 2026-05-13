@@ -23,7 +23,7 @@ from valleyscope.reports.analysis_outputs import write_analysis_outputs
 from valleyscope.reports.csv_report import weight_row
 from valleyscope.subspace.valley_basis import build_two_valley_adapted_basis
 from valleyscope.symmetry.operation_classifier import classify_operation
-from valleyscope.symmetry.rotation_selection import resolve_rotation_order
+from valleyscope.symmetry.rotation_selection import mark_rotation_generators, resolve_rotation_order
 from valleyscope.symmetry.spglib_finder import find_symmetry_operations
 from valleyscope.symmetry.valley_preservation import map_valley_sectors
 
@@ -353,6 +353,7 @@ def _prepare_symmetry_payload(config: AppConfig, monolayer_recip: np.ndarray) ->
                 "center_mapping": valley_mapping.center_mapping,
             }
         )
+    mark_rotation_generators(operations)
     symprec_scan_summary = _symprec_scan_summary(config, cell)
     candidate_rotations = [
         operation["operation_id"]

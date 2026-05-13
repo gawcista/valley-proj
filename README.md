@@ -400,6 +400,8 @@ A monolayer POSCAR cannot replace the moire POSCAR for symmetry-operation detect
 - integer `n`: analyze only `C_n`, currently with `n = 2, 3, 4, 6`.
 - `None` / `none`: detect and report symmetry operations, but skip rotation-eigenvalue extraction.
 
+By default, rotation eigenvalues are computed only for one generator of each selected cyclic rotation subgroup. For example, if the detected point group contains both `C3` and `C3^2`, ValleyScope reports the generator and keeps the other power in `symmetry_report.json` as a detected operation rather than computing a redundant eigenvalue table.
+
 ## Reading the Outputs
 
 The analyzer writes results under `output.directory`:
@@ -926,6 +928,8 @@ symmetry:
 - `auto`：从检测到的 moire 空间群和候选旋转操作推断目标阶数。例如 `P321` / `P312` 解析为 `C3`，`P422` 解析为 `C4`。
 - 整数 `n`：只分析 `C_n`，目前支持 `n = 2, 3, 4, 6`。
 - `None` / `none`：仍检测并报告对称操作，但跳过旋转本征值提取。
+
+默认只对每个被选中的循环旋转子群计算一个生成元的本征值。例如检测到的点群同时包含 `C3` 和 `C3^2` 时，ValleyScope 只报告生成元；另一个幂操作仍保留在 `symmetry_report.json` 的 detected operations 中，但不再生成重复的本征值表。
 
 ## 读取输出
 
