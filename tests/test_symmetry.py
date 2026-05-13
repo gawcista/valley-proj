@@ -9,6 +9,7 @@ from valleyscope.symmetry.plane_wave_action import build_plane_wave_representati
 from valleyscope.symmetry.rotation_eigenvalues import nearest_root_of_unity
 from valleyscope.symmetry.spglib_finder import find_symmetry_operations
 from valleyscope.symmetry.valley_preservation import map_valley_sectors
+from valleyscope.analysis.rotation_diagnostic import rotation_diagnostics_for_kpoint
 
 
 RECIP = np.array(
@@ -199,6 +200,113 @@ def test_plane_wave_action_recovers_known_c2_eigenvalues():
 
     assert result.mapping_miss_count == 0
     assert np.allclose(result.matrix, np.diag([1.0, -1.0]), atol=1e-12)
+
+
+def test_plane_wave_action_pure_translation_phase():
+    coefficients = np.array([[[1.0 + 0.0j]]], dtype=np.complex128)
+    q_cart = np.array([[2.0, 0.0, 0.0]])
+    translation = np.array([0.3, 0.0, 0.0])
+
+    result = build_plane_wave_representation(coefficients, q_cart, np.eye(3), translation)
+
+    assert result.mapping_miss_count == 0
+    np.testing.assert_allclose(result.matrix, [[np.exp(-0.6j)]], atol=1e-12)
+
+
+def test_plane_wave_action_non_origin_c2_rotation_phase():
+    coefficients = np.array(
+        [
+            [[1.0 + 0.0j, 0.0 + 0.0j]],
+            [[0.0 + 0.0j, 1.0 + 0.0j]],
+        ],
+        dtype=np.complex128,
+    )
+    q_cart = np.array([[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]])
+    rotation = np.diag([-1.0, -1.0, 1.0])
+    center = np.array([0.25, 0.0, 0.0])
+    translation = center - rotation @ center
+
+    result = build_plane_wave_representation(coefficients, q_cart, rotation, translation)
+
+    expected = np.array(
+        [
+            [0.0, np.exp(-0.5j)],
+            [np.exp(0.5j), 0.0],
+        ],
+        dtype=np.complex128,
+    )
+    assert result.mapping_miss_count == 0
+    np.testing.assert_allclose(result.matrix, expected, atol=1e-12)
+
+
+def test_plane_wave_action_recovers_c3_angular_momentum_eigenvalue():
+    angle = 2.0 * np.pi / 3.0
+    rotation = np.array(
+        [
+            [np.cos(angle), -np.sin(angle), 0.0],
+            [np.sin(angle), np.cos(angle), 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    q_cart = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [np.cos(angle), np.sin(angle), 0.0],
+            [np.cos(2.0 * angle), np.sin(2.0 * angle), 0.0],
+        ]
+    )
+    phases = np.exp(1.0j * np.array([0.0, angle, 2.0 * angle]))
+    coefficients = phases.reshape(1, 1, 3) / np.sqrt(3.0)
+
+    result = build_plane_wave_representation(coefficients, q_cart, rotation, np.zeros(3), tolerance=1e-7)
+
+    assert result.mapping_miss_count == 0
+    np.testing.assert_allclose(result.matrix, [[np.exp(-1.0j * angle)]], atol=1e-12)
+
+
+def test_spinor_rotation_rows_are_diagnostic_only_without_convention_benchmark():
+    coefficients = np.array(
+        [
+            [
+                [1.0 + 0.0j, 0.0 + 0.0j],
+                [0.0 + 0.0j, 0.0 + 0.0j],
+            ]
+        ],
+        dtype=np.complex128,
+    )
+    q_cart = np.array([[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]])
+    symmetry_payload = {
+        "detected_operations": [
+            {
+                "operation_id": 0,
+                "candidate_rotation": True,
+                "rotation_frac": np.diag([-1, -1, 1]),
+                "rotation_cart": np.diag([-1.0, -1.0, 1.0]),
+                "translation_cart": np.zeros(3),
+                "preserved": {"K_sector": True},
+                "order": 2,
+                "kind": "C2",
+            }
+        ]
+    }
+    rotation_payload: dict[str, object] = {}
+
+    rows = rotation_diagnostics_for_kpoint(
+        kpoint_name="GammaM",
+        k_frac=np.zeros(3),
+        q_cart=q_cart,
+        coefficients=coefficients,
+        symmetry_payload=symmetry_payload,
+        basis_payload=None,
+        rotation_payload=rotation_payload,
+    )
+
+    assert rows
+    assert rows[0]["spinor_rotation_applied"] is True
+    assert rows[0]["spinor_convention_verified"] is False
+    assert rows[0]["diagnostic_only"] is True
+    assert rows[0]["topology_input_ready"] is False
+    assert rows[0]["topology_ready"] is False
 
 
 def test_nearest_root_of_unity_diagnostic():

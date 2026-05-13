@@ -328,6 +328,7 @@ The screen summary is organized as:
 
 ```text
 Input
+Valley manifolds
 Valley projection summary
 Valley-adapted subspace
 Symmetry diagnostics
@@ -337,7 +338,36 @@ Warnings
 Output files
 ```
 
-Use the `Valley projection summary` table to check `W_val`, `P_v`, `W_overlap`, and `W_res` band by band. Use `Valley-adapted subspace` to decide whether the near-degenerate target subspace is a good two-valley subspace. Rotation eigenvalues are topology-ready only when they are reported in the valley-adapted basis and all little-group and valley-preservation checks pass.
+Use the `Valley projection summary` table to check `W_val`, `P_v`, `W_overlap`, and `W_res` band by band. Use `Valley-adapted subspace` to decide whether the near-degenerate target subspace is a good two-valley subspace. In the rotation table, `topology_input_ready` only means that the HSP rotation eigenvalue is suitable as an input to a later symmetry-based topology analysis; it does not validate full-mBZ valley-resolved topology. The legacy `topology_ready` column is kept as a backward-compatible alias of `topology_input_ready`.
+
+For SOC/spinor wavefunctions, ValleyScope applies the SU(2) spin rotation in the plane-wave representation, but VASP spinor phase conventions have not yet been benchmark-verified. Such rows are reported with `spinor_rotation_applied=True`, `spinor_convention_verified=False`, and `diagnostic_only=True`; they are not marked `topology_input_ready`.
+
+Example screen summary:
+
+```text
+Input
+-----
+wavefunction_h5: ./wave.h5
+operation structure: ./2dm-5370-7.34.vasp
+operation-detection backend: spglib
+target k-points: GammaM, KM, MM
+target bands (VASP): 2195, 2196
+qcut mode: relative_min_sector_distance
+qcut value: 0.034 A^-1
+
+Valley manifolds
+----------------
+label      centers
+---------  ----------------
+K_sector   top_K, bottom_K
+Kp_sector  top_Kp, bottom_Kp
+
+Valley projection summary
+-------------------------
+kpoint  band  W_val  P_v   W_overlap  W_res  status
+------  ----  -----  ----  ---------  -----  ------------
+GammaM  2195  0.98   0.99  0          0.02   valley-clean
+```
 
 ### Structure Files
 
@@ -431,6 +461,17 @@ Rows are written only when an operation passes all V1 filters:
 
 An empty file with only a header is not automatically an error. It often means no operation passed these checks for the selected HSP and valley sector.
 
+The readiness columns are deliberately conservative:
+
+```text
+rotation_ready, topology_input_ready, topology_ready, spinor_rotation_applied,
+spinor_convention_verified, diagnostic_only, D_valley_offdiag_norm
+```
+
+`rotation_ready` checks whether the representation matrix was constructed without missing plane-wave mappings and with small unitarity deviation. `topology_input_ready` additionally requires a valid two-sector valley-adapted basis, small root-of-unity deviation, and small two-sector `D_valley_offdiag_norm`. It does not claim a full valley Chern number. For compatibility, `topology_ready` stores the same value. `D_valley_offdiag_norm` is only a two-sector valley-adapted diagnostic; it is not a general multi-valley or multidimensional-irrep criterion.
+
+Spinor rows remain diagnostic-only unless the VASP spinor convention is benchmark-verified.
+
 ### `diagnostics.h5`
 
 This file stores projector masks and q-cut scan data:
@@ -445,9 +486,21 @@ This file stores projector masks and q-cut scan data:
 /qcut_scan/<kpoint>/eta
 /qcut_scan/<kpoint>/W_overlap
 /qcut_scan/<kpoint>/overlap_count
+/rotation/<kpoint>/<operation_id>/D_raw
+/rotation/<kpoint>/<operation_id>/D_valley
+/rotation/<kpoint>/<operation_id>/eigenvalues
+/rotation/<kpoint>/<operation_id>/root_deviation
+/rotation/<kpoint>/<operation_id>/rotation_cart
+/rotation/<kpoint>/<operation_id>/translation_cart
+/rotation/<kpoint>/<operation_id>/rotation_ready
+/rotation/<kpoint>/<operation_id>/topology_input_ready
+/rotation/<kpoint>/<operation_id>/spinor_rotation_applied
+/rotation/<kpoint>/<operation_id>/spinor_convention_verified
+/rotation/<kpoint>/<operation_id>/diagnostic_only
+/rotation/<kpoint>/<operation_id>/D_valley_offdiag_norm
 ```
 
-Use it when tuning `qcut_fraction` or checking whether the projector windows select the expected momenta.
+Use it when tuning `qcut_fraction`, checking whether the projector windows select the expected momenta, or debugging the rotation representation. `D_valley` is present only when a valid valley-adapted basis was available.
 
 ## V1 Scope
 
@@ -795,6 +848,7 @@ valleyscope analyze-hsp analyze.yaml
 
 ```text
 Input
+Valley manifolds
 Valley projection summary
 Valley-adapted subspace
 Symmetry diagnostics
@@ -804,7 +858,36 @@ Warnings
 Output files
 ```
 
-先看 `Valley projection summary` 表中的 `W_val`、`P_v`、`W_overlap` 和 `W_res`，判断每条能带是否主要来自目标谷子空间。再看 `Valley-adapted subspace`，判断近简并目标子空间是否构成良好的双谷子空间。只有在 valley-adapted basis 中给出、且通过 little-group 与 valley-preservation 检查的旋转本征值，才可作为后续拓扑诊断的输入。
+先看 `Valley projection summary` 表中的 `W_val`、`P_v`、`W_overlap` 和 `W_res`，判断每条能带是否主要来自目标谷子空间。再看 `Valley-adapted subspace`，判断近简并目标子空间是否构成良好的双谷子空间。在旋转本征值表中，`topology_input_ready` 只表示这个高对称点旋转本征值适合作为后续基于对称性的拓扑分析输入；它不验证整个 moire 布里渊区上的谷分辨拓扑。旧字段 `topology_ready` 保留为 `topology_input_ready` 的兼容别名。
+
+对于含自旋轨道耦合的 spinor 波函数，ValleyScope 会在平面波表示中施加 SU(2) 自旋旋转，但 VASP spinor 相位约定尚未经过基准验证。因此这些行会标记为 `spinor_rotation_applied=True`、`spinor_convention_verified=False` 和 `diagnostic_only=True`，不会标记为 `topology_input_ready`。
+
+屏幕摘要示例：
+
+```text
+Input
+-----
+wavefunction_h5: ./wave.h5
+operation structure: ./2dm-5370-7.34.vasp
+operation-detection backend: spglib
+target k-points: GammaM, KM, MM
+target bands (VASP): 2195, 2196
+qcut mode: relative_min_sector_distance
+qcut value: 0.034 A^-1
+
+Valley manifolds
+----------------
+label      centers
+---------  ----------------
+K_sector   top_K, bottom_K
+Kp_sector  top_Kp, bottom_Kp
+
+Valley projection summary
+-------------------------
+kpoint  band  W_val  P_v   W_overlap  W_res  status
+------  ----  -----  ----  ---------  -----  ------------
+GammaM  2195  0.98   0.99  0          0.02   valley-clean
+```
 
 ### 结构文件怎么选
 
@@ -898,6 +981,17 @@ kpoint, band_vasp, energy_eV, K_sector, Kp_sector, W_val, P_v, eta, W_overlap, W
 
 如果这个文件只有表头，不一定是错误。它往往表示当前高对称点和谷扇区下没有操作通过这些检查。
 
+readiness 相关列采用保守定义：
+
+```text
+rotation_ready, topology_input_ready, topology_ready, spinor_rotation_applied,
+spinor_convention_verified, diagnostic_only, D_valley_offdiag_norm
+```
+
+`rotation_ready` 检查表示矩阵是否没有缺失的平面波映射，并且幺正性偏差较小。`topology_input_ready` 进一步要求有效的双谷适配基、较小的单位根偏差，以及较小的双谷 `D_valley_offdiag_norm`。它不声明完整 valley Chern number。为了兼容旧结果，`topology_ready` 保存同一个值。`D_valley_offdiag_norm` 只是双谷谷适配诊断，不是通用多谷或多维不可约表示判据。
+
+spinor 行在 VASP spinor 约定完成基准验证前都只作为诊断结果。
+
 ### `diagnostics.h5`
 
 这里保存投影掩码（projector masks）与 q-cut 扫描数据：
@@ -912,9 +1006,21 @@ kpoint, band_vasp, energy_eV, K_sector, Kp_sector, W_val, P_v, eta, W_overlap, W
 /qcut_scan/<kpoint>/eta
 /qcut_scan/<kpoint>/W_overlap
 /qcut_scan/<kpoint>/overlap_count
+/rotation/<kpoint>/<operation_id>/D_raw
+/rotation/<kpoint>/<operation_id>/D_valley
+/rotation/<kpoint>/<operation_id>/eigenvalues
+/rotation/<kpoint>/<operation_id>/root_deviation
+/rotation/<kpoint>/<operation_id>/rotation_cart
+/rotation/<kpoint>/<operation_id>/translation_cart
+/rotation/<kpoint>/<operation_id>/rotation_ready
+/rotation/<kpoint>/<operation_id>/topology_input_ready
+/rotation/<kpoint>/<operation_id>/spinor_rotation_applied
+/rotation/<kpoint>/<operation_id>/spinor_convention_verified
+/rotation/<kpoint>/<operation_id>/diagnostic_only
+/rotation/<kpoint>/<operation_id>/D_valley_offdiag_norm
 ```
 
-调 `qcut_fraction` 或检查投影窗口是否选中了预期动量时，优先看这个文件。
+调 `qcut_fraction`、检查投影窗口是否选中了预期动量，或调试旋转表示时，优先看这个文件。只有存在有效谷适配基时，才会写入 `D_valley`。
 
 ## V1 边界
 

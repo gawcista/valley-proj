@@ -52,6 +52,11 @@ def build_summary_payload(
             "eta": "signed valley polarization for a two-valley diagnostic",
             "W_overlap": "cross-sector projector-window overlap weight",
             "W_res": "out-of-valley residual weight",
+            "topology_input_ready": (
+                "HSP rotation eigenvalue is suitable as input to later symmetry-based topology analysis; "
+                "it does not validate full-mBZ valley-resolved topology"
+            ),
+            "topology_ready": "backward-compatible alias of topology_input_ready",
         },
     }
 
@@ -65,6 +70,21 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     lines.append(f"operation-detection backend: {input_summary['operation_detection_backend']}")
     lines.append(f"target k-points: {', '.join(summary['target_kpoints'])}")
     lines.append(f"target bands (VASP): {', '.join(str(v) for v in summary['target_bands_vasp'])}")
+    qcut = summary["qcut"]
+    lines.append(f"qcut mode: {qcut['mode']}")
+    lines.append(f"qcut value: {_fmt(qcut['value_Ainv'])} A^-1")
+    lines.append("")
+
+    _section(lines, "Valley manifolds")
+    lines.extend(
+        _table(
+            ["label", "centers"],
+            [
+                [row["label"], ", ".join(row["centers"])]
+                for row in summary["valley_manifolds"]
+            ],
+        )
+    )
     lines.append("")
 
     _section(lines, "Valley projection summary")
@@ -145,9 +165,26 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     lines.append("")
 
     _section(lines, "Rotation eigenvalues")
+    lines.append(
+        "Note: topology_input_ready only means the HSP rotation eigenvalue is suitable as input "
+        "to later symmetry-based topology analysis; it does not validate full-mBZ valley-resolved topology."
+    )
     lines.extend(
         _table(
-            ["kpoint", "operation", "order", "basis", "state", "phase", "root", "dev"],
+            [
+                "kpoint",
+                "operation",
+                "order",
+                "basis",
+                "state",
+                "phase",
+                "root",
+                "root_dev",
+                "rotation_ready",
+                "topology_input_ready",
+                "diagnostic_only",
+                "D_valley_offdiag_norm",
+            ],
             [
                 [
                     row["kpoint"],
@@ -158,6 +195,10 @@ def render_summary_text(summary: dict[str, Any]) -> str:
                     _fmt(row["phase_2pi"]),
                     row["nearest_root_of_unity"],
                     _fmt(row["root_deviation"]),
+                    row.get("rotation_ready", ""),
+                    row.get("topology_input_ready", row.get("topology_ready", "")),
+                    row.get("diagnostic_only", ""),
+                    _fmt(row.get("D_valley_offdiag_norm")),
                 ]
                 for row in summary["rotation_eigenvalues"]
             ],
@@ -300,10 +341,21 @@ def _collect_warnings(
     if any(row.get("basis") != "valley_adapted" for row in rotation_rows):
         warnings.append("Some rotation eigenvalues are not valley-adapted and are diagnostic-only")
     if any(
-        not bool(row.get("spinor_convention_verified", False)) and row.get("basis") == "valley_adapted"
+        bool(row.get("spinor_rotation_applied", False)) and not bool(row.get("spinor_convention_verified", False))
         for row in rotation_rows
     ):
-        warnings.append("Spinor convention is not benchmark-verified; do not use spinful eigenvalues as topology claims")
+        warnings.append(
+            "Spinor rotation is applied, but the VASP spinor convention is not benchmark-verified; "
+            "spinful rotation eigenvalues are diagnostic-only"
+        )
+    if any(bool(row.get("diagnostic_only", False)) for row in rotation_rows):
+        warnings.append(
+            "Some rotation eigenvalues are diagnostic-only and are not topology_input_ready"
+        )
+    for operation in symmetry_payload.get("detected_operations", []):
+        for kpoint, quality in operation.get("representation_quality", {}).items():
+            if isinstance(quality, dict) and quality.get("skipped_reason"):
+                warnings.append(f"{kpoint}: rotation {operation.get('operation_id')} skipped: {quality['skipped_reason']}")
     return warnings
 
 

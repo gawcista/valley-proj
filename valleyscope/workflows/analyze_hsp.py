@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
+from valleyscope.analysis.rotation_diagnostic import rotation_diagnostics_for_kpoint
 from valleyscope.geometry.lattice import (
     cart_rotation_from_fractional,
     cart_translation_from_fractional,
@@ -18,20 +19,10 @@ from valleyscope.projection.qcut_scan import (
 )
 from valleyscope.projection.sector_projectors import SectorProjectors, build_sector_projectors
 from valleyscope.projection.weights import classify_valley_weights, compute_valley_weights
-from valleyscope.reports.csv_report import weight_row, write_rotation_eigenvalues_csv, write_valley_weights_csv
-from valleyscope.reports.h5_report import write_basis_transform_h5, write_diagnostics_h5
-from valleyscope.reports.json_report import write_json
-from valleyscope.reports.summary_report import (
-    build_summary_payload,
-    render_summary_text,
-    write_summary_json,
-    write_summary_text,
-)
+from valleyscope.reports.analysis_outputs import write_analysis_outputs
+from valleyscope.reports.csv_report import weight_row
 from valleyscope.subspace.valley_basis import build_two_valley_adapted_basis
-from valleyscope.symmetry.little_group import is_little_group_operation
-from valleyscope.symmetry.operation_classifier import classify_operation, rotation_axis_angle
-from valleyscope.symmetry.plane_wave_action import build_plane_wave_representation, spin_rotation_matrix
-from valleyscope.symmetry.rotation_eigenvalues import extract_rotation_eigenvalues, nearest_root_of_unity
+from valleyscope.symmetry.operation_classifier import classify_operation
 from valleyscope.symmetry.spglib_finder import find_symmetry_operations
 from valleyscope.symmetry.valley_preservation import map_valley_sectors
 
@@ -200,75 +191,31 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             }
         if symmetry_payload["status"] == "ok":
             rotation_rows.extend(
-                _rotation_rows_for_kpoint(
-                    config,
-                    kpoint_name,
-                    kpoint.frac,
-                    q_cart,
-                    coefficients,
-                    symmetry_payload,
-                    basis_transforms.get(kpoint_name),
-                    rotation_payload,
+                rotation_diagnostics_for_kpoint(
+                    kpoint_name=kpoint_name,
+                    k_frac=kpoint.frac,
+                    q_cart=q_cart,
+                    coefficients=coefficients,
+                    symmetry_payload=symmetry_payload,
+                    basis_payload=basis_transforms.get(kpoint_name),
+                    rotation_payload=rotation_payload,
                 )
             )
 
     sector_names = list(projectors_by_kpoint[next(iter(projectors_by_kpoint))].sector_masks)
-    outputs: dict[str, object] = {}
-    if config.output.write_detailed_files:
-        if config.output.write_csv:
-            outputs["valley_weights_csv"] = write_valley_weights_csv(
-                output_dir / "valley_weights.csv",
-                rows,
-                sector_names,
-            )
-            outputs["rotation_eigenvalues_csv"] = write_rotation_eigenvalues_csv(
-                output_dir / "rotation_eigenvalues.csv",
-                rotation_rows,
-            )
-        if config.output.write_json:
-            outputs["valley_subspace_json"] = write_json(output_dir / "valley_subspace.json", subspace_payload)
-            outputs["symmetry_report_json"] = write_json(
-                output_dir / "symmetry_report.json",
-                symmetry_payload,
-            )
-        outputs["diagnostics_h5"] = write_diagnostics_h5(
-            output_dir / "diagnostics.h5",
-            projectors_by_kpoint,
-            qcut_scan_payload,
-            rotation_payload,
-            symmetry_payload,
-        )
-        if config.output.write_hdf5_basis_transform:
-            outputs["valley_basis_transform_h5"] = write_basis_transform_h5(
-                output_dir / "valley_basis_transform.h5",
-                basis_transforms,
-            )
-    summary_path_plan: dict[str, Path] = {}
-    if config.output.write_summary_txt or not config.output.write_detailed_files:
-        summary_path_plan["valley_summary_txt"] = output_dir / "valley_summary.txt"
-    if config.output.write_summary_json or not config.output.write_detailed_files:
-        summary_path_plan["valley_summary_json"] = output_dir / "valley_summary.json"
-    output_paths = {
-        key: value
-        for key, value in {**outputs, **summary_path_plan}.items()
-        if isinstance(value, Path)
-    }
-    summary_payload = build_summary_payload(
+    return write_analysis_outputs(
         config=config,
         qcut=qcut,
+        weight_rows=rows,
+        sector_names=sector_names,
         subspace_payload=subspace_payload,
         symmetry_payload=symmetry_payload,
         rotation_rows=rotation_rows,
-        output_paths=output_paths,
+        projectors_by_kpoint=projectors_by_kpoint,
+        qcut_scan_payload=qcut_scan_payload,
+        rotation_payload=rotation_payload,
+        basis_transforms=basis_transforms,
     )
-    summary_text = render_summary_text(summary_payload)
-    if "valley_summary_txt" in summary_path_plan:
-        outputs["valley_summary_txt"] = write_summary_text(summary_path_plan["valley_summary_txt"], summary_text)
-    if "valley_summary_json" in summary_path_plan:
-        outputs["valley_summary_json"] = write_summary_json(summary_path_plan["valley_summary_json"], summary_payload)
-    outputs["summary_text"] = summary_text
-    outputs["summary_stdout"] = config.output.summary_stdout
-    return outputs
 
 
 def _add_valley_subspace_diagnostic(
@@ -458,126 +405,3 @@ def _symprec_scan_summary(config: AppConfig, cell: tuple) -> list[dict[str, obje
                 }
             )
     return summary
-
-
-def _rotation_rows_for_kpoint(
-    config: AppConfig,
-    kpoint_name: str,
-    k_frac: np.ndarray,
-    q_cart: np.ndarray,
-    coefficients: np.ndarray,
-    symmetry_payload: dict[str, object],
-    basis_payload: dict[str, np.ndarray] | None,
-    rotation_payload: dict[str, object],
-) -> list[dict[str, object]]:
-    del config
-    rows: list[dict[str, object]] = []
-    for operation in symmetry_payload["detected_operations"]:
-        if not operation["candidate_rotation"]:
-            continue
-        little = is_little_group_operation(np.asarray(operation["rotation_frac"]), k_frac)
-        preserves_all = all(bool(value) for value in operation["preserved"].values())
-        operation["little_group_by_kpoint"] = {
-            **operation.get("little_group_by_kpoint", {}),
-            kpoint_name: little,
-        }
-        operation["allowed_for_single_valley_rotation"] = bool(little and preserves_all)
-        operation["allowed_for_single_valley_rotation_by_kpoint"] = {
-            **operation.get("allowed_for_single_valley_rotation_by_kpoint", {}),
-            kpoint_name: bool(little and preserves_all),
-        }
-        rejection_reason = ""
-        if not little:
-            rejection_reason = "not in little group"
-        elif not preserves_all:
-            rejection_reason = "not valley preserving"
-        operation["rejection_reason_by_kpoint"] = {
-            **operation.get("rejection_reason_by_kpoint", {}),
-            kpoint_name: rejection_reason,
-        }
-        if rejection_reason:
-            continue
-        spin_rotation = None
-        spinor_convention_verified = coefficients.shape[1] == 1
-        if coefficients.shape[1] == 2:
-            try:
-                axis, angle = rotation_axis_angle(np.asarray(operation["rotation_cart"]))
-                spin_rotation = spin_rotation_matrix(axis, angle)
-            except ValueError as exc:
-                operation.setdefault("representation_quality", {})[kpoint_name] = {
-                    "skipped_reason": f"spinor rotation skipped: {exc}",
-                    "spinor_convention_verified": False,
-                }
-                continue
-        elif coefficients.shape[1] != 1:
-            operation.setdefault("representation_quality", {})[kpoint_name] = {
-                "skipped_reason": f"unsupported nspinor={coefficients.shape[1]}",
-                "spinor_convention_verified": False,
-            }
-            continue
-        representation = build_plane_wave_representation(
-            coefficients,
-            q_cart,
-            np.asarray(operation["rotation_cart"]),
-            np.asarray(operation["translation_cart"]),
-            spin_rotation=spin_rotation,
-        )
-        basis = "raw_diagnostic"
-        matrix_for_eigen = representation.matrix
-        d_valley = None
-        valley_eta = None
-        reason = "not valley-adapted"
-        topology_ready = False
-        if basis_payload is not None and bool(np.asarray(basis_payload.get("valid_valley_subspace", False))):
-            transform = np.asarray(basis_payload["transform"], dtype=np.complex128)
-            d_valley = transform.conj().T @ representation.matrix @ transform
-            matrix_for_eigen = d_valley
-            basis = "valley_adapted"
-            valley_eta = np.asarray(basis_payload.get("eta", []), dtype=float)
-            reason = ""
-            topology_ready = bool(coefficients.shape[1] == 1 and representation.mapping_miss_count == 0)
-        eigen = extract_rotation_eigenvalues(matrix_for_eigen, spinor_convention_verified=spinor_convention_verified)
-        operation.setdefault("representation_quality", {})[kpoint_name] = {
-            "mapping_miss_count": representation.mapping_miss_count,
-            "unitarity_deviation": eigen.unitarity_deviation,
-            "max_modulus_deviation": float(np.max(eigen.modulus_deviation)) if len(eigen.modulus_deviation) else 0.0,
-            "spinor_convention_verified": spinor_convention_verified,
-            "basis": basis,
-        }
-        op_key = f"operation_{operation['operation_id']}"
-        op_payload: dict[str, object] = {
-            "D_raw": representation.matrix,
-            "eigenvalues": eigen.eigenvalues,
-            "mapping_miss_count": representation.mapping_miss_count,
-            "unitarity_deviation": eigen.unitarity_deviation,
-            "operation_order": int(operation["order"]),
-        }
-        if d_valley is not None:
-            op_payload["D_valley"] = d_valley
-        rotation_payload.setdefault(kpoint_name, {})[op_key] = op_payload
-        order = int(operation["order"])
-        for state_index, (value, phase, modulus_deviation) in enumerate(
-            zip(eigen.eigenvalues, eigen.phases_2pi, eigen.modulus_deviation)
-        ):
-            root_index, _root, root_deviation = nearest_root_of_unity(value, order=order)
-            rows.append(
-                {
-                    "kpoint": kpoint_name,
-                    "operation_id": operation["operation_id"],
-                    "order": order,
-                    "basis": basis,
-                    "state_index": state_index,
-                    "eigenvalue_real": float(value.real),
-                    "eigenvalue_imag": float(value.imag),
-                    "phase_2pi": float(phase),
-                    "modulus_deviation": float(modulus_deviation),
-                    "unitarity_deviation": float(eigen.unitarity_deviation),
-                    "spinor_convention_verified": spinor_convention_verified,
-                    "nearest_root_of_unity": f"exp(2pii*{root_index}/{order})",
-                    "root_deviation": root_deviation,
-                    "topology_ready": topology_ready,
-                    "reason": reason,
-                    "valley_eta": "" if valley_eta is None or state_index >= len(valley_eta) else float(valley_eta[state_index]),
-                }
-            )
-    return rows
