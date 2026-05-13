@@ -48,8 +48,8 @@ valley_sectors:
 projection:
   use_2d_momentum_only: true
   qcut_mode: relative_min_sector_distance
-  qcut_fraction: 0.30
-  qcut_scan: [0.20, 0.25, 0.30, 0.35, 0.40]
+  qcut_fraction: 0.20
+  qcut_scan: [0.15, 0.20, 0.25, 0.30]
   overlap_cross_sector: warn_exclude
   thresholds:
     W_val_min: 0.8
@@ -68,6 +68,7 @@ symmetry:
   filters:
     proper_rotations_only: true
     allowed_orders: [2, 3, 4, 6]
+    rotation_order: auto
 
 output:
   directory: ./valley_analysis
