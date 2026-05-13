@@ -282,8 +282,8 @@ valley_sectors:
 projection:
   use_2d_momentum_only: true
   qcut_mode: relative_min_sector_distance
-  qcut_fraction: 0.30
-  qcut_scan: [0.20, 0.25, 0.30, 0.35]
+  qcut_fraction: 0.20
+  qcut_scan: [0.15, 0.20, 0.25, 0.30]
   overlap_cross_sector: warn_exclude
   thresholds:
     W_val_min: 0.8
@@ -480,6 +480,23 @@ spinor_convention_verified, diagnostic_only, D_valley_offdiag_norm
 `rotation_ready` checks whether the representation matrix was constructed without missing plane-wave mappings and with small unitarity deviation. `topology_input_ready` additionally requires a valid two-sector valley-adapted basis, small root-of-unity deviation, and small two-sector `D_valley_offdiag_norm`. It does not claim a full valley Chern number. For compatibility, `topology_ready` stores the same value. `D_valley_offdiag_norm` is only a two-sector valley-adapted diagnostic; it is not a general multi-valley or multidimensional-irrep criterion.
 
 Spinor rows remain diagnostic-only unless the VASP spinor convention is benchmark-verified.
+
+The main columns mean:
+
+- `kpoint`: the analyzed moire HSP.
+- `operation_id`: the detected symmetry-operation id in `symmetry_report.json`; by default this is one generator of the selected cyclic rotation subgroup.
+- `order`: rotation order, for example `3` for `C3`.
+- `basis`: whether the representation was diagonalized in the `valley_adapted` basis or only as a raw diagnostic.
+- `state_index`: index inside the chosen target subspace after diagonalizing the rotation matrix.
+- `eigenvalue_real`, `eigenvalue_imag`: Cartesian components of the complex rotation eigenvalue.
+- `phase_2pi`: eigenvalue phase divided by `2π`; for spinful `C3`, phases such as `1/6` and `5/6` are expected double-group phases.
+- `nearest_root_of_unity` and `root_deviation`: nearest allowed root and its complex-plane distance from the computed eigenvalue.
+- `unitarity_deviation`: deviation of the representation matrix from a unitary matrix within the selected plane-wave/band subspace.
+- `rotation_ready`: the representation matrix passed the V1 numerical construction checks.
+- `topology_input_ready`: conservative flag for later symmetry-based topology analysis input; it is not a topology result.
+- `diagnostic_only`: the row should be read as a diagnostic rather than a validated topology input.
+- `D_valley_offdiag_norm`: for two-sector valley-adapted diagnostics only, the off-diagonal norm of the rotation matrix in the valley-adapted basis.
+- `valley_eta`: signed valley polarization of the valley-adapted state, when available.
 
 ### `diagnostics.h5`
 
@@ -811,8 +828,8 @@ valley_sectors:
 projection:
   use_2d_momentum_only: true
   qcut_mode: relative_min_sector_distance
-  qcut_fraction: 0.30
-  qcut_scan: [0.20, 0.25, 0.30, 0.35]
+  qcut_fraction: 0.20
+  qcut_scan: [0.15, 0.20, 0.25, 0.30]
   overlap_cross_sector: warn_exclude
   thresholds:
     W_val_min: 0.8
@@ -1009,6 +1026,23 @@ spinor_convention_verified, diagnostic_only, D_valley_offdiag_norm
 `rotation_ready` 检查表示矩阵是否没有缺失的平面波映射，并且幺正性偏差较小。`topology_input_ready` 进一步要求有效的双谷适配基、较小的单位根偏差，以及较小的双谷 `D_valley_offdiag_norm`。它不声明完整 valley Chern number。为了兼容旧结果，`topology_ready` 保存同一个值。`D_valley_offdiag_norm` 只是双谷谷适配诊断，不是通用多谷或多维不可约表示判据。
 
 spinor 行在 VASP spinor 约定完成基准验证前都只作为诊断结果。
+
+主要列的含义如下：
+
+- `kpoint`：被分析的 moire 高对称点。
+- `operation_id`：`symmetry_report.json` 中检测到的对称操作编号；默认只选中目标循环旋转子群的一个生成元。
+- `order`：旋转阶数，例如 `3` 表示 `C3`。
+- `basis`：表示矩阵是在 `valley_adapted` 基中对角化，还是仅作为原始基诊断。
+- `state_index`：旋转矩阵对角化后，目标子空间内部的态编号。
+- `eigenvalue_real`、`eigenvalue_imag`：复旋转本征值的实部和虚部。
+- `phase_2pi`：本征值相位除以 `2π`；对于 spinful `C3`，`1/6` 和 `5/6` 这样的 double-group 相位是正常的。
+- `nearest_root_of_unity` 和 `root_deviation`：最近的允许单位根，以及计算值到该单位根的复平面距离。
+- `unitarity_deviation`：所选平面波/能带子空间内表示矩阵偏离幺正矩阵的程度。
+- `rotation_ready`：表示矩阵通过了 V1 的数值构造检查。
+- `topology_input_ready`：保守地表示该行可作为后续基于对称性的拓扑分析输入；它本身不是拓扑结论。
+- `diagnostic_only`：该行只能作为诊断读取，不能作为已验证的拓扑输入。
+- `D_valley_offdiag_norm`：仅用于双谷谷适配诊断，表示谷适配基中旋转矩阵的非对角块范数。
+- `valley_eta`：若可用，表示谷适配态的有符号谷极化。
 
 ### `diagnostics.h5`
 

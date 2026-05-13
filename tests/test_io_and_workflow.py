@@ -831,3 +831,39 @@ def test_summary_marks_spinor_rotation_as_diagnostic_only(tmp_path):
     text = render_summary_text(summary)
     assert "topology_input_ready" in text
     assert "diagnostic_only" in text
+
+
+def test_summary_output_files_use_human_readable_labels(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    config = load_config(config_path)
+    from valleyscope.reports.summary_report import build_summary_payload, render_summary_text
+
+    summary = build_summary_payload(
+        config=config,
+        qcut=0.5,
+        subspace_payload={"kpoints": {}},
+        symmetry_payload={
+            "status": "skipped",
+            "reason": "no structure",
+            "detected_operations": [],
+            "candidate_rotations": [],
+            "little_group_check": {"status": "not_run"},
+            "valley_preservation_check": {"status": "not_run"},
+        },
+        rotation_rows=[],
+        output_paths={
+            "rotation_eigenvalues_csv": out_dir / "rotation_eigenvalues.csv",
+            "valley_summary_txt": out_dir / "valley_summary.txt",
+        },
+    )
+
+    text = render_summary_text(summary)
+
+    assert "Rotation eigenvalues:" in text
+    assert "Human-readable summary:" in text
+    assert "rotation_eigenvalues_csv:" not in text
+    assert "valley_summary_txt:" not in text

@@ -218,7 +218,7 @@ def render_summary_text(summary: dict[str, Any]) -> str:
 
     _section(lines, "Output files")
     for name, path in summary["output_files"].items():
-        lines.append(f"{name}: {path}")
+        lines.append(f"{_output_file_label(name)}: {path}")
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -403,3 +403,17 @@ def _short_list(value: Any) -> str:
     if array.ndim == 0:
         return _fmt(array.item())
     return "[" + ", ".join(_fmt(item) for item in array.tolist()) + "]"
+
+
+def _output_file_label(name: str) -> str:
+    labels = {
+        "valley_summary_txt": "Human-readable summary",
+        "valley_summary_json": "Machine-readable summary",
+        "valley_weights_csv": "Valley weights",
+        "valley_subspace_json": "Valley-adapted subspace diagnostics",
+        "valley_basis_transform_h5": "Valley basis transform",
+        "symmetry_report_json": "Symmetry diagnostics",
+        "rotation_eigenvalues_csv": "Rotation eigenvalues",
+        "diagnostics_h5": "Projector, qcut, and rotation diagnostics",
+    }
+    return labels.get(name, name.replace("_", " ").title())
