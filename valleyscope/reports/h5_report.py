@@ -12,6 +12,8 @@ def write_diagnostics_h5(
     path: str | Path,
     projectors_by_kpoint: dict[str, SectorProjectors],
     qcut_scan_payload: dict[str, object] | None = None,
+    rotation_payload: dict[str, object] | None = None,
+    symmetry_payload: dict[str, object] | None = None,
 ) -> Path:
     out = Path(path)
     with h5py.File(out, "w") as h5:
@@ -37,6 +39,30 @@ def write_diagnostics_h5(
                             group.attrs[key] = value
                         else:
                             group[key] = np.asarray(value)
+        if rotation_payload is not None:
+            rotation_group = h5.create_group("rotation")
+            for kpoint_name, operations in rotation_payload.items():
+                kpoint_group = rotation_group.create_group(kpoint_name)
+                if not isinstance(operations, dict):
+                    continue
+                for operation_id, payload in operations.items():
+                    op_group = kpoint_group.create_group(str(operation_id))
+                    if not isinstance(payload, dict):
+                        continue
+                    for key, value in payload.items():
+                        if isinstance(value, str):
+                            op_group.attrs[key] = value
+                        else:
+                            op_group[key] = np.asarray(value)
+        if symmetry_payload is not None:
+            symmetry_group = h5.create_group("symmetry")
+            symmetry_group.attrs["status"] = str(symmetry_payload.get("status", "unknown"))
+            symmetry_group.attrs["operation_detection_backend"] = str(
+                symmetry_payload.get("operation_detection_backend", "")
+            )
+            symmetry_group.attrs["structure_file"] = str(symmetry_payload.get("structure_file", ""))
+            symmetry_group.attrs["detected_operation_count"] = int(symmetry_payload.get("detected_operation_count", 0))
+            symmetry_group.attrs["candidate_rotation_count"] = len(symmetry_payload.get("candidate_rotations", []))
     return out
 
 

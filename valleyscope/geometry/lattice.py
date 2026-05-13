@@ -44,12 +44,14 @@ def _read_poscar_lines(path: str) -> list[str]:
 
 
 def cart_rotation_from_fractional(rotation_frac: np.ndarray, direct_cart: np.ndarray) -> np.ndarray:
+    """Convert spglib x' = W x to Cartesian column action r' = R r."""
     rotation = np.asarray(rotation_frac, dtype=float)
     direct = np.asarray(direct_cart, dtype=float)
     return direct.T @ rotation @ np.linalg.inv(direct.T)
 
 
 def cart_translation_from_fractional(translation_frac: np.ndarray, direct_cart: np.ndarray) -> np.ndarray:
+    """Convert fractional translation to Cartesian column components."""
     return np.asarray(direct_cart, dtype=float).T @ np.asarray(translation_frac, dtype=float)
 
 

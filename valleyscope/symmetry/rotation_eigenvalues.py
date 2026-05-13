@@ -17,6 +17,15 @@ class RotationEigenvalueResult:
     spinor_convention_verified: bool
 
 
+def nearest_root_of_unity(value: complex, order: int) -> tuple[int, complex, float]:
+    if order <= 0:
+        raise ValueError("order must be positive")
+    roots = np.exp(2.0j * np.pi * np.arange(order) / order)
+    distances = np.abs(np.asarray(value, dtype=np.complex128) - roots)
+    index = int(np.argmin(distances))
+    return index, complex(roots[index]), float(distances[index])
+
+
 def extract_rotation_eigenvalues(
     representation_matrix: np.ndarray,
     *,

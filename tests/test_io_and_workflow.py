@@ -1,4 +1,6 @@
+import csv
 import json
+import re
 from pathlib import Path
 
 import h5py
@@ -9,6 +11,7 @@ import yaml
 from valleyscope.io.config import load_config
 from valleyscope.io.h5_reader import read_wavefunction_h5
 from valleyscope.geometry.lattice import read_poscar_cell, read_poscar_lattice
+from valleyscope.cli import main as cli_main
 from valleyscope.workflows.analyze_hsp import analyze_hsp
 
 
@@ -45,7 +48,7 @@ def write_fixture_with_lattice(path: Path, direct_cart: np.ndarray):
 
 def write_config(path: Path, h5_path: Path, out_dir: Path):
     config = {
-        "input": {"wavefunction_h5": str(h5_path), "poscar": "CONTCAR"},
+        "input": {"wavefunction_h5": str(h5_path)},
         "analysis": {"kpoints": ["GammaM"], "target_bands_vasp": [101], "degeneracy_tol_meV": 1.0},
         "monolayer_lattices": {
             "default": {"reciprocal_cart": [[10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 1.0]]}
@@ -68,9 +71,55 @@ def write_config(path: Path, h5_path: Path, out_dir: Path):
             "qcut_scan": [0.5],
             "overlap_cross_sector": "warn_exclude",
         },
+        "symmetry": {
+            "operations": {
+                "mode": "auto",
+                "structure_file": "CONTCAR",
+                "backend": "spglib",
+            },
+            "tolerance": {
+                "symprec": 1.0e-3,
+                "angle_tolerance": -1.0,
+                "symprec_scan": [1.0e-5, 1.0e-3],
+            },
+            "filters": {
+                "proper_rotations_only": True,
+                "allowed_orders": [2, 3, 4, 6],
+            },
+        },
         "output": {"directory": str(out_dir), "write_json": True, "write_csv": True, "write_hdf5_basis_transform": True},
     }
     path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+
+def write_simple_poscar(path: Path):
+    path.write_text(
+        "simple\n"
+        "1.0\n"
+        "1.0 0.0 0.0\n"
+        "-0.5 0.8660254037844386 0.0\n"
+        "0.0 0.0 8.0\n"
+        "X\n"
+        "1\n"
+        "Direct\n"
+        "0.0 0.0 0.0\n",
+        encoding="utf-8",
+    )
+
+
+def write_square_poscar(path: Path):
+    path.write_text(
+        "square\n"
+        "1.0\n"
+        "1.0 0.0 0.0\n"
+        "0.0 1.0 0.0\n"
+        "0.0 0.0 8.0\n"
+        "X\n"
+        "1\n"
+        "Direct\n"
+        "0.0 0.0 0.0\n",
+        encoding="utf-8",
+    )
 
 
 def test_h5_reader_validates_group_schema(tmp_path):
@@ -96,7 +145,102 @@ def test_config_loader_parses_core_schema(tmp_path):
     assert config.analysis.target_bands_vasp == [101]
     assert config.projection.qcut_mode == "absolute"
     assert config.projection.overlap_cross_sector == "warn_exclude"
+    assert config.symmetry.operations.mode == "auto"
+    assert config.symmetry.operations.structure_file == config_path.parent / "CONTCAR"
+    assert config.symmetry.operations.backend == "spglib"
+    assert config.symmetry.tolerance.symprec == pytest.approx(1.0e-3)
+    assert config.symmetry.tolerance.angle_tolerance == pytest.approx(-1.0)
+    assert config.symmetry.tolerance.symprec_scan == [1.0e-5, 1.0e-3]
+    assert config.symmetry.filters.proper_rotations_only is True
+    assert config.symmetry.filters.allowed_orders == [2, 3, 4, 6]
     assert config.valley_sectors[0].name == "K_sector"
+
+
+def test_config_loader_accepts_legacy_symmetry_schema_with_deprecation_warning(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "legacy.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["input"]["poscar"] = "legacy-CONTCAR"
+    raw["symmetry"] = {
+        "source": "spglib",
+        "symprec": 3.0e-4,
+        "symprec_scan": [1.0e-5, 3.0e-4],
+        "angle_tolerance": 0.5,
+        "allowed_orders": [3],
+        "proper_rotations_only": True,
+        "little_group_check": True,
+        "valley_preservation_check": True,
+    }
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    with pytest.warns(DeprecationWarning, match="input.poscar and symmetry.source are deprecated"):
+        config = load_config(config_path)
+
+    assert config.symmetry.operations.structure_file == config_path.parent / "legacy-CONTCAR"
+    assert config.symmetry.operations.backend == "spglib"
+    assert config.symmetry.tolerance.symprec == pytest.approx(3.0e-4)
+    assert config.symmetry.tolerance.angle_tolerance == pytest.approx(0.5)
+    assert config.symmetry.tolerance.symprec_scan == [1.0e-5, 3.0e-4]
+    assert config.symmetry.filters.allowed_orders == [3]
+
+
+def test_config_loader_prefers_new_symmetry_schema_over_legacy_fields(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "mixed.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["input"]["poscar"] = "legacy-CONTCAR"
+    raw["symmetry"]["source"] = "spglib"
+    raw["symmetry"]["symprec"] = 1.0e-1
+    raw["symmetry"]["allowed_orders"] = [2]
+    raw["symmetry"]["operations"]["structure_file"] = "new-CONTCAR"
+    raw["symmetry"]["tolerance"]["symprec"] = 2.0e-4
+    raw["symmetry"]["filters"]["allowed_orders"] = [3, 6]
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    with pytest.warns(DeprecationWarning, match="ignored"):
+        config = load_config(config_path)
+
+    assert config.symmetry.operations.structure_file == config_path.parent / "new-CONTCAR"
+    assert config.symmetry.tolerance.symprec == pytest.approx(2.0e-4)
+    assert config.symmetry.filters.allowed_orders == [3, 6]
+
+
+def test_input_poscar_fallback_for_legacy_symmetry_structure(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "fallback.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["input"]["poscar"] = "fallback-CONTCAR"
+    raw.pop("symmetry")
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    with pytest.warns(DeprecationWarning, match="input.poscar"):
+        config = load_config(config_path)
+
+    assert config.symmetry.operations.structure_file == config_path.parent / "fallback-CONTCAR"
+
+
+@pytest.mark.parametrize("check_name", ["little_group_check", "valley_preservation_check"])
+def test_legacy_false_symmetry_hard_checks_are_rejected(tmp_path, check_name):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "legacy_false_check.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["symmetry"][check_name] = False
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=f"{check_name}.*hard check"):
+        load_config(config_path)
 
 
 def test_config_loader_rejects_unknown_projection_keys(tmp_path):
@@ -220,7 +364,12 @@ def test_analyze_hsp_writes_csv_json_and_diagnostics_h5(tmp_path):
 
     assert outputs["valley_weights_csv"].exists()
     assert outputs["valley_subspace_json"].exists()
+    assert outputs["valley_summary_txt"].exists()
+    assert outputs["valley_summary_json"].exists()
     assert outputs["diagnostics_h5"].exists()
+    report = json.loads(outputs["symmetry_report_json"].read_text(encoding="utf-8"))
+    assert report["status"] == "skipped"
+    assert "symmetry.operations.structure_file" in report["reason"]
     csv_text = outputs["valley_weights_csv"].read_text(encoding="utf-8")
     csv_header = csv_text.splitlines()[0].split(",")
     assert csv_header == [
@@ -253,9 +402,105 @@ def test_analyze_hsp_writes_csv_json_and_diagnostics_h5(tmp_path):
         assert "ambiguous_mask" not in projector_group
         scan_group = h5["qcut_scan"]["GammaM"]
         assert "W_overlap" in scan_group
+        assert "W_res" in scan_group
         assert "overlap_count" in scan_group
         assert "ambiguous_weight" not in scan_group
         assert "ambiguous_count" not in scan_group
+    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    assert {
+        "input",
+        "valley_projection_summary",
+        "valley_adapted_subspace",
+        "symmetry_diagnostics",
+        "allowed_valley_preserving_rotations",
+        "rotation_eigenvalues",
+        "warnings",
+        "output_files",
+        "legend",
+    } <= set(summary)
+
+
+def test_cli_prints_human_readable_summary(tmp_path, capsys):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+
+    assert cli_main(["analyze-hsp", str(config_path)]) == 0
+
+    out = capsys.readouterr().out
+    assert "Input" in out
+    assert "Valley projection summary" in out
+    assert "W_val" in out
+    assert "P_v" in out
+    assert "W_overlap" in out
+    assert "W_res" in out
+
+
+def test_analyze_hsp_writes_symmetry_operation_detection_report(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    structure = tmp_path / "CONTCAR"
+    write_fixture(h5_path)
+    write_simple_poscar(structure)
+    write_config(config_path, h5_path, out_dir)
+
+    outputs = analyze_hsp(config_path)
+    report = json.loads(outputs["symmetry_report_json"].read_text(encoding="utf-8"))
+
+    assert report["status"] == "ok"
+    assert report["operation_detection_backend"] == "spglib"
+    assert report["structure_file"] == str(structure)
+    assert report["symprec"] == pytest.approx(1.0e-3)
+    assert report["angle_tolerance"] == pytest.approx(-1.0)
+    assert "symprec_scan_summary" in report
+    assert {"symprec", "spacegroup_number", "international", "n_operations", "n_candidate_rotations", "order_counts"} <= set(
+        report["symprec_scan_summary"][0]
+    )
+    assert "detected_operations" in report
+    assert "candidate_rotations" in report
+    assert "operations" not in report
+    assert report["little_group_check"]["required"] is True
+    assert report["valley_preservation_check"]["required"] is True
+
+
+def test_readme_symmetry_example_uses_parser_schema(tmp_path):
+    readme = Path("README.md").read_text(encoding="utf-8")
+    assert "symmetry:\n  operations:" in readme
+    assert "input:\n  wavefunction_h5: ./wave.h5\n\n  # Moire/bilayer POSCAR" not in readme
+    assert "symmetry:\n  source: spglib" not in readme
+
+    match = re.search(
+        r"For a `generate_hexagonal_210\(9, 5, \.\.\.\)` style cell:\n\n```yaml\n(.*?)\n```",
+        readme,
+        flags=re.DOTALL,
+    )
+    assert match is not None
+
+    h5_path = tmp_path / "wave.h5"
+    mono = tmp_path / "2dm-5370.vasp"
+    structure = tmp_path / "2dm-5370-7.34.vasp"
+    out_dir = tmp_path / "valley_analysis"
+    write_fixture(h5_path)
+    write_simple_poscar(mono)
+    write_simple_poscar(structure)
+
+    yaml_text = match.group(1)
+    yaml_text = yaml_text.replace("./wave.h5", str(h5_path))
+    yaml_text = yaml_text.replace("./2dm-5370.vasp", str(mono))
+    yaml_text = yaml_text.replace("./2dm-5370-7.34.vasp", str(structure))
+    yaml_text = yaml_text.replace("./valley_analysis", str(out_dir))
+    config_path = tmp_path / "readme_example.yaml"
+    config_path.write_text(yaml_text, encoding="utf-8")
+
+    config = load_config(config_path)
+
+    assert config.symmetry.operations.structure_file == structure
+    assert config.symmetry.operations.backend == "spglib"
+    assert config.symmetry.tolerance.symprec == pytest.approx(1.0e-3)
+    assert config.symmetry.filters.allowed_orders == [2, 3, 4, 6]
 
 
 def test_analyze_hsp_writes_two_valley_subspace_transform_for_degenerate_pair(tmp_path):
@@ -295,3 +540,129 @@ def test_analyze_hsp_writes_two_valley_subspace_transform_for_degenerate_pair(tm
     with h5py.File(outputs["valley_basis_transform_h5"], "r") as h5:
         assert "GammaM" in h5
         assert h5["GammaM/transform"].shape == (2, 2)
+    subspace = json.loads(outputs["valley_subspace_json"].read_text(encoding="utf-8"))
+    diagnostic = subspace["kpoints"]["GammaM"]["valley_adapted_subspace"]
+    assert diagnostic["status"] == "two_valley_adapted"
+    assert diagnostic["valid_valley_subspace"] is True
+    assert diagnostic["s_min"] == pytest.approx(1.0)
+    assert diagnostic["s_max"] == pytest.approx(1.0)
+
+
+def test_rotation_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    structure = tmp_path / "CONTCAR"
+    with h5py.File(h5_path, "w") as h5:
+        meta = h5.create_group("metadata")
+        lattice = meta.create_group("lattice")
+        lattice["direct_cart"] = np.eye(3)
+        lattice["reciprocal_cart"] = np.eye(3)
+        meta["spinor"] = False
+        meta["source"] = "toy"
+        meta["vasp_band_index_base"] = 1
+        kp = h5.create_group("kpoints").create_group("0")
+        kp["name"] = "GammaM"
+        kp["frac"] = np.array([0.0, 0.0, 0.0])
+        kp["cart"] = np.array([0.0, 0.0, 0.0])
+        q_cart = np.array(
+            [
+                [1.0, 0.0, 0.0],
+                [-1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, -1.0, 0.0],
+            ]
+        )
+        kp["g_vectors_frac"] = q_cart
+        kp["g_vectors_cart"] = q_cart
+        inv_sqrt2 = 1.0 / np.sqrt(2.0)
+        k_state = np.array([inv_sqrt2, inv_sqrt2, 0.0, 0.0])
+        kp_state = np.array([0.0, 0.0, inv_sqrt2, inv_sqrt2])
+        kp["coefficients"] = np.array(
+            [
+                [[*(inv_sqrt2 * (k_state + kp_state))]],
+                [[*(inv_sqrt2 * (k_state - kp_state))]],
+            ],
+            dtype=np.complex128,
+        )
+        kp["energies_eV"] = np.array([0.1, 0.1001])
+        kp["band_indices_vasp"] = np.array([101, 102])
+    write_square_poscar(structure)
+
+    config = {
+        "input": {"wavefunction_h5": str(h5_path)},
+        "analysis": {"kpoints": ["GammaM"], "target_bands_vasp": [101, 102], "degeneracy_tol_meV": 1.0},
+        "monolayer_lattices": {
+            "default": {"reciprocal_cart": [[10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 1.0]]}
+        },
+        "valley_centers": {
+            "coordinate_mode": "cart",
+            "centers": [
+                {"name": "K_plus", "cart": [1.0, 0.0, 0.0]},
+                {"name": "K_minus", "cart": [-1.0, 0.0, 0.0]},
+                {"name": "Kp_plus", "cart": [0.0, 1.0, 0.0]},
+                {"name": "Kp_minus", "cart": [0.0, -1.0, 0.0]},
+            ],
+        },
+        "valley_sectors": [
+            {"name": "K_sector", "centers": ["K_plus", "K_minus"]},
+            {"name": "Kp_sector", "centers": ["Kp_plus", "Kp_minus"]},
+        ],
+        "projection": {
+            "use_2d_momentum_only": True,
+            "qcut_mode": "absolute",
+            "qcut_Ainv": 0.25,
+            "overlap_cross_sector": "warn_exclude",
+            "thresholds": {"W_val_min": 0.8, "P_v_clean": 0.95, "P_v_approx": 0.85},
+        },
+        "symmetry": {
+            "operations": {"mode": "auto", "structure_file": str(structure), "backend": "spglib"},
+            "tolerance": {"symprec": 1.0e-5, "angle_tolerance": -1.0},
+            "filters": {"proper_rotations_only": True, "allowed_orders": [2, 4]},
+        },
+        "output": {"directory": str(out_dir), "write_json": True, "write_csv": True, "write_hdf5_basis_transform": True},
+    }
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    outputs = analyze_hsp(config_path)
+
+    with outputs["rotation_eigenvalues_csv"].open(encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows
+    assert {"basis", "nearest_root_of_unity", "root_deviation", "topology_ready", "reason", "valley_eta"} <= set(
+        rows[0]
+    )
+    assert any(row["basis"] == "valley_adapted" for row in rows)
+    assert all(row["basis"] != "raw_vasp_final" for row in rows)
+
+    with h5py.File(outputs["diagnostics_h5"], "r") as h5:
+        assert "rotation/GammaM" in h5
+        operation_groups = list(h5["rotation/GammaM"].values())
+        assert operation_groups
+        assert any("D_valley" in group for group in operation_groups)
+        assert all("D_raw" in group for group in operation_groups)
+        assert all("operation_order" in group for group in operation_groups)
+    summary_text = outputs["valley_summary_txt"].read_text(encoding="utf-8")
+    assert "rejected" in summary_text
+    assert "not in little group" in summary_text or "not valley preserving" in summary_text
+
+
+def test_write_detailed_files_false_writes_only_summary_files(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["output"]["write_detailed_files"] = False
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    outputs = analyze_hsp(config_path)
+
+    assert outputs["valley_summary_txt"].exists()
+    assert outputs["valley_summary_json"].exists()
+    assert not (out_dir / "valley_weights.csv").exists()
+    assert not (out_dir / "valley_subspace.json").exists()
+    assert not (out_dir / "symmetry_report.json").exists()
+    assert not (out_dir / "rotation_eigenvalues.csv").exists()
+    assert not (out_dir / "diagnostics.h5").exists()

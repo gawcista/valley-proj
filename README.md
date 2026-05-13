@@ -129,7 +129,7 @@ The matrix $S$ tests whether the target subspace lies in the chosen valley subsp
 
 ### Symmetry Diagnostics
 
-ValleyScope obtains candidate symmetry operations from `spglib` using the moire POSCAR/CONTCAR. A rotation eigenvalue is reported only after two checks:
+ValleyScope performs symmetry-operation detection from the moire or bilayer structure file. By default, candidate symmetry operations are detected from the moiré structure file using spglib, with user-controlled symprec and optional symprec_scan. A rotation eigenvalue is reported only after two checks:
 
 1. The operation belongs to the little group of the analyzed HSP.
 2. The operation preserves the target valley sector.
@@ -233,10 +233,6 @@ For a `generate_hexagonal_210(9, 5, ...)` style cell:
 input:
   wavefunction_h5: ./wave.h5
 
-  # Moire/bilayer POSCAR for spglib symmetry.
-  # This is not the monolayer POSCAR.
-  poscar: ./2dm-5370-7.34.vasp
-
   # Monolayer POSCARs for layer reciprocal lattices and valley centers.
   # With these files set, reciprocal_cart usually does not need to be written by hand.
   monolayer_poscars:
@@ -295,17 +291,24 @@ projection:
     P_v_approx: 0.85
 
 symmetry:
-  source: spglib
-  symprec: 1.0e-3
-  symprec_scan: [1.0e-5, 3.0e-5, 1.0e-4, 3.0e-4, 1.0e-3]
-  angle_tolerance: -1.0
-  allowed_orders: [2, 3, 4, 6]
-  proper_rotations_only: true
-  little_group_check: true
-  valley_preservation_check: true
+  operations:
+    mode: auto
+    structure_file: ./2dm-5370-7.34.vasp
+    backend: spglib
+  tolerance:
+    symprec: 1.0e-3
+    angle_tolerance: -1.0
+    symprec_scan: [1.0e-5, 3.0e-5, 1.0e-4, 3.0e-4, 1.0e-3]
+  filters:
+    proper_rotations_only: true
+    allowed_orders: [2, 3, 4, 6]
 
 output:
   directory: ./valley_analysis
+  summary_stdout: true
+  write_summary_txt: true
+  write_summary_json: true
+  write_detailed_files: true
   write_json: true
   write_csv: true
   write_hdf5_basis_transform: true
@@ -317,29 +320,56 @@ Run:
 valleyscope analyze-hsp analyze.yaml
 ```
 
-### POSCAR Files
+### Reading the Screen Output
 
-These two inputs serve different purposes:
+`analyze-hsp` first prints a compact physics summary. This is the first layer of diagnosis; the CSV, JSON, and HDF5 files are for reproducibility and debugging.
+
+The screen summary is organized as:
+
+```text
+Input
+Valley projection summary
+Valley-adapted subspace
+Symmetry diagnostics
+Allowed valley-preserving rotations
+Rotation eigenvalues
+Warnings
+Output files
+```
+
+Use the `Valley projection summary` table to check `W_val`, `P_v`, `W_overlap`, and `W_res` band by band. Use `Valley-adapted subspace` to decide whether the near-degenerate target subspace is a good two-valley subspace. Rotation eigenvalues are topology-ready only when they are reported in the valley-adapted basis and all little-group and valley-preservation checks pass.
+
+### Structure Files
+
+These inputs serve different purposes:
 
 ```yaml
 input:
-  poscar: ./2dm-5370-7.34.vasp
+  wavefunction_h5: ./wave.h5
   monolayer_poscars:
     top: ./2dm-5370.vasp
     bottom: ./2dm-5370.vasp
+
+symmetry:
+  operations:
+    structure_file: ./2dm-5370-7.34.vasp
 ```
 
-`input.poscar` is the moire or bilayer POSCAR/CONTCAR. It is used by `spglib` to find symmetry operations. If it is missing or the path is wrong, `symmetry_report.json` will show that symmetry analysis was skipped.
+`input.wavefunction_h5` is the extracted moire wavefunction HDF5 file. It contains the selected HSP plane-wave coefficients and the moire reciprocal lattice used by the projection workflow.
 
 `input.monolayer_poscars` are monolayer structures. They are used to build layer reciprocal lattices and interpret `layer_frac` valley centers. Once they are set, you usually do not need to write `monolayer_lattices.*.reciprocal_cart` manually.
 
-A monolayer POSCAR cannot replace the moire POSCAR for symmetry. The moire POSCAR also should not be silently reused as a monolayer reciprocal lattice.
+`symmetry.operations.structure_file` is the moire or bilayer POSCAR/CONTCAR used for candidate real-space symmetry-operation detection. If it is missing or the path is wrong, `symmetry_report.json` will show that detection was skipped.
+
+A monolayer POSCAR cannot replace the moire POSCAR for symmetry-operation detection. The moire POSCAR also should not be silently reused as a monolayer reciprocal lattice.
 
 ## Reading the Outputs
 
 The analyzer writes results under `output.directory`:
 
 ```text
+valley_summary.txt
+valley_summary.json
 valley_weights.csv
 valley_subspace.json
 valley_basis_transform.h5
@@ -381,7 +411,7 @@ Use this transform for any later representation calculation in the valley-adapte
 
 ### `symmetry_report.json`
 
-This records the `spglib` operations obtained from `input.poscar`, including operation type, rotation matrix, translation, candidate rotation status, and little-group / valley-preservation diagnostics.
+This records the detected symmetry operations, including operation type, rotation matrix, translation, candidate rotation status, operation-detection backend, and little-group / valley-preservation diagnostics.
 
 If the report says:
 
@@ -389,7 +419,7 @@ If the report says:
 "status": "skipped"
 ```
 
-the usual cause is that `input.poscar` is missing or points to the wrong file. This path must be the moire or bilayer POSCAR.
+the usual cause is that `symmetry.operations.structure_file` is missing or points to the wrong file. This path must be the moire or bilayer POSCAR/CONTCAR.
 
 ### `rotation_eigenvalues.csv`
 
@@ -566,7 +596,7 @@ V_{mn}=
 
 ### 对称性诊断（Symmetry Diagnostics）
 
-ValleyScope 使用 moire POSCAR/CONTCAR 调用 `spglib` 得到候选对称操作。只有通过两项检查后，程序才报告旋转本征值：
+ValleyScope 从 moire 或双层结构文件中自动识别候选实空间对称操作。默认情况下，程序用 spglib 作为候选对称操作识别后端，并由用户控制 `symprec` 和可选的 `symprec_scan`。只有通过两项检查后，程序才报告旋转本征值：
 
 1. 该操作属于目标高对称点的小群。
 2. 该操作保持目标谷扇区。
@@ -670,10 +700,6 @@ valleyscope extract-wavecar extract.yaml
 input:
   wavefunction_h5: ./wave.h5
 
-  # Moire/bilayer POSCAR for spglib symmetry.
-  # This is not the monolayer POSCAR.
-  poscar: ./2dm-5370-7.34.vasp
-
   # Monolayer POSCARs for layer reciprocal lattices and valley centers.
   # With these files set, reciprocal_cart usually does not need to be written by hand.
   monolayer_poscars:
@@ -732,17 +758,24 @@ projection:
     P_v_approx: 0.85
 
 symmetry:
-  source: spglib
-  symprec: 1.0e-3
-  symprec_scan: [1.0e-5, 3.0e-5, 1.0e-4, 3.0e-4, 1.0e-3]
-  angle_tolerance: -1.0
-  allowed_orders: [2, 3, 4, 6]
-  proper_rotations_only: true
-  little_group_check: true
-  valley_preservation_check: true
+  operations:
+    mode: auto
+    structure_file: ./2dm-5370-7.34.vasp
+    backend: spglib
+  tolerance:
+    symprec: 1.0e-3
+    angle_tolerance: -1.0
+    symprec_scan: [1.0e-5, 3.0e-5, 1.0e-4, 3.0e-4, 1.0e-3]
+  filters:
+    proper_rotations_only: true
+    allowed_orders: [2, 3, 4, 6]
 
 output:
   directory: ./valley_analysis
+  summary_stdout: true
+  write_summary_txt: true
+  write_summary_json: true
+  write_detailed_files: true
   write_json: true
   write_csv: true
   write_hdf5_basis_transform: true
@@ -754,29 +787,56 @@ output:
 valleyscope analyze-hsp analyze.yaml
 ```
 
-### POSCAR 文件怎么选
+### 如何阅读屏幕输出
 
-这两个输入的用途不同：
+`analyze-hsp` 会先在终端打印一份紧凑的物理诊断摘要。它是第一层判断依据；CSV、JSON 和 HDF5 文件主要用于复现、检查和调试。
+
+屏幕摘要按以下部分组织：
+
+```text
+Input
+Valley projection summary
+Valley-adapted subspace
+Symmetry diagnostics
+Allowed valley-preserving rotations
+Rotation eigenvalues
+Warnings
+Output files
+```
+
+先看 `Valley projection summary` 表中的 `W_val`、`P_v`、`W_overlap` 和 `W_res`，判断每条能带是否主要来自目标谷子空间。再看 `Valley-adapted subspace`，判断近简并目标子空间是否构成良好的双谷子空间。只有在 valley-adapted basis 中给出、且通过 little-group 与 valley-preservation 检查的旋转本征值，才可作为后续拓扑诊断的输入。
+
+### 结构文件怎么选
+
+这些输入的用途不同：
 
 ```yaml
 input:
-  poscar: ./2dm-5370-7.34.vasp
+  wavefunction_h5: ./wave.h5
   monolayer_poscars:
     top: ./2dm-5370.vasp
     bottom: ./2dm-5370.vasp
+
+symmetry:
+  operations:
+    structure_file: ./2dm-5370-7.34.vasp
 ```
 
-`input.poscar` 是 moire 或双层结构的 POSCAR/CONTCAR，用于 `spglib` 识别对称操作。如果缺少它或路径写错，`symmetry_report.json` 会显示对称性分析被跳过。
+`input.wavefunction_h5` 是抽取后的 moire 波函数 HDF5 文件，包含选定高对称点的平面波系数，以及投影流程使用的 moire 倒格矢。
 
 `input.monolayer_poscars` 是单层结构，用于构造各层倒格矢，并解释 `layer_frac` 谷中心。设置了单层 POSCAR 后，通常不需要手写 `monolayer_lattices.*.reciprocal_cart`。
 
-单层 POSCAR 不能替代 moire POSCAR 做对称性分析。moire POSCAR 也不应该被程序默认拿来当成单层倒格矢来源。
+`symmetry.operations.structure_file` 是用于识别候选实空间对称操作的 moire 或双层 POSCAR/CONTCAR。如果缺少它或路径写错，`symmetry_report.json` 会显示对称操作识别被跳过。
+
+单层 POSCAR 不能替代 moire POSCAR 做对称操作识别。moire POSCAR 也不应该被程序默认拿来当成单层倒格矢来源。
 
 ## 读取输出
 
 分析结果写到 `output.directory`：
 
 ```text
+valley_summary.txt
+valley_summary.json
 valley_weights.csv
 valley_subspace.json
 valley_basis_transform.h5
@@ -818,7 +878,7 @@ kpoint, band_vasp, energy_eV, K_sector, Kp_sector, W_val, P_v, eta, W_overlap, W
 
 ### `symmetry_report.json`
 
-这里记录从 `input.poscar` 得到的 `spglib` 对称操作，包括操作类型、旋转矩阵、平移、是否是候选旋转，以及小群与谷保持检查结果。
+这里记录检测到的对称操作，包括操作类型、旋转矩阵、平移、是否是候选旋转、操作识别后端，以及小群与谷保持检查结果。
 
 如果看到：
 
@@ -826,7 +886,7 @@ kpoint, band_vasp, energy_eV, K_sector, Kp_sector, W_val, P_v, eta, W_overlap, W
 "status": "skipped"
 ```
 
-通常说明 `input.poscar` 没有设置或路径错误。这个路径必须指向 moire 或 bilayer POSCAR。
+通常说明 `symmetry.operations.structure_file` 没有设置或路径错误。这个路径必须指向 moire 或双层 POSCAR/CONTCAR。
 
 ### `rotation_eigenvalues.csv`
 

@@ -17,6 +17,34 @@ def write_valley_weights_csv(path: str | Path, rows: list[dict[str, object]], se
     return out
 
 
+def write_rotation_eigenvalues_csv(path: str | Path, rows: list[dict[str, object]]) -> Path:
+    out = Path(path)
+    fieldnames = [
+        "kpoint",
+        "operation_id",
+        "order",
+        "basis",
+        "state_index",
+        "eigenvalue_real",
+        "eigenvalue_imag",
+        "phase_2pi",
+        "modulus_deviation",
+        "unitarity_deviation",
+        "spinor_convention_verified",
+        "nearest_root_of_unity",
+        "root_deviation",
+        "topology_ready",
+        "reason",
+        "valley_eta",
+    ]
+    with out.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+    return out
+
+
 def weight_row(
     *,
     kpoint: str,

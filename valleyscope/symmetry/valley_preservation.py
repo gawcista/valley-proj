@@ -27,15 +27,25 @@ def map_valley_sectors(
     del rotation_frac
     center_map = centers_by_name(centers)
     center_to_sector = {center_name: sector.name for sector in sectors for center_name in sector.centers}
+    for sector in sectors:
+        for center_name in sector.centers:
+            if center_name not in center_map:
+                raise ValueError(f"Unknown center in sector {sector.name}: {center_name}")
+
     center_mapping: dict[str, str | None] = {}
     for center in centers:
         rotated = np.asarray(rotation_cart, dtype=float) @ center.cart
         target_name = None
         for candidate in centers:
+            reciprocal = candidate.reciprocal_cart
+            if reciprocal is None:
+                reciprocal = center.reciprocal_cart
+            if reciprocal is None:
+                reciprocal = monolayer_reciprocal_cart
             if equivalent_mod_reciprocal(
                 rotated,
                 candidate.cart,
-                monolayer_reciprocal_cart,
+                reciprocal,
                 tolerance=tolerance,
                 shell=2,
                 use_2d=True,
@@ -47,19 +57,18 @@ def map_valley_sectors(
     sector_mapping: dict[str, str | None] = {}
     preserved: dict[str, bool] = {}
     for sector in sectors:
-        mapped_sector_names = set()
+        mapped_sector_names: set[str] = set()
+        all_centers_mapped = True
         for center_name in sector.centers:
             target_center = center_mapping.get(center_name)
-            if target_center is not None:
+            if target_center is None:
+                all_centers_mapped = False
+            else:
                 mapped_sector_names.add(center_to_sector[target_center])
-        if len(mapped_sector_names) == 1 and len(mapped_sector_names) == len({next(iter(mapped_sector_names))}):
+        if all_centers_mapped and len(mapped_sector_names) == 1:
             target_sector = next(iter(mapped_sector_names))
         else:
             target_sector = None
         sector_mapping[sector.name] = target_sector
         preserved[sector.name] = target_sector == sector.name
-    for sector in sectors:
-        for center_name in sector.centers:
-            if center_name not in center_map:
-                raise ValueError(f"Unknown center in sector {sector.name}: {center_name}")
     return ValleyMappingResult(sector_mapping, preserved, center_mapping)

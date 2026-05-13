@@ -17,7 +17,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "analyze-hsp":
         outputs = analyze_hsp(args.config)
-        print(f"Wrote valley analysis outputs to {next(iter(outputs.values())).parent}")
+        if outputs.get("summary_stdout", True):
+            print(str(outputs["summary_text"]), end="")
         return 0
     if args.command == "extract-wavecar":
         output = extract_wavecar_to_h5(args.config)
