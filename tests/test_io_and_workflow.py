@@ -157,6 +157,67 @@ def test_config_loader_parses_core_schema(tmp_path):
     assert config.valley_sectors[0].name == "K_sector"
 
 
+def test_config_loader_accepts_simplified_schema_aliases(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "simplified.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    config = {
+        "input": {"wavefunction_h5": str(h5_path)},
+        "analysis": {
+            "kpoints": ["GammaM"],
+            "iband": [101],
+            "subspace_energy_tol_meV": 2.0,
+        },
+        "monolayer_lattices": {
+            "default": {"reciprocal_cart": [[10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 1.0]]}
+        },
+        "valley_centers": {
+            "coordinate_mode": "cart",
+            "centers": [
+                {"name": "K", "cart": [0.0, 0.0, 0.0]},
+                {"name": "Kp", "cart": [5.0, 0.0, 0.0]},
+            ],
+        },
+        "valley_manifolds": [
+            {"name": "K_valley", "centers": ["K"]},
+            {"name": "Kp_valley", "centers": ["Kp"]},
+        ],
+        "projection": {
+            "qcut_fraction": 0.2,
+            "thresholds": {"W_val_min": 0.8},
+        },
+        "symmetry": {
+            "operations": {"structure_file": "CONTCAR"},
+            "filters": {"rotation_order": "auto"},
+        },
+        "spinor": {
+            "convention": "vasp_up_down_saxis_z",
+            "convention_verified": True,
+            "benchmark": "tMoTe2_VBM_C3_literature",
+        },
+        "output": {"directory": str(out_dir)},
+    }
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    config = load_config(config_path)
+
+    assert config.analysis.target_bands_vasp == [101]
+    assert config.analysis.degeneracy_tol_meV == pytest.approx(2.0)
+    assert config.valley_sectors[0].name == "K_valley"
+    assert config.projection.qcut_mode == "relative_min_sector_distance"
+    assert config.projection.qcut_fraction == pytest.approx(0.2)
+    assert config.projection.use_2d_momentum_only is True
+    assert config.projection.overlap_cross_sector == "warn_exclude"
+    assert config.symmetry.operations.structure_file == config_path.parent / "CONTCAR"
+    assert config.symmetry.operations.backend == "spglib"
+    assert config.symmetry.filters.proper_rotations_only is True
+    assert config.symmetry.filters.allowed_orders == [2, 3, 4, 6]
+    assert config.spinor.convention == "vasp_up_down_saxis_z"
+    assert config.spinor.convention_verified is True
+    assert config.spinor.benchmark == "tMoTe2_VBM_C3_literature"
+
+
 def test_config_loader_accepts_legacy_symmetry_schema_with_deprecation_warning(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "legacy.yaml"
@@ -670,6 +731,8 @@ def test_rotation_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp
         "topology_ready",
         "spinor_rotation_applied",
         "spinor_convention_verified",
+        "spinor_convention",
+        "spinor_benchmark",
         "diagnostic_only",
         "D_valley_offdiag_norm",
         "reason",
@@ -690,6 +753,8 @@ def test_rotation_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp
         assert all("basis" in group.attrs for group in operation_groups)
         assert all("spinor_rotation_applied" in group for group in operation_groups)
         assert all("spinor_convention_verified" in group for group in operation_groups)
+        assert all("spinor_convention" in group.attrs for group in operation_groups)
+        assert all("spinor_benchmark" in group.attrs for group in operation_groups)
         assert all("rotation_ready" in group for group in operation_groups)
         assert all("topology_input_ready" in group for group in operation_groups)
         assert all("diagnostic_only" in group for group in operation_groups)
@@ -701,6 +766,8 @@ def test_rotation_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp
     assert "topology_input_ready" in summary_text
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     assert any("topology_input_ready" in row for row in summary["rotation_eigenvalues"])
+    assert "spinor_convention" in summary["input"]
+    assert "spinor_benchmark" in summary["rotation_eigenvalues"][0]
 
 
 def test_write_detailed_files_false_writes_only_summary_files(tmp_path):

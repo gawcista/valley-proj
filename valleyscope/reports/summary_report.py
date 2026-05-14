@@ -27,6 +27,9 @@ def build_summary_payload(
             if config.symmetry.operations.structure_file is None
             else str(config.symmetry.operations.structure_file),
             "operation_detection_backend": config.symmetry.operations.backend,
+            "spinor_convention": config.spinor.convention,
+            "spinor_convention_verified": config.spinor.convention_verified,
+            "spinor_benchmark": config.spinor.benchmark,
         },
         "target_kpoints": list(config.analysis.kpoints),
         "target_bands_vasp": list(config.analysis.target_bands_vasp),
@@ -68,6 +71,12 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     lines.append(f"wavefunction_h5: {input_summary['wavefunction_h5']}")
     lines.append(f"operation structure: {input_summary['operation_structure_file']}")
     lines.append(f"operation-detection backend: {input_summary['operation_detection_backend']}")
+    lines.append(
+        "spinor convention: "
+        f"{input_summary['spinor_convention']} "
+        f"(verified={input_summary['spinor_convention_verified']}, "
+        f"benchmark={input_summary['spinor_benchmark']})"
+    )
     lines.append(f"target k-points: {', '.join(summary['target_kpoints'])}")
     lines.append(f"target bands (VASP): {', '.join(str(v) for v in summary['target_bands_vasp'])}")
     qcut = summary["qcut"]

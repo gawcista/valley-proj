@@ -20,8 +20,8 @@ layer_transforms:
 
 analysis:
   kpoints: [GammaM, KM, MM]
-  target_bands_vasp: [101, 102]
-  degeneracy_tol_meV: 1.0
+  iband: [101, 102]
+  subspace_energy_tol_meV: 1.0
 
 valley_centers:
   coordinate_mode: layer_frac
@@ -39,18 +39,15 @@ valley_centers:
       layer: bottom
       frac: [-0.333333333333, -0.333333333333, 0.0]
 
-valley_sectors:
-  - name: K_sector
+valley_manifolds:
+  - name: K_valley
     centers: [top_K, bottom_K]
-  - name: Kp_sector
+  - name: Kp_valley
     centers: [top_Kp, bottom_Kp]
 
 projection:
-  use_2d_momentum_only: true
-  qcut_mode: relative_min_sector_distance
   qcut_fraction: 0.20
   qcut_scan: [0.15, 0.20, 0.25, 0.30]
-  overlap_cross_sector: warn_exclude
   thresholds:
     W_val_min: 0.8
     P_v_clean: 0.95
@@ -58,24 +55,13 @@ projection:
 
 symmetry:
   operations:
-    mode: auto
     structure_file: ./CONTCAR
-    backend: spglib
   tolerance:
     symprec: 1.0e-3
     angle_tolerance: -1.0
     symprec_scan: [1.0e-5, 3.0e-5, 1.0e-4, 3.0e-4, 1.0e-3]
   filters:
-    proper_rotations_only: true
-    allowed_orders: [2, 3, 4, 6]
     rotation_order: auto
 
 output:
   directory: ./valley_analysis
-  summary_stdout: true
-  write_summary_txt: true
-  write_summary_json: true
-  write_detailed_files: true
-  write_json: true
-  write_csv: true
-  write_hdf5_basis_transform: true

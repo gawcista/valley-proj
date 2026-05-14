@@ -35,6 +35,8 @@ def write_rotation_eigenvalues_csv(path: str | Path, rows: list[dict[str, object
         "topology_ready",
         "spinor_rotation_applied",
         "spinor_convention_verified",
+        "spinor_convention",
+        "spinor_benchmark",
         "diagnostic_only",
         "D_valley_offdiag_norm",
         "nearest_root_of_unity",

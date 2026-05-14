@@ -200,6 +200,9 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     symmetry_payload=symmetry_payload,
                     basis_payload=basis_transforms.get(kpoint_name),
                     rotation_payload=rotation_payload,
+                    spinor_convention_verified=config.spinor.convention_verified,
+                    spinor_convention=config.spinor.convention,
+                    spinor_benchmark=config.spinor.benchmark,
                 )
             )
 

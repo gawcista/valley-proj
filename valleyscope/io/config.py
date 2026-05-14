@@ -82,6 +82,13 @@ class OutputConfig:
 
 
 @dataclass(frozen=True)
+class SpinorConfig:
+    convention: str = "vasp_up_down_saxis_z"
+    convention_verified: bool = False
+    benchmark: str | None = None
+
+
+@dataclass(frozen=True)
 class AppConfig:
     input: InputConfig
     analysis: AnalysisConfig
@@ -90,6 +97,7 @@ class AppConfig:
     projection: ProjectionConfig
     output: OutputConfig
     symmetry: SymmetryConfig = field(default_factory=SymmetryConfig)
+    spinor: SpinorConfig = field(default_factory=SpinorConfig)
     monolayer_lattices: dict[str, np.ndarray] = field(default_factory=dict)
     layer_transforms: dict[str, dict[str, Any]] = field(default_factory=dict)
 
@@ -356,6 +364,76 @@ def _parse_centers(
     return centers
 
 
+def _parse_analysis_config(raw: dict[str, Any]) -> AnalysisConfig:
+    if "iband" in raw:
+        if "target_bands_vasp" in raw and list(raw["target_bands_vasp"]) != list(raw["iband"]):
+            warnings.warn(
+                "analysis.target_bands_vasp is ignored because analysis.iband is present.",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+        target_bands = raw["iband"]
+    else:
+        target_bands = raw.get("target_bands_vasp", [])
+
+    if "subspace_energy_tol_meV" in raw:
+        if "degeneracy_tol_meV" in raw and float(raw["degeneracy_tol_meV"]) != float(raw["subspace_energy_tol_meV"]):
+            warnings.warn(
+                "analysis.degeneracy_tol_meV is ignored because analysis.subspace_energy_tol_meV is present.",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+        degeneracy_tol = raw["subspace_energy_tol_meV"]
+    else:
+        degeneracy_tol = raw.get("degeneracy_tol_meV", 1.0)
+
+    return AnalysisConfig(
+        kpoints=list(raw.get("kpoints", [])),
+        target_bands_vasp=[int(value) for value in target_bands],
+        degeneracy_tol_meV=float(degeneracy_tol),
+    )
+
+
+def _parse_valley_sectors(raw: dict[str, Any]) -> list[ValleySector]:
+    if "valley_manifolds" in raw:
+        if "valley_sectors" in raw and raw["valley_sectors"] != raw["valley_manifolds"]:
+            warnings.warn(
+                "valley_sectors is ignored because valley_manifolds is present.",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+        sectors_raw = raw.get("valley_manifolds", [])
+    else:
+        sectors_raw = raw.get("valley_sectors", [])
+    return [ValleySector(item["name"], list(item["centers"])) for item in sectors_raw]
+
+
+def _projection_qcut_mode(raw: dict[str, Any]) -> str:
+    if "qcut_mode" in raw:
+        return str(raw["qcut_mode"])
+    if "qcut_Ainv" in raw:
+        return "absolute"
+    if "qcut_fraction" in raw:
+        return "relative_min_sector_distance"
+    return "moire_shell"
+
+
+def _parse_spinor_config(raw: dict[str, Any]) -> SpinorConfig:
+    convention = str(raw.get("convention", "vasp_up_down_saxis_z"))
+    if convention != "vasp_up_down_saxis_z":
+        raise ValueError("spinor.convention currently supports only 'vasp_up_down_saxis_z'")
+    convention_verified = bool(raw.get("convention_verified", raw.get("verified", False)))
+    benchmark = raw.get("benchmark")
+    benchmark = None if benchmark is None else str(benchmark)
+    if convention_verified and not benchmark:
+        raise ValueError("spinor.convention_verified=true requires spinor.benchmark")
+    return SpinorConfig(
+        convention=convention,
+        convention_verified=convention_verified,
+        benchmark=benchmark,
+    )
+
+
 def load_config(path: str | Path) -> AppConfig:
     config_path = Path(path)
     base = config_path.parent
@@ -375,7 +453,7 @@ def load_config(path: str | Path) -> AppConfig:
         layer_transforms,
         moire_direct,
     )
-    sectors = [ValleySector(item["name"], list(item["centers"])) for item in raw.get("valley_sectors", [])]
+    sectors = _parse_valley_sectors(raw)
     analysis_raw = raw.get("analysis", {})
     projection_raw = raw.get("projection", {})
     allowed_projection_keys = {
@@ -404,16 +482,12 @@ def load_config(path: str | Path) -> AppConfig:
             wavefunction_h5=_path(base, input_raw["wavefunction_h5"]),
             monolayer_poscars=monolayer_poscars,
         ),
-        analysis=AnalysisConfig(
-            kpoints=list(analysis_raw.get("kpoints", [])),
-            target_bands_vasp=[int(value) for value in analysis_raw.get("target_bands_vasp", [])],
-            degeneracy_tol_meV=float(analysis_raw.get("degeneracy_tol_meV", 1.0)),
-        ),
+        analysis=_parse_analysis_config(analysis_raw),
         valley_centers=centers,
         valley_sectors=sectors,
         projection=ProjectionConfig(
             use_2d_momentum_only=bool(projection_raw.get("use_2d_momentum_only", True)),
-            qcut_mode=str(projection_raw.get("qcut_mode", "moire_shell")),
+            qcut_mode=_projection_qcut_mode(projection_raw),
             qcut_shell=float(projection_raw.get("qcut_shell", 3.0)),
             qcut_Ainv=projection_raw.get("qcut_Ainv"),
             qcut_fraction=float(projection_raw.get("qcut_fraction", 0.3)),
@@ -422,6 +496,7 @@ def load_config(path: str | Path) -> AppConfig:
             thresholds=dict(projection_raw.get("thresholds", {})),
         ),
         symmetry=_parse_symmetry_config(base, input_raw, symmetry_raw),
+        spinor=_parse_spinor_config(raw.get("spinor", {})),
         output=OutputConfig(
             directory=_path(base, output_raw.get("directory", "valley_analysis")),
             write_json=bool(output_raw.get("write_json", True)),

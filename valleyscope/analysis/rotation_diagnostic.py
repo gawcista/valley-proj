@@ -22,6 +22,9 @@ def rotation_diagnostics_for_kpoint(
     symmetry_payload: dict[str, object],
     basis_payload: dict[str, np.ndarray] | None,
     rotation_payload: dict[str, object],
+    spinor_convention_verified: bool = False,
+    spinor_convention: str = "vasp_up_down_saxis_z",
+    spinor_benchmark: str | None = None,
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for operation in symmetry_payload["detected_operations"]:
@@ -51,12 +54,13 @@ def rotation_diagnostics_for_kpoint(
             continue
         spin_rotation = None
         spinor_rotation_applied = False
-        spinor_convention_verified = coefficients.shape[1] == 1
+        spinor_verified = coefficients.shape[1] == 1
         if coefficients.shape[1] == 2:
             try:
                 axis, angle = rotation_axis_angle(np.asarray(operation["rotation_cart"]))
                 spin_rotation = spin_rotation_matrix(axis, angle)
                 spinor_rotation_applied = True
+                spinor_verified = bool(spinor_convention_verified)
             except ValueError as exc:
                 operation.setdefault("representation_quality", {})[kpoint_name] = {
                     "skipped_reason": f"spinor rotation skipped: {exc}",
@@ -94,7 +98,7 @@ def rotation_diagnostics_for_kpoint(
             valley_eta = np.asarray(basis_payload.get("eta", []), dtype=float)
             reason = ""
             valid_valley_subspace = True
-        eigen = extract_rotation_eigenvalues(matrix_for_eigen, spinor_convention_verified=spinor_convention_verified)
+        eigen = extract_rotation_eigenvalues(matrix_for_eigen, spinor_convention_verified=spinor_verified)
         rotation_ready = bool(
             representation.mapping_miss_count == 0 and eigen.unitarity_deviation <= UNITARITY_TOL
         )
@@ -109,7 +113,7 @@ def rotation_diagnostics_for_kpoint(
                     rotation_ready=rotation_ready,
                     basis=basis,
                     valid_valley_subspace=valid_valley_subspace,
-                    spinor_convention_verified=spinor_convention_verified,
+                    spinor_convention_verified=spinor_verified,
                     root_deviation=root_deviation,
                     d_valley_offdiag_norm=d_valley_offdiag_norm,
                 )
@@ -125,7 +129,7 @@ def rotation_diagnostics_for_kpoint(
             "max_root_deviation": float(np.max(root_deviations)) if len(root_deviations) else 0.0,
             "rotation_ready": rotation_ready,
             "spinor_rotation_applied": spinor_rotation_applied,
-            "spinor_convention_verified": spinor_convention_verified,
+            "spinor_convention_verified": spinor_verified,
             "diagnostic_only": bool(np.any(diagnostic_only_by_state)),
             "D_valley_offdiag_norm": np.nan if d_valley_offdiag_norm is None else d_valley_offdiag_norm,
             "basis": basis,
@@ -146,7 +150,9 @@ def rotation_diagnostics_for_kpoint(
             "basis": basis,
             "rotation_ready": rotation_ready,
             "spinor_rotation_applied": spinor_rotation_applied,
-            "spinor_convention_verified": spinor_convention_verified,
+            "spinor_convention_verified": spinor_verified,
+            "spinor_convention": spinor_convention,
+            "spinor_benchmark": "" if spinor_benchmark is None else spinor_benchmark,
             "topology_input_ready": topology_input_ready_by_state,
             "topology_ready": topology_input_ready_by_state,
             "diagnostic_only": diagnostic_only_by_state,
@@ -170,7 +176,7 @@ def rotation_diagnostics_for_kpoint(
                 base_reason=reason,
                 rotation_ready=rotation_ready,
                 spinor_rotation_applied=spinor_rotation_applied,
-                spinor_convention_verified=spinor_convention_verified,
+                spinor_convention_verified=spinor_verified,
                 root_deviation=root_deviation,
                 d_valley_offdiag_norm=d_valley_offdiag_norm,
                 topology_input_ready=bool(topology_input_ready),
@@ -189,7 +195,9 @@ def rotation_diagnostics_for_kpoint(
                     "unitarity_deviation": float(eigen.unitarity_deviation),
                     "rotation_ready": rotation_ready,
                     "spinor_rotation_applied": spinor_rotation_applied,
-                    "spinor_convention_verified": spinor_convention_verified,
+                    "spinor_convention_verified": spinor_verified,
+                    "spinor_convention": spinor_convention,
+                    "spinor_benchmark": "" if spinor_benchmark is None else spinor_benchmark,
                     "nearest_root_of_unity": f"exp(2pii*{root_index}/{root_order})",
                     "root_deviation": root_deviation,
                     "topology_input_ready": bool(topology_input_ready),

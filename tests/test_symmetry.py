@@ -350,6 +350,47 @@ def test_spinful_c3_root_diagnostic_uses_double_group_order():
     assert rows[0]["root_deviation"] == pytest.approx(0.0, abs=1e-12)
 
 
+def test_spinor_convention_benchmark_marks_spinor_rows_verified():
+    angle = 2.0 * np.pi / 3.0
+    rotation_cart = np.array(
+        [
+            [np.cos(angle), -np.sin(angle), 0.0],
+            [np.sin(angle), np.cos(angle), 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    coefficients = np.array([[[1.0 + 0.0j], [0.0 + 0.0j]]], dtype=np.complex128)
+    symmetry_payload = {
+        "detected_operations": [
+            {
+                "operation_id": 0,
+                "candidate_rotation": True,
+                "rotation_frac": np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]]),
+                "rotation_cart": rotation_cart,
+                "translation_cart": np.zeros(3),
+                "preserved": {"K_sector": True},
+                "order": 3,
+                "kind": "C3",
+            }
+        ]
+    }
+
+    rows = rotation_diagnostics_for_kpoint(
+        kpoint_name="GammaM",
+        k_frac=np.zeros(3),
+        q_cart=np.zeros((1, 3)),
+        coefficients=coefficients,
+        symmetry_payload=symmetry_payload,
+        basis_payload=None,
+        rotation_payload={},
+        spinor_convention_verified=True,
+    )
+
+    assert rows[0]["spinor_rotation_applied"] is True
+    assert rows[0]["spinor_convention_verified"] is True
+    assert rows[0]["reason"] == "not valley-adapted"
+
+
 def test_rotation_ready_tolerates_small_truncation_unitarity_error():
     coefficients = np.array([[[np.sqrt(0.99999) + 0.0j]]], dtype=np.complex128)
     symmetry_payload = {

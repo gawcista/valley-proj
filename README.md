@@ -254,8 +254,8 @@ layer_transforms:
 
 analysis:
   kpoints: [GammaM, KM, MM]
-  target_bands_vasp: [2195, 2196]
-  degeneracy_tol_meV: 1.0
+  iband: [2195, 2196]
+  subspace_energy_tol_meV: 1.0
 
 valley_centers:
   coordinate_mode: layer_frac
@@ -273,18 +273,15 @@ valley_centers:
       layer: bottom
       frac: [-0.333333333333, -0.333333333333, 0.0]
 
-valley_sectors:
-  - name: K_sector
+valley_manifolds:
+  - name: K_valley
     centers: [top_K, bottom_K]
-  - name: Kp_sector
+  - name: Kp_valley
     centers: [top_Kp, bottom_Kp]
 
 projection:
-  use_2d_momentum_only: true
-  qcut_mode: relative_min_sector_distance
   qcut_fraction: 0.20
   qcut_scan: [0.15, 0.20, 0.25, 0.30]
-  overlap_cross_sector: warn_exclude
   thresholds:
     W_val_min: 0.8
     P_v_clean: 0.95
@@ -292,27 +289,21 @@ projection:
 
 symmetry:
   operations:
-    mode: auto
     structure_file: ./2dm-5370-7.34.vasp
-    backend: spglib
   tolerance:
     symprec: 1.0e-3
     angle_tolerance: -1.0
     symprec_scan: [1.0e-5, 3.0e-5, 1.0e-4, 3.0e-4, 1.0e-3]
   filters:
-    proper_rotations_only: true
-    allowed_orders: [2, 3, 4, 6]
     rotation_order: auto
+
+spinor:
+  convention: vasp_up_down_saxis_z
+  convention_verified: true
+  benchmark: tMoTe2_VBM_C3_literature
 
 output:
   directory: ./valley_analysis
-  summary_stdout: true
-  write_summary_txt: true
-  write_summary_json: true
-  write_detailed_files: true
-  write_json: true
-  write_csv: true
-  write_hdf5_basis_transform: true
 ```
 
 Run:
@@ -341,7 +332,7 @@ Output files
 
 Use the `Valley projection summary` table to check `W_val`, `P_v`, `W_overlap`, and `W_res` band by band. Use `Valley-adapted subspace` to decide whether the near-degenerate target subspace is a good two-valley subspace. In the rotation table, `topology_input_ready` only means that the HSP rotation eigenvalue is suitable as an input to a later symmetry-based topology analysis; it does not validate full-mBZ valley-resolved topology. The legacy `topology_ready` column is kept as a backward-compatible alias of `topology_input_ready`.
 
-For SOC/spinor wavefunctions, ValleyScope applies the SU(2) spin rotation in the plane-wave representation, but VASP spinor phase conventions have not yet been benchmark-verified. Such rows are reported with `spinor_rotation_applied=True`, `spinor_convention_verified=False`, and `diagnostic_only=True`; they are not marked `topology_input_ready`.
+For SOC/spinor wavefunctions, ValleyScope applies the SU(2) spin rotation in the plane-wave representation. By default, VASP spinor phase conventions are treated as unverified, so spinful rows are reported with `spinor_rotation_applied=True`, `spinor_convention_verified=False`, and `diagnostic_only=True`. After an explicit benchmark, set `spinor.convention_verified: true` and record the benchmark name. For the tMoTe2 VBM C3 check used here, the benchmark is the literature pattern $\Gamma_M: -1$ and $K_M: e^{\pm i\pi/3}$ for the two spin-valley branches; this still does not validate full-mBZ valley-resolved topology.
 
 Example screen summary:
 
@@ -351,6 +342,7 @@ Input
 wavefunction_h5: ./wave.h5
 operation structure: ./2dm-5370-7.34.vasp
 operation-detection backend: spglib
+spinor convention: vasp_up_down_saxis_z (verified=True, benchmark=tMoTe2_VBM_C3_literature)
 target k-points: GammaM, KM, MM
 target bands (VASP): 2195, 2196
 qcut mode: relative_min_sector_distance
@@ -358,10 +350,10 @@ qcut value: 0.034 A^-1
 
 Valley manifolds
 ----------------
-label      centers
----------  ----------------
-K_sector   top_K, bottom_K
-Kp_sector  top_Kp, bottom_Kp
+label     centers
+--------  ----------------
+K_valley  top_K, bottom_K
+Kp_valley top_Kp, bottom_Kp
 
 Valley projection summary
 -------------------------
@@ -479,7 +471,7 @@ spinor_convention_verified, diagnostic_only, D_valley_offdiag_norm
 
 `rotation_ready` checks whether the representation matrix was constructed without missing plane-wave mappings and with small unitarity deviation. `topology_input_ready` additionally requires a valid two-sector valley-adapted basis, small root-of-unity deviation, and small two-sector `D_valley_offdiag_norm`. It does not claim a full valley Chern number. For compatibility, `topology_ready` stores the same value. `D_valley_offdiag_norm` is only a two-sector valley-adapted diagnostic; it is not a general multi-valley or multidimensional-irrep criterion.
 
-Spinor rows remain diagnostic-only unless the VASP spinor convention is benchmark-verified.
+Spinor rows remain diagnostic-only unless the VASP spinor convention is benchmark-verified. If `spinor.convention_verified: true` is used, the benchmark label is written to `spinor_benchmark` so the result remains auditable.
 
 The main columns mean:
 
@@ -800,8 +792,8 @@ layer_transforms:
 
 analysis:
   kpoints: [GammaM, KM, MM]
-  target_bands_vasp: [2195, 2196]
-  degeneracy_tol_meV: 1.0
+  iband: [2195, 2196]
+  subspace_energy_tol_meV: 1.0
 
 valley_centers:
   coordinate_mode: layer_frac
@@ -819,18 +811,15 @@ valley_centers:
       layer: bottom
       frac: [-0.333333333333, -0.333333333333, 0.0]
 
-valley_sectors:
-  - name: K_sector
+valley_manifolds:
+  - name: K_valley
     centers: [top_K, bottom_K]
-  - name: Kp_sector
+  - name: Kp_valley
     centers: [top_Kp, bottom_Kp]
 
 projection:
-  use_2d_momentum_only: true
-  qcut_mode: relative_min_sector_distance
   qcut_fraction: 0.20
   qcut_scan: [0.15, 0.20, 0.25, 0.30]
-  overlap_cross_sector: warn_exclude
   thresholds:
     W_val_min: 0.8
     P_v_clean: 0.95
@@ -838,27 +827,21 @@ projection:
 
 symmetry:
   operations:
-    mode: auto
     structure_file: ./2dm-5370-7.34.vasp
-    backend: spglib
   tolerance:
     symprec: 1.0e-3
     angle_tolerance: -1.0
     symprec_scan: [1.0e-5, 3.0e-5, 1.0e-4, 3.0e-4, 1.0e-3]
   filters:
-    proper_rotations_only: true
-    allowed_orders: [2, 3, 4, 6]
     rotation_order: auto
+
+spinor:
+  convention: vasp_up_down_saxis_z
+  convention_verified: true
+  benchmark: tMoTe2_VBM_C3_literature
 
 output:
   directory: ./valley_analysis
-  summary_stdout: true
-  write_summary_txt: true
-  write_summary_json: true
-  write_detailed_files: true
-  write_json: true
-  write_csv: true
-  write_hdf5_basis_transform: true
 ```
 
 运行：
@@ -887,7 +870,7 @@ Output files
 
 先看 `Valley projection summary` 表中的 `W_val`、`P_v`、`W_overlap` 和 `W_res`，判断每条能带是否主要来自目标谷子空间。再看 `Valley-adapted subspace`，判断近简并目标子空间是否构成良好的双谷子空间。在旋转本征值表中，`topology_input_ready` 只表示这个高对称点旋转本征值适合作为后续基于对称性的拓扑分析输入；它不验证整个 moire 布里渊区上的谷分辨拓扑。旧字段 `topology_ready` 保留为 `topology_input_ready` 的兼容别名。
 
-对于含自旋轨道耦合的 spinor 波函数，ValleyScope 会在平面波表示中施加 SU(2) 自旋旋转，但 VASP spinor 相位约定尚未经过基准验证。因此这些行会标记为 `spinor_rotation_applied=True`、`spinor_convention_verified=False` 和 `diagnostic_only=True`，不会标记为 `topology_input_ready`。
+对于含自旋轨道耦合的自旋波函数（spinor wavefunctions），ValleyScope 会在平面波表示中施加 SU(2) 自旋旋转。默认情况下，VASP 自旋波函数相位约定仍被视为未验证，因此这些行会标记为 `spinor_rotation_applied=True`、`spinor_convention_verified=False` 和 `diagnostic_only=True`。完成明确基准测试后，可以设置 `spinor.convention_verified: true`，并在 `spinor.benchmark` 记录基准名称。这里使用的 tMoTe2 价带顶 C3 基准来自文献模式：$\Gamma_M: -1$，$K_M: e^{\pm i\pi/3}$；这仍不等同于验证整个 moire 布里渊区的谷分辨拓扑。
 
 屏幕摘要示例：
 
@@ -897,6 +880,7 @@ Input
 wavefunction_h5: ./wave.h5
 operation structure: ./2dm-5370-7.34.vasp
 operation-detection backend: spglib
+spinor convention: vasp_up_down_saxis_z (verified=True, benchmark=tMoTe2_VBM_C3_literature)
 target k-points: GammaM, KM, MM
 target bands (VASP): 2195, 2196
 qcut mode: relative_min_sector_distance
@@ -904,10 +888,10 @@ qcut value: 0.034 A^-1
 
 Valley manifolds
 ----------------
-label      centers
----------  ----------------
-K_sector   top_K, bottom_K
-Kp_sector  top_Kp, bottom_Kp
+label     centers
+--------  ----------------
+K_valley  top_K, bottom_K
+Kp_valley top_Kp, bottom_Kp
 
 Valley projection summary
 -------------------------
@@ -1025,7 +1009,7 @@ spinor_convention_verified, diagnostic_only, D_valley_offdiag_norm
 
 `rotation_ready` 检查表示矩阵是否没有缺失的平面波映射，并且幺正性偏差较小。`topology_input_ready` 进一步要求有效的双谷适配基、较小的单位根偏差，以及较小的双谷 `D_valley_offdiag_norm`。它不声明完整 valley Chern number。为了兼容旧结果，`topology_ready` 保存同一个值。`D_valley_offdiag_norm` 只是双谷谷适配诊断，不是通用多谷或多维不可约表示判据。
 
-spinor 行在 VASP spinor 约定完成基准验证前都只作为诊断结果。
+自旋波函数行在 VASP 自旋约定完成基准验证前都只作为诊断结果。如果使用 `spinor.convention_verified: true`，基准名称会写入 `spinor_benchmark`，便于之后审计。
 
 主要列的含义如下：
 
