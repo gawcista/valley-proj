@@ -4,6 +4,12 @@ from pathlib import Path
 
 import numpy as np
 
+from valleyscope.analysis.decision_tree import (
+    derive_derived_score,
+    derive_polarization_score,
+    derive_symmetry_status,
+    derive_valley_status,
+)
 from valleyscope.analysis.rotation_diagnostic import rotation_diagnostics_for_kpoint
 from valleyscope.geometry.lattice import (
     cart_rotation_from_fractional,
@@ -18,7 +24,7 @@ from valleyscope.projection.qcut_scan import (
     scan_qcut,
 )
 from valleyscope.projection.sector_projectors import SectorProjectors, build_sector_projectors
-from valleyscope.projection.weights import classify_valley_weights, compute_valley_weights
+from valleyscope.projection.weights import compute_valley_weights
 from valleyscope.reports.analysis_outputs import write_analysis_outputs
 from valleyscope.reports.csv_report import weight_row
 from valleyscope.subspace.valley_basis import build_two_valley_adapted_basis
@@ -52,12 +58,13 @@ def _resolve_qcut(
 
 
 def _target_band_positions(available_bands: np.ndarray, target_bands: list[int]) -> list[int]:
+    band_to_pos = {int(b): i for i, b in enumerate(available_bands)}
     positions: list[int] = []
     for band in target_bands:
-        matches = np.where(available_bands == band)[0]
-        if len(matches) == 0:
+        pos = band_to_pos.get(band)
+        if pos is None:
             raise ValueError(f"HDF5 is missing target VASP band index: {band}")
-        positions.append(int(matches[0]))
+        positions.append(pos)
     return positions
 
 
@@ -112,24 +119,18 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         kpoint_subspace = {
             "qcut": qcut,
             "warnings": projectors.warnings,
+            "symmetry_status": "not_requested",
             "weights": [
-                {
-                    "band_vasp": int(kpoint.band_indices_vasp[positions[idx]]),
-                    "classification": classify_valley_weights(
-                        w_val=result.w_val,
-                        purity=result.purity,
-                        thresholds=config.projection.thresholds,
-                    ),
-                    "sector_weights": result.sector_weights,
-                    "W_val": result.w_val,
-                    "P_v": result.purity,
-                    "eta": result.eta,
-                    "W_overlap": result.overlap_weight,
-                    "W_res": result.residual_weight,
-                }
+                _build_weight_entry(
+                    band_vasp=int(kpoint.band_indices_vasp[positions[idx]]),
+                    result=result,
+                    thresholds=config.projection.thresholds,
+                )
                 for idx, result in enumerate(weights)
             ],
         }
+        max_w_overlap = max((w.overlap_weight for w in weights), default=0.0)
+        max_w_res = max((w.residual_weight for w in weights), default=0.0)
         _add_valley_subspace_diagnostic(
             kpoint_subspace,
             basis_transforms,
@@ -139,7 +140,9 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             coefficients,
             projectors,
             config.analysis.degeneracy_tol_meV,
-            config.projection.thresholds.get("W_val_min", 0.8),
+            thresholds=config.projection.thresholds if config.projection.thresholds else None,
+            max_w_overlap=max_w_overlap,
+            max_w_res=max_w_res,
         )
         subspace_payload["kpoints"][kpoint_name] = kpoint_subspace
         if config.projection.qcut_scan:
@@ -205,6 +208,9 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     spinor_benchmark=config.spinor.benchmark,
                 )
             )
+        kpoint_subspace["symmetry_status"] = _resolve_symmetry_status(
+            symmetry_payload, rotation_rows, kpoint_name,
+        )
 
     sector_names = list(projectors_by_kpoint[next(iter(projectors_by_kpoint))].sector_masks)
     return write_analysis_outputs(
@@ -231,8 +237,11 @@ def _add_valley_subspace_diagnostic(
     coefficients: np.ndarray,
     projectors: SectorProjectors,
     degeneracy_tol_meV: float,
-    w_val_min: float,
+    thresholds: dict[str, float] | None = None,
+    max_w_overlap: float = 0.0,
+    max_w_res: float = 0.0,
 ) -> None:
+    w_val_min = float(thresholds.get("W_val_min", 0.8)) if thresholds else 0.8
     sector_names = projectors.sector_names
     energy_span_meV = float((np.max(energies_eV) - np.min(energies_eV)) * 1000.0)
     diagnostic: dict[str, object] = {
@@ -258,6 +267,11 @@ def _add_valley_subspace_diagnostic(
         s_max = float(np.max(s_eigenvalues)) if len(s_eigenvalues) else 0.0
         valid_valley_subspace = bool(s_min >= w_val_min)
         status = "two_valley_adapted" if valid_valley_subspace else "poor_valley_manifold"
+        max_abs_eta = float(max(abs(v) for v in result.eta)) if len(result.eta) else 0.0
+        subspace_derived = derive_derived_score(analysis_level="adapted_subspace", s_min=s_min)
+        subspace_polarization = derive_polarization_score(
+            analysis_level="adapted_subspace", eta_adapted=result.eta
+        )
         diagnostic.update(
             {
                 "status": status,
@@ -266,10 +280,21 @@ def _add_valley_subspace_diagnostic(
                 "s_eigenvalues": s_eigenvalues,
                 "s_min": s_min,
                 "s_max": s_max,
+                "max_abs_eta": max_abs_eta,
                 "valid_valley_subspace": valid_valley_subspace,
                 "v_eigenvalues": np.linalg.eigvalsh(result.v_matrix),
                 "transform_h5_group": kpoint_name,
             }
+        )
+        payload["derived_score"] = subspace_derived
+        payload["polarization_score"] = subspace_polarization
+        payload["subspace_valley_status"] = derive_valley_status(
+            analysis_level="adapted_subspace",
+            derived_score=subspace_derived,
+            polarization_score=subspace_polarization,
+            w_overlap=max_w_overlap,
+            w_res=max_w_res,
+            thresholds=thresholds,
         )
         if valid_valley_subspace:
             basis_transforms[kpoint_name] = {
@@ -307,17 +332,27 @@ def _prepare_symmetry_payload(config: AppConfig, monolayer_recip: np.ndarray) ->
         "little_group_check": {"required": True, "status": "not_run"},
         "valley_preservation_check": {"required": True, "status": "not_run"},
     }
-    if structure_file is None or not structure_file.exists():
+    if structure_file is None:
         return {
             **base_payload,
             "status": "skipped",
             "reason": (
-                "symmetry.operations.structure_file is missing or does not exist. "
+                "symmetry.operations.structure_file is missing. "
                 "Symmetry-operation detection requires the moire/bilayer POSCAR or CONTCAR; "
                 "input.monolayer_poscars are used for monolayer reciprocal geometry and valley centers."
             ),
         }
-    cell = read_poscar_cell(str(structure_file))
+    try:
+        cell = read_poscar_cell(str(structure_file))
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        return {
+            **base_payload,
+            "status": "skipped",
+            "reason": (
+                f"symmetry.operations.structure_file could not be read: {exc}. "
+                "Symmetry-operation detection requires the moire/bilayer POSCAR or CONTCAR."
+            ),
+        }
     dataset = find_symmetry_operations(cell, symmetry.tolerance.symprec, symmetry.tolerance.angle_tolerance)
     lattice = np.asarray(cell[0], dtype=float)
     candidate_orders = _candidate_rotation_orders(dataset.rotations)
@@ -327,10 +362,11 @@ def _prepare_symmetry_payload(config: AppConfig, monolayer_recip: np.ndarray) ->
         candidate_orders=candidate_orders,
     )
     effective_allowed_orders = [] if resolved_rotation_order is None else [resolved_rotation_order]
+    inv_direct_T = np.linalg.inv(lattice.T)
     operations = []
     for op_id, (rotation, translation) in enumerate(zip(dataset.rotations, dataset.translations)):
         info = classify_operation(rotation, translation, allowed_orders=effective_allowed_orders)
-        rotation_cart = cart_rotation_from_fractional(rotation, lattice)
+        rotation_cart = cart_rotation_from_fractional(rotation, lattice, inv_direct_T=inv_direct_T)
         translation_cart = cart_translation_from_fractional(translation, lattice)
         valley_mapping = map_valley_sectors(
             rotation,
@@ -442,3 +478,85 @@ def _candidate_rotation_orders(rotations: list[np.ndarray]) -> list[int]:
         if info.det == 1 and info.order in {2, 3, 4, 6}:
             orders.append(int(info.order))
     return orders
+
+
+def _build_weight_entry(
+    *,
+    band_vasp: int,
+    result,
+    thresholds: dict[str, float],
+) -> dict[str, object]:
+    sector_count = len(result.sector_weights)
+    two_sector = sector_count == 2
+    eta_raw = result.eta if two_sector else None
+    derived = derive_derived_score(analysis_level="raw_state", w_val=result.w_val)
+    polarization = derive_polarization_score(
+        analysis_level="raw_state",
+        eta_raw=eta_raw if two_sector else None,
+        purity=None if two_sector else result.purity,
+    )
+    status = derive_valley_status(
+        analysis_level="raw_state",
+        derived_score=derived,
+        polarization_score=polarization,
+        w_overlap=result.overlap_weight,
+        w_res=result.residual_weight,
+        thresholds=thresholds,
+        two_sector=two_sector,
+    )
+    return {
+        "band_vasp": band_vasp,
+        "analysis_level": "raw_state",
+        "derived_score": derived,
+        "polarization_score": polarization,
+        "valley_status": status,
+        "sector_weights": result.sector_weights,
+        "W_val": result.w_val,
+        "P_v": result.purity,
+        "eta": eta_raw,
+        "W_overlap": result.overlap_weight,
+        "W_res": result.residual_weight,
+    }
+
+
+def _resolve_symmetry_status(
+    symmetry_payload: dict[str, object],
+    rotation_rows: list[dict[str, object]],
+    kpoint_name: str,
+) -> str:
+    symmetry_skipped = symmetry_payload.get("status") == "skipped"
+    if symmetry_payload.get("rotation_eigenvalue_enabled") is False:
+        return "not_requested"
+    has_topology_ready = any(
+        row.get("topology_input_ready") for row in rotation_rows
+        if row.get("kpoint") == kpoint_name
+    )
+    has_diagnostic = any(
+        row.get("kpoint") == kpoint_name for row in rotation_rows
+    )
+
+    little_group_passed: bool | None = None
+    valley_preserving: bool | None = None
+    for op in symmetry_payload.get("detected_operations", []):
+        if not op.get("candidate_rotation", False):
+            continue
+        lg = op.get("little_group_by_kpoint", {}).get(kpoint_name)
+        if lg is False:
+            little_group_passed = False
+            continue
+        if lg is True:
+            little_group_passed = True
+            allowed = op.get("allowed_for_single_valley_rotation_by_kpoint", {}).get(kpoint_name, False)
+            if not allowed:
+                preserved = op.get("preserved", {})
+                if any(not bool(v) for v in preserved.values()):
+                    valley_preserving = False
+                else:
+                    valley_preserving = True
+
+    return derive_symmetry_status(
+        symmetry_skipped=symmetry_skipped,
+        little_group_passed=little_group_passed,
+        valley_preserving=valley_preserving,
+        topology_input_ready=has_topology_ready if has_topology_ready else (False if has_diagnostic and not has_topology_ready else None),
+    )

@@ -54,7 +54,7 @@ class WavecarReader:
             self.coeff_dtype = np.complex128
         else:
             raise ValueError(f"Unsupported WAVECAR RTAG {self.rtag}; supported: 45200, 45210, 53300, 53310")
-        second = self._read_record_raw(1, 12, np.float64)
+        second = self._read_record(1, np.float64, count=12)
         nkpts = int(round(second[0]))
         nbands = int(round(second[1]))
         encut = float(second[2])
@@ -78,22 +78,17 @@ class WavecarReader:
     def __exit__(self, exc_type, exc, tb) -> None:
         self.close()
 
-    def _read_record_raw(self, record_index: int, count: int, dtype) -> np.ndarray:
+    def _read_record(self, record_index: int, dtype, *, count: int | None = None) -> np.ndarray:
         self._handle.seek(record_index * self.record_length)
         raw = self._handle.read(self.record_length)
         if len(raw) != self.record_length:
             raise ValueError(f"Could not read WAVECAR record {record_index + 1}")
         arr = np.frombuffer(raw, dtype=dtype)
-        if count > len(arr):
-            raise ValueError(f"WAVECAR record {record_index + 1} is too short for {count} values")
-        return arr[:count].copy()
-
-    def _read_record_all(self, record_index: int, dtype) -> np.ndarray:
-        self._handle.seek(record_index * self.record_length)
-        raw = self._handle.read(self.record_length)
-        if len(raw) != self.record_length:
-            raise ValueError(f"Could not read WAVECAR record {record_index + 1}")
-        return np.frombuffer(raw, dtype=dtype).copy()
+        if count is not None:
+            if count > len(arr):
+                raise ValueError(f"WAVECAR record {record_index + 1} is too short for {count} values")
+            return arr[:count].copy()
+        return arr.copy()
 
     def _record_index(self, spin_index: int, kpoint_index: int, band_offset: int | None = None) -> int:
         if spin_index < 0 or spin_index >= self.header.nspin:
@@ -108,7 +103,7 @@ class WavecarReader:
 
     def read_band_header(self, kpoint_index: int, *, spin_index: int = 0) -> WavecarBandHeader:
         record_index = self._record_index(spin_index, kpoint_index)
-        values = self._read_record_raw(record_index, 4 + 3 * self.header.nbands, np.float64)
+        values = self._read_record(record_index, np.float64, count=4 + 3 * self.header.nbands)
         bands = values[4:].reshape(self.header.nbands, 3)
         return WavecarBandHeader(
             nplane_record=int(round(values[0])),
@@ -129,7 +124,7 @@ class WavecarReader:
         if band_index < 0 or band_index >= self.header.nbands:
             raise ValueError(f"band_index out of range: {band_index + 1}")
         record_index = self._record_index(spin_index, kpoint_index, band_index)
-        coeffs = self._read_record_all(record_index, self.coeff_dtype)
+        coeffs = self._read_record(record_index, self.coeff_dtype)
         nonzero_len = _trim_complex_record(coeffs)
         if nonzero_len == nplane:
             nspinor = 1
@@ -170,17 +165,10 @@ class WavecarReader:
             return arr
         if nplane_record % 2 == 0 and len(arr) == nplane_record // 2:
             return arr
-        expected_text = f"{nplane_record} or {nplane_record // 2} for spinor-count records"
-        if nplane_record % 2 != 0:
-            expected_text = str(nplane_record)
-        if nplane_record % 2 == 0:
-            raise ValueError(
-                f"Generated {len(arr)} G-vectors but WAVECAR reports {nplane_record} "
-                f"({expected_text}). Unsupported WAVECAR variant or cutoff/G-list convention mismatch."
-            )
+        hint = f"{nplane_record} or {nplane_record // 2} for spinor-count records" if nplane_record % 2 == 0 else str(nplane_record)
         raise ValueError(
-            f"Generated {len(arr)} G-vectors but WAVECAR reports {nplane_record}. "
-            "Unsupported WAVECAR variant or cutoff/G-list convention mismatch."
+            f"Generated {len(arr)} G-vectors but WAVECAR reports {nplane_record} "
+            f"(expected {hint}). Unsupported WAVECAR variant or cutoff/G-list convention mismatch."
         )
 
 

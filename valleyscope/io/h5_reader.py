@@ -34,11 +34,14 @@ class WavefunctionData:
     metadata: WavefunctionMetadata
     kpoints: list[KPointData]
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "_kpoint_by_name", {kp.name: kp for kp in self.kpoints})
+
     def find_kpoint(self, name: str) -> KPointData:
-        for kpoint in self.kpoints:
-            if kpoint.name == name:
-                return kpoint
-        raise KeyError(f"HDF5 does not contain target k-point: {name}")
+        try:
+            return self._kpoint_by_name[name]
+        except KeyError:
+            raise KeyError(f"HDF5 does not contain target k-point: {name}")
 
 
 def _read_string(dataset) -> str:
@@ -100,4 +103,9 @@ def read_wavefunction_h5(path: str | Path) -> WavefunctionData:
                     band_indices_vasp=bands,
                 )
             )
+    seen_names: set[str] = set()
+    for kp in kpoints:
+        if kp.name in seen_names:
+            raise ValueError(f"Duplicate k-point name in HDF5: {kp.name}")
+        seen_names.add(kp.name)
     return WavefunctionData(metadata=metadata, kpoints=kpoints)

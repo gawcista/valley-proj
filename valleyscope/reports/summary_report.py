@@ -50,10 +50,14 @@ def build_summary_payload(
         "warnings": warnings,
         "output_files": {name: str(path) for name, path in output_paths.items()},
         "legend": {
-            "W_val": "target-valley-subspace weight",
-            "P_v": "valley purity inside the selected valley subspace",
+            "derived_score": "W_val for raw state or s_min for subspace — target-valley-subspace weight",
+            "polarization_score": "abs(eta) for raw state or max(abs(eta_adapted)) for subspace — valley polarization",
+            "valley_status": "controlled vocabulary: not_valley_derived | projector_unreliable | raw_valley_clean | raw_valley_mixed | valley_separable_subspace | valley_mixed_subspace",
+            "symmetry_status": "controlled vocabulary: not_requested | rejected_not_little_group | rejected_not_valley_preserving | diagnostic_only | topology_input_ready",
+            "W_val": "target-valley-subspace weight (raw band)",
+            "P_v": "valley purity inside the selected valley subspace (P_v = (1+|eta|)/2 for two sectors)",
             "eta": "signed valley polarization for a two-valley diagnostic",
-            "W_overlap": "cross-sector projector-window overlap weight",
+            "W_overlap": "cross-sector projector-window overlap weight — projector-quality diagnostic, not physical intervalley mixing",
             "W_res": "out-of-valley residual weight",
             "topology_input_ready": (
                 "HSP rotation eigenvalue is suitable as input to later symmetry-based topology analysis; "
@@ -98,22 +102,22 @@ def render_summary_text(summary: dict[str, Any]) -> str:
 
     _section(lines, "Valley projection summary")
     lines.append(
-        "Legend: W_val target-valley-subspace weight; P_v valley purity; "
-        "W_overlap projector-window overlap; W_res out-of-valley residual."
+        "Legend: derived=valley-subspace weight; pol=|eta|; "
+        "W_overlap=cross-sector window overlap; W_res=out-of-valley residual."
     )
     projection_rows = summary["valley_projection_summary"]
     lines.extend(
         _table(
-            ["kpoint", "band", "W_val", "P_v", "W_overlap", "W_res", "status"],
+            ["kpoint", "band", "derived", "pol", "W_overlap", "W_res", "valley_status"],
             [
                 [
                     row["kpoint"],
                     row["band_vasp"],
-                    _fmt(row["W_val"]),
-                    _fmt(row["P_v"]),
-                    _fmt(row["W_overlap"]),
-                    _fmt(row["W_res"]),
-                    row["status"],
+                    _fmt(row.get("derived_score", row.get("W_val"))),
+                    _fmt(row.get("polarization_score", "")),
+                    _fmt(row.get("W_overlap")),
+                    _fmt(row.get("W_res")),
+                    row.get("valley_status", ""),
                 ]
                 for row in projection_rows
             ],
@@ -124,15 +128,17 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     _section(lines, "Valley-adapted subspace")
     lines.extend(
         _table(
-            ["kpoint", "status", "eta", "s_min", "s_max", "s_eigenvalues"],
+            ["kpoint", "status", "derived", "pol", "eta_adapted", "s_min", "s_max", "valley_status"],
             [
                 [
                     row["kpoint"],
-                    row["status"],
-                    _short_list(row.get("eta")),
+                    row.get("subspace_status", ""),
+                    _fmt(row.get("derived_score")),
+                    _fmt(row.get("polarization_score")),
+                    _short_list(row.get("eta_adapted")),
                     _fmt(row.get("s_min")),
                     _fmt(row.get("s_max")),
-                    _short_list(row.get("s_eigenvalues")),
+                    row.get("valley_status", ""),
                 ]
                 for row in summary["valley_adapted_subspace"]
             ],
@@ -247,22 +253,20 @@ def _projection_rows(subspace_payload: dict[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for kpoint, payload in subspace_payload.get("kpoints", {}).items():
         for weight in payload.get("weights", []):
-            classification = weight.get("classification", {})
-            if not classification.get("valley_derived", False):
-                status = "not-valley-derived"
-            else:
-                clean = classification.get("valley_clean", "mixed")
-                status = "valley-clean" if clean == "clean" else clean
             rows.append(
                 {
                     "kpoint": kpoint,
                     "band_vasp": weight.get("band_vasp"),
+                    "analysis_level": "raw_state",
+                    "derived_score": weight.get("derived_score", weight.get("W_val")),
+                    "polarization_score": weight.get("polarization_score"),
                     "W_val": weight.get("W_val"),
                     "P_v": weight.get("P_v"),
                     "eta": weight.get("eta"),
                     "W_overlap": weight.get("W_overlap"),
                     "W_res": weight.get("W_res"),
-                    "status": status,
+                    "valley_status": weight.get("valley_status", "not_valley_derived"),
+                    "symmetry_status": payload.get("symmetry_status", "not_requested"),
                 }
             )
     return rows
@@ -275,12 +279,17 @@ def _subspace_rows(subspace_payload: dict[str, Any]) -> list[dict[str, Any]]:
         rows.append(
             {
                 "kpoint": kpoint,
-                "status": diagnostic.get("status"),
-                "eta": diagnostic.get("eta"),
+                "analysis_level": "adapted_subspace",
+                "subspace_status": diagnostic.get("status", ""),
+                "derived_score": diagnostic.get("s_min"),
+                "polarization_score": diagnostic.get("max_abs_eta"),
                 "s_eigenvalues": diagnostic.get("s_eigenvalues"),
                 "s_min": diagnostic.get("s_min"),
                 "s_max": diagnostic.get("s_max"),
+                "eta_adapted": diagnostic.get("eta"),
                 "valid_valley_subspace": diagnostic.get("valid_valley_subspace"),
+                "valley_status": payload.get("subspace_valley_status", ""),
+                "symmetry_status": payload.get("symmetry_status", "not_requested"),
             }
         )
     return rows
@@ -353,8 +362,17 @@ def _collect_warnings(
         for warning in payload.get("warnings", []):
             warnings.append(f"{kpoint}: {warning}")
         diagnostic = payload.get("valley_adapted_subspace", {})
-        if diagnostic.get("status") == "poor_valley_manifold":
-            warnings.append(f"{kpoint}: poor_valley_manifold; rotation eigenvalues are diagnostic-only")
+        sv_status = payload.get("subspace_valley_status", "")
+        if sv_status == "valley_mixed_subspace":
+            warnings.append(f"{kpoint}: valley_mixed_subspace; rotation eigenvalues are diagnostic-only")
+        if sv_status == "not_valley_derived":
+            warnings.append(f"{kpoint}: subspace not_valley_derived; target subspace is not valley-derived")
+        if sv_status == "projector_unreliable":
+            warnings.append(f"{kpoint}: projector_unreliable; check W_overlap and W_res")
+        for row_weight in payload.get("weights", []):
+            w_v_status = row_weight.get("valley_status", "")
+            if w_v_status == "projector_unreliable":
+                warnings.append(f"{kpoint} band {row_weight.get('band_vasp')}: projector_unreliable; check W_overlap and W_res")
     if any(row.get("basis") != "valley_adapted" for row in rotation_rows):
         warnings.append("Some rotation eigenvalues are not valley-adapted and are diagnostic-only")
     if any(

@@ -30,7 +30,7 @@ def build_sector_projectors(
     qcut: float,
     *,
     use_2d: bool = True,
-    g_search_shell: int = 2,
+    g_search_shell: int = 3,
     overlap_policy: str = "warn_exclude",
 ) -> SectorProjectors:
     q = np.asarray(q_cart, dtype=float)

@@ -37,17 +37,23 @@ def read_poscar_lattice(path: str) -> Lattice:
 
 
 def _read_poscar_lines(path: str) -> list[str]:
-    lines = [line.rstrip() for line in open(path, encoding="utf-8")]
+    with open(path, encoding="utf-8") as handle:
+        lines = [line.rstrip() for line in handle]
     while lines and not lines[-1].strip():
         lines.pop()
     return lines
 
 
-def cart_rotation_from_fractional(rotation_frac: np.ndarray, direct_cart: np.ndarray) -> np.ndarray:
+def cart_rotation_from_fractional(
+    rotation_frac: np.ndarray, direct_cart: np.ndarray, *, inv_direct_T: np.ndarray | None = None
+) -> np.ndarray:
     """Convert spglib x' = W x to Cartesian column action r' = R r."""
     rotation = np.asarray(rotation_frac, dtype=float)
-    direct = np.asarray(direct_cart, dtype=float)
-    return direct.T @ rotation @ np.linalg.inv(direct.T)
+    if inv_direct_T is None:
+        inv_direct_T = np.linalg.inv(np.asarray(direct_cart, dtype=float).T)
+    else:
+        inv_direct_T = np.asarray(inv_direct_T, dtype=float)
+    return np.asarray(direct_cart, dtype=float).T @ rotation @ inv_direct_T
 
 
 def cart_translation_from_fractional(translation_frac: np.ndarray, direct_cart: np.ndarray) -> np.ndarray:

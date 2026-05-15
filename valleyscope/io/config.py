@@ -11,6 +11,7 @@ import h5py
 
 from valleyscope.geometry.lattice import read_poscar_lattice, reciprocal_from_direct
 from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector
+from valleyscope.io import resolve_config_path
 from valleyscope.symmetry.rotation_selection import parse_rotation_order
 
 
@@ -102,23 +103,8 @@ class AppConfig:
     layer_transforms: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def default_monolayer_reciprocal(self) -> np.ndarray:
-        if "default" in self.monolayer_lattices:
-            return self.monolayer_lattices["default"]
-        if self.monolayer_lattices:
-            return next(iter(self.monolayer_lattices.values()))
-        for layer, path in self.input.monolayer_poscars.items():
-            del layer
-            return read_poscar_lattice(str(path)).reciprocal_cart
-        raise ValueError(
-            "No monolayer reciprocal lattice configured; provide monolayer_lattices or monolayer_poscars"
-        )
+        return _resolve_fallback_reciprocal(self.monolayer_lattices, self.input.monolayer_poscars)
 
-
-def _path(base: Path, value: str | None) -> Path | None:
-    if value is None:
-        return None
-    path = Path(value)
-    return path if path.is_absolute() else base / path
 
 
 def _section(raw: dict[str, Any], key: str) -> dict[str, Any]:
@@ -175,48 +161,52 @@ def _parse_symmetry_config(
         operations_raw = _section(symmetry_raw, "operations")
         tolerance_raw = _section(symmetry_raw, "tolerance")
         filters_raw = _section(symmetry_raw, "filters")
-        structure_file = _path(base, operations_raw.get("structure_file"))
-        backend = str(operations_raw.get("backend", "spglib"))
-        mode = str(operations_raw.get("mode", "auto"))
-        symprec = float(tolerance_raw.get("symprec", 1e-3))
-        angle_tolerance = float(tolerance_raw.get("angle_tolerance", -1.0))
-        symprec_scan = [float(value) for value in tolerance_raw.get("symprec_scan", [])]
-        proper_rotations_only = bool(filters_raw.get("proper_rotations_only", True))
-        allowed_orders = [int(value) for value in filters_raw.get("allowed_orders", [2, 3, 4, 6])]
-        rotation_order = parse_rotation_order(
-            filters_raw.get("rotation_order", symmetry_raw.get("rotation_order", "auto"))
+        fields = dict(
+            structure_file=resolve_config_path(base, operations_raw.get("structure_file")),
+            backend=str(operations_raw.get("backend", "spglib")),
+            mode=str(operations_raw.get("mode", "auto")),
+            symprec=float(tolerance_raw.get("symprec", 1e-3)),
+            angle_tolerance=float(tolerance_raw.get("angle_tolerance", -1.0)),
+            symprec_scan=[float(v) for v in tolerance_raw.get("symprec_scan", [])],
+            proper_rotations_only=bool(filters_raw.get("proper_rotations_only", True)),
+            allowed_orders=[int(v) for v in filters_raw.get("allowed_orders", [2, 3, 4, 6])],
+            rotation_order=parse_rotation_order(
+                filters_raw.get("rotation_order", symmetry_raw.get("rotation_order", "auto"))
+            ),
         )
     else:
-        structure_file = _path(base, input_raw.get("poscar"))
-        backend = str(symmetry_raw.get("source", "spglib"))
-        mode = "auto"
-        symprec = float(symmetry_raw.get("symprec", 1e-3))
-        angle_tolerance = float(symmetry_raw.get("angle_tolerance", -1.0))
-        symprec_scan = [float(value) for value in symmetry_raw.get("symprec_scan", [])]
-        proper_rotations_only = bool(symmetry_raw.get("proper_rotations_only", True))
-        allowed_orders = [int(value) for value in symmetry_raw.get("allowed_orders", [2, 3, 4, 6])]
-        rotation_order = parse_rotation_order(symmetry_raw.get("rotation_order", "auto"))
+        fields = dict(
+            structure_file=resolve_config_path(base, input_raw.get("poscar")),
+            backend=str(symmetry_raw.get("source", "spglib")),
+            mode="auto",
+            symprec=float(symmetry_raw.get("symprec", 1e-3)),
+            angle_tolerance=float(symmetry_raw.get("angle_tolerance", -1.0)),
+            symprec_scan=[float(v) for v in symmetry_raw.get("symprec_scan", [])],
+            proper_rotations_only=bool(symmetry_raw.get("proper_rotations_only", True)),
+            allowed_orders=[int(v) for v in symmetry_raw.get("allowed_orders", [2, 3, 4, 6])],
+            rotation_order=parse_rotation_order(symmetry_raw.get("rotation_order", "auto")),
+        )
 
-    if mode != "auto":
+    if fields["mode"] != "auto":
         raise ValueError("symmetry.operations.mode currently supports only 'auto'")
-    if backend != "spglib":
+    if fields["backend"] != "spglib":
         raise ValueError("symmetry.operations.backend currently supports only 'spglib'")
 
     return SymmetryConfig(
         operations=SymmetryOperationsConfig(
-            mode=mode,
-            structure_file=structure_file,
-            backend=backend,
+            mode=fields["mode"],
+            structure_file=fields["structure_file"],
+            backend=fields["backend"],
         ),
         tolerance=SymmetryToleranceConfig(
-            symprec=symprec,
-            angle_tolerance=angle_tolerance,
-            symprec_scan=symprec_scan,
+            symprec=fields["symprec"],
+            angle_tolerance=fields["angle_tolerance"],
+            symprec_scan=fields["symprec_scan"],
         ),
         filters=SymmetryFilterConfig(
-            proper_rotations_only=proper_rotations_only,
-            allowed_orders=allowed_orders,
-            rotation_order=rotation_order,
+            proper_rotations_only=fields["proper_rotations_only"],
+            allowed_orders=fields["allowed_orders"],
+            rotation_order=fields["rotation_order"],
         ),
         little_group_check=True,
         valley_preservation_check=True,
@@ -236,9 +226,11 @@ def _parse_lattices(raw: dict[str, Any]) -> dict[str, np.ndarray]:
 
 
 def _read_h5_direct_cart(path: Path) -> np.ndarray | None:
-    if not path.exists():
+    try:
+        h5 = h5py.File(path, "r")
+    except (FileNotFoundError, OSError):
         return None
-    with h5py.File(path, "r") as h5:
+    with h5:
         if "metadata/lattice/direct_cart" not in h5:
             return None
         direct = np.asarray(h5["metadata/lattice/direct_cart"][()], dtype=float)
@@ -249,13 +241,16 @@ def _read_h5_direct_cart(path: Path) -> np.ndarray | None:
 
 def _moire_direct_cart(base: Path, input_raw: dict[str, Any]) -> np.ndarray | None:
     if "wavefunction_h5" in input_raw:
-        direct = _read_h5_direct_cart(_path(base, input_raw["wavefunction_h5"]))
+        direct = _read_h5_direct_cart(resolve_config_path(base, input_raw["wavefunction_h5"]))
         if direct is not None:
             return direct
     if input_raw.get("poscar") is not None:
-        poscar = _path(base, input_raw.get("poscar"))
-        if poscar is not None and poscar.exists():
-            return read_poscar_lattice(str(poscar)).direct_cart
+        poscar = resolve_config_path(base, input_raw.get("poscar"))
+        if poscar is not None:
+            try:
+                return read_poscar_lattice(str(poscar)).direct_cart
+            except (FileNotFoundError, OSError, ValueError):
+                pass
     return None
 
 
@@ -266,7 +261,7 @@ def _rotation_z_row(degrees: float) -> np.ndarray:
     return np.array([[c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0]], dtype=float)
 
 
-def _fallback_reciprocal(
+def _resolve_fallback_reciprocal(
     lattices: dict[str, np.ndarray],
     monolayer_poscars: dict[str, Path],
 ) -> np.ndarray:
@@ -310,7 +305,7 @@ def _layer_reciprocal(
     elif layer is not None and layer in monolayer_poscars:
         reciprocal = read_poscar_lattice(str(monolayer_poscars[layer])).reciprocal_cart
     else:
-        reciprocal = _fallback_reciprocal(lattices, monolayer_poscars)
+        reciprocal = _resolve_fallback_reciprocal(lattices, monolayer_poscars)
     rotation = _rotation_z_row(float(transform.get("rotation_deg", 0.0)))
     return np.asarray(reciprocal, dtype=float) @ rotation
 
@@ -440,7 +435,7 @@ def load_config(path: str | Path) -> AppConfig:
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     input_raw = raw.get("input", {})
     monolayer_poscars = {
-        str(name): _path(base, str(value))
+        str(name): resolve_config_path(base, str(value))
         for name, value in (input_raw.get("monolayer_poscars") or {}).items()
     }
     monolayer_lattices = _parse_lattices(raw.get("monolayer_lattices", {}))
@@ -479,7 +474,7 @@ def load_config(path: str | Path) -> AppConfig:
         raise ValueError("valley_sectors must not be empty")
     return AppConfig(
         input=InputConfig(
-            wavefunction_h5=_path(base, input_raw["wavefunction_h5"]),
+            wavefunction_h5=resolve_config_path(base, input_raw["wavefunction_h5"]),
             monolayer_poscars=monolayer_poscars,
         ),
         analysis=_parse_analysis_config(analysis_raw),
@@ -498,7 +493,7 @@ def load_config(path: str | Path) -> AppConfig:
         symmetry=_parse_symmetry_config(base, input_raw, symmetry_raw),
         spinor=_parse_spinor_config(raw.get("spinor", {})),
         output=OutputConfig(
-            directory=_path(base, output_raw.get("directory", "valley_analysis")),
+            directory=resolve_config_path(base, output_raw.get("directory", "valley_analysis")),
             write_json=bool(output_raw.get("write_json", True)),
             write_csv=bool(output_raw.get("write_csv", True)),
             write_hdf5_basis_transform=bool(output_raw.get("write_hdf5_basis_transform", True)),

@@ -6,6 +6,7 @@ import h5py
 import numpy as np
 import yaml
 
+from valleyscope.io import resolve_config_path
 from valleyscope.io.wavecar import WavecarReader
 
 
@@ -20,8 +21,12 @@ def extract_wavecar_to_h5(config_path: str | Path) -> Path:
         raise ValueError("input.wavecar is required")
     if "wavefunction_h5" not in output_raw:
         raise ValueError("output.wavefunction_h5 is required")
-    wavecar_path = _resolve(base, input_raw["wavecar"])
-    output_h5 = _resolve(base, output_raw["wavefunction_h5"])
+    wavecar_path = resolve_config_path(base, input_raw["wavecar"])
+    if wavecar_path is None:
+        raise ValueError("input.wavecar path resolution failed")
+    output_h5 = resolve_config_path(base, output_raw["wavefunction_h5"])
+    if output_h5 is None:
+        raise ValueError("output.wavefunction_h5 path resolution failed")
     kpoints = extract_raw.get("kpoints", [])
     bands_vasp = [int(value) for value in extract_raw.get("bands_vasp", [])]
     spin_index = int(extract_raw.get("spin_index", 1)) - 1
@@ -77,11 +82,6 @@ def extract_wavecar_to_h5(config_path: str | Path) -> Path:
             group["norms"] = np.sum(np.abs(coefficients) ** 2, axis=(1, 2))
         metadata["spinor"] = bool(spinor_seen)
     return output_h5
-
-
-def _resolve(base: Path, value: str) -> Path:
-    path = Path(value)
-    return path if path.is_absolute() else base / path
 
 
 def _stack_coefficients(coefficients: list[np.ndarray]) -> np.ndarray:

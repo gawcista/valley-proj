@@ -471,16 +471,11 @@ def test_analyze_hsp_writes_csv_json_and_diagnostics_h5(tmp_path):
     ]
     subspace = json.loads(outputs["valley_subspace_json"].read_text(encoding="utf-8"))
     weight = subspace["kpoints"]["GammaM"]["weights"][0]
-    assert set(weight) == {
-        "band_vasp",
-        "classification",
-        "sector_weights",
-        "W_val",
-        "P_v",
-        "eta",
-        "W_overlap",
-        "W_res",
-    }
+    assert {
+        "band_vasp", "sector_weights", "W_val", "P_v", "eta", "W_overlap", "W_res",
+    }.issubset(set(weight))
+    assert weight.get("analysis_level") == "raw_state"
+    assert weight.get("valley_status") == "raw_valley_clean"
     with h5py.File(outputs["diagnostics_h5"], "r") as h5:
         projector_group = h5["projectors"]["GammaM"]
         assert "overlap_mask" in projector_group
@@ -503,6 +498,10 @@ def test_analyze_hsp_writes_csv_json_and_diagnostics_h5(tmp_path):
         "output_files",
         "legend",
     } <= set(summary)
+    subspace_rows = summary["valley_adapted_subspace"]
+    assert subspace_rows
+    assert subspace_rows[0].get("valley_status") != "not_valley_derived"
+    assert not any("target subspace is not valley-derived" in w for w in summary["warnings"])
 
 
 def test_cli_prints_human_readable_summary(tmp_path, capsys):
@@ -517,8 +516,8 @@ def test_cli_prints_human_readable_summary(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "Input" in out
     assert "Valley projection summary" in out
-    assert "W_val" in out
-    assert "P_v" in out
+    assert "derived" in out
+    assert "valley_status" in out
     assert "W_overlap" in out
     assert "W_res" in out
     assert "Valley manifolds" in out
@@ -934,3 +933,263 @@ def test_summary_output_files_use_human_readable_labels(tmp_path):
     assert "Human-readable summary:" in text
     assert "rotation_eigenvalues_csv:" not in text
     assert "valley_summary_txt:" not in text
+
+
+def test_single_band_and_not_degenerate_no_subspace_valley_status_mislabel(tmp_path):
+    """P1-2: single_band / not_degenerate should not be labelled not_valley_derived."""
+    cases = [
+        ("single_band", np.array([0.1]), np.array([101])),
+        ("not_degenerate", np.array([0.1, 0.105]), np.array([101, 102])),
+    ]
+    for label, energies, bands in cases:
+        h5_path = tmp_path / f"wf_{label}.h5"
+        with h5py.File(h5_path, "w") as h5:
+            meta = h5.create_group("metadata")
+            lattice = meta.create_group("lattice")
+            lattice["direct_cart"] = np.eye(3)
+            lattice["reciprocal_cart"] = np.eye(3) * 10.0
+            meta["spinor"] = False
+            meta["source"] = "toy"
+            meta["vasp_band_index_base"] = 1
+            kp = h5.create_group("kpoints").create_group("0")
+            kp["name"] = "GammaM"
+            kp["frac"] = np.array([0.0, 0.0, 0.0])
+            kp["cart"] = np.array([0.0, 0.0, 0.0])
+            nb = len(bands)
+            kp["g_vectors_frac"] = np.array([[0, 0, 0], [1, 0, 0]])
+            kp["g_vectors_cart"] = np.array([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]])
+            coeffs = np.zeros((nb, 1, 2), dtype=np.complex128)
+            coeffs[0, 0, 0] = 1.0 + 0.0j
+            if nb == 2:
+                coeffs[1, 0, 1] = 1.0 + 0.0j
+            kp["coefficients"] = coeffs
+            kp["energies_eV"] = energies
+            kp["band_indices_vasp"] = bands
+
+        config_path = tmp_path / f"config_{label}.yaml"
+        out_dir = tmp_path / f"out_{label}"
+        config = {
+            "input": {"wavefunction_h5": str(h5_path)},
+            "analysis": {"kpoints": ["GammaM"], "target_bands_vasp": bands.tolist(), "degeneracy_tol_meV": 1.0},
+            "monolayer_lattices": {
+                "default": {"reciprocal_cart": [[10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 1.0]]}
+            },
+            "valley_centers": {
+                "coordinate_mode": "cart",
+                "centers": [
+                    {"name": "K", "cart": [0.0, 0.0, 0.0]},
+                    {"name": "Kp", "cart": [5.0, 0.0, 0.0]},
+                ],
+            },
+            "valley_sectors": [
+                {"name": "K_sector", "centers": ["K"]},
+                {"name": "Kp_sector", "centers": ["Kp"]},
+            ],
+            "projection": {"qcut_mode": "absolute", "qcut_Ainv": 0.5, "overlap_cross_sector": "warn_exclude"},
+            "output": {"directory": str(out_dir)},
+        }
+        config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+        outputs = analyze_hsp(config_path)
+        subspace = json.loads(outputs["valley_subspace_json"].read_text(encoding="utf-8"))
+        kp_data = subspace["kpoints"]["GammaM"]
+
+        for w in kp_data["weights"]:
+            assert w.get("valley_status") == "raw_valley_clean", f"raw band mislabeled in {label}"
+
+        diag = kp_data.get("valley_adapted_subspace", {})
+        assert diag.get("status") == label, f"subspace diagnostic status mismatch in {label}"
+        assert kp_data.get("subspace_valley_status", "missing") not in ("not_valley_derived",), \
+            f"subspace labeled not_valley_derived in {label}"
+
+        summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+        assert not any("target subspace is not valley-derived" in w for w in summary["warnings"]), \
+            f"false subspace warning in {label}"
+        subspace_rows = summary["valley_adapted_subspace"]
+        assert subspace_rows
+        assert subspace_rows[0].get("subspace_status") == label, \
+            f"subspace_status not visible in summary for {label}"
+        summary_text = outputs["valley_summary_txt"].read_text(encoding="utf-8")
+        assert label in summary_text, f"'{label}' not found in summary text"
+
+
+def test_rotation_order_none_yields_not_requested_symmetry_status(tmp_path):
+    """P1-3: rotation_order: none should give symmetry_status = not_requested."""
+    h5_path = tmp_path / "wf.h5"
+    write_fixture(h5_path)
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    structure = tmp_path / "CONTCAR"
+    write_square_poscar(structure)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["symmetry"]["filters"]["rotation_order"] = "none"
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    outputs = analyze_hsp(config_path)
+
+    subspace = json.loads(outputs["valley_subspace_json"].read_text(encoding="utf-8"))
+    kp_data = subspace["kpoints"]["GammaM"]
+    assert kp_data.get("symmetry_status") == "not_requested"
+
+    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    assert summary["symmetry_diagnostics"]["rotation_eigenvalue_enabled"] is False
+
+
+def test_subspace_projector_unreliable_when_band_overlap_exceeds_threshold(tmp_path):
+    """P2-4: adapted subspace with band W_overlap > threshold → projector_unreliable."""
+    h5_path = tmp_path / "wf.h5"
+    with h5py.File(h5_path, "w") as h5:
+        meta = h5.create_group("metadata")
+        lattice = meta.create_group("lattice")
+        lattice["direct_cart"] = np.eye(3)
+        lattice["reciprocal_cart"] = np.eye(3) * 10.0
+        meta["spinor"] = False
+        meta["source"] = "toy"
+        meta["vasp_band_index_base"] = 1
+        kp = h5.create_group("kpoints").create_group("0")
+        kp["name"] = "GammaM"
+        kp["frac"] = np.array([0.0, 0.0, 0.0])
+        kp["cart"] = np.array([0.0, 0.0, 0.0])
+        # G-vectors: [0,0,0] clean K, [5,0,0] clean Kp, [2.5,0,0] overlap
+        q_cart = np.array([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0], [2.5, 0.0, 0.0]])
+        kp["g_vectors_frac"] = q_cart
+        kp["g_vectors_cart"] = q_cart
+        a = np.sqrt(0.9)
+        b = np.sqrt(0.1)
+        kp["coefficients"] = np.array(
+            [
+                [[a + 0.0j, 0.0 + 0.0j, b + 0.0j]],
+                [[0.0 + 0.0j, a + 0.0j, b + 0.0j]],
+            ],
+            dtype=np.complex128,
+        )
+        kp["energies_eV"] = np.array([0.1, 0.1001])
+        kp["band_indices_vasp"] = np.array([101, 102])
+
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    config = {
+        "input": {"wavefunction_h5": str(h5_path)},
+        "analysis": {"kpoints": ["GammaM"], "target_bands_vasp": [101, 102], "degeneracy_tol_meV": 1.0},
+        "monolayer_lattices": {
+            "default": {"reciprocal_cart": [[10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 1.0]]}
+        },
+        "valley_centers": {
+            "coordinate_mode": "cart",
+            "centers": [
+                {"name": "K", "cart": [0.0, 0.0, 0.0]},
+                {"name": "Kp", "cart": [5.0, 0.0, 0.0]},
+            ],
+        },
+        "valley_sectors": [
+            {"name": "K_sector", "centers": ["K"]},
+            {"name": "Kp_sector", "centers": ["Kp"]},
+        ],
+        "projection": {
+            "qcut_mode": "absolute", "qcut_Ainv": 3.0, "overlap_cross_sector": "warn_exclude",
+            "thresholds": {"W_val_min": 0.8},
+        },
+        "output": {"directory": str(out_dir)},
+    }
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        outputs = analyze_hsp(config_path)
+
+    subspace = json.loads(outputs["valley_subspace_json"].read_text(encoding="utf-8"))
+    kp_data = subspace["kpoints"]["GammaM"]
+    assert kp_data.get("subspace_valley_status") == "projector_unreliable"
+
+
+def test_h5_reader_rejects_duplicate_kpoint_names(tmp_path):
+    """P2-6: duplicate k-point names in HDF5 should raise ValueError."""
+    h5_path = tmp_path / "dup.h5"
+    with h5py.File(h5_path, "w") as h5:
+        meta = h5.create_group("metadata")
+        lattice = meta.create_group("lattice")
+        lattice["direct_cart"] = np.eye(3)
+        lattice["reciprocal_cart"] = np.eye(3) * 10.0
+        meta["spinor"] = False
+        meta["source"] = "toy"
+        meta["vasp_band_index_base"] = 1
+        kpts_grp = h5.create_group("kpoints")
+        for idx in range(2):
+            kp = kpts_grp.create_group(str(idx))
+            kp["name"] = "GammaM"
+            kp["frac"] = np.zeros(3)
+            kp["cart"] = np.zeros(3)
+            kp["g_vectors_frac"] = np.zeros((1, 3))
+            kp["g_vectors_cart"] = np.zeros((1, 3))
+            kp["coefficients"] = np.ones((1, 1, 1), dtype=np.complex128)
+            kp["energies_eV"] = np.array([0.1])
+            kp["band_indices_vasp"] = np.array([1])
+
+    with pytest.raises(ValueError, match="Duplicate k-point name"):
+        read_wavefunction_h5(h5_path)
+
+
+def test_subspace_thresholds_inherit_user_config(tmp_path):
+    """Fix 2: user thresholds (overlap_warn) affect subspace projector_unreliable."""
+    h5_path = tmp_path / "wf.h5"
+    with h5py.File(h5_path, "w") as h5:
+        meta = h5.create_group("metadata")
+        lattice = meta.create_group("lattice")
+        lattice["direct_cart"] = np.eye(3)
+        lattice["reciprocal_cart"] = np.eye(3) * 10.0
+        meta["spinor"] = False
+        meta["source"] = "toy"
+        meta["vasp_band_index_base"] = 1
+        kp = h5.create_group("kpoints").create_group("0")
+        kp["name"] = "GammaM"
+        kp["frac"] = np.array([0.0, 0.0, 0.0])
+        kp["cart"] = np.array([0.0, 0.0, 0.0])
+        q_cart = np.array([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0], [2.5, 0.0, 0.0]])
+        kp["g_vectors_frac"] = q_cart
+        kp["g_vectors_cart"] = q_cart
+        a = np.sqrt(0.9)
+        b = np.sqrt(0.1)
+        kp["coefficients"] = np.array(
+            [[[a, 0.0, b]], [[0.0, a, b]]], dtype=np.complex128,
+        )
+        kp["energies_eV"] = np.array([0.1, 0.1001])
+        kp["band_indices_vasp"] = np.array([101, 102])
+
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    config = {
+        "input": {"wavefunction_h5": str(h5_path)},
+        "analysis": {"kpoints": ["GammaM"], "target_bands_vasp": [101, 102], "degeneracy_tol_meV": 1.0},
+        "monolayer_lattices": {
+            "default": {"reciprocal_cart": [[10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 1.0]]}
+        },
+        "valley_centers": {
+            "coordinate_mode": "cart",
+            "centers": [
+                {"name": "K", "cart": [0.0, 0.0, 0.0]},
+                {"name": "Kp", "cart": [5.0, 0.0, 0.0]},
+            ],
+        },
+        "valley_sectors": [
+            {"name": "K_sector", "centers": ["K"]},
+            {"name": "Kp_sector", "centers": ["Kp"]},
+        ],
+        "projection": {
+            "qcut_mode": "absolute", "qcut_Ainv": 3.0, "overlap_cross_sector": "warn_exclude",
+            "thresholds": {"W_val_min": 0.8, "overlap_warn": 0.15},
+        },
+        "output": {"directory": str(out_dir)},
+    }
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        outputs = analyze_hsp(config_path)
+
+    subspace = json.loads(outputs["valley_subspace_json"].read_text(encoding="utf-8"))
+    kp_data = subspace["kpoints"]["GammaM"]
+    # overlap_warn=0.15 > max_w_overlap=0.1 → not projector_unreliable
+    assert kp_data.get("subspace_valley_status") == "valley_separable_subspace"

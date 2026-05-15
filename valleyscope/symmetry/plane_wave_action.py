@@ -57,16 +57,16 @@ def build_plane_wave_representation(
 
     lookup = _q_vector_lookup(q, tolerance)
     mapping = np.full(n_g, -1, dtype=int)
+    q_rotated = np.empty_like(q)
     for source_idx, q_source in enumerate(q):
-        q_target = rot @ q_source
-        mapping[source_idx] = _lookup_q_vector(q_target, q, lookup, tolerance)
+        q_rotated[source_idx] = rot @ q_source
+        mapping[source_idx] = _lookup_q_vector(q_rotated[source_idx], q, lookup, tolerance)
 
     transformed = np.zeros_like(coeffs)
     for source_idx, target_idx in enumerate(mapping):
         if target_idx < 0:
             continue
-        q_target = rot @ q[source_idx]
-        phase = np.exp(-1.0j * float(q_target @ trans))
+        phase = np.exp(-1.0j * float(q_rotated[source_idx] @ trans))
         for band in range(n_bands):
             transformed[band, :, target_idx] += phase * (spin @ coeffs[band, :, source_idx])
 

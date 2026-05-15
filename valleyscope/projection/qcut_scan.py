@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from valleyscope.geometry.reciprocal import minimum_periodic_distance
-from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector
+from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector, centers_by_name
 from valleyscope.projection.sector_projectors import build_sector_projectors
 from valleyscope.projection.weights import ValleyWeightResult, compute_valley_weights
 
@@ -74,7 +74,7 @@ def qcut_from_min_sector_distance(
     *,
     use_2d: bool = True,
 ) -> float:
-    center_map = {center.name: center for center in centers}
+    center_map = centers_by_name(centers)
     sector_points: list[tuple[str, np.ndarray]] = []
     for sector in sectors:
         for center_name in sector.centers:
@@ -120,6 +120,6 @@ def _basis_for_point(
     fallback: np.ndarray | None,
 ) -> np.ndarray | None:
     for center in centers:
-        if np.allclose(center.cart, point, atol=1e-12):
+        if np.allclose(center.cart, point, atol=1e-8):
             return center.reciprocal_cart if center.reciprocal_cart is not None else fallback
     return fallback

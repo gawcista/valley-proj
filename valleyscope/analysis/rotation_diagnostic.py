@@ -32,24 +32,15 @@ def rotation_diagnostics_for_kpoint(
             continue
         little = is_little_group_operation(np.asarray(operation["rotation_frac"]), k_frac)
         preserves_all = all(bool(value) for value in operation["preserved"].values())
-        operation["little_group_by_kpoint"] = {
-            **operation.get("little_group_by_kpoint", {}),
-            kpoint_name: little,
-        }
+        operation.setdefault("little_group_by_kpoint", {})[kpoint_name] = little
         operation["allowed_for_single_valley_rotation"] = bool(little and preserves_all)
-        operation["allowed_for_single_valley_rotation_by_kpoint"] = {
-            **operation.get("allowed_for_single_valley_rotation_by_kpoint", {}),
-            kpoint_name: bool(little and preserves_all),
-        }
+        operation.setdefault("allowed_for_single_valley_rotation_by_kpoint", {})[kpoint_name] = bool(little and preserves_all)
         rejection_reason = ""
         if not little:
             rejection_reason = "not in little group"
         elif not preserves_all:
             rejection_reason = "not valley preserving"
-        operation["rejection_reason_by_kpoint"] = {
-            **operation.get("rejection_reason_by_kpoint", {}),
-            kpoint_name: rejection_reason,
-        }
+        operation.setdefault("rejection_reason_by_kpoint", {})[kpoint_name] = rejection_reason
         if rejection_reason:
             continue
         spin_rotation = None
@@ -121,7 +112,7 @@ def rotation_diagnostics_for_kpoint(
             ],
             dtype=bool,
         )
-        diagnostic_only_by_state = np.logical_not(topology_input_ready_by_state)
+        diagnostic_any = bool(np.any(~topology_input_ready_by_state))
         operation.setdefault("representation_quality", {})[kpoint_name] = {
             "mapping_miss_count": representation.mapping_miss_count,
             "unitarity_deviation": eigen.unitarity_deviation,
@@ -130,7 +121,7 @@ def rotation_diagnostics_for_kpoint(
             "rotation_ready": rotation_ready,
             "spinor_rotation_applied": spinor_rotation_applied,
             "spinor_convention_verified": spinor_verified,
-            "diagnostic_only": bool(np.any(diagnostic_only_by_state)),
+            "diagnostic_only": diagnostic_any,
             "D_valley_offdiag_norm": np.nan if d_valley_offdiag_norm is None else d_valley_offdiag_norm,
             "basis": basis,
         }
@@ -154,21 +145,19 @@ def rotation_diagnostics_for_kpoint(
             "spinor_convention": spinor_convention,
             "spinor_benchmark": "" if spinor_benchmark is None else spinor_benchmark,
             "topology_input_ready": topology_input_ready_by_state,
-            "topology_ready": topology_input_ready_by_state,
-            "diagnostic_only": diagnostic_only_by_state,
+            "diagnostic_only": ~topology_input_ready_by_state,
             "D_valley_offdiag_norm": np.nan if d_valley_offdiag_norm is None else d_valley_offdiag_norm,
         }
         if d_valley is not None:
             op_payload["D_valley"] = d_valley
         rotation_payload.setdefault(kpoint_name, {})[op_key] = op_payload
-        for state_index, (value, phase, modulus_deviation, root, topology_input_ready, diagnostic_only) in enumerate(
+        for state_index, (value, phase, modulus_deviation, root, topology_input_ready) in enumerate(
             zip(
                 eigen.eigenvalues,
                 eigen.phases_2pi,
                 eigen.modulus_deviation,
                 root_info,
                 topology_input_ready_by_state,
-                diagnostic_only_by_state,
             )
         ):
             root_index, _root, root_deviation = root
@@ -202,7 +191,7 @@ def rotation_diagnostics_for_kpoint(
                     "root_deviation": root_deviation,
                     "topology_input_ready": bool(topology_input_ready),
                     "topology_ready": bool(topology_input_ready),
-                    "diagnostic_only": bool(diagnostic_only),
+                    "diagnostic_only": bool(not topology_input_ready),
                     "D_valley_offdiag_norm": "" if d_valley_offdiag_norm is None else d_valley_offdiag_norm,
                     "reason": row_reason,
                     "valley_eta": "" if valley_eta is None or state_index >= len(valley_eta) else float(valley_eta[state_index]),
