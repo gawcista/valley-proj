@@ -526,3 +526,101 @@ def test_spglib_finds_c3_candidate_for_simple_hexagonal_cell():
     infos = [classify_operation(rot, trans) for rot, trans in zip(dataset.rotations, dataset.translations)]
 
     assert any(info.order == 3 and info.det == 1 for info in infos)
+
+
+class TestLittleGroupExtendedDiagnostics:
+    """V1.1: extended diagnostics for ALL valley-preserving little-group operations."""
+
+    def _toy_symmetry_payload(self, operations):
+        return {"status": "ok", "detected_operations": operations, "little_group_check": {}, "valley_preservation_check": {}}
+
+    def test_generators_only_default_behavior_unchanged(self):
+        """Default generators_only=True should match old behavior."""
+        from valleyscope.analysis.rotation_diagnostic import rotation_diagnostics_for_kpoint
+        coeffs = np.array([[[1.0 + 0.0j]]], dtype=np.complex128)
+        ops = [
+            {
+                "operation_id": 0, "candidate_rotation": True, "order": 2, "kind": "C2",
+                "rotation_frac": np.diag([-1, -1, 1]), "rotation_cart": np.diag([-1.0, -1.0, 1.0]),
+                "translation_cart": np.zeros(3), "preserved": {"K": True},
+            },
+            {
+                "operation_id": 1, "candidate_rotation": False, "order": 3, "kind": "C3",
+                "rotation_frac": np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]]),
+                "rotation_cart": np.eye(3), "translation_cart": np.zeros(3),
+                "preserved": {"K": True},
+            },
+        ]
+        rows = rotation_diagnostics_for_kpoint(
+            kpoint_name="GM", k_frac=np.zeros(3), q_cart=np.zeros((1, 3)),
+            coefficients=coeffs, symmetry_payload=self._toy_symmetry_payload(ops),
+            basis_payload=None, rotation_payload={},
+        )
+        assert len(rows) > 0
+        assert all(row["operation_id"] == 0 for row in rows)
+
+    def test_generators_only_false_includes_all_proper_rotations(self):
+        """With generators_only=False, C3 (order=3, non-candidate) should be included."""
+        from valleyscope.analysis.rotation_diagnostic import rotation_diagnostics_for_kpoint
+        coeffs = np.array([[[1.0 + 0.0j]]], dtype=np.complex128)
+        ops = [
+            {
+                "operation_id": 0, "candidate_rotation": True, "order": 2, "kind": "C2",
+                "rotation_frac": np.diag([-1, -1, 1]), "rotation_cart": np.diag([-1.0, -1.0, 1.0]),
+                "translation_cart": np.zeros(3), "preserved": {"K": True},
+            },
+            {
+                "operation_id": 1, "candidate_rotation": False, "order": 3, "kind": "C3",
+                "rotation_frac": np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]]),
+                "rotation_cart": np.eye(3), "translation_cart": np.zeros(3),
+                "preserved": {"K": True},
+            },
+        ]
+        rows = rotation_diagnostics_for_kpoint(
+            kpoint_name="GM", k_frac=np.zeros(3), q_cart=np.zeros((1, 3)),
+            coefficients=coeffs, symmetry_payload=self._toy_symmetry_payload(ops),
+            basis_payload=None, rotation_payload={}, generators_only=False,
+        )
+        op_ids = {row["operation_id"] for row in rows}
+        assert 1 in op_ids, "C3 should be included with generators_only=False"
+
+    def test_non_little_group_skipped_with_reason(self):
+        """Operations not in little group should be skipped with clear reason."""
+        from valleyscope.analysis.rotation_diagnostic import rotation_diagnostics_for_kpoint
+        coeffs = np.array([[[1.0 + 0.0j]]], dtype=np.complex128)
+        c2z = np.diag([-1, -1, 1])
+        ops = [
+            {
+                "operation_id": 0, "candidate_rotation": True, "order": 2, "kind": "C2",
+                "rotation_frac": c2z, "rotation_cart": np.diag([-1.0, -1.0, 1.0]),
+                "translation_cart": np.zeros(3), "preserved": {"K": True},
+            },
+        ]
+        rows = rotation_diagnostics_for_kpoint(
+            kpoint_name="K", k_frac=np.array([1.0/3.0, 0.0, 0.0]),
+            q_cart=np.zeros((1, 3)), coefficients=coeffs,
+            symmetry_payload=self._toy_symmetry_payload(ops),
+            basis_payload=None, rotation_payload={}, generators_only=False,
+        )
+        assert rows == []
+
+    def test_character_fields_present_in_output(self):
+        """Output rows should contain character_raw and character_valley."""
+        from valleyscope.analysis.rotation_diagnostic import rotation_diagnostics_for_kpoint
+        coeffs = np.array([[[1.0 + 0.0j]]], dtype=np.complex128)
+        ops = [
+            {
+                "operation_id": 0, "candidate_rotation": True, "order": 2, "kind": "C2",
+                "rotation_frac": np.diag([-1, -1, 1]), "rotation_cart": np.diag([-1.0, -1.0, 1.0]),
+                "translation_cart": np.zeros(3), "preserved": {"K": True},
+            },
+        ]
+        rows = rotation_diagnostics_for_kpoint(
+            kpoint_name="GM", k_frac=np.zeros(3), q_cart=np.zeros((1, 3)),
+            coefficients=coeffs, symmetry_payload=self._toy_symmetry_payload(ops),
+            basis_payload=None, rotation_payload={},
+        )
+        assert "character_raw" in rows[0]
+        assert "character_valley" in rows[0]
+        assert "little_group_passed" in rows[0]
+        assert "valley_preserving" in rows[0]

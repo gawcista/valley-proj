@@ -18,9 +18,10 @@ def build_summary_payload(
     symmetry_payload: dict[str, Any],
     rotation_rows: list[dict[str, Any]],
     output_paths: dict[str, Path],
+    little_group_diagnostics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     warnings = _collect_warnings(subspace_payload, symmetry_payload, rotation_rows)
-    return {
+    payload: dict[str, Any] = {
         "input": {
             "wavefunction_h5": str(config.input.wavefunction_h5),
             "operation_structure_file": None
@@ -51,8 +52,8 @@ def build_summary_payload(
         "output_files": {name: str(path) for name, path in output_paths.items()},
         "legend": {
             "derived_score": "W_val for raw state or s_min for subspace — target-valley-subspace weight",
-            "polarization_score": "abs(eta) for raw state or max(abs(eta_adapted)) for subspace — valley polarization",
-            "valley_status": "controlled vocabulary: not_valley_derived | projector_unreliable | raw_valley_clean | raw_valley_mixed | valley_separable_subspace | valley_mixed_subspace",
+            "polarization_score": "abs(eta) for two-sector raw state, P_v for multi-sector raw state, or min(abs(eta_adapted)) for subspace — valley polarization",
+            "valley_status": "controlled vocabulary: not_valley_derived | projector_unreliable | raw_valley_clean | raw_valley_approx | raw_valley_mixed | valley_separable_subspace | valley_approximately_separable_subspace | valley_mixed_subspace",
             "symmetry_status": "controlled vocabulary: not_requested | rejected_not_little_group | rejected_not_valley_preserving | diagnostic_only | topology_input_ready",
             "W_val": "target-valley-subspace weight (raw band)",
             "P_v": "valley purity inside the selected valley subspace (P_v = (1+|eta|)/2 for two sectors)",
@@ -66,6 +67,9 @@ def build_summary_payload(
             "topology_ready": "backward-compatible alias of topology_input_ready",
         },
     }
+    if little_group_diagnostics:
+        payload["little_group_diagnostics"] = little_group_diagnostics
+    return payload
 
 
 def render_summary_text(summary: dict[str, Any]) -> str:
@@ -102,7 +106,7 @@ def render_summary_text(summary: dict[str, Any]) -> str:
 
     _section(lines, "Valley projection summary")
     lines.append(
-        "Legend: derived=valley-subspace weight; pol=|eta|; "
+        "Legend: derived=valley-subspace weight; pol=|eta| for two-sector diagnostics or P_v for multi-sector diagnostics; "
         "W_overlap=cross-sector window overlap; W_res=out-of-valley residual."
     )
     projection_rows = summary["valley_projection_summary"]
@@ -144,6 +148,38 @@ def render_summary_text(summary: dict[str, Any]) -> str:
             ],
         )
     )
+    lines.append("")
+
+    _section(lines, "Little-group eigenvalue diagnostics")
+    if summary.get("little_group_diagnostics"):
+        diag = summary["little_group_diagnostics"]
+        lines.append(f"detected operations: {diag.get('total_operations', 0)}")
+        lines.append(f"little-group operations: {diag.get('little_group_count', 0)}")
+        lines.append(f"valley-preserving: {diag.get('valley_preserving_count', 0)}")
+        lines.append(f"representation matrices computed: {diag.get('computed_count', 0)}")
+        lines.append("irrep label matching deferred")
+        lines.append("Note: valley-resolved single states are NOT full double space group irreps.")
+        lines.append("")
+        for kp_name, kp_info in diag.get("by_kpoint", {}).items():
+            lines.append(f"  {kp_name}:")
+            for op_info in kp_info.get("operations", []):
+                if op_info.get("accepted"):
+                    status = "computed"
+                    diagnostic_reasons = op_info.get("diagnostic_reasons") or []
+                    if diagnostic_reasons:
+                        status += f" (diagnostic-only: {'; '.join(str(item) for item in diagnostic_reasons)})"
+                else:
+                    status = f"skipped ({op_info.get('reason', '')})"
+                lines.append(
+                    f"    op {op_info.get('operation_id')} ({op_info.get('kind')} "
+                    f"order={op_info.get('order')}): {status}"
+                )
+                if op_info.get("character_valley"):
+                    lines.append(f"      character_valley={op_info['character_valley']}")
+                if op_info.get("eigenvalues"):
+                    lines.append(f"      phases (2pi): {op_info['eigenvalues']}")
+    else:
+        lines.append("(not run)")
     lines.append("")
 
     _section(lines, "Symmetry diagnostics")
@@ -282,12 +318,12 @@ def _subspace_rows(subspace_payload: dict[str, Any]) -> list[dict[str, Any]]:
                 "analysis_level": "adapted_subspace",
                 "subspace_status": diagnostic.get("status", ""),
                 "derived_score": diagnostic.get("s_min"),
-                "polarization_score": diagnostic.get("max_abs_eta"),
                 "s_eigenvalues": diagnostic.get("s_eigenvalues"),
                 "s_min": diagnostic.get("s_min"),
                 "s_max": diagnostic.get("s_max"),
                 "eta_adapted": diagnostic.get("eta"),
                 "valid_valley_subspace": diagnostic.get("valid_valley_subspace"),
+                "polarization_score": payload.get("polarization_score", diagnostic.get("max_abs_eta")),
                 "valley_status": payload.get("subspace_valley_status", ""),
                 "symmetry_status": payload.get("symmetry_status", "not_requested"),
             }
@@ -365,6 +401,8 @@ def _collect_warnings(
         sv_status = payload.get("subspace_valley_status", "")
         if sv_status == "valley_mixed_subspace":
             warnings.append(f"{kpoint}: valley_mixed_subspace; rotation eigenvalues are diagnostic-only")
+        if sv_status == "valley_approximately_separable_subspace":
+            pass
         if sv_status == "not_valley_derived":
             warnings.append(f"{kpoint}: subspace not_valley_derived; target subspace is not valley-derived")
         if sv_status == "projector_unreliable":
@@ -441,6 +479,8 @@ def _output_file_label(name: str) -> str:
         "valley_basis_transform_h5": "Valley basis transform",
         "symmetry_report_json": "Symmetry diagnostics",
         "rotation_eigenvalues_csv": "Rotation eigenvalues",
+        "little_group_eigenvalues_csv": "Little-group eigenvalues",
+        "little_group_representations_json": "Little-group representation diagnostics",
         "diagnostics_h5": "Projector, qcut, and rotation diagnostics",
     }
     return labels.get(name, name.replace("_", " ").title())

@@ -8,7 +8,7 @@ from valleyscope.symmetry.plane_wave_action import build_plane_wave_representati
 from valleyscope.symmetry.rotation_eigenvalues import extract_rotation_eigenvalues, nearest_root_of_unity
 
 
-UNITARITY_TOL = 1e-4
+unitarity_tol = 1e-4
 ROOT_DEVIATION_TOL = 1e-6
 D_VALLEY_OFFDIAG_TOL = 1e-6
 
@@ -25,11 +25,19 @@ def rotation_diagnostics_for_kpoint(
     spinor_convention_verified: bool = False,
     spinor_convention: str = "vasp_up_down_saxis_z",
     spinor_benchmark: str | None = None,
+    unitarity_tol: float = unitarity_tol,
+    root_deviation_tol: float = ROOT_DEVIATION_TOL,
+    d_valley_offdiag_tol: float = D_VALLEY_OFFDIAG_TOL,
+    generators_only: bool = True,
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for operation in symmetry_payload["detected_operations"]:
-        if not operation["candidate_rotation"]:
+        if generators_only and not operation["candidate_rotation"]:
             continue
+        if not generators_only:
+            order = operation.get("order")
+            if order not in (2, 3, 4, 6):
+                continue
         little = is_little_group_operation(np.asarray(operation["rotation_frac"]), k_frac)
         preserves_all = all(bool(value) for value in operation["preserved"].values())
         operation.setdefault("little_group_by_kpoint", {})[kpoint_name] = little
@@ -91,7 +99,7 @@ def rotation_diagnostics_for_kpoint(
             valid_valley_subspace = True
         eigen = extract_rotation_eigenvalues(matrix_for_eigen, spinor_convention_verified=spinor_verified)
         rotation_ready = bool(
-            representation.mapping_miss_count == 0 and eigen.unitarity_deviation <= UNITARITY_TOL
+            representation.mapping_miss_count == 0 and eigen.unitarity_deviation <= unitarity_tol
         )
         d_valley_offdiag_norm = _two_sector_offdiag_norm(d_valley)
         order = int(operation["order"])
@@ -107,6 +115,8 @@ def rotation_diagnostics_for_kpoint(
                     spinor_convention_verified=spinor_verified,
                     root_deviation=root_deviation,
                     d_valley_offdiag_norm=d_valley_offdiag_norm,
+                    root_deviation_tol=root_deviation_tol,
+                    d_valley_offdiag_tol=d_valley_offdiag_tol,
                 )
                 for root_deviation in root_deviations
             ],
@@ -169,12 +179,19 @@ def rotation_diagnostics_for_kpoint(
                 root_deviation=root_deviation,
                 d_valley_offdiag_norm=d_valley_offdiag_norm,
                 topology_input_ready=bool(topology_input_ready),
+                root_deviation_tol=root_deviation_tol,
+                d_valley_offdiag_tol=d_valley_offdiag_tol,
             )
+            char_raw = complex(np.trace(representation.matrix)) if state_index == 0 else None
+            char_valley = complex(np.trace(d_valley)) if d_valley is not None and state_index == 0 else None
             rows.append(
                 {
                     "kpoint": kpoint_name,
                     "operation_id": operation["operation_id"],
+                    "kind": operation.get("kind", ""),
                     "order": order,
+                    "rotation_frac": str(np.asarray(operation.get("rotation_frac", [])).tolist()),
+                    "translation_frac": str(np.asarray(operation.get("translation_frac", [])).tolist()),
                     "basis": basis,
                     "state_index": state_index,
                     "eigenvalue_real": float(value.real),
@@ -182,6 +199,10 @@ def rotation_diagnostics_for_kpoint(
                     "phase_2pi": float(phase),
                     "modulus_deviation": float(modulus_deviation),
                     "unitarity_deviation": float(eigen.unitarity_deviation),
+                    "character_raw": "" if char_raw is None else f"{char_raw.real:.6f}{char_raw.imag:+.6f}j",
+                    "character_valley": "" if char_valley is None else f"{char_valley.real:.6f}{char_valley.imag:+.6f}j",
+                    "little_group_passed": bool(little),
+                    "valley_preserving": bool(preserves_all),
                     "rotation_ready": rotation_ready,
                     "spinor_rotation_applied": spinor_rotation_applied,
                     "spinor_convention_verified": spinor_verified,
@@ -214,15 +235,17 @@ def _topology_input_ready(
     spinor_convention_verified: bool,
     root_deviation: float,
     d_valley_offdiag_norm: float | None,
+    root_deviation_tol: float = ROOT_DEVIATION_TOL,
+    d_valley_offdiag_tol: float = D_VALLEY_OFFDIAG_TOL,
 ) -> bool:
     return bool(
         rotation_ready
         and basis == "valley_adapted"
         and valid_valley_subspace
         and spinor_convention_verified
-        and root_deviation <= ROOT_DEVIATION_TOL
+        and root_deviation <= root_deviation_tol
         and d_valley_offdiag_norm is not None
-        and d_valley_offdiag_norm <= D_VALLEY_OFFDIAG_TOL
+        and d_valley_offdiag_norm <= d_valley_offdiag_tol
     )
 
 
@@ -235,6 +258,8 @@ def _readiness_reason(
     root_deviation: float,
     d_valley_offdiag_norm: float | None,
     topology_input_ready: bool,
+    root_deviation_tol: float = ROOT_DEVIATION_TOL,
+    d_valley_offdiag_tol: float = D_VALLEY_OFFDIAG_TOL,
 ) -> str:
     if topology_input_ready:
         return ""
@@ -244,10 +269,10 @@ def _readiness_reason(
         return "rotation representation not ready"
     if spinor_rotation_applied and not spinor_convention_verified:
         return "spinor convention unverified"
-    if root_deviation > ROOT_DEVIATION_TOL:
+    if root_deviation > root_deviation_tol:
         return "root deviation too large"
     if d_valley_offdiag_norm is None:
         return "two-sector D_valley offdiag diagnostic unavailable"
-    if d_valley_offdiag_norm > D_VALLEY_OFFDIAG_TOL:
+    if d_valley_offdiag_norm > d_valley_offdiag_tol:
         return "two-sector D_valley offdiag diagnostic too large"
     return "diagnostic-only"

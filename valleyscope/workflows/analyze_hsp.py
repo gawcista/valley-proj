@@ -78,6 +78,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
 
     rows: list[dict[str, object]] = []
     rotation_rows: list[dict[str, object]] = []
+    little_group_rows: list[dict[str, object]] = []
     subspace_payload: dict[str, object] = {
         "degeneracy_tol_meV": config.analysis.degeneracy_tol_meV,
         "kpoints": {},
@@ -206,6 +207,27 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     spinor_convention_verified=config.spinor.convention_verified,
                     spinor_convention=config.spinor.convention,
                     spinor_benchmark=config.spinor.benchmark,
+                    unitarity_tol=config.rotation.unitarity_tol,
+                    root_deviation_tol=config.rotation.root_deviation_tol,
+                    d_valley_offdiag_tol=config.rotation.D_valley_offdiag_tol,
+                )
+            )
+            little_group_rows.extend(
+                rotation_diagnostics_for_kpoint(
+                    kpoint_name=kpoint_name,
+                    k_frac=kpoint.frac,
+                    q_cart=q_cart,
+                    coefficients=coefficients,
+                    symmetry_payload=symmetry_payload,
+                    basis_payload=basis_transforms.get(kpoint_name),
+                    rotation_payload=rotation_payload,
+                    spinor_convention_verified=config.spinor.convention_verified,
+                    spinor_convention=config.spinor.convention,
+                    spinor_benchmark=config.spinor.benchmark,
+                    unitarity_tol=config.rotation.unitarity_tol,
+                    root_deviation_tol=config.rotation.root_deviation_tol,
+                    d_valley_offdiag_tol=config.rotation.D_valley_offdiag_tol,
+                    generators_only=False,
                 )
             )
         kpoint_subspace["symmetry_status"] = _resolve_symmetry_status(
@@ -213,7 +235,8 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         )
 
     sector_names = list(projectors_by_kpoint[next(iter(projectors_by_kpoint))].sector_masks)
-    return write_analysis_outputs(
+    little_group_diag = _build_little_group_summary(symmetry_payload, little_group_rows)
+    outputs = write_analysis_outputs(
         config=config,
         qcut=qcut,
         weight_rows=rows,
@@ -225,7 +248,10 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         qcut_scan_payload=qcut_scan_payload,
         rotation_payload=rotation_payload,
         basis_transforms=basis_transforms,
+        little_group_rows=little_group_rows,
+        little_group_diagnostics=little_group_diag,
     )
+    return outputs
 
 
 def _add_valley_subspace_diagnostic(
@@ -560,3 +586,70 @@ def _resolve_symmetry_status(
         valley_preserving=valley_preserving,
         topology_input_ready=has_topology_ready if has_topology_ready else (False if has_diagnostic and not has_topology_ready else None),
     )
+
+
+def _build_little_group_summary(
+    symmetry_payload: dict[str, object],
+    little_group_rows: list[dict[str, object]],
+) -> dict[str, object]:
+    ops = symmetry_payload.get("detected_operations", [])
+    total = len(ops)
+    by_kpoint: dict[str, dict[str, object]] = {}
+    for row in little_group_rows:
+        kp = str(row.get("kpoint", ""))
+        if kp not in by_kpoint:
+            by_kpoint[kp] = {"operations": [], "_by_operation": {}}
+        by_operation = by_kpoint[kp]["_by_operation"]
+        key = str(row.get("operation_id"))
+        if key not in by_operation:
+            accepted = bool(row.get("little_group_passed", False)) and bool(row.get("valley_preserving", False))
+            op_info = {
+                "operation_id": row.get("operation_id"),
+                "kind": row.get("kind"),
+                "order": row.get("order"),
+                "accepted": accepted,
+                "reason": "" if accepted else row.get("reason"),
+                "diagnostic_reasons": [],
+                "topology_input_ready": [],
+                "character_valley": row.get("character_valley"),
+                "character_raw": row.get("character_raw"),
+                "eigenvalues": [],
+            }
+            by_operation[key] = op_info
+            by_kpoint[kp]["operations"].append(op_info)
+        by_operation[key]["eigenvalues"].append(row.get("phase_2pi"))
+        by_operation[key]["topology_input_ready"].append(bool(row.get("topology_input_ready", False)))
+        if row.get("reason") and row.get("little_group_passed", False) and row.get("valley_preserving", False):
+            reasons = by_operation[key]["diagnostic_reasons"]
+            if row.get("reason") not in reasons:
+                reasons.append(row.get("reason"))
+        if row.get("character_valley"):
+            by_operation[key]["character_valley"] = row.get("character_valley")
+        if row.get("character_raw"):
+            by_operation[key]["character_raw"] = row.get("character_raw")
+    for kp_info in by_kpoint.values():
+        kp_info.pop("_by_operation", None)
+
+    little_count = 0
+    vp_count = 0
+    computed = sum(len(kp_info.get("operations", [])) for kp_info in by_kpoint.values())
+    for op in ops:
+        has_lg = any(
+            bool(v) for v in op.get("little_group_by_kpoint", {}).values()
+        )
+        has_vp = all(
+            bool(v) for v in op.get("preserved", {}).values()
+        )
+        if has_lg:
+            little_count += 1
+        if has_lg and has_vp:
+            vp_count += 1
+
+    return {
+        "total_operations": total,
+        "little_group_count": little_count,
+        "valley_preserving_count": vp_count,
+        "computed_count": computed,
+        "irrep_label_matching": "deferred",
+        "by_kpoint": by_kpoint,
+    }

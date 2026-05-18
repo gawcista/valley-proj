@@ -89,6 +89,11 @@ P_v=\frac{\max_i W_i}{W_{\rm val}},
 ```
 It measures whether the assigned valley weight is concentrated in one valley sector or distributed among several sectors. In the two-sector case, `P_v` and `|eta|` are redundant: `P_v = (1 + |eta|) / 2`. ValleyScope uses `|eta|` as the valley concentration score for two-sector diagnostics. For three or more sectors, `|eta|` is undefined and `P_v` is used directly as the concentration score.
 
+The concentration score is classified into three tiers:
+- **clean** (`raw_valley_clean` / `valley_separable_subspace`): concentration above the clean threshold (default `P_v=0.95`, equivalent to `|eta|=0.90`). Suitable as input for valley-resolved symmetry diagnostics.
+- **approximate** (`raw_valley_approx` / `valley_approximately_separable_subspace`): concentration between the approx and clean thresholds (default `P_v=0.85~0.95`, `|eta|=0.70~0.90`). Usable with caution; rotation eigenvalues in this regime are diagnostic-only.
+- **mixed** (`raw_valley_mixed` / `valley_mixed_subspace`): concentration below the approx threshold. Valley sectors are not well separated; single-valley diagnostics are not reliable.
+
 For a two-valley subspace ordered as K-valley followed by K'-valley, the signed valley polarization is
 
 ```math
@@ -331,6 +336,11 @@ spinor:
   convention_verified: true
   benchmark: tMoTe2_VBM_C3_literature
 
+rotation:
+  unitarity_tol: 1.0e-4
+  root_deviation_tol: 1.0e-6
+  D_valley_offdiag_tol: 1.0e-6
+
 output:
   directory: ./valley_analysis
 ```
@@ -551,15 +561,16 @@ Use it when tuning `qcut_fraction`, checking whether the projector windows selec
 
 ## Roadmap
 
-### V1.1: Valley-resolved irrep extraction
+### V1.1: Little-group eigenvalue diagnostics
 
-Generalize rotation eigenvalues into full little-group representation analysis:
-- Enumerate all valley-preserving little-group operations at each HSP.
-- Compute representation matrices and characters for valley-adapted states.
-- Match characters to irreps of the valley-preserving little group.
-- Output valley-resolved irrep multiplicities.
+For each target HSP, compute representation matrices, eigenvalues, and characters for ALL valley-preserving little-group symmetry operations (not just the rotation generator). Output as transparent symmetry-eigenvalue diagnostics.
 
-Rotation eigenvalues are a subset of irrep data. Single-valley irreps are irreps of the valley-preserving subgroup, not necessarily of the full moire space group.
+- Enumerate all proper-rotation operations that satisfy little-group AND valley-preservation checks.
+- Compute `D_raw` and `D_valley` (valley-adapted) representation matrices.
+- Report eigenvalues, phases, characters, and readiness flags per operation.
+- Output: `little_group_eigenvalues.csv` and `little_group_representations.json`.
+
+**Irrep label matching is deferred.** Valley-resolved single states are not automatically matched to full double space group irrep labels. This requires defining the valley-preserving subgroup restriction and parent full irrep relationship — theoretical work for a later stage.
 
 ### V2: Valley-resolved reduced EBR / topology diagnostics
 

@@ -98,16 +98,20 @@ class TestDeriveValleyStatus:
             "not_valley_derived",
             "projector_unreliable",
             "raw_valley_clean",
+            "raw_valley_approx",
             "raw_valley_mixed",
             "valley_separable_subspace",
+            "valley_approximately_separable_subspace",
             "valley_mixed_subspace",
         }
         test_cases = [
             ("not_valley_derived", "raw_state", 0.3, 0.9, 0.0, 0.0),
             ("projector_unreliable", "raw_state", 0.9, 0.9, 0.1, 0.0),
             ("raw_valley_clean", "raw_state", 0.95, 0.98, 0.0, 0.0),
+            ("raw_valley_approx", "raw_state", 0.9, 0.89, 0.0, 0.0),
             ("raw_valley_mixed", "raw_state", 0.9, 0.5, 0.0, 0.0),
             ("valley_separable_subspace", "adapted_subspace", 0.95, 0.98, 0.0, 0.0),
+            ("valley_approximately_separable_subspace", "adapted_subspace", 0.9, 0.89, 0.0, 0.0),
             ("valley_mixed_subspace", "adapted_subspace", 0.9, 0.5, 0.0, 0.0),
         ]
         for expected, level, derived, pol, overlap, res in test_cases:
@@ -201,10 +205,11 @@ class TestPolarizationScore:
         score = derive_polarization_score(analysis_level="raw_state", eta_raw=None)
         assert score == 0.0
 
-    def test_subspace_uses_max_abs_eta(self):
+    def test_subspace_uses_min_abs_eta(self):
+        """Fix 1: subspace polarization_score uses min(abs(eta_adapted))."""
         eta = np.array([0.98, -0.96, 0.5])
         score = derive_polarization_score(analysis_level="adapted_subspace", eta_adapted=eta)
-        assert score == pytest.approx(0.98)
+        assert score == pytest.approx(0.5)
 
     def test_subspace_empty_returns_zero(self):
         score = derive_polarization_score(analysis_level="adapted_subspace", eta_adapted=np.array([]))
@@ -243,7 +248,7 @@ class TestDecisionTreeIntegration:
             w_res=0.0,
         )
         assert derived == pytest.approx(0.92)
-        assert polarization == pytest.approx(0.5)
+        assert polarization == pytest.approx(0.3)
         assert v_status == "valley_mixed_subspace"
 
     def test_full_four_step_with_symmetry(self):
@@ -277,13 +282,13 @@ class TestEtaThresholdConversion:
         )
         assert status == "raw_valley_clean"
 
-    def test_pv_clean_095_eta_089_passes_approx_070(self):
-        """|eta|=0.89 < 0.90 (eta_clean) but >= 0.70 (eta_approx), so still clean."""
+    def test_pv_clean_095_eta_089_is_approx(self):
+        """|eta|=0.89 < 0.90 (eta_clean) but >= 0.70 (eta_approx), so approx."""
         status = derive_valley_status(
             analysis_level="raw_state", derived_score=0.95,
             polarization_score=0.89, w_overlap=0.0, w_res=0.0,
         )
-        assert status == "raw_valley_clean"
+        assert status == "raw_valley_approx"
 
     def test_eta_below_both_thresholds_is_mixed(self):
         """|eta|=0.60 < 0.70 (eta_approx) and < 0.90 (eta_clean), so mixed."""
@@ -293,12 +298,13 @@ class TestEtaThresholdConversion:
         )
         assert status == "raw_valley_mixed"
 
-    def test_pv_approx_085_passes_eta_075(self):
+    def test_pv_approx_085_passes_eta_075_is_approx(self):
+        """|eta|=0.75 >= 0.70 (eta_approx) but < 0.90 (eta_clean), so approx."""
         status = derive_valley_status(
             analysis_level="raw_state", derived_score=0.95,
             polarization_score=0.75, w_overlap=0.0, w_res=0.0,
         )
-        assert status == "raw_valley_clean"
+        assert status == "raw_valley_approx"
 
     def test_explicit_eta_clean_overrides_pv_clean(self):
         status = derive_valley_status(
@@ -309,12 +315,13 @@ class TestEtaThresholdConversion:
         assert status == "raw_valley_clean"
 
     def test_explicit_eta_approx_with_default_pv_clean(self):
+        """eta_approx=0.60, P_v_clean=0.99 → eta_clean=0.98. |eta|=0.65 → approx."""
         status = derive_valley_status(
             analysis_level="raw_state", derived_score=0.95,
             polarization_score=0.65, w_overlap=0.0, w_res=0.0,
             thresholds={"eta_approx": 0.60, "P_v_clean": 0.99},
         )
-        assert status == "raw_valley_clean"
+        assert status == "raw_valley_approx"
 
     def test_subspace_uses_converted_thresholds(self):
         status = derive_valley_status(
@@ -353,13 +360,13 @@ class TestMultiSectorPolarization:
         assert status == "raw_valley_mixed"
 
     def test_three_sector_pv_approx_boundary(self):
-        """P_v=0.93 > 0.85 but < 0.95, passes P_v_approx so clean."""
+        """P_v=0.93 >= 0.85 but < 0.95, so approx (not clean)."""
         status = derive_valley_status(
             analysis_level="raw_state", derived_score=0.95,
             polarization_score=0.93, w_overlap=0.0, w_res=0.0,
             two_sector=False,
         )
-        assert status == "raw_valley_clean"
+        assert status == "raw_valley_approx"
 
     def test_two_sector_still_uses_eta_conversion(self):
         status = derive_valley_status(
@@ -380,3 +387,55 @@ class TestMultiSectorPolarization:
             analysis_level="raw_state", eta_raw=-0.85, purity=0.96,
         )
         assert score == pytest.approx(0.85)
+
+
+class TestSubspacePolarizationMin:
+    """Fix 1: adapted_subspace polarization_score uses min(abs(eta_adapted))."""
+
+    def test_min_abs_eta_adapted(self):
+        score = derive_polarization_score(
+            analysis_level="adapted_subspace",
+            eta_adapted=np.array([0.99, 0.2]),
+        )
+        assert score == pytest.approx(0.2)
+
+    def test_min_abs_eta_adapted_all_high(self):
+        score = derive_polarization_score(
+            analysis_level="adapted_subspace",
+            eta_adapted=np.array([0.99, -0.96]),
+        )
+        assert score == pytest.approx(0.96)
+
+    def test_min_abs_eta_with_zeros(self):
+        score = derive_polarization_score(
+            analysis_level="adapted_subspace",
+            eta_adapted=np.array([0.0, 0.99]),
+        )
+        assert score == pytest.approx(0.0)
+
+
+class TestApproxBoundaries:
+    """Fix 2: three-tier clean/approx/mixed boundary tests."""
+
+    def test_raw_approx_boundary_low(self):
+        """|eta| just above eta_approx=0.70 is approx."""
+        status = derive_valley_status(
+            analysis_level="raw_state", derived_score=0.95,
+            polarization_score=0.71, w_overlap=0.0, w_res=0.0,
+        )
+        assert status == "raw_valley_approx"
+
+    def test_subspace_approx_boundary(self):
+        status = derive_valley_status(
+            analysis_level="adapted_subspace", derived_score=0.92,
+            polarization_score=0.80, w_overlap=0.0, w_res=0.0,
+        )
+        assert status == "valley_approximately_separable_subspace"
+
+    def test_multi_sector_approx(self):
+        status = derive_valley_status(
+            analysis_level="raw_state", derived_score=0.95,
+            polarization_score=0.88, w_overlap=0.0, w_res=0.0,
+            two_sector=False,
+        )
+        assert status == "raw_valley_approx"

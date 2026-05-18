@@ -86,6 +86,11 @@ P_v=\frac{\max_i W_i}{W_{\rm val}},\qquad W_{\rm val}>0 .
 ```
 对于两扇区情形，`P_v` 与 `|eta|` 存在冗余关系：`P_v = (1 + |eta|) / 2`。ValleyScope 在双扇区诊断中使用 `|eta|` 作为谷集中度分数；三扇区及以上 `|eta|` 无定义，直接使用 `P_v`。
 
+谷集中度分数分为三档：
+- **clean**（`raw_valley_clean` / `valley_separable_subspace`）：集中度高于 clean 阈值（默认 `P_v=0.95`，即 `|eta|=0.90`）。适合作为谷分辨对称性诊断的输入。
+- **approximate**（`raw_valley_approx` / `valley_approximately_separable_subspace`）：集中度介于 approx 和 clean 阈值之间（默认 `P_v=0.85~0.95`，`|eta|=0.70~0.90`）。可谨慎使用；此范围内的旋转本征值仅供诊断参考。
+- **mixed**（`raw_valley_mixed` / `valley_mixed_subspace`）：集中度低于 approx 阈值。谷扇区未有效分离，单谷诊断不可靠。
+
 对两谷子空间，有符号谷极化为
 
 ```math
@@ -319,6 +324,11 @@ spinor:
   convention_verified: true
   benchmark: tMoTe2_VBM_C3_literature
 
+rotation:
+  unitarity_tol: 1.0e-4
+  root_deviation_tol: 1.0e-6
+  D_valley_offdiag_tol: 1.0e-6
+
 output:
   directory: ./valley_analysis
 ```
@@ -485,6 +495,17 @@ kpoint, band_vasp, energy_eV, K_sector, Kp_sector, W_val, P_v, eta, W_overlap, W
 ```
 
 `D_valley` 仅在存在有效谷适配基时写入。
+
+## V1.1：小群本征值诊断
+
+对每个目标高对称点，计算**所有**满足小群条件和谷保持条件的 proper-rotation 对称操作的表示矩阵、本征值和特征标（不限于旋转生成元）。
+
+- 枚举通过小群检查 + 谷保持检查的全部 proper rotation。
+- 计算 `D_raw` 和 `D_valley`（谷适配基）表示矩阵。
+- 输出本征值、相位、特征标和 readiness 标志。
+- 新增输出：`little_group_eigenvalues.csv` 和 `little_group_representations.json`。
+
+**Irrep label matching 暂缓。** 谷分辨的单态不会自动匹配到完整 double space group irrep label（如 -K4/-K5/-K6）。这需要先定义 valley-preserving subgroup restriction 和 parent full irrep 的关系，留待后续理论工作。
 
 ## V1 边界
 

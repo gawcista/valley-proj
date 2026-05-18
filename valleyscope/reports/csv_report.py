@@ -10,7 +10,7 @@ def write_valley_weights_csv(path: str | Path, rows: list[dict[str, object]], se
     out = Path(path)
     fieldnames = ["kpoint", "band_vasp", "energy_eV", *sector_names, "W_val", "P_v", "eta", "W_overlap", "W_res"]
     with out.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         for row in rows:
             writer.writerow(row)
@@ -45,7 +45,7 @@ def write_rotation_eigenvalues_csv(path: str | Path, rows: list[dict[str, object
         "valley_eta",
     ]
     with out.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         for row in rows:
             writer.writerow(row)
@@ -73,3 +73,41 @@ def weight_row(
     for sector in sector_names:
         row[sector] = result.sector_weights.get(sector, 0.0)
     return row
+
+
+def write_little_group_eigenvalues_csv(path: str | Path, rows: list[dict[str, object]]) -> Path:
+    out = Path(path)
+    fieldnames = [
+        "kpoint",
+        "operation_id",
+        "kind",
+        "order",
+        "rotation_frac",
+        "translation_frac",
+        "basis",
+        "state_index",
+        "eigenvalue_real",
+        "eigenvalue_imag",
+        "phase_2pi",
+        "modulus_deviation",
+        "unitarity_deviation",
+        "character_valley",
+        "character_raw",
+        "little_group_passed",
+        "valley_preserving",
+        "rotation_ready",
+        "spinor_rotation_applied",
+        "spinor_convention_verified",
+        "diagnostic_only",
+        "D_valley_offdiag_norm",
+        "nearest_root_of_unity",
+        "root_deviation",
+        "reason",
+        "valley_eta",
+    ]
+    with out.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+    return out

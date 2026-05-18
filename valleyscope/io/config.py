@@ -90,6 +90,13 @@ class SpinorConfig:
 
 
 @dataclass(frozen=True)
+class RotationConfig:
+    unitarity_tol: float = 1.0e-4
+    root_deviation_tol: float = 1.0e-6
+    D_valley_offdiag_tol: float = 1.0e-6
+
+
+@dataclass(frozen=True)
 class AppConfig:
     input: InputConfig
     analysis: AnalysisConfig
@@ -99,6 +106,7 @@ class AppConfig:
     output: OutputConfig
     symmetry: SymmetryConfig = field(default_factory=SymmetryConfig)
     spinor: SpinorConfig = field(default_factory=SpinorConfig)
+    rotation: RotationConfig = field(default_factory=RotationConfig)
     monolayer_lattices: dict[str, np.ndarray] = field(default_factory=dict)
     layer_transforms: dict[str, dict[str, Any]] = field(default_factory=dict)
 
@@ -429,6 +437,14 @@ def _parse_spinor_config(raw: dict[str, Any]) -> SpinorConfig:
     )
 
 
+def _parse_rotation_config(raw: dict[str, Any]) -> RotationConfig:
+    return RotationConfig(
+        unitarity_tol=float(raw.get("unitarity_tol", 1.0e-4)),
+        root_deviation_tol=float(raw.get("root_deviation_tol", 1.0e-6)),
+        D_valley_offdiag_tol=float(raw.get("D_valley_offdiag_tol", 1.0e-6)),
+    )
+
+
 def load_config(path: str | Path) -> AppConfig:
     config_path = Path(path)
     base = config_path.parent
@@ -492,6 +508,7 @@ def load_config(path: str | Path) -> AppConfig:
         ),
         symmetry=_parse_symmetry_config(base, input_raw, symmetry_raw),
         spinor=_parse_spinor_config(raw.get("spinor", {})),
+        rotation=_parse_rotation_config(raw.get("rotation", {})),
         output=OutputConfig(
             directory=resolve_config_path(base, output_raw.get("directory", "valley_analysis")),
             write_json=bool(output_raw.get("write_json", True)),

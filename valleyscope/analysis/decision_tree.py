@@ -65,14 +65,14 @@ def derive_valley_status(
         if polarization_score >= clean_threshold:
             return "raw_valley_clean"
         if polarization_score >= approx_threshold:
-            return "raw_valley_clean"
+            return "raw_valley_approx"
         return "raw_valley_mixed"
 
     if analysis_level == "adapted_subspace":
         if polarization_score >= clean_threshold:
             return "valley_separable_subspace"
         if polarization_score >= approx_threshold:
-            return "valley_separable_subspace"
+            return "valley_approximately_separable_subspace"
         return "valley_mixed_subspace"
 
     return "not_valley_derived"
@@ -117,7 +117,7 @@ def derive_polarization_score(
     purity: float | None = None,
 ) -> float:
     if analysis_level == "adapted_subspace" and eta_adapted is not None and len(eta_adapted) > 0:
-        return float(max(abs(float(v)) for v in eta_adapted))
+        return float(min(abs(float(v)) for v in eta_adapted))
     if eta_raw is not None:
         return float(abs(eta_raw))
     if purity is not None:

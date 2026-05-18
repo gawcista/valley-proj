@@ -763,10 +763,15 @@ def test_rotation_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp
     assert "rejected" in summary_text
     assert "not in little group" in summary_text or "not valley preserving" in summary_text
     assert "topology_input_ready" in summary_text
+    assert "Little-group eigenvalues:" in summary_text
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     assert any("topology_input_ready" in row for row in summary["rotation_eigenvalues"])
     assert "spinor_convention" in summary["input"]
     assert "spinor_benchmark" in summary["rotation_eigenvalues"][0]
+    assert outputs["little_group_eigenvalues_csv"].exists()
+    assert outputs["little_group_representations_json"].exists()
+    assert "little_group_eigenvalues_csv" in summary["output_files"]
+    assert "little_group_representations_json" in summary["output_files"]
 
 
 def test_write_detailed_files_false_writes_only_summary_files(tmp_path):
@@ -787,6 +792,8 @@ def test_write_detailed_files_false_writes_only_summary_files(tmp_path):
     assert not (out_dir / "valley_subspace.json").exists()
     assert not (out_dir / "symmetry_report.json").exists()
     assert not (out_dir / "rotation_eigenvalues.csv").exists()
+    assert not (out_dir / "little_group_eigenvalues.csv").exists()
+    assert not (out_dir / "little_group_representations.json").exists()
     assert not (out_dir / "diagnostics.h5").exists()
 
 
@@ -933,6 +940,100 @@ def test_summary_output_files_use_human_readable_labels(tmp_path):
     assert "Human-readable summary:" in text
     assert "rotation_eigenvalues_csv:" not in text
     assert "valley_summary_txt:" not in text
+
+
+def test_summary_subspace_polarization_uses_min_eta_score(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    config = load_config(config_path)
+    from valleyscope.reports.summary_report import build_summary_payload
+
+    summary = build_summary_payload(
+        config=config,
+        qcut=0.5,
+        subspace_payload={
+            "kpoints": {
+                "GammaM": {
+                    "weights": [],
+                    "warnings": [],
+                    "polarization_score": 0.2,
+                    "subspace_valley_status": "valley_mixed_subspace",
+                    "valley_adapted_subspace": {
+                        "status": "two_valley_adapted",
+                        "eta": [0.99, 0.2],
+                        "max_abs_eta": 0.99,
+                        "s_min": 0.98,
+                        "s_max": 1.0,
+                    },
+                }
+            }
+        },
+        symmetry_payload={
+            "status": "skipped",
+            "reason": "no structure",
+            "detected_operations": [],
+            "candidate_rotations": [],
+            "little_group_check": {"status": "not_run"},
+            "valley_preservation_check": {"status": "not_run"},
+        },
+        rotation_rows=[],
+        output_paths={},
+    )
+
+    assert summary["valley_adapted_subspace"][0]["polarization_score"] == pytest.approx(0.2)
+
+
+def test_little_group_summary_distinguishes_computed_from_diagnostic_only(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    config = load_config(config_path)
+    from valleyscope.reports.summary_report import build_summary_payload, render_summary_text
+
+    summary = build_summary_payload(
+        config=config,
+        qcut=0.5,
+        subspace_payload={"kpoints": {}},
+        symmetry_payload={
+            "status": "ok",
+            "detected_operations": [],
+            "candidate_rotations": [],
+            "little_group_check": {"status": "evaluated_per_kpoint"},
+            "valley_preservation_check": {"status": "completed"},
+        },
+        rotation_rows=[],
+        output_paths={},
+        little_group_diagnostics={
+            "total_operations": 1,
+            "little_group_count": 1,
+            "valley_preserving_count": 1,
+            "computed_count": 1,
+            "by_kpoint": {
+                "KM": {
+                    "operations": [
+                        {
+                            "operation_id": 1,
+                            "kind": "C3",
+                            "order": 3,
+                            "accepted": True,
+                            "diagnostic_reasons": ["two-sector D_valley offdiag diagnostic too large"],
+                            "character_valley": "1.000000+0.000000j",
+                            "eigenvalues": [1.0 / 6.0, -1.0 / 6.0],
+                        }
+                    ]
+                }
+            },
+        },
+    )
+
+    text = render_summary_text(summary)
+    assert "computed (diagnostic-only: two-sector D_valley offdiag diagnostic too large)" in text
+    assert "skipped (two-sector D_valley offdiag diagnostic too large)" not in text
 
 
 def test_single_band_and_not_degenerate_no_subspace_valley_status_mislabel(tmp_path):
@@ -1193,3 +1294,82 @@ def test_subspace_thresholds_inherit_user_config(tmp_path):
     kp_data = subspace["kpoints"]["GammaM"]
     # overlap_warn=0.15 > max_w_overlap=0.1 → not projector_unreliable
     assert kp_data.get("subspace_valley_status") == "valley_separable_subspace"
+
+
+def test_rotation_thresholds_from_config_parsed_and_applied(tmp_path):
+    """Fix 3: rotation thresholds in YAML config are parsed and used."""
+    h5_path = tmp_path / "wf.h5"
+    structure = tmp_path / "CONTCAR"
+    write_square_poscar(structure)
+    with h5py.File(h5_path, "w") as h5:
+        meta = h5.create_group("metadata")
+        lattice = meta.create_group("lattice")
+        lattice["direct_cart"] = np.eye(3)
+        lattice["reciprocal_cart"] = np.eye(3)
+        meta["spinor"] = False
+        meta["source"] = "toy"
+        meta["vasp_band_index_base"] = 1
+        kp = h5.create_group("kpoints").create_group("0")
+        kp["name"] = "GammaM"
+        kp["frac"] = np.array([0.0, 0.0, 0.0])
+        kp["cart"] = np.array([0.0, 0.0, 0.0])
+        q_cart = np.array([[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]])
+        kp["g_vectors_frac"] = q_cart
+        kp["g_vectors_cart"] = q_cart
+        kp["coefficients"] = np.array(
+            [[[1.0, 0.0]], [[0.0, 1.0]]], dtype=np.complex128,
+        )
+        kp["energies_eV"] = np.array([0.1, 0.1001])
+        kp["band_indices_vasp"] = np.array([101, 102])
+
+    config = {
+        "input": {"wavefunction_h5": str(h5_path)},
+        "analysis": {"kpoints": ["GammaM"], "target_bands_vasp": [101, 102], "degeneracy_tol_meV": 1.0},
+        "monolayer_lattices": {
+            "default": {"reciprocal_cart": [[10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 1.0]]}
+        },
+        "valley_centers": {
+            "coordinate_mode": "cart",
+            "centers": [
+                {"name": "K", "cart": [1.0, 0.0, 0.0]},
+                {"name": "Kp", "cart": [-1.0, 0.0, 0.0]},
+            ],
+        },
+        "valley_sectors": [
+            {"name": "K_sector", "centers": ["K"]},
+            {"name": "Kp_sector", "centers": ["Kp"]},
+        ],
+        "projection": {"qcut_mode": "absolute", "qcut_Ainv": 0.25, "overlap_cross_sector": "warn_exclude"},
+        "symmetry": {
+            "operations": {"mode": "auto", "structure_file": str(structure), "backend": "spglib"},
+            "tolerance": {"symprec": 1.0e-5, "angle_tolerance": -1.0},
+            "filters": {"rotation_order": 2},
+        },
+        "rotation": {"unitarity_tol": 1.0e-4, "root_deviation_tol": 1.0e-6, "D_valley_offdiag_tol": 1.0e-6},
+        "output": {"directory": str(tmp_path / "out")},
+    }
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    outputs = analyze_hsp(config_path)
+    # Verify config is parsed
+    from valleyscope.io.config import load_config
+    app_config = load_config(config_path)
+    assert app_config.rotation.unitarity_tol == pytest.approx(1.0e-4)
+    assert app_config.rotation.root_deviation_tol == pytest.approx(1.0e-6)
+    assert app_config.rotation.D_valley_offdiag_tol == pytest.approx(1.0e-6)
+
+    # Verify rotation eigenvalues were produced (thresholds don't break output)
+    with outputs["rotation_eigenvalues_csv"].open(encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert len(rows) > 0
+
+    # Default config (all fields omitted) still works
+    config2 = dict(config)
+    del config2["rotation"]
+    config_path2 = tmp_path / "config2.yaml"
+    config_path2.write_text(yaml.safe_dump(config2), encoding="utf-8")
+    outputs2 = analyze_hsp(config_path2)
+    with outputs2["rotation_eigenvalues_csv"].open(encoding="utf-8") as handle:
+        rows2 = list(csv.DictReader(handle))
+    assert len(rows2) > 0
