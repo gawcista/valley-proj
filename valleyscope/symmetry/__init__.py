@@ -1,1 +1,1 @@
-"""Symmetry diagnostics and rotation representations."""
+"""Symmetry-operation and representation diagnostics."""

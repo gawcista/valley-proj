@@ -33,6 +33,7 @@ def scan_qcut(
     *,
     use_2d: bool = True,
     overlap_policy: str = "warn_exclude",
+    emit_warnings: bool = True,
     plateau_tol: float = 1e-2,
 ) -> QcutScanResult:
     entries: list[QcutScanEntry] = []
@@ -45,6 +46,7 @@ def scan_qcut(
             qcut,
             use_2d=use_2d,
             overlap_policy=overlap_policy,
+            emit_warnings=emit_warnings,
         )
         entries.append(
             QcutScanEntry(

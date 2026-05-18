@@ -13,7 +13,7 @@ ROOT_DEVIATION_TOL = 1e-6
 D_VALLEY_OFFDIAG_TOL = 1e-6
 
 
-def rotation_diagnostics_for_kpoint(
+def symmetry_eigenvalue_diagnostics_for_kpoint(
     *,
     kpoint_name: str,
     k_frac: np.ndarray,
@@ -21,7 +21,7 @@ def rotation_diagnostics_for_kpoint(
     coefficients: np.ndarray,
     symmetry_payload: dict[str, object],
     basis_payload: dict[str, np.ndarray] | None,
-    rotation_payload: dict[str, object],
+    representation_payload: dict[str, object],
     spinor_convention_verified: bool = False,
     spinor_convention: str = "vasp_up_down_saxis_z",
     spinor_benchmark: str | None = None,
@@ -41,8 +41,8 @@ def rotation_diagnostics_for_kpoint(
         little = is_little_group_operation(np.asarray(operation["rotation_frac"]), k_frac)
         preserves_all = all(bool(value) for value in operation["preserved"].values())
         operation.setdefault("little_group_by_kpoint", {})[kpoint_name] = little
-        operation["allowed_for_single_valley_rotation"] = bool(little and preserves_all)
-        operation.setdefault("allowed_for_single_valley_rotation_by_kpoint", {})[kpoint_name] = bool(little and preserves_all)
+        operation["allowed_for_single_valley_representation"] = bool(little and preserves_all)
+        operation.setdefault("allowed_for_single_valley_representation_by_kpoint", {})[kpoint_name] = bool(little and preserves_all)
         rejection_reason = ""
         if not little:
             rejection_reason = "not in little group"
@@ -160,7 +160,7 @@ def rotation_diagnostics_for_kpoint(
         }
         if d_valley is not None:
             op_payload["D_valley"] = d_valley
-        rotation_payload.setdefault(kpoint_name, {})[op_key] = op_payload
+        representation_payload.setdefault(kpoint_name, {})[op_key] = op_payload
         for state_index, (value, phase, modulus_deviation, root, topology_input_ready) in enumerate(
             zip(
                 eigen.eigenvalues,

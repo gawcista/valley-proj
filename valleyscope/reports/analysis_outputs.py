@@ -6,8 +6,7 @@ from typing import Any
 from valleyscope.io.config import AppConfig
 from valleyscope.projection.sector_projectors import SectorProjectors
 from valleyscope.reports.csv_report import (
-    write_little_group_eigenvalues_csv,
-    write_rotation_eigenvalues_csv,
+    write_symmetry_eigenvalues_csv,
     write_valley_weights_csv,
 )
 from valleyscope.reports.h5_report import write_basis_transform_h5, write_diagnostics_h5
@@ -28,13 +27,12 @@ def write_analysis_outputs(
     sector_names: list[str],
     subspace_payload: dict[str, Any],
     symmetry_payload: dict[str, Any],
-    rotation_rows: list[dict[str, object]],
+    symmetry_rows: list[dict[str, object]],
     projectors_by_kpoint: dict[str, SectorProjectors],
     qcut_scan_payload: dict[str, object],
-    rotation_payload: dict[str, object],
+    symmetry_representation_payload: dict[str, object],
     basis_transforms: dict[str, dict[str, object]],
-    little_group_rows: list[dict[str, object]] | None = None,
-    little_group_diagnostics: dict[str, object] | None = None,
+    symmetry_eigenvalue_summary: dict[str, object] | None = None,
 ) -> dict[str, object]:
     output_dir = config.output.directory
     outputs: dict[str, object] = {}
@@ -47,12 +45,11 @@ def write_analysis_outputs(
             sector_names=sector_names,
             subspace_payload=subspace_payload,
             symmetry_payload=symmetry_payload,
-            rotation_rows=rotation_rows,
+            symmetry_rows=symmetry_rows,
             projectors_by_kpoint=projectors_by_kpoint,
             qcut_scan_payload=qcut_scan_payload,
-            rotation_payload=rotation_payload,
+            symmetry_representation_payload=symmetry_representation_payload,
             basis_transforms=basis_transforms,
-            little_group_rows=[] if little_group_rows is None else little_group_rows,
         )
     _write_summary_outputs(
         config=config,
@@ -61,8 +58,8 @@ def write_analysis_outputs(
         outputs=outputs,
         subspace_payload=subspace_payload,
         symmetry_payload=symmetry_payload,
-        rotation_rows=rotation_rows,
-        little_group_diagnostics=little_group_diagnostics,
+        symmetry_rows=symmetry_rows,
+        symmetry_eigenvalue_summary=symmetry_eigenvalue_summary,
     )
     return outputs
 
@@ -76,12 +73,11 @@ def _write_detailed_outputs(
     sector_names: list[str],
     subspace_payload: dict[str, Any],
     symmetry_payload: dict[str, Any],
-    rotation_rows: list[dict[str, object]],
+    symmetry_rows: list[dict[str, object]],
     projectors_by_kpoint: dict[str, SectorProjectors],
     qcut_scan_payload: dict[str, object],
-    rotation_payload: dict[str, object],
+    symmetry_representation_payload: dict[str, object],
     basis_transforms: dict[str, dict[str, object]],
-    little_group_rows: list[dict[str, object]],
 ) -> None:
     if config.output.write_csv:
         outputs["valley_weights_csv"] = write_valley_weights_csv(
@@ -89,31 +85,19 @@ def _write_detailed_outputs(
             weight_rows,
             sector_names,
         )
-        outputs["rotation_eigenvalues_csv"] = write_rotation_eigenvalues_csv(
-            output_dir / "rotation_eigenvalues.csv",
-            rotation_rows,
-        )
-        if little_group_rows:
-            outputs["little_group_eigenvalues_csv"] = write_little_group_eigenvalues_csv(
-                output_dir / "little_group_eigenvalues.csv",
-                little_group_rows,
+        if symmetry_rows:
+            outputs["symmetry_eigenvalues_csv"] = write_symmetry_eigenvalues_csv(
+                output_dir / "symmetry_eigenvalues.csv",
+                symmetry_rows,
             )
     if config.output.write_json:
         outputs["valley_subspace_json"] = write_json(output_dir / "valley_subspace.json", subspace_payload)
         outputs["symmetry_report_json"] = write_json(output_dir / "symmetry_report.json", symmetry_payload)
-        if little_group_rows:
-            outputs["little_group_representations_json"] = write_json(
-                output_dir / "little_group_representations.json",
-                {
-                    "little_group_representations": little_group_rows,
-                    "irrep_label_matching": "deferred",
-                },
-            )
     outputs["diagnostics_h5"] = write_diagnostics_h5(
         output_dir / "diagnostics.h5",
         projectors_by_kpoint,
         qcut_scan_payload,
-        rotation_payload,
+        symmetry_representation_payload,
         symmetry_payload,
     )
     if config.output.write_hdf5_basis_transform:
@@ -131,8 +115,8 @@ def _write_summary_outputs(
     outputs: dict[str, object],
     subspace_payload: dict[str, Any],
     symmetry_payload: dict[str, Any],
-    rotation_rows: list[dict[str, object]],
-    little_group_diagnostics: dict[str, object] | None = None,
+    symmetry_rows: list[dict[str, object]],
+    symmetry_eigenvalue_summary: dict[str, object] | None = None,
 ) -> None:
     summary_path_plan: dict[str, Path] = {}
     if config.output.write_summary_txt or not config.output.write_detailed_files:
@@ -149,9 +133,9 @@ def _write_summary_outputs(
         qcut=qcut,
         subspace_payload=subspace_payload,
         symmetry_payload=symmetry_payload,
-        rotation_rows=rotation_rows,
+        symmetry_rows=symmetry_rows,
         output_paths=output_paths,
-        little_group_diagnostics=little_group_diagnostics,
+        symmetry_eigenvalue_summary=symmetry_eigenvalue_summary,
     )
     summary_text = render_summary_text(summary_payload)
     if "valley_summary_txt" in summary_path_plan:

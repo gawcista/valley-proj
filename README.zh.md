@@ -2,9 +2,9 @@
 
 **语言:** 中文 | [English](README.md)
 
-ValleyScope 是一套面向 VASP moire 超胞波函数的动量空间谷投影（momentum-space valley projection）与对称性诊断（symmetry diagnostics）后处理流程。它适用于低能态的谷特征（valley character）来自底层单层布里渊区，但实际第一性原理计算在大型 moire 超胞中完成的情况。
+ValleyScope 是一套面向 VASP moire 超胞波函数的动量空间谷投影（momentum-space valley projection）与对称性分析（symmetry analysis）后处理流程。它适用于低能态的谷特征（valley character）来自底层单层布里渊区，但实际第一性原理计算在大型 moire 超胞中完成的情况。
 
-它不是黑箱陈数（Chern number）程序。V1 是只针对高对称点的诊断（HSP-only diagnostic）：分析选定高对称点，在平面波希尔伯特空间中构造单层谷投影算符，对近简并目标子空间进行谷规范固定，并输出旋转本征值诊断。严格的谷分辨拓扑判断需要后续全 mBZ 验证。
+它不是黑箱陈数（Chern number）程序。V1 是只针对高对称点的诊断（HSP-only diagnostic）：分析选定高对称点，在平面波希尔伯特空间中构造单层谷投影算符，对近简并目标子空间进行谷规范固定，并输出谷保持对称操作的本征值诊断。严格的谷分辨拓扑判断需要后续全 mBZ 验证。
 
 ## 物理动机
 
@@ -12,7 +12,7 @@ ValleyScope 是一套面向 VASP moire 超胞波函数的动量空间谷投影�
 
 对转角双层体系，同一个单层谷中的上下层动量可以杂化。这种层间杂化本身不破坏谷量子数。真正需要诊断的是目标态是否仍然局限在选定的谷子空间中，还是出现了谷间混合或谷外剩余权重。
 
-V1 工作流在选定高对称点上回答这个问题。它还会检查候选对称操作是否属于该高对称点的小群（little group），以及是否保持目标谷扇区，然后才报告旋转本征值。
+V1 工作流在选定高对称点上回答这个问题。它还会检查候选对称操作是否属于该高对称点的小群（little group），以及是否保持目标谷扇区，然后才报告对称本征值。
 
 ## 物理定义
 
@@ -88,7 +88,7 @@ P_v=\frac{\max_i W_i}{W_{\rm val}},\qquad W_{\rm val}>0 .
 
 谷集中度分数分为三档：
 - **clean**（`raw_valley_clean` / `valley_separable_subspace`）：集中度高于 clean 阈值（默认 `P_v=0.95`，即 `|eta|=0.90`）。适合作为谷分辨对称性诊断的输入。
-- **approximate**（`raw_valley_approx` / `valley_approximately_separable_subspace`）：集中度介于 approx 和 clean 阈值之间（默认 `P_v=0.85~0.95`，`|eta|=0.70~0.90`）。可谨慎使用；此范围内的旋转本征值仅供诊断参考。
+- **approximate**（`raw_valley_approx` / `valley_approximately_separable_subspace`）：集中度介于 approx 和 clean 阈值之间（默认 `P_v=0.85~0.95`，`|eta|=0.70~0.90`）。可谨慎使用；此范围内的对称本征值仅供诊断参考。
 - **mixed**（`raw_valley_mixed` / `valley_mixed_subspace`）：集中度低于 approx 阈值。谷扇区未有效分离，单谷诊断不可靠。
 
 对两谷子空间，有符号谷极化为
@@ -128,12 +128,12 @@ V_{mn}=
 
 ### 对称性诊断
 
-ValleyScope 用 spglib 从 moire/bilayer 结构文件中自动识别对称操作，支持 `symprec` 和 `symprec_scan`。旋转本征值仅在两项检查通过后才报告：
+ValleyScope 用 spglib 从 moire/bilayer 结构文件中自动识别对称操作，支持 `symprec` 和 `symprec_scan`。对称本征值仅在两项检查通过后才报告：
 
 1. 该操作属于目标高对称点的小群。
 2. 该操作保持目标谷扇区。
 
-得到的矩阵是谷适配子空间中的小群表示。其本征值是旋转本征值诊断，可用于基于对称性的拓扑公式约束，但 V1 不自动推断完整整数陈数。
+得到的矩阵是谷适配子空间中的小群表示。其本征值是对称性诊断，可用于基于对称性的拓扑公式约束，但 V1 不自动推断完整整数陈数。
 
 ## 运行流程
 
@@ -348,15 +348,33 @@ valleyscope analyze-hsp analyze.yaml
 Input
 Valley manifolds
 Valley projection summary
-Valley-adapted subspace
-Symmetry diagnostics
-Allowed valley-preserving rotations
-Rotation eigenvalues
+Two-valley subspace
+Symmetry analysis
+Symmetry eigenvalues
 Warnings
 Output files
 ```
 
-先看 `Valley projection summary` 表中的 `derived`、`pol`、`W_overlap`、`W_res` 和 `valley_status`。再看 `Valley-adapted subspace`，判断近简并目标子空间是否构成良好的双谷子空间。旋转本征值表中，`topology_input_ready` 只表示高对称点旋转本征值适合作为后续拓扑分析输入，不验证整个 mBZ 的谷分辨拓扑。`topology_ready` 是 `topology_input_ready` 的兼容别名。
+先看 `Valley projection summary`，它只给出逐条原始 VASP 能带的投影量：
+
+```text
+W_val:      谷子空间权重
+P_v:        谷纯度
+W_overlap: 投影窗口重叠权重
+W_res:      剩余权重
+```
+
+屏幕上的 `status` 只保留三类：`clean`、`approx`、`mixed`。
+
+再看 `Two-valley subspace`。近简并子空间中的原始 VASP 本征矢依赖规范选择，逐条能带投影不是最终诊断。ValleyScope 在目标子空间中构造
+
+```math
+S=P_K+P_{K'}, \qquad V=P_K-P_{K'} .
+```
+
+`S` 判断整个目标子空间是否主要位于所选双谷子空间中；`V` 在该子空间内固定谷适配基。这里输出的 `S_min`、`S_max`、`P_v_min` 和 `eta_adapted` 是子空间诊断，不是 raw-band 表的重复。
+
+`Symmetry analysis` 先列出空间群和检测到的对称操作，再按高对称点列出 little-group 操作和 valley-preserving 操作。`Symmetry eigenvalues` 只列出实际构造了表示矩阵并求得本征值的操作。`topology_input_ready` 只表示该高对称点对称本征值可作为后续基于对称性的拓扑分析输入，不验证整个 mBZ 的谷分辨拓扑。
 
 对于 SOC spinor 波函数，ValleyScope 在平面波表示中施加 SU(2) 自旋旋转。默认 VASP 自旋约定未验证时标记为 `diagnostic_only=True`。完成基准测试后可设置 `spinor.convention_verified: true`。
 
@@ -370,7 +388,7 @@ operation structure: ./2dm-5370-7.34.vasp
 operation-detection backend: spglib
 spinor convention: vasp_up_down_saxis_z (verified=True, benchmark=tMoTe2_VBM_C3_literature)
 target k-points: GammaM, KM, MM
-target bands (VASP): 2195, 2196
+iband (VASP): 2195, 2196
 qcut mode: relative_min_sector_distance
 qcut value: 0.034 A^-1
 
@@ -383,9 +401,13 @@ Kp_valley top_Kp, bottom_Kp
 
 Valley projection summary
 -------------------------
-kpoint  band  derived  pol   W_overlap  W_res  valley_status
-------  ----  -------  ----  ---------  -----  --------------
-GammaM  2195  0.98     0.98  0          0.02   raw_valley_clean
+W_val:      谷子空间权重
+P_v:        谷纯度
+W_overlap: 投影窗口重叠权重
+W_res:      剩余权重
+kpoint  band  W_val  P_v   W_overlap  W_res  status
+------  ----  -----  ----  ---------  -----  ------
+GammaM  2195  0.98   0.99  0          0.02   clean
 ```
 
 ### 结构文件
@@ -410,10 +432,10 @@ symmetry:
 
 单层 POSCAR 不能替代 moire POSCAR 做对称操作识别。
 
-`symmetry.filters.rotation_order` 控制旋转本征值计算：
+`symmetry.filters.rotation_order` 选择用于对称本征值提取的 proper-rotation 阶数：
 - `auto`：从空间群推断（如 `P321`/`P312` → `C3`，`P422` → `C4`）
 - 整数 `n`：只分析 `C_n`
-- `None`/`none`：跳过旋转本征值提取
+- `None`/`none`：跳过对称本征值提取
 
 默认只计算每个循环旋转子群的一个生成元。
 
@@ -425,9 +447,9 @@ symmetry:
 valley_summary.txt          ← 最先看
 valley_summary.json
 valley_weights.csv          ← 第一眼检查
-valley_subspace.json        ← 近简并态主要结果
-rotation_eigenvalues.csv    ← 旋转本征值
-symmetry_report.json        ← 对称操作详情
+valley_subspace.json        ← 双谷子空间数据
+symmetry_eigenvalues.csv    ← 对称本征值
+symmetry_report.json        ← 对称性分析
 valley_basis_transform.h5   ← 谷适配基变换
 diagnostics.h5              ← 调试用
 ```
@@ -446,14 +468,14 @@ kpoint, band_vasp, energy_eV, K_sector, Kp_sector, W_val, P_v, eta, W_overlap, W
 
 近简并态的主要摘要文件。记录投影谷算符、谷适配基诊断，以及目标子空间落在所选谷子空间中的程度。
 
-### rotation_eigenvalues.csv
+### symmetry_eigenvalues.csv
 
-只有操作通过 V1 三项检查后才写入：真旋转且阶数在 `[2,3,4,6]`、属于 HSP 小群、保持目标谷扇区。
+只有操作通过 V1 表示矩阵检查后才写入：真旋转且阶数在 `[2,3,4,6]`、属于 HSP 小群、保持目标谷扇区。
 
 主要列：
 
 - `kpoint`：moiré 高对称点
-- `operation_id`：对称操作编号
+- `operation_id`：`symmetry_report.json` 中的对称操作编号
 - `order`：旋转阶数
 - `basis`：`valley_adapted` 或 `raw_diagnostic`
 - `phase_2pi`：本征值相位 / 2π
@@ -461,7 +483,7 @@ kpoint, band_vasp, energy_eV, K_sector, Kp_sector, W_val, P_v, eta, W_overlap, W
 - `rotation_ready`：表示矩阵通过 V1 数值检查
 - `topology_input_ready`：适合作为后续拓扑分析输入（保守标志）
 - `diagnostic_only`：仅供诊断
-- `D_valley_offdiag_norm`：双谷适配基中旋转矩阵非对角块范数
+- `D_valley_offdiag_norm`：双谷适配基中表示矩阵非对角块范数
 - `valley_eta`：谷适配态的有符号谷极化
 
 ### valley_basis_transform.h5
@@ -492,21 +514,21 @@ kpoint, band_vasp, energy_eV, K_sector, Kp_sector, W_val, P_v, eta, W_overlap, W
 /qcut_scan/<kpoint>/qcuts
 /qcut_scan/<kpoint>/w_val
 ...
-/rotation/<kpoint>/<operation_id>/D_raw
-/rotation/<kpoint>/<operation_id>/D_valley
+/symmetry_representations/<kpoint>/<operation_id>/D_raw
+/symmetry_representations/<kpoint>/<operation_id>/D_valley
 ...
 ```
 
 `D_valley` 仅在存在有效谷适配基时写入。
 
-## V1.1：小群本征值诊断
+## V1.1：对称本征值诊断
 
-对每个目标高对称点，计算**所有**满足小群条件和谷保持条件的 proper-rotation 对称操作的表示矩阵、本征值和特征标（不限于旋转生成元）。
+对每个目标高对称点，计算满足小群条件和谷保持条件的 proper-rotation 对称操作的表示矩阵、本征值和特征标。
 
 - 枚举通过小群检查 + 谷保持检查的全部 proper rotation。
 - 计算 `D_raw` 和 `D_valley`（谷适配基）表示矩阵。
 - 输出本征值、相位、特征标和 readiness 标志。
-- 新增输出：`little_group_eigenvalues.csv` 和 `little_group_representations.json`。
+- 输出：`symmetry_eigenvalues.csv`、`symmetry_report.json` 和 `diagnostics.h5`。
 
 **Irrep label matching 暂缓。** 谷分辨的单态不会自动匹配到完整 double space group irrep label（如 -K4/-K5/-K6）。这需要先定义 valley-preserving subgroup restriction 和 parent full irrep 的关系，留待后续理论工作。
 

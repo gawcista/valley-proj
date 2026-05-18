@@ -10,7 +10,7 @@ from valleyscope.symmetry.rotation_eigenvalues import nearest_root_of_unity
 from valleyscope.symmetry.rotation_selection import mark_rotation_generators, resolve_rotation_order
 from valleyscope.symmetry.spglib_finder import find_symmetry_operations
 from valleyscope.symmetry.valley_preservation import map_valley_sectors
-from valleyscope.analysis.rotation_diagnostic import rotation_diagnostics_for_kpoint
+from valleyscope.analysis.symmetry_eigenvalue_diagnostic import symmetry_eigenvalue_diagnostics_for_kpoint
 
 
 RECIP = np.array(
@@ -265,7 +265,7 @@ def test_plane_wave_action_recovers_c3_angular_momentum_eigenvalue():
     np.testing.assert_allclose(result.matrix, [[np.exp(-1.0j * angle)]], atol=1e-12)
 
 
-def test_spinor_rotation_rows_are_diagnostic_only_without_convention_benchmark():
+def test_spinor_symmetry_rows_are_diagnostic_only_without_convention_benchmark():
     coefficients = np.array(
         [
             [
@@ -290,16 +290,16 @@ def test_spinor_rotation_rows_are_diagnostic_only_without_convention_benchmark()
             }
         ]
     }
-    rotation_payload: dict[str, object] = {}
+    representation_payload: dict[str, object] = {}
 
-    rows = rotation_diagnostics_for_kpoint(
+    rows = symmetry_eigenvalue_diagnostics_for_kpoint(
         kpoint_name="GammaM",
         k_frac=np.zeros(3),
         q_cart=q_cart,
         coefficients=coefficients,
         symmetry_payload=symmetry_payload,
         basis_payload=None,
-        rotation_payload=rotation_payload,
+        representation_payload=representation_payload,
     )
 
     assert rows
@@ -334,16 +334,16 @@ def test_spinful_c3_root_diagnostic_uses_double_group_order():
             }
         ]
     }
-    rotation_payload: dict[str, object] = {}
+    representation_payload: dict[str, object] = {}
 
-    rows = rotation_diagnostics_for_kpoint(
+    rows = symmetry_eigenvalue_diagnostics_for_kpoint(
         kpoint_name="GammaM",
         k_frac=np.zeros(3),
         q_cart=np.zeros((1, 3)),
         coefficients=coefficients,
         symmetry_payload=symmetry_payload,
         basis_payload=None,
-        rotation_payload=rotation_payload,
+        representation_payload=representation_payload,
     )
 
     assert rows[0]["nearest_root_of_unity"] == "exp(2pii*5/6)"
@@ -375,14 +375,14 @@ def test_spinor_convention_benchmark_marks_spinor_rows_verified():
         ]
     }
 
-    rows = rotation_diagnostics_for_kpoint(
+    rows = symmetry_eigenvalue_diagnostics_for_kpoint(
         kpoint_name="GammaM",
         k_frac=np.zeros(3),
         q_cart=np.zeros((1, 3)),
         coefficients=coefficients,
         symmetry_payload=symmetry_payload,
         basis_payload=None,
-        rotation_payload={},
+        representation_payload={},
         spinor_convention_verified=True,
     )
 
@@ -407,14 +407,14 @@ def test_rotation_ready_tolerates_small_truncation_unitarity_error():
             }
         ]
     }
-    rows = rotation_diagnostics_for_kpoint(
+    rows = symmetry_eigenvalue_diagnostics_for_kpoint(
         kpoint_name="GammaM",
         k_frac=np.zeros(3),
         q_cart=np.zeros((1, 3)),
         coefficients=coefficients,
         symmetry_payload=symmetry_payload,
         basis_payload=None,
-        rotation_payload={},
+        representation_payload={},
     )
 
     assert rows[0]["unitarity_deviation"] < 1.0e-4
@@ -536,7 +536,7 @@ class TestLittleGroupExtendedDiagnostics:
 
     def test_generators_only_default_behavior_unchanged(self):
         """Default generators_only=True should match old behavior."""
-        from valleyscope.analysis.rotation_diagnostic import rotation_diagnostics_for_kpoint
+        from valleyscope.analysis.symmetry_eigenvalue_diagnostic import symmetry_eigenvalue_diagnostics_for_kpoint
         coeffs = np.array([[[1.0 + 0.0j]]], dtype=np.complex128)
         ops = [
             {
@@ -551,17 +551,17 @@ class TestLittleGroupExtendedDiagnostics:
                 "preserved": {"K": True},
             },
         ]
-        rows = rotation_diagnostics_for_kpoint(
+        rows = symmetry_eigenvalue_diagnostics_for_kpoint(
             kpoint_name="GM", k_frac=np.zeros(3), q_cart=np.zeros((1, 3)),
             coefficients=coeffs, symmetry_payload=self._toy_symmetry_payload(ops),
-            basis_payload=None, rotation_payload={},
+            basis_payload=None, representation_payload={},
         )
         assert len(rows) > 0
         assert all(row["operation_id"] == 0 for row in rows)
 
     def test_generators_only_false_includes_all_proper_rotations(self):
         """With generators_only=False, C3 (order=3, non-candidate) should be included."""
-        from valleyscope.analysis.rotation_diagnostic import rotation_diagnostics_for_kpoint
+        from valleyscope.analysis.symmetry_eigenvalue_diagnostic import symmetry_eigenvalue_diagnostics_for_kpoint
         coeffs = np.array([[[1.0 + 0.0j]]], dtype=np.complex128)
         ops = [
             {
@@ -576,17 +576,17 @@ class TestLittleGroupExtendedDiagnostics:
                 "preserved": {"K": True},
             },
         ]
-        rows = rotation_diagnostics_for_kpoint(
+        rows = symmetry_eigenvalue_diagnostics_for_kpoint(
             kpoint_name="GM", k_frac=np.zeros(3), q_cart=np.zeros((1, 3)),
             coefficients=coeffs, symmetry_payload=self._toy_symmetry_payload(ops),
-            basis_payload=None, rotation_payload={}, generators_only=False,
+            basis_payload=None, representation_payload={}, generators_only=False,
         )
         op_ids = {row["operation_id"] for row in rows}
         assert 1 in op_ids, "C3 should be included with generators_only=False"
 
     def test_non_little_group_skipped_with_reason(self):
         """Operations not in little group should be skipped with clear reason."""
-        from valleyscope.analysis.rotation_diagnostic import rotation_diagnostics_for_kpoint
+        from valleyscope.analysis.symmetry_eigenvalue_diagnostic import symmetry_eigenvalue_diagnostics_for_kpoint
         coeffs = np.array([[[1.0 + 0.0j]]], dtype=np.complex128)
         c2z = np.diag([-1, -1, 1])
         ops = [
@@ -596,17 +596,17 @@ class TestLittleGroupExtendedDiagnostics:
                 "translation_cart": np.zeros(3), "preserved": {"K": True},
             },
         ]
-        rows = rotation_diagnostics_for_kpoint(
+        rows = symmetry_eigenvalue_diagnostics_for_kpoint(
             kpoint_name="K", k_frac=np.array([1.0/3.0, 0.0, 0.0]),
             q_cart=np.zeros((1, 3)), coefficients=coeffs,
             symmetry_payload=self._toy_symmetry_payload(ops),
-            basis_payload=None, rotation_payload={}, generators_only=False,
+            basis_payload=None, representation_payload={}, generators_only=False,
         )
         assert rows == []
 
     def test_character_fields_present_in_output(self):
         """Output rows should contain character_raw and character_valley."""
-        from valleyscope.analysis.rotation_diagnostic import rotation_diagnostics_for_kpoint
+        from valleyscope.analysis.symmetry_eigenvalue_diagnostic import symmetry_eigenvalue_diagnostics_for_kpoint
         coeffs = np.array([[[1.0 + 0.0j]]], dtype=np.complex128)
         ops = [
             {
@@ -615,10 +615,10 @@ class TestLittleGroupExtendedDiagnostics:
                 "translation_cart": np.zeros(3), "preserved": {"K": True},
             },
         ]
-        rows = rotation_diagnostics_for_kpoint(
+        rows = symmetry_eigenvalue_diagnostics_for_kpoint(
             kpoint_name="GM", k_frac=np.zeros(3), q_cart=np.zeros((1, 3)),
             coefficients=coeffs, symmetry_payload=self._toy_symmetry_payload(ops),
-            basis_payload=None, rotation_payload={},
+            basis_payload=None, representation_payload={},
         )
         assert "character_raw" in rows[0]
         assert "character_valley" in rows[0]

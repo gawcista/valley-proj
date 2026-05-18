@@ -252,7 +252,7 @@ class TestDecisionTreeIntegration:
         assert v_status == "valley_mixed_subspace"
 
     def test_full_four_step_with_symmetry(self):
-        """A separable subspace with verified rotation eigenvalue."""
+        """A separable subspace with verified symmetry eigenvalue."""
         s_status = derive_symmetry_status(
             symmetry_skipped=False, little_group_passed=True,
             valley_preserving=True, topology_input_ready=True,

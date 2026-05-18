@@ -10,7 +10,7 @@ from valleyscope.analysis.decision_tree import (
     derive_symmetry_status,
     derive_valley_status,
 )
-from valleyscope.analysis.rotation_diagnostic import rotation_diagnostics_for_kpoint
+from valleyscope.analysis.symmetry_eigenvalue_diagnostic import symmetry_eigenvalue_diagnostics_for_kpoint
 from valleyscope.geometry.lattice import (
     cart_rotation_from_fractional,
     cart_translation_from_fractional,
@@ -77,8 +77,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     qcut = _resolve_qcut(config, wavefunctions.metadata.lattice.reciprocal_cart, monolayer_recip)
 
     rows: list[dict[str, object]] = []
-    rotation_rows: list[dict[str, object]] = []
-    little_group_rows: list[dict[str, object]] = []
+    symmetry_rows: list[dict[str, object]] = []
     subspace_payload: dict[str, object] = {
         "degeneracy_tol_meV": config.analysis.degeneracy_tol_meV,
         "kpoints": {},
@@ -86,7 +85,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     projectors_by_kpoint: dict[str, SectorProjectors] = {}
     qcut_scan_payload: dict[str, object] = {}
     basis_transforms: dict[str, dict[str, np.ndarray]] = {}
-    rotation_payload: dict[str, object] = {}
+    symmetry_representation_payload: dict[str, object] = {}
     symmetry_payload: dict[str, object] = _prepare_symmetry_payload(config, monolayer_recip)
 
     for kpoint_name in config.analysis.kpoints:
@@ -102,6 +101,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             qcut,
             use_2d=config.projection.use_2d_momentum_only,
             overlap_policy=config.projection.overlap_cross_sector,
+            emit_warnings=False,
         )
         projectors_by_kpoint[kpoint_name] = projectors
         weights = compute_valley_weights(coefficients, projectors)
@@ -166,6 +166,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 scan_qcuts,
                 use_2d=config.projection.use_2d_momentum_only,
                 overlap_policy=config.projection.overlap_cross_sector,
+                emit_warnings=False,
             )
             qcut_scan_payload[kpoint_name] = {
                 "has_plateau": scan.has_plateau,
@@ -194,33 +195,16 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     for entry in scan.entries
                 ],
             }
-        if symmetry_payload["status"] == "ok":
-            rotation_rows.extend(
-                rotation_diagnostics_for_kpoint(
+        if symmetry_payload["status"] == "ok" and symmetry_payload.get("symmetry_eigenvalue_enabled", True):
+            symmetry_rows.extend(
+                symmetry_eigenvalue_diagnostics_for_kpoint(
                     kpoint_name=kpoint_name,
                     k_frac=kpoint.frac,
                     q_cart=q_cart,
                     coefficients=coefficients,
                     symmetry_payload=symmetry_payload,
                     basis_payload=basis_transforms.get(kpoint_name),
-                    rotation_payload=rotation_payload,
-                    spinor_convention_verified=config.spinor.convention_verified,
-                    spinor_convention=config.spinor.convention,
-                    spinor_benchmark=config.spinor.benchmark,
-                    unitarity_tol=config.rotation.unitarity_tol,
-                    root_deviation_tol=config.rotation.root_deviation_tol,
-                    d_valley_offdiag_tol=config.rotation.D_valley_offdiag_tol,
-                )
-            )
-            little_group_rows.extend(
-                rotation_diagnostics_for_kpoint(
-                    kpoint_name=kpoint_name,
-                    k_frac=kpoint.frac,
-                    q_cart=q_cart,
-                    coefficients=coefficients,
-                    symmetry_payload=symmetry_payload,
-                    basis_payload=basis_transforms.get(kpoint_name),
-                    rotation_payload=rotation_payload,
+                    representation_payload=symmetry_representation_payload,
                     spinor_convention_verified=config.spinor.convention_verified,
                     spinor_convention=config.spinor.convention,
                     spinor_benchmark=config.spinor.benchmark,
@@ -231,11 +215,11 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 )
             )
         kpoint_subspace["symmetry_status"] = _resolve_symmetry_status(
-            symmetry_payload, rotation_rows, kpoint_name,
+            symmetry_payload, symmetry_rows, kpoint_name,
         )
 
     sector_names = list(projectors_by_kpoint[next(iter(projectors_by_kpoint))].sector_masks)
-    little_group_diag = _build_little_group_summary(symmetry_payload, little_group_rows)
+    symmetry_eigenvalue_summary = _build_symmetry_eigenvalue_summary(symmetry_payload, symmetry_rows)
     outputs = write_analysis_outputs(
         config=config,
         qcut=qcut,
@@ -243,13 +227,12 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         sector_names=sector_names,
         subspace_payload=subspace_payload,
         symmetry_payload=symmetry_payload,
-        rotation_rows=rotation_rows,
+        symmetry_rows=symmetry_rows,
         projectors_by_kpoint=projectors_by_kpoint,
         qcut_scan_payload=qcut_scan_payload,
-        rotation_payload=rotation_payload,
+        symmetry_representation_payload=symmetry_representation_payload,
         basis_transforms=basis_transforms,
-        little_group_rows=little_group_rows,
-        little_group_diagnostics=little_group_diag,
+        symmetry_eigenvalue_summary=symmetry_eigenvalue_summary,
     )
     return outputs
 
@@ -352,7 +335,7 @@ def _prepare_symmetry_payload(config: AppConfig, monolayer_recip: np.ndarray) ->
             "allowed_orders": symmetry.filters.allowed_orders,
             "rotation_order": symmetry.filters.rotation_order,
         },
-        "rotation_eigenvalue_enabled": False,
+        "symmetry_eigenvalue_enabled": False,
         "requested_rotation_order": symmetry.filters.rotation_order,
         "resolved_rotation_order": None,
         "little_group_check": {"required": True, "status": "not_run"},
@@ -431,7 +414,7 @@ def _prepare_symmetry_payload(config: AppConfig, monolayer_recip: np.ndarray) ->
         "structure_file": str(structure_file),
         "spacegroup_number": dataset.spacegroup_number,
         "international": dataset.international,
-        "rotation_eigenvalue_enabled": resolved_rotation_order is not None,
+        "symmetry_eigenvalue_enabled": resolved_rotation_order is not None,
         "requested_rotation_order": symmetry.filters.rotation_order,
         "resolved_rotation_order": resolved_rotation_order,
         "symprec_scan_summary": symprec_scan_summary,
@@ -547,18 +530,18 @@ def _build_weight_entry(
 
 def _resolve_symmetry_status(
     symmetry_payload: dict[str, object],
-    rotation_rows: list[dict[str, object]],
+    symmetry_rows: list[dict[str, object]],
     kpoint_name: str,
 ) -> str:
     symmetry_skipped = symmetry_payload.get("status") == "skipped"
-    if symmetry_payload.get("rotation_eigenvalue_enabled") is False:
+    if symmetry_payload.get("symmetry_eigenvalue_enabled") is False:
         return "not_requested"
     has_topology_ready = any(
-        row.get("topology_input_ready") for row in rotation_rows
+        row.get("topology_input_ready") for row in symmetry_rows
         if row.get("kpoint") == kpoint_name
     )
     has_diagnostic = any(
-        row.get("kpoint") == kpoint_name for row in rotation_rows
+        row.get("kpoint") == kpoint_name for row in symmetry_rows
     )
 
     little_group_passed: bool | None = None
@@ -572,7 +555,7 @@ def _resolve_symmetry_status(
             continue
         if lg is True:
             little_group_passed = True
-            allowed = op.get("allowed_for_single_valley_rotation_by_kpoint", {}).get(kpoint_name, False)
+            allowed = op.get("allowed_for_single_valley_representation_by_kpoint", {}).get(kpoint_name, False)
             if not allowed:
                 preserved = op.get("preserved", {})
                 if any(not bool(v) for v in preserved.values()):
@@ -588,14 +571,14 @@ def _resolve_symmetry_status(
     )
 
 
-def _build_little_group_summary(
+def _build_symmetry_eigenvalue_summary(
     symmetry_payload: dict[str, object],
-    little_group_rows: list[dict[str, object]],
+    symmetry_rows: list[dict[str, object]],
 ) -> dict[str, object]:
     ops = symmetry_payload.get("detected_operations", [])
     total = len(ops)
     by_kpoint: dict[str, dict[str, object]] = {}
-    for row in little_group_rows:
+    for row in symmetry_rows:
         kp = str(row.get("kpoint", ""))
         if kp not in by_kpoint:
             by_kpoint[kp] = {"operations": [], "_by_operation": {}}

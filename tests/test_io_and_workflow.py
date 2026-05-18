@@ -1,6 +1,7 @@
 import csv
 import json
 import re
+import warnings
 from pathlib import Path
 
 import h5py
@@ -523,17 +524,19 @@ def test_analyze_hsp_writes_csv_json_and_diagnostics_h5(tmp_path):
     assert {
         "input",
         "valley_projection_summary",
-        "valley_adapted_subspace",
-        "symmetry_diagnostics",
-        "allowed_valley_preserving_rotations",
-        "rotation_eigenvalues",
+        "two_valley_subspace",
+        "symmetry_analysis",
+        "symmetry_eigenvalues",
         "warnings",
         "output_files",
         "legend",
     } <= set(summary)
-    subspace_rows = summary["valley_adapted_subspace"]
+    assert "valley_adapted_subspace" not in summary
+    assert "rotation_eigenvalues" not in summary
+    assert "allowed_valley_preserving_rotations" not in summary
+    subspace_rows = summary["two_valley_subspace"]
     assert subspace_rows
-    assert subspace_rows[0].get("valley_status") != "not_valley_derived"
+    assert subspace_rows[0].get("status") in {"clean", "approx", "mixed", "not_evaluated"}
     assert not any("target subspace is not valley-derived" in w for w in summary["warnings"])
 
 
@@ -549,14 +552,42 @@ def test_cli_prints_human_readable_summary(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "Input" in out
     assert "Valley projection summary" in out
-    assert "derived" in out
-    assert "valley_status" in out
+    assert "W_val" in out
+    assert "P_v" in out
+    assert "derived" not in out
+    assert " pol " not in out
+    assert "status" in out
     assert "W_overlap" in out
     assert "W_res" in out
+    assert "Two-valley subspace" in out
+    assert "Symmetry analysis" in out
+    assert "Symmetry diagnostics" not in out
+    assert "Allowed valley-preserving rotations" not in out
+    assert "Rotation eigenvalues" not in out
     assert "Valley manifolds" in out
     assert "K_sector" in out
     assert "qcut mode: absolute" in out
     assert "qcut value" in out
+
+
+def test_analyze_hsp_collects_overlap_warnings_without_raw_warning_output(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["projection"]["qcut_Ainv"] = 5.1
+    raw["projection"]["qcut_scan"] = [5.1]
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("always")
+        outputs = analyze_hsp(config_path)
+
+    assert not [item for item in captured if "overlap across valley sectors" in str(item.message)]
+    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    assert any("overlap across valley sectors" in item for item in summary["warnings"])
 
 
 def test_analyze_hsp_writes_symmetry_operation_detection_report(tmp_path):
@@ -673,7 +704,7 @@ def test_analyze_hsp_writes_two_valley_subspace_transform_for_degenerate_pair(tm
     assert diagnostic["s_max"] == pytest.approx(1.0)
 
 
-def test_rotation_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp_path):
+def test_symmetry_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "config.yaml"
     out_dir = tmp_path / "out"
@@ -751,7 +782,13 @@ def test_rotation_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp
 
     outputs = analyze_hsp(config_path)
 
-    with outputs["rotation_eigenvalues_csv"].open(encoding="utf-8") as handle:
+    assert "rotation_eigenvalues_csv" not in outputs
+    assert "little_group_eigenvalues_csv" not in outputs
+    assert "little_group_representations_json" not in outputs
+    assert not (out_dir / "rotation_eigenvalues.csv").exists()
+    assert not (out_dir / "little_group_eigenvalues.csv").exists()
+    assert not (out_dir / "little_group_representations.json").exists()
+    with outputs["symmetry_eigenvalues_csv"].open(encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     assert rows
     assert {
@@ -774,8 +811,9 @@ def test_rotation_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp
     assert all(row["basis"] != "raw_vasp_final" for row in rows)
 
     with h5py.File(outputs["diagnostics_h5"], "r") as h5:
-        assert "rotation/GammaM" in h5
-        operation_groups = list(h5["rotation/GammaM"].values())
+        assert "rotation" not in h5
+        assert "symmetry_representations/GammaM" in h5
+        operation_groups = list(h5["symmetry_representations/GammaM"].values())
         assert operation_groups
         assert any("D_valley" in group for group in operation_groups)
         assert all("D_raw" in group for group in operation_groups)
@@ -796,15 +834,14 @@ def test_rotation_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp
     assert "rejected" in summary_text
     assert "not in little group" in summary_text or "not valley preserving" in summary_text
     assert "topology_input_ready" in summary_text
-    assert "Little-group eigenvalues:" in summary_text
+    assert "Symmetry eigenvalues" in summary_text
+    assert "Rotation eigenvalues" not in summary_text
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
-    assert any("topology_input_ready" in row for row in summary["rotation_eigenvalues"])
+    assert any("topology_input_ready" in row for row in summary["symmetry_eigenvalues"])
     assert "spinor_convention" in summary["input"]
-    assert "spinor_benchmark" in summary["rotation_eigenvalues"][0]
-    assert outputs["little_group_eigenvalues_csv"].exists()
-    assert outputs["little_group_representations_json"].exists()
-    assert "little_group_eigenvalues_csv" in summary["output_files"]
-    assert "little_group_representations_json" in summary["output_files"]
+    assert "spinor_benchmark" in summary["symmetry_eigenvalues"][0]
+    assert outputs["symmetry_eigenvalues_csv"].exists()
+    assert "symmetry_eigenvalues_csv" in summary["output_files"]
 
 
 def test_write_detailed_files_false_writes_only_summary_files(tmp_path):
@@ -827,6 +864,7 @@ def test_write_detailed_files_false_writes_only_summary_files(tmp_path):
     assert not (out_dir / "rotation_eigenvalues.csv").exists()
     assert not (out_dir / "little_group_eigenvalues.csv").exists()
     assert not (out_dir / "little_group_representations.json").exists()
+    assert not (out_dir / "symmetry_eigenvalues.csv").exists()
     assert not (out_dir / "diagnostics.h5").exists()
 
 
@@ -871,7 +909,7 @@ def test_summary_warns_about_skipped_rotation_representation(tmp_path):
                 }
             ],
         },
-        rotation_rows=[],
+        symmetry_rows=[],
         output_paths={},
     )
 
@@ -911,7 +949,7 @@ def test_summary_marks_spinor_rotation_as_diagnostic_only(tmp_path):
             "valley_preservation_check": {"required": True, "status": "completed"},
             "detected_operations": [],
         },
-        rotation_rows=[
+        symmetry_rows=[
             {
                 "kpoint": "GammaM",
                 "operation_id": 0,
@@ -936,7 +974,7 @@ def test_summary_marks_spinor_rotation_as_diagnostic_only(tmp_path):
     assert any("Spinor rotation is applied" in warning for warning in summary["warnings"])
     text = render_summary_text(summary)
     assert "topology_input_ready" in text
-    assert "diagnostic_only" in text
+    assert "diagnostic-only" in text
 
 
 def test_summary_output_files_use_human_readable_labels(tmp_path):
@@ -960,18 +998,18 @@ def test_summary_output_files_use_human_readable_labels(tmp_path):
             "little_group_check": {"status": "not_run"},
             "valley_preservation_check": {"status": "not_run"},
         },
-        rotation_rows=[],
+        symmetry_rows=[],
         output_paths={
-            "rotation_eigenvalues_csv": out_dir / "rotation_eigenvalues.csv",
+            "symmetry_eigenvalues_csv": out_dir / "symmetry_eigenvalues.csv",
             "valley_summary_txt": out_dir / "valley_summary.txt",
         },
     )
 
     text = render_summary_text(summary)
 
-    assert "Rotation eigenvalues:" in text
+    assert "Symmetry eigenvalues:" in text
     assert "Human-readable summary:" in text
-    assert "rotation_eigenvalues_csv:" not in text
+    assert "symmetry_eigenvalues_csv:" not in text
     assert "valley_summary_txt:" not in text
 
 
@@ -1012,14 +1050,14 @@ def test_summary_subspace_polarization_uses_min_eta_score(tmp_path):
             "little_group_check": {"status": "not_run"},
             "valley_preservation_check": {"status": "not_run"},
         },
-        rotation_rows=[],
+        symmetry_rows=[],
         output_paths={},
     )
 
-    assert summary["valley_adapted_subspace"][0]["polarization_score"] == pytest.approx(0.2)
+    assert summary["two_valley_subspace"][0]["P_v_min"] == pytest.approx(0.6)
 
 
-def test_little_group_summary_distinguishes_computed_from_diagnostic_only(tmp_path):
+def test_symmetry_analysis_distinguishes_computed_from_diagnostic_only(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "config.yaml"
     out_dir = tmp_path / "out"
@@ -1039,33 +1077,28 @@ def test_little_group_summary_distinguishes_computed_from_diagnostic_only(tmp_pa
             "little_group_check": {"status": "evaluated_per_kpoint"},
             "valley_preservation_check": {"status": "completed"},
         },
-        rotation_rows=[],
+        symmetry_rows=[
+            {
+                "kpoint": "KM",
+                "operation_id": 1,
+                "order": 3,
+                "basis": "valley_adapted",
+                "state_index": 0,
+                "phase_2pi": 1.0 / 6.0,
+                "nearest_root_of_unity": "exp(2pii*1/6)",
+                "root_deviation": 0.0,
+                "rotation_ready": True,
+                "topology_input_ready": False,
+                "diagnostic_only": True,
+                "D_valley_offdiag_norm": 0.01,
+                "reason": "two-sector D_valley offdiag diagnostic too large",
+            }
+        ],
         output_paths={},
-        little_group_diagnostics={
-            "total_operations": 1,
-            "little_group_count": 1,
-            "valley_preserving_count": 1,
-            "computed_count": 1,
-            "by_kpoint": {
-                "KM": {
-                    "operations": [
-                        {
-                            "operation_id": 1,
-                            "kind": "C3",
-                            "order": 3,
-                            "accepted": True,
-                            "diagnostic_reasons": ["two-sector D_valley offdiag diagnostic too large"],
-                            "character_valley": "1.000000+0.000000j",
-                            "eigenvalues": [1.0 / 6.0, -1.0 / 6.0],
-                        }
-                    ]
-                }
-            },
-        },
     )
 
     text = render_summary_text(summary)
-    assert "computed (diagnostic-only: two-sector D_valley offdiag diagnostic too large)" in text
+    assert "two-sector D_valley offdiag diagnostic too large" in text
     assert "skipped (two-sector D_valley offdiag diagnostic too large)" not in text
 
 
@@ -1139,10 +1172,10 @@ def test_single_band_and_not_degenerate_no_subspace_valley_status_mislabel(tmp_p
         summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
         assert not any("target subspace is not valley-derived" in w for w in summary["warnings"]), \
             f"false subspace warning in {label}"
-        subspace_rows = summary["valley_adapted_subspace"]
+        subspace_rows = summary["two_valley_subspace"]
         assert subspace_rows
-        assert subspace_rows[0].get("subspace_status") == label, \
-            f"subspace_status not visible in summary for {label}"
+        assert subspace_rows[0].get("basis_status") == label, \
+            f"basis_status not visible in summary for {label}"
         summary_text = outputs["valley_summary_txt"].read_text(encoding="utf-8")
         assert label in summary_text, f"'{label}' not found in summary text"
 
@@ -1167,7 +1200,10 @@ def test_rotation_order_none_yields_not_requested_symmetry_status(tmp_path):
     assert kp_data.get("symmetry_status") == "not_requested"
 
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
-    assert summary["symmetry_diagnostics"]["rotation_eigenvalue_enabled"] is False
+    assert summary["symmetry_analysis"]["symmetry_eigenvalue_enabled"] is False
+    assert summary["symmetry_eigenvalues"] == []
+    assert "symmetry_eigenvalues_csv" not in outputs
+    assert not (out_dir / "symmetry_eigenvalues.csv").exists()
 
 
 def test_subspace_projector_unreliable_when_band_overlap_exceeds_threshold(tmp_path):
@@ -1392,8 +1428,8 @@ def test_rotation_thresholds_from_config_parsed_and_applied(tmp_path):
     assert app_config.rotation.root_deviation_tol == pytest.approx(1.0e-6)
     assert app_config.rotation.D_valley_offdiag_tol == pytest.approx(1.0e-6)
 
-    # Verify rotation eigenvalues were produced (thresholds don't break output)
-    with outputs["rotation_eigenvalues_csv"].open(encoding="utf-8") as handle:
+    # Verify symmetry eigenvalues were produced (thresholds don't break output)
+    with outputs["symmetry_eigenvalues_csv"].open(encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     assert len(rows) > 0
 
@@ -1403,6 +1439,6 @@ def test_rotation_thresholds_from_config_parsed_and_applied(tmp_path):
     config_path2 = tmp_path / "config2.yaml"
     config_path2.write_text(yaml.safe_dump(config2), encoding="utf-8")
     outputs2 = analyze_hsp(config_path2)
-    with outputs2["rotation_eigenvalues_csv"].open(encoding="utf-8") as handle:
+    with outputs2["symmetry_eigenvalues_csv"].open(encoding="utf-8") as handle:
         rows2 = list(csv.DictReader(handle))
     assert len(rows2) > 0

@@ -12,7 +12,7 @@ def write_diagnostics_h5(
     path: str | Path,
     projectors_by_kpoint: dict[str, SectorProjectors],
     qcut_scan_payload: dict[str, object] | None = None,
-    rotation_payload: dict[str, object] | None = None,
+    symmetry_representation_payload: dict[str, object] | None = None,
     symmetry_payload: dict[str, object] | None = None,
 ) -> Path:
     out = Path(path)
@@ -39,10 +39,10 @@ def write_diagnostics_h5(
                             group.attrs[key] = value
                         else:
                             group[key] = np.asarray(value)
-        if rotation_payload is not None:
-            rotation_group = h5.create_group("rotation")
-            for kpoint_name, operations in rotation_payload.items():
-                kpoint_group = rotation_group.create_group(kpoint_name)
+        if symmetry_representation_payload is not None:
+            representation_group = h5.create_group("symmetry_representations")
+            for kpoint_name, operations in symmetry_representation_payload.items():
+                kpoint_group = representation_group.create_group(kpoint_name)
                 if not isinstance(operations, dict):
                     continue
                 for operation_id, payload in operations.items():

@@ -1,4 +1,4 @@
-"""Valley-resolved wavefunction and symmetry diagnostics."""
+"""Valley-resolved wavefunction projection and symmetry analysis."""
 
 __all__ = ["__version__"]
 

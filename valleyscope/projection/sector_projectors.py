@@ -32,6 +32,7 @@ def build_sector_projectors(
     use_2d: bool = True,
     g_search_shell: int = 3,
     overlap_policy: str = "warn_exclude",
+    emit_warnings: bool = True,
 ) -> SectorProjectors:
     q = np.asarray(q_cart, dtype=float)
     if q.ndim != 2 or q.shape[1] != 3:
@@ -78,7 +79,8 @@ def build_sector_projectors(
         if overlap_policy == "error":
             raise ValueError(message)
         if overlap_policy == "warn_exclude":
-            warnings.warn(message, UserWarning, stacklevel=2)
+            if emit_warnings:
+                warnings.warn(message, UserWarning, stacklevel=2)
             for name in list(sector_masks):
                 sector_masks[name] = sector_masks[name] & ~overlap
         elif overlap_policy == "include":
