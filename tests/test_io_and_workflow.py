@@ -538,7 +538,7 @@ def test_analyze_hsp_writes_csv_json_and_diagnostics_h5(tmp_path):
     assert {
         "input",
         "valley_projection_summary",
-        "two_valley_subspace",
+        "valley_subspace_analysis",
         "symmetry_analysis",
         "symmetry_eigenvalues",
         "warnings",
@@ -548,7 +548,8 @@ def test_analyze_hsp_writes_csv_json_and_diagnostics_h5(tmp_path):
     assert "valley_adapted_subspace" not in summary
     assert "rotation_eigenvalues" not in summary
     assert "allowed_valley_preserving_rotations" not in summary
-    subspace_rows = summary["two_valley_subspace"]
+    assert "two_valley_subspace" not in summary
+    subspace_rows = summary["valley_subspace_analysis"]
     assert subspace_rows
     assert subspace_rows[0].get("status") in {"clean", "approx", "mixed", "n/a"}
     assert "derived_score" not in summary["valley_projection_summary"][0]
@@ -579,7 +580,10 @@ def test_cli_prints_human_readable_summary(tmp_path, capsys):
     assert "status" in out
     assert "W_overlap" in out
     assert "W_res" in out
-    assert "Two-valley subspace" in out
+    assert "Valley subspace analysis" in out
+    assert "Two-valley subspace" not in out
+    assert "S_min:      minimum target-valley-subspace weight" in out
+    assert "eta_adapted: signed valley polarization" in out
     assert "Symmetry analysis" in out
     assert "Symmetry diagnostics" not in out
     assert "Allowed valley-preserving rotations" not in out
@@ -657,6 +661,9 @@ def test_readme_symmetry_example_uses_parser_schema(tmp_path):
     assert "symmetry:\n  source: spglib" not in readme
     assert "Example screen summary" in readme
     assert "Valley projection summary" in readme
+    assert "Valley subspace analysis" in readme
+    assert "Two-valley subspace" not in readme
+    assert "S_min:      minimum target-valley-subspace weight" in readme
     assert "qcut mode:" in readme
 
     match = re.search(
@@ -704,9 +711,12 @@ def test_chinese_readme_uses_public_valley_vocabulary():
     assert "扇区" not in readme
     assert not re.search(r"\bV[123]\b", readme)
     assert "Valley subspaces" in readme
+    assert "Valley subspace analysis" in readme
+    assert "Two-valley subspace" not in readme
+    assert "S_min:      目标谷子空间权重下界" in readme
 
 
-def test_analyze_hsp_writes_two_valley_subspace_transform_for_degenerate_pair(tmp_path):
+def test_analyze_hsp_writes_valley_subspace_analysis_transform_for_degenerate_pair(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "config.yaml"
     out_dir = tmp_path / "out"
@@ -1105,7 +1115,7 @@ def test_summary_subspace_polarization_uses_min_eta_score(tmp_path):
         output_paths={},
     )
 
-    assert summary["two_valley_subspace"][0]["P_v_min"] == pytest.approx(0.6)
+    assert summary["valley_subspace_analysis"][0]["P_v_min"] == pytest.approx(0.6)
 
 
 def test_symmetry_analysis_distinguishes_computed_from_diagnostic_only(tmp_path):
@@ -1271,7 +1281,7 @@ def test_single_band_and_not_degenerate_no_subspace_valley_status_mislabel(tmp_p
         summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
         assert not any("target subspace is not valley-derived" in w for w in summary["warnings"]), \
             f"false subspace warning in {label}"
-        subspace_rows = summary["two_valley_subspace"]
+        subspace_rows = summary["valley_subspace_analysis"]
         assert subspace_rows
         assert subspace_rows[0].get("basis_status") == label, \
             f"basis_status missing from summary JSON for {label}"

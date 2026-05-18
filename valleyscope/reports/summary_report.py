@@ -47,7 +47,7 @@ def build_summary_payload(
             "scan": list(config.projection.qcut_scan),
         },
         "valley_projection_summary": _projection_rows(subspace_payload),
-        "two_valley_subspace": _subspace_rows(subspace_payload),
+        "valley_subspace_analysis": _subspace_rows(subspace_payload),
         "symmetry_analysis": _symmetry_analysis(symmetry_payload, config.analysis.kpoints),
         "symmetry_eigenvalues": eigen_rows,
         "warnings": warnings,
@@ -127,8 +127,13 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     )
     lines.append("")
 
-    _section(lines, "Two-valley subspace")
-    lines.append("S=P_K+P_Kp checks the two-valley weight; V=P_K-P_Kp fixes the valley basis.")
+    _section(lines, "Valley subspace analysis")
+    lines.append("S=P_K+P_Kp: target-valley-subspace projector in the selected target bands")
+    lines.append("V=P_K-P_Kp: projected valley operator for valley-basis fixing in a two-valley setting")
+    lines.append("S_min:      minimum target-valley-subspace weight")
+    lines.append("S_max:      maximum target-valley-subspace weight")
+    lines.append("P_v_min:    minimum valley purity after valley-basis fixing")
+    lines.append("eta_adapted: signed valley polarization in the valley-adapted basis")
     lines.extend(
         _table(
             ["kpoint", "S_min", "S_max", "P_v_min", "eta_adapted", "status"],
@@ -141,7 +146,7 @@ def render_summary_text(summary: dict[str, Any]) -> str:
                     _short_list(row.get("eta_adapted")),
                     row.get("status", ""),
                 ]
-                for row in summary["two_valley_subspace"]
+                for row in summary["valley_subspace_analysis"]
             ],
         )
     )
@@ -524,7 +529,7 @@ def _output_file_label(name: str) -> str:
         "valley_summary_txt": "Human-readable summary",
         "valley_summary_json": "Machine-readable summary",
         "valley_weights_csv": "Valley weights",
-        "valley_subspace_json": "Two-valley subspace data",
+        "valley_subspace_json": "Valley subspace analysis",
         "valley_basis_transform_h5": "Valley basis transform",
         "symmetry_report_json": "Symmetry analysis",
         "symmetry_eigenvalues_csv": "Symmetry eigenvalues",

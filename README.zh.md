@@ -347,7 +347,7 @@ valleyscope analyze-hsp analyze.yaml
 Input
 Valley subspaces
 Valley projection summary
-Two-valley subspace
+Valley subspace analysis
 Symmetry analysis
 Symmetry eigenvalues
 Warnings
@@ -365,13 +365,22 @@ W_res:      剩余权重
 
 屏幕上的 `status` 只保留三类：`clean`、`approx`、`mixed`。
 
-再看 `Two-valley subspace`。近简并子空间中的原始 VASP 本征矢依赖规范选择，逐条能带投影不是最终诊断。ValleyScope 在目标子空间中构造
+再看 `Valley subspace analysis`。近简并子空间中的原始 VASP 本征矢依赖规范选择，逐条能带投影不是最终诊断。对于双谷设置，ValleyScope 在目标子空间中构造
 
 ```math
 S=P_K+P_{K'}, \qquad V=P_K-P_{K'} .
 ```
 
-`S` 判断整个目标子空间是否主要位于所选双谷子空间中；`V` 在该子空间内固定谷适配基。这里输出的 `S_min`、`S_max`、`P_v_min` 和 `eta_adapted` 是子空间诊断，不是 raw-band 表的重复。
+```text
+S=P_K+P_Kp: 目标能带中的目标谷子空间投影算符
+V=P_K-P_Kp: 用于双谷设置中固定谷基的投影谷算符
+S_min:      目标谷子空间权重下界
+S_max:      目标谷子空间权重上界
+P_v_min:    固定谷基后的最低谷纯度
+eta_adapted: 谷适配基中的有符号谷极化
+```
+
+`S` 判断所选目标能带是否能被选定的谷子空间良好描述；`V` 在存在两个谷时选出最谷极化的基。这里输出的是对子空间整体的诊断，不是逐条原始能带投影表的重复。
 
 `Symmetry analysis` 先列出空间群和检测到的对称操作，再按高对称点列出 little-group 操作和 valley-preserving 操作。把一个谷映射到另一个谷的操作会标记为 `valley-exchanging`。`Symmetry eigenvalues` 只列出实际构造了表示矩阵并求得本征值的操作。`topology_input_ready` 只表示该高对称点对称本征值可作为后续基于对称性的拓扑分析输入，不验证整个 mBZ 的谷分辨拓扑。
 

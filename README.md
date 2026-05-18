@@ -364,7 +364,7 @@ The screen summary is organized as:
 Input
 Valley subspaces
 Valley projection summary
-Two-valley subspace
+Valley subspace analysis
 Symmetry analysis
 Symmetry eigenvalues
 Warnings
@@ -382,13 +382,22 @@ W_res:      residual weight
 
 The screen `status` is intentionally compact: `clean`, `approx`, or `mixed`.
 
-Use `Two-valley subspace` for near-degenerate target bands. Raw VASP eigenvectors inside a near-degenerate subspace are gauge-dependent, so the per-band projection is not the final diagnostic. ValleyScope instead forms
+Use `Valley subspace analysis` for the target-band subspace as a whole. Raw VASP eigenvectors inside a near-degenerate subspace are gauge-dependent, so the per-band projection is not the final diagnostic. In a two-valley setting, ValleyScope forms
 
 ```math
 S=P_K+P_{K'}, \qquad V=P_K-P_{K'} .
 ```
 
-`S` checks whether the whole target subspace lies in the selected two-valley subspace. `V` fixes the valley-adapted basis inside that subspace. The reported `S_min`, `S_max`, `P_v_min`, and `eta_adapted` are subspace diagnostics, not a repeat of the raw-band table.
+```text
+S=P_K+P_Kp: target-valley-subspace projector in the selected target bands
+V=P_K-P_Kp: projected valley operator for valley-basis fixing in a two-valley setting
+S_min:      minimum target-valley-subspace weight
+S_max:      maximum target-valley-subspace weight
+P_v_min:    minimum valley purity after valley-basis fixing
+eta_adapted: signed valley polarization in the valley-adapted basis
+```
+
+`S` checks whether the selected target bands are well described by the chosen valley subspace. `V` chooses the most valley-polarized basis inside that target subspace when two valleys are present. The reported values are subspace diagnostics, not a repeat of the raw-band table.
 
 `Symmetry analysis` first reports the detected space group and symmetry operations, then lists which operations belong to each target HSP little group and which of those preserve the selected valley. Operations that exchange the two valleys are reported as `valley-exchanging`. `Symmetry eigenvalues` reports the representation eigenvalues that were actually computed. `topology_input_ready` only means that the HSP symmetry eigenvalue is suitable as an input to a later symmetry-based topology analysis; it does not validate full-mBZ valley-resolved topology.
 
