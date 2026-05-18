@@ -61,16 +61,16 @@ def write_config(path: Path, h5_path: Path, out_dir: Path):
                 {"name": "Kp", "cart": [5.0, 0.0, 0.0]},
             ],
         },
-        "valley_manifolds": [
-            {"name": "K_sector", "centers": ["K"]},
-            {"name": "Kp_sector", "centers": ["Kp"]},
+        "valley_subspaces": [
+            {"name": "K_valley", "centers": ["K"]},
+            {"name": "Kp_valley", "centers": ["Kp"]},
         ],
         "projection": {
             "use_2d_momentum_only": True,
             "qcut_mode": "absolute",
             "qcut_Ainv": 0.5,
             "qcut_scan": [0.5],
-            "overlap_cross_sector": "warn_exclude",
+            "overlap_policy": "warn_exclude",
         },
         "symmetry": {
             "operations": {
@@ -145,7 +145,7 @@ def test_config_loader_parses_core_schema(tmp_path):
 
     assert config.analysis.iband == [101]
     assert config.projection.qcut_mode == "absolute"
-    assert config.projection.overlap_cross_sector == "warn_exclude"
+    assert config.projection.overlap_policy == "warn_exclude"
     assert config.symmetry.operations.mode == "auto"
     assert config.symmetry.operations.structure_file == config_path.parent / "CONTCAR"
     assert config.symmetry.operations.backend == "spglib"
@@ -155,10 +155,10 @@ def test_config_loader_parses_core_schema(tmp_path):
     assert config.symmetry.filters.proper_rotations_only is True
     assert config.symmetry.filters.allowed_orders == [2, 3, 4, 6]
     assert config.symmetry.filters.rotation_order == "auto"
-    assert config.valley_manifolds[0].name == "K_sector"
+    assert config.valley_subspaces[0].name == "K_valley"
 
 
-def test_config_loader_accepts_simplified_schema_aliases(tmp_path):
+def test_config_loader_accepts_simplified_schema_defaults(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "simplified.yaml"
     out_dir = tmp_path / "out"
@@ -180,7 +180,7 @@ def test_config_loader_accepts_simplified_schema_aliases(tmp_path):
                 {"name": "Kp", "cart": [5.0, 0.0, 0.0]},
             ],
         },
-        "valley_manifolds": [
+        "valley_subspaces": [
             {"name": "K_valley", "centers": ["K"]},
             {"name": "Kp_valley", "centers": ["Kp"]},
         ],
@@ -205,11 +205,11 @@ def test_config_loader_accepts_simplified_schema_aliases(tmp_path):
 
     assert config.analysis.iband == [101]
     assert config.analysis.degeneracy_tol_meV == pytest.approx(2.0)
-    assert config.valley_manifolds[0].name == "K_valley"
-    assert config.projection.qcut_mode == "relative_min_sector_distance"
+    assert config.valley_subspaces[0].name == "K_valley"
+    assert config.projection.qcut_mode == "relative_min_valley_distance"
     assert config.projection.qcut_fraction == pytest.approx(0.2)
     assert config.projection.use_2d_momentum_only is True
-    assert config.projection.overlap_cross_sector == "warn_exclude"
+    assert config.projection.overlap_policy == "warn_exclude"
     assert config.symmetry.operations.structure_file == config_path.parent / "CONTCAR"
     assert config.symmetry.operations.backend == "spglib"
     assert config.symmetry.filters.proper_rotations_only is True
@@ -241,14 +241,28 @@ def test_config_loader_rejects_removed_valley_sectors_field(tmp_path):
     write_config(config_path, h5_path, out_dir)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     raw["analysis"] = {"kpoints": ["GammaM"], "iband": [101]}
-    raw.pop("valley_manifolds")
+    raw.pop("valley_subspaces")
     raw["valley_sectors"] = [
         {"name": "K_sector", "centers": ["K"]},
         {"name": "Kp_sector", "centers": ["Kp"]},
     ]
     config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="valley_manifolds"):
+    with pytest.raises(ValueError, match="valley_subspaces"):
+        load_config(config_path)
+
+
+def test_config_loader_rejects_removed_valley_manifolds_field(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "removed_valley_manifolds.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["valley_manifolds"] = raw.pop("valley_subspaces")
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="valley_subspaces"):
         load_config(config_path)
 
 
@@ -423,7 +437,7 @@ def test_config_loader_builds_layer_rotated_fractional_valley_centers(tmp_path):
                 {"name": "bottom_K", "layer": "bottom", "frac": [0.5, 0.0, 0.0]},
             ],
         },
-        "valley_manifolds": [{"name": "K_sector", "centers": ["top_K", "bottom_K"]}],
+        "valley_subspaces": [{"name": "K_sector", "centers": ["top_K", "bottom_K"]}],
         "output": {"directory": str(out_dir)},
     }
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
@@ -457,7 +471,7 @@ def test_config_loader_derives_layer_reciprocal_from_supercell_matrix(tmp_path):
                 {"name": "top_K", "layer": "top", "frac": [0.5, 0.0, 0.0]},
             ],
         },
-        "valley_manifolds": [{"name": "K_sector", "centers": ["top_K"]}],
+        "valley_subspaces": [{"name": "K_sector", "centers": ["top_K"]}],
         "output": {"directory": str(tmp_path / "out")},
     }
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
@@ -495,8 +509,8 @@ def test_analyze_hsp_writes_csv_json_and_diagnostics_h5(tmp_path):
         "kpoint",
         "band_vasp",
         "energy_eV",
-        "K_sector",
-        "Kp_sector",
+        "K_valley",
+        "Kp_valley",
         "W_val",
         "P_v",
         "eta",
@@ -536,7 +550,13 @@ def test_analyze_hsp_writes_csv_json_and_diagnostics_h5(tmp_path):
     assert "allowed_valley_preserving_rotations" not in summary
     subspace_rows = summary["two_valley_subspace"]
     assert subspace_rows
-    assert subspace_rows[0].get("status") in {"clean", "approx", "mixed", "not_evaluated"}
+    assert subspace_rows[0].get("status") in {"clean", "approx", "mixed", "n/a"}
+    assert "derived_score" not in summary["valley_projection_summary"][0]
+    assert "polarization_score" not in summary["valley_projection_summary"][0]
+    assert "valley_status" not in summary["valley_projection_summary"][0]
+    assert "derived_score" not in subspace_rows[0]
+    assert "polarization_score" not in subspace_rows[0]
+    assert "valley_status" not in subspace_rows[0]
     assert not any("target subspace is not valley-derived" in w for w in summary["warnings"])
 
 
@@ -564,8 +584,9 @@ def test_cli_prints_human_readable_summary(tmp_path, capsys):
     assert "Symmetry diagnostics" not in out
     assert "Allowed valley-preserving rotations" not in out
     assert "Rotation eigenvalues" not in out
-    assert "Valley manifolds" in out
-    assert "K_sector" in out
+    assert "Valley subspaces" in out
+    assert "K_valley" in out
+    assert "K_sector" not in out
     assert "qcut mode: absolute" in out
     assert "qcut value" in out
 
@@ -585,9 +606,9 @@ def test_analyze_hsp_collects_overlap_warnings_without_raw_warning_output(tmp_pa
         warnings.simplefilter("always")
         outputs = analyze_hsp(config_path)
 
-    assert not [item for item in captured if "overlap across valley sectors" in str(item.message)]
+    assert not [item for item in captured if "overlap across valleys" in str(item.message)]
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
-    assert any("overlap across valley sectors" in item for item in summary["warnings"])
+    assert any("overlap across valleys" in item for item in summary["warnings"])
 
 
 def test_analyze_hsp_writes_symmetry_operation_detection_report(tmp_path):
@@ -621,6 +642,17 @@ def test_analyze_hsp_writes_symmetry_operation_detection_report(tmp_path):
 def test_readme_symmetry_example_uses_parser_schema(tmp_path):
     readme = Path("README.md").read_text(encoding="utf-8")
     assert "symmetry:\n  operations:" in readme
+    assert "valley_subspaces:" in readme
+    assert "valley_manifolds" not in readme
+    assert "valley_sectors" not in readme
+    assert "target_bands_vasp" not in readme
+    assert "raw_valley_clean" not in readme
+    assert "valley_separable_subspace" not in readme
+    assert "relative_min_sector_distance" not in readme
+    assert "overlap_cross_sector" not in readme
+    assert "sector" not in readme.lower()
+    assert "manifold" not in readme.lower()
+    assert not re.search(r"\bV[123]\b", readme)
     assert "input:\n  wavefunction_h5: ./wave.h5\n\n  # Moire/bilayer POSCAR" not in readme
     assert "symmetry:\n  source: spglib" not in readme
     assert "Example screen summary" in readme
@@ -657,6 +689,21 @@ def test_readme_symmetry_example_uses_parser_schema(tmp_path):
     assert config.symmetry.tolerance.symprec == pytest.approx(1.0e-3)
     assert config.symmetry.filters.allowed_orders == [2, 3, 4, 6]
     assert config.symmetry.filters.rotation_order == "auto"
+
+
+def test_chinese_readme_uses_public_valley_vocabulary():
+    readme = Path("README.zh.md").read_text(encoding="utf-8")
+    assert "valley_subspaces:" in readme
+    assert "valley_manifolds" not in readme
+    assert "valley_sectors" not in readme
+    assert "target_bands_vasp" not in readme
+    assert "raw_valley_clean" not in readme
+    assert "valley_separable_subspace" not in readme
+    assert "relative_min_sector_distance" not in readme
+    assert "overlap_cross_sector" not in readme
+    assert "扇区" not in readme
+    assert not re.search(r"\bV[123]\b", readme)
+    assert "Valley subspaces" in readme
 
 
 def test_analyze_hsp_writes_two_valley_subspace_transform_for_degenerate_pair(tmp_path):
@@ -760,7 +807,7 @@ def test_symmetry_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp
                 {"name": "Kp_minus", "cart": [0.0, -1.0, 0.0]},
             ],
         },
-        "valley_manifolds": [
+        "valley_subspaces": [
             {"name": "K_sector", "centers": ["K_plus", "K_minus"]},
             {"name": "Kp_sector", "centers": ["Kp_plus", "Kp_minus"]},
         ],
@@ -768,7 +815,7 @@ def test_symmetry_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp
             "use_2d_momentum_only": True,
             "qcut_mode": "absolute",
             "qcut_Ainv": 0.25,
-            "overlap_cross_sector": "warn_exclude",
+            "overlap_policy": "warn_exclude",
             "thresholds": {"W_val_min": 0.8, "P_v_clean": 0.95, "P_v_approx": 0.85},
         },
         "symmetry": {
@@ -832,7 +879,11 @@ def test_symmetry_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp
         assert all("root_deviation" in group for group in operation_groups)
     summary_text = outputs["valley_summary_txt"].read_text(encoding="utf-8")
     assert "rejected" in summary_text
-    assert "not in little group" in summary_text or "not valley preserving" in summary_text
+    assert (
+        "not in little group" in summary_text
+        or "valley-exchanging" in summary_text
+        or "not valley preserving" in summary_text
+    )
     assert "topology_input_ready" in summary_text
     assert "Symmetry eigenvalues" in summary_text
     assert "Rotation eigenvalues" not in summary_text
@@ -1091,15 +1142,63 @@ def test_symmetry_analysis_distinguishes_computed_from_diagnostic_only(tmp_path)
                 "topology_input_ready": False,
                 "diagnostic_only": True,
                 "D_valley_offdiag_norm": 0.01,
-                "reason": "two-sector D_valley offdiag diagnostic too large",
+                "reason": "two-valley D_valley offdiag diagnostic too large",
             }
         ],
         output_paths={},
     )
 
     text = render_summary_text(summary)
-    assert "two-sector D_valley offdiag diagnostic too large" in text
-    assert "skipped (two-sector D_valley offdiag diagnostic too large)" not in text
+    assert "two-valley D_valley offdiag diagnostic too large" in text
+    assert "exp(i*pi/3)" in text
+    assert "exp(2pii*1/6)" not in text
+    assert "valley_adapted" not in text
+    assert "skipped (two-valley D_valley offdiag diagnostic too large)" not in text
+
+
+def test_symmetry_summary_orders_hsp_and_labels_valley_exchanging(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["analysis"]["kpoints"] = ["GammaM", "KM"]
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    config = load_config(config_path)
+    from valleyscope.reports.summary_report import build_summary_payload, render_summary_text
+
+    summary = build_summary_payload(
+        config=config,
+        qcut=0.5,
+        subspace_payload={"kpoints": {}},
+        symmetry_payload={
+            "status": "ok",
+            "detected_operations": [
+                {
+                    "operation_id": 2,
+                    "kind": "C2",
+                    "order": 2,
+                    "det": 1,
+                    "rotation_frac": np.eye(3),
+                    "translation_frac": np.zeros(3),
+                    "little_group_by_kpoint": {"KM": True, "GammaM": True},
+                    "rejection_reason_by_kpoint": {"KM": "valley-exchanging", "GammaM": "valley-exchanging"},
+                }
+            ],
+            "candidate_rotations": [],
+            "little_group_check": {"status": "evaluated_per_kpoint"},
+            "valley_preservation_check": {"status": "completed"},
+        },
+        symmetry_rows=[],
+        output_paths={},
+    )
+
+    rejected = summary["symmetry_analysis"]["rejected_operations"]
+    assert [row["kpoint"] for row in rejected] == ["GammaM", "KM"]
+    text = render_summary_text(summary)
+    assert text.index("GammaM: little group") < text.index("KM: little group")
+    assert "valley-exchanging" in text
 
 
 def test_single_band_and_not_degenerate_no_subspace_valley_status_mislabel(tmp_path):
@@ -1148,11 +1247,11 @@ def test_single_band_and_not_degenerate_no_subspace_valley_status_mislabel(tmp_p
                     {"name": "Kp", "cart": [5.0, 0.0, 0.0]},
                 ],
             },
-            "valley_manifolds": [
+            "valley_subspaces": [
                 {"name": "K_sector", "centers": ["K"]},
                 {"name": "Kp_sector", "centers": ["Kp"]},
             ],
-            "projection": {"qcut_mode": "absolute", "qcut_Ainv": 0.5, "overlap_cross_sector": "warn_exclude"},
+            "projection": {"qcut_mode": "absolute", "qcut_Ainv": 0.5, "overlap_policy": "warn_exclude"},
             "output": {"directory": str(out_dir)},
         }
         config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
@@ -1175,9 +1274,9 @@ def test_single_band_and_not_degenerate_no_subspace_valley_status_mislabel(tmp_p
         subspace_rows = summary["two_valley_subspace"]
         assert subspace_rows
         assert subspace_rows[0].get("basis_status") == label, \
-            f"basis_status not visible in summary for {label}"
+            f"basis_status missing from summary JSON for {label}"
         summary_text = outputs["valley_summary_txt"].read_text(encoding="utf-8")
-        assert label in summary_text, f"'{label}' not found in summary text"
+        assert "basis_status" not in summary_text
 
 
 def test_rotation_order_none_yields_not_requested_symmetry_status(tmp_path):
@@ -1204,6 +1303,47 @@ def test_rotation_order_none_yields_not_requested_symmetry_status(tmp_path):
     assert summary["symmetry_eigenvalues"] == []
     assert "symmetry_eigenvalues_csv" not in outputs
     assert not (out_dir / "symmetry_eigenvalues.csv").exists()
+
+
+def test_workflow_uses_rotation_generators_by_default(tmp_path, monkeypatch):
+    import importlib
+
+    workflow_module = importlib.import_module("valleyscope.workflows.analyze_hsp")
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    calls: list[bool] = []
+
+    def fake_prepare_symmetry_payload(config, monolayer_recip):
+        return {
+            "status": "ok",
+            "operation_detection_backend": "spglib",
+            "structure_file": "fake-CONTCAR",
+            "spacegroup_number": 150,
+            "international": "P321",
+            "symmetry_eigenvalue_enabled": True,
+            "requested_rotation_order": "auto",
+            "resolved_rotation_order": 3,
+            "detected_operation_count": 0,
+            "detected_operations": [],
+            "candidate_rotations": [],
+            "symprec_scan_summary": [],
+            "little_group_check": {"required": True, "status": "evaluated_per_kpoint"},
+            "valley_preservation_check": {"required": True, "status": "completed"},
+        }
+
+    def fake_symmetry_diagnostic(**kwargs):
+        calls.append(bool(kwargs["generators_only"]))
+        return []
+
+    monkeypatch.setattr(workflow_module, "_prepare_symmetry_payload", fake_prepare_symmetry_payload)
+    monkeypatch.setattr(workflow_module, "symmetry_eigenvalue_diagnostics_for_kpoint", fake_symmetry_diagnostic)
+
+    workflow_module.analyze_hsp(config_path)
+
+    assert calls == [True]
 
 
 def test_subspace_projector_unreliable_when_band_overlap_exceeds_threshold(tmp_path):
@@ -1252,12 +1392,12 @@ def test_subspace_projector_unreliable_when_band_overlap_exceeds_threshold(tmp_p
                 {"name": "Kp", "cart": [5.0, 0.0, 0.0]},
             ],
         },
-        "valley_manifolds": [
+        "valley_subspaces": [
             {"name": "K_sector", "centers": ["K"]},
             {"name": "Kp_sector", "centers": ["Kp"]},
         ],
         "projection": {
-            "qcut_mode": "absolute", "qcut_Ainv": 3.0, "overlap_cross_sector": "warn_exclude",
+            "qcut_mode": "absolute", "qcut_Ainv": 3.0, "overlap_policy": "warn_exclude",
             "thresholds": {"W_val_min": 0.8},
         },
         "output": {"directory": str(out_dir)},
@@ -1342,12 +1482,12 @@ def test_subspace_thresholds_inherit_user_config(tmp_path):
                 {"name": "Kp", "cart": [5.0, 0.0, 0.0]},
             ],
         },
-        "valley_manifolds": [
+        "valley_subspaces": [
             {"name": "K_sector", "centers": ["K"]},
             {"name": "Kp_sector", "centers": ["Kp"]},
         ],
         "projection": {
-            "qcut_mode": "absolute", "qcut_Ainv": 3.0, "overlap_cross_sector": "warn_exclude",
+            "qcut_mode": "absolute", "qcut_Ainv": 3.0, "overlap_policy": "warn_exclude",
             "thresholds": {"W_val_min": 0.8, "overlap_warn": 0.15},
         },
         "output": {"directory": str(out_dir)},
@@ -1404,11 +1544,11 @@ def test_rotation_thresholds_from_config_parsed_and_applied(tmp_path):
                 {"name": "Kp", "cart": [-1.0, 0.0, 0.0]},
             ],
         },
-        "valley_manifolds": [
+        "valley_subspaces": [
             {"name": "K_sector", "centers": ["K"]},
             {"name": "Kp_sector", "centers": ["Kp"]},
         ],
-        "projection": {"qcut_mode": "absolute", "qcut_Ainv": 0.25, "overlap_cross_sector": "warn_exclude"},
+        "projection": {"qcut_mode": "absolute", "qcut_Ainv": 0.25, "overlap_policy": "warn_exclude"},
         "symmetry": {
             "operations": {"mode": "auto", "structure_file": str(structure), "backend": "spglib"},
             "tolerance": {"symprec": 1.0e-5, "angle_tolerance": -1.0},

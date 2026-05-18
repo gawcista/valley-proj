@@ -46,10 +46,10 @@ def _resolve_qcut(
         return float(projection.qcut_Ainv)
     if projection.qcut_mode == "moire_shell":
         return qcut_from_moire_shell(moire_reciprocal_cart, projection.qcut_shell)
-    if projection.qcut_mode == "relative_min_sector_distance":
+    if projection.qcut_mode == "relative_min_valley_distance":
         return qcut_from_min_sector_distance(
             config.valley_centers,
-            config.valley_manifolds,
+            config.valley_subspaces,
             projection.qcut_fraction,
             monolayer_reciprocal_cart,
             use_2d=projection.use_2d_momentum_only,
@@ -96,11 +96,11 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         projectors = build_sector_projectors(
             q_cart,
             config.valley_centers,
-            config.valley_manifolds,
+            config.valley_subspaces,
             monolayer_recip,
             qcut,
             use_2d=config.projection.use_2d_momentum_only,
-            overlap_policy=config.projection.overlap_cross_sector,
+            overlap_policy=config.projection.overlap_policy,
             emit_warnings=False,
         )
         projectors_by_kpoint[kpoint_name] = projectors
@@ -148,10 +148,10 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         subspace_payload["kpoints"][kpoint_name] = kpoint_subspace
         if config.projection.qcut_scan:
             scan_qcuts = config.projection.qcut_scan
-            if config.projection.qcut_mode == "relative_min_sector_distance":
+            if config.projection.qcut_mode == "relative_min_valley_distance":
                 min_qcut = qcut_from_min_sector_distance(
                     config.valley_centers,
-                    config.valley_manifolds,
+                    config.valley_subspaces,
                     1.0,
                     monolayer_recip,
                     use_2d=config.projection.use_2d_momentum_only,
@@ -161,11 +161,11 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 q_cart,
                 coefficients,
                 config.valley_centers,
-                config.valley_manifolds,
+                config.valley_subspaces,
                 monolayer_recip,
                 scan_qcuts,
                 use_2d=config.projection.use_2d_momentum_only,
-                overlap_policy=config.projection.overlap_cross_sector,
+                overlap_policy=config.projection.overlap_policy,
                 emit_warnings=False,
             )
             qcut_scan_payload[kpoint_name] = {
@@ -211,7 +211,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     unitarity_tol=config.rotation.unitarity_tol,
                     root_deviation_tol=config.rotation.root_deviation_tol,
                     d_valley_offdiag_tol=config.rotation.D_valley_offdiag_tol,
-                    generators_only=False,
+                    generators_only=True,
                 )
             )
         kpoint_subspace["symmetry_status"] = _resolve_symmetry_status(
@@ -381,7 +381,7 @@ def _prepare_symmetry_payload(config: AppConfig, monolayer_recip: np.ndarray) ->
             rotation,
             rotation_cart,
             config.valley_centers,
-            config.valley_manifolds,
+            config.valley_subspaces,
             monolayer_recip,
             tolerance=1e-6,
         )

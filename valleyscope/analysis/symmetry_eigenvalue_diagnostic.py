@@ -32,12 +32,9 @@ def symmetry_eigenvalue_diagnostics_for_kpoint(
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for operation in symmetry_payload["detected_operations"]:
-        if generators_only and not operation["candidate_rotation"]:
+        order = operation.get("order")
+        if operation.get("det", 1) != 1 or order not in (2, 3, 4, 6):
             continue
-        if not generators_only:
-            order = operation.get("order")
-            if order not in (2, 3, 4, 6):
-                continue
         little = is_little_group_operation(np.asarray(operation["rotation_frac"]), k_frac)
         preserves_all = all(bool(value) for value in operation["preserved"].values())
         operation.setdefault("little_group_by_kpoint", {})[kpoint_name] = little
@@ -47,8 +44,10 @@ def symmetry_eigenvalue_diagnostics_for_kpoint(
         if not little:
             rejection_reason = "not in little group"
         elif not preserves_all:
-            rejection_reason = "not valley preserving"
+            rejection_reason = _valley_rejection_reason(operation)
         operation.setdefault("rejection_reason_by_kpoint", {})[kpoint_name] = rejection_reason
+        if generators_only and not operation["candidate_rotation"]:
+            continue
         if rejection_reason:
             continue
         spin_rotation = None
@@ -221,6 +220,15 @@ def symmetry_eigenvalue_diagnostics_for_kpoint(
     return rows
 
 
+def _valley_rejection_reason(operation: dict[str, object]) -> str:
+    mapping = operation.get("sector_mapping", {})
+    if isinstance(mapping, dict):
+        for source, target in mapping.items():
+            if target is not None and str(target) != str(source):
+                return "valley-exchanging"
+    return "not valley preserving"
+
+
 def _two_sector_offdiag_norm(matrix: np.ndarray | None) -> float | None:
     if matrix is None or matrix.shape != (2, 2):
         return None
@@ -272,7 +280,7 @@ def _readiness_reason(
     if root_deviation > root_deviation_tol:
         return "root deviation too large"
     if d_valley_offdiag_norm is None:
-        return "two-sector D_valley offdiag diagnostic unavailable"
+        return "two-valley D_valley offdiag diagnostic unavailable"
     if d_valley_offdiag_norm > d_valley_offdiag_tol:
-        return "two-sector D_valley offdiag diagnostic too large"
+        return "two-valley D_valley offdiag diagnostic too large"
     return "diagnostic-only"

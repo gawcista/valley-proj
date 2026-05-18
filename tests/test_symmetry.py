@@ -604,6 +604,61 @@ class TestLittleGroupExtendedDiagnostics:
         )
         assert rows == []
 
+    def test_valley_exchanging_operation_gets_specific_rejection_reason(self):
+        """A little-group operation that maps K to Kp is valley-exchanging."""
+        from valleyscope.analysis.symmetry_eigenvalue_diagnostic import symmetry_eigenvalue_diagnostics_for_kpoint
+        coeffs = np.array([[[1.0 + 0.0j]]], dtype=np.complex128)
+        ops = [
+            {
+                "operation_id": 2,
+                "candidate_rotation": True,
+                "order": 2,
+                "kind": "C2",
+                "rotation_frac": np.eye(3, dtype=int),
+                "rotation_cart": np.eye(3),
+                "translation_cart": np.zeros(3),
+                "preserved": {"K_valley": False, "Kp_valley": False},
+                "sector_mapping": {"K_valley": "Kp_valley", "Kp_valley": "K_valley"},
+            },
+        ]
+
+        rows = symmetry_eigenvalue_diagnostics_for_kpoint(
+            kpoint_name="GM", k_frac=np.zeros(3), q_cart=np.zeros((1, 3)),
+            coefficients=coeffs, symmetry_payload=self._toy_symmetry_payload(ops),
+            basis_payload=None, representation_payload={},
+        )
+
+        assert rows == []
+        assert ops[0]["rejection_reason_by_kpoint"]["GM"] == "valley-exchanging"
+
+    def test_non_generator_operation_still_gets_little_group_and_valley_checks(self):
+        """Non-generator rotations are not diagonalized by default but are still classified."""
+        from valleyscope.analysis.symmetry_eigenvalue_diagnostic import symmetry_eigenvalue_diagnostics_for_kpoint
+        coeffs = np.array([[[1.0 + 0.0j]]], dtype=np.complex128)
+        ops = [
+            {
+                "operation_id": 2,
+                "candidate_rotation": False,
+                "order": 2,
+                "kind": "C2",
+                "rotation_frac": np.eye(3, dtype=int),
+                "rotation_cart": np.eye(3),
+                "translation_cart": np.zeros(3),
+                "preserved": {"K_valley": False, "Kp_valley": False},
+                "sector_mapping": {"K_valley": "Kp_valley", "Kp_valley": "K_valley"},
+            },
+        ]
+
+        rows = symmetry_eigenvalue_diagnostics_for_kpoint(
+            kpoint_name="GM", k_frac=np.zeros(3), q_cart=np.zeros((1, 3)),
+            coefficients=coeffs, symmetry_payload=self._toy_symmetry_payload(ops),
+            basis_payload=None, representation_payload={},
+        )
+
+        assert rows == []
+        assert ops[0]["little_group_by_kpoint"]["GM"] is True
+        assert ops[0]["rejection_reason_by_kpoint"]["GM"] == "valley-exchanging"
+
     def test_character_fields_present_in_output(self):
         """Output rows should contain character_raw and character_valley."""
         from valleyscope.analysis.symmetry_eigenvalue_diagnostic import symmetry_eigenvalue_diagnostics_for_kpoint

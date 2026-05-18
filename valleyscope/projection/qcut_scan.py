@@ -112,7 +112,7 @@ def qcut_from_min_sector_distance(
                     )
                 distances.append(min(candidates))
     if not distances:
-        raise ValueError("relative_min_sector_distance requires at least two sectors")
+        raise ValueError("relative_min_valley_distance requires at least two valleys")
     return float(fraction * min(distances))
 
 

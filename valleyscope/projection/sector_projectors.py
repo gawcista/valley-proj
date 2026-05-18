@@ -72,7 +72,7 @@ def build_sector_projectors(
     messages: list[str] = []
     if overlap.any():
         message = (
-            f"{int(overlap.sum())} plane-wave components overlap across valley sectors; "
+            f"{int(overlap.sum())} plane-wave components overlap across valleys; "
             "try smaller qcut or check valley centers and monolayer lattice"
         )
         messages.append(message)
@@ -86,7 +86,7 @@ def build_sector_projectors(
         elif overlap_policy == "include":
             pass
         else:
-            raise ValueError(f"Unsupported overlap_cross_sector policy: {overlap_policy}")
+            raise ValueError(f"Unsupported overlap_policy: {overlap_policy}")
 
     return SectorProjectors(
         sector_masks=sector_masks,

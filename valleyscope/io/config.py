@@ -36,7 +36,7 @@ class ProjectionConfig:
     qcut_Ainv: float | None = None
     qcut_fraction: float = 0.3
     qcut_scan: list[float] = field(default_factory=list)
-    overlap_cross_sector: str = "warn_exclude"
+    overlap_policy: str = "warn_exclude"
     thresholds: dict[str, float] = field(default_factory=dict)
 
 
@@ -101,7 +101,7 @@ class AppConfig:
     input: InputConfig
     analysis: AnalysisConfig
     valley_centers: list[ValleyCenter]
-    valley_manifolds: list[ValleySector]
+    valley_subspaces: list[ValleySector]
     projection: ProjectionConfig
     output: OutputConfig
     symmetry: SymmetryConfig = field(default_factory=SymmetryConfig)
@@ -392,10 +392,12 @@ def _parse_analysis_config(raw: dict[str, Any]) -> AnalysisConfig:
     )
 
 
-def _parse_valley_manifolds(raw: dict[str, Any]) -> list[ValleySector]:
+def _parse_valley_subspaces(raw: dict[str, Any]) -> list[ValleySector]:
     if "valley_sectors" in raw:
-        raise ValueError("valley_sectors has been removed; use valley_manifolds")
-    sectors_raw = raw.get("valley_manifolds", [])
+        raise ValueError("valley_sectors has been removed; use valley_subspaces")
+    if "valley_manifolds" in raw:
+        raise ValueError("valley_manifolds has been removed; use valley_subspaces")
+    sectors_raw = raw.get("valley_subspaces", [])
     return [ValleySector(item["name"], list(item["centers"])) for item in sectors_raw]
 
 
@@ -405,7 +407,7 @@ def _projection_qcut_mode(raw: dict[str, Any]) -> str:
     if "qcut_Ainv" in raw:
         return "absolute"
     if "qcut_fraction" in raw:
-        return "relative_min_sector_distance"
+        return "relative_min_valley_distance"
     return "moire_shell"
 
 
@@ -452,7 +454,7 @@ def load_config(path: str | Path) -> AppConfig:
         layer_transforms,
         moire_direct,
     )
-    sectors = _parse_valley_manifolds(raw)
+    valley_subspaces = _parse_valley_subspaces(raw)
     analysis_raw = raw.get("analysis", {})
     projection_raw = raw.get("projection", {})
     allowed_projection_keys = {
@@ -462,7 +464,7 @@ def load_config(path: str | Path) -> AppConfig:
         "qcut_Ainv",
         "qcut_fraction",
         "qcut_scan",
-        "overlap_cross_sector",
+        "overlap_policy",
         "thresholds",
     }
     unknown_projection_keys = sorted(set(projection_raw) - allowed_projection_keys)
@@ -474,8 +476,8 @@ def load_config(path: str | Path) -> AppConfig:
         raise ValueError("input.wavefunction_h5 is required")
     if not centers:
         raise ValueError("valley_centers.centers must not be empty")
-    if not sectors:
-        raise ValueError("valley_manifolds must not be empty")
+    if not valley_subspaces:
+        raise ValueError("valley_subspaces must not be empty")
     return AppConfig(
         input=InputConfig(
             wavefunction_h5=resolve_config_path(base, input_raw["wavefunction_h5"]),
@@ -483,7 +485,7 @@ def load_config(path: str | Path) -> AppConfig:
         ),
         analysis=_parse_analysis_config(analysis_raw),
         valley_centers=centers,
-        valley_manifolds=sectors,
+        valley_subspaces=valley_subspaces,
         projection=ProjectionConfig(
             use_2d_momentum_only=bool(projection_raw.get("use_2d_momentum_only", True)),
             qcut_mode=_projection_qcut_mode(projection_raw),
@@ -491,7 +493,7 @@ def load_config(path: str | Path) -> AppConfig:
             qcut_Ainv=projection_raw.get("qcut_Ainv"),
             qcut_fraction=float(projection_raw.get("qcut_fraction", 0.3)),
             qcut_scan=[float(value) for value in projection_raw.get("qcut_scan", [])],
-            overlap_cross_sector=str(projection_raw.get("overlap_cross_sector", "warn_exclude")),
+            overlap_policy=str(projection_raw.get("overlap_policy", "warn_exclude")),
             thresholds=dict(projection_raw.get("thresholds", {})),
         ),
         symmetry=_parse_symmetry_config(base, input_raw, symmetry_raw),
