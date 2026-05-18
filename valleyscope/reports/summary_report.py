@@ -33,10 +33,10 @@ def build_summary_payload(
             "spinor_benchmark": config.spinor.benchmark,
         },
         "target_kpoints": list(config.analysis.kpoints),
-        "target_bands_vasp": list(config.analysis.target_bands_vasp),
+        "iband": list(config.analysis.iband),
         "valley_manifolds": [
             {"label": sector.name, "centers": list(sector.centers)}
-            for sector in config.valley_sectors
+            for sector in config.valley_manifolds
         ],
         "qcut": {
             "mode": config.projection.qcut_mode,
@@ -86,7 +86,7 @@ def render_summary_text(summary: dict[str, Any]) -> str:
         f"benchmark={input_summary['spinor_benchmark']})"
     )
     lines.append(f"target k-points: {', '.join(summary['target_kpoints'])}")
-    lines.append(f"target bands (VASP): {', '.join(str(v) for v in summary['target_bands_vasp'])}")
+    lines.append(f"iband (VASP): {', '.join(str(v) for v in summary['iband'])}")
     qcut = summary["qcut"]
     lines.append(f"qcut mode: {qcut['mode']}")
     lines.append(f"qcut value: {_fmt(qcut['value_Ainv'])} A^-1")

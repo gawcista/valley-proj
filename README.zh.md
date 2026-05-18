@@ -200,6 +200,9 @@ output:
 ```
 
 其余字段使用默认值（`qcut_mode: moire_shell`, `qcut_shell: 3`, symmetry detection 跳过等）。
+当前分析配置使用 `analysis.iband` 表示 VASP 能带编号，使用
+`valley_manifolds` 表示用户定义的单层谷子空间。旧输入字段
+`analysis.target_bands_vasp` 和 `valley_sectors` 已从公开 schema 中移除。
 
 ### 从 WAVECAR 抽取
 

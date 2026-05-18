@@ -210,6 +210,11 @@ output:
   directory: ./valley_analysis
 ```
 
+Current analysis configs use `analysis.iband` for VASP band indices and
+`valley_manifolds` for user-defined monolayer-valley subspaces. The older
+input keys `analysis.target_bands_vasp` and `valley_sectors` have been removed
+from the public schema.
+
 ### Extract From WAVECAR
 
 Write an `extract.yaml` like this:

@@ -49,7 +49,7 @@ def _resolve_qcut(
     if projection.qcut_mode == "relative_min_sector_distance":
         return qcut_from_min_sector_distance(
             config.valley_centers,
-            config.valley_sectors,
+            config.valley_manifolds,
             projection.qcut_fraction,
             monolayer_reciprocal_cart,
             use_2d=projection.use_2d_momentum_only,
@@ -91,13 +91,13 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
 
     for kpoint_name in config.analysis.kpoints:
         kpoint = wavefunctions.find_kpoint(kpoint_name)
-        positions = _target_band_positions(kpoint.band_indices_vasp, config.analysis.target_bands_vasp)
+        positions = _target_band_positions(kpoint.band_indices_vasp, config.analysis.iband)
         coefficients = kpoint.coefficients[positions]
         q_cart = kpoint.cart.reshape(1, 3) + kpoint.g_vectors_cart
         projectors = build_sector_projectors(
             q_cart,
             config.valley_centers,
-            config.valley_sectors,
+            config.valley_manifolds,
             monolayer_recip,
             qcut,
             use_2d=config.projection.use_2d_momentum_only,
@@ -151,7 +151,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             if config.projection.qcut_mode == "relative_min_sector_distance":
                 min_qcut = qcut_from_min_sector_distance(
                     config.valley_centers,
-                    config.valley_sectors,
+                    config.valley_manifolds,
                     1.0,
                     monolayer_recip,
                     use_2d=config.projection.use_2d_momentum_only,
@@ -161,7 +161,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 q_cart,
                 coefficients,
                 config.valley_centers,
-                config.valley_sectors,
+                config.valley_manifolds,
                 monolayer_recip,
                 scan_qcuts,
                 use_2d=config.projection.use_2d_momentum_only,
@@ -398,7 +398,7 @@ def _prepare_symmetry_payload(config: AppConfig, monolayer_recip: np.ndarray) ->
             rotation,
             rotation_cart,
             config.valley_centers,
-            config.valley_sectors,
+            config.valley_manifolds,
             monolayer_recip,
             tolerance=1e-6,
         )

@@ -24,7 +24,7 @@ class InputConfig:
 @dataclass(frozen=True)
 class AnalysisConfig:
     kpoints: list[str]
-    target_bands_vasp: list[int]
+    iband: list[int]
     degeneracy_tol_meV: float = 1.0
 
 
@@ -101,7 +101,7 @@ class AppConfig:
     input: InputConfig
     analysis: AnalysisConfig
     valley_centers: list[ValleyCenter]
-    valley_sectors: list[ValleySector]
+    valley_manifolds: list[ValleySector]
     projection: ProjectionConfig
     output: OutputConfig
     symmetry: SymmetryConfig = field(default_factory=SymmetryConfig)
@@ -368,16 +368,11 @@ def _parse_centers(
 
 
 def _parse_analysis_config(raw: dict[str, Any]) -> AnalysisConfig:
-    if "iband" in raw:
-        if "target_bands_vasp" in raw and list(raw["target_bands_vasp"]) != list(raw["iband"]):
-            warnings.warn(
-                "analysis.target_bands_vasp is ignored because analysis.iband is present.",
-                DeprecationWarning,
-                stacklevel=3,
-            )
-        target_bands = raw["iband"]
-    else:
-        target_bands = raw.get("target_bands_vasp", [])
+    if "target_bands_vasp" in raw:
+        raise ValueError("analysis.target_bands_vasp has been removed; use analysis.iband")
+    if "iband" not in raw:
+        raise ValueError("analysis.iband is required")
+    iband = raw["iband"]
 
     if "subspace_energy_tol_meV" in raw:
         if "degeneracy_tol_meV" in raw and float(raw["degeneracy_tol_meV"]) != float(raw["subspace_energy_tol_meV"]):
@@ -392,22 +387,15 @@ def _parse_analysis_config(raw: dict[str, Any]) -> AnalysisConfig:
 
     return AnalysisConfig(
         kpoints=list(raw.get("kpoints", [])),
-        target_bands_vasp=[int(value) for value in target_bands],
+        iband=[int(value) for value in iband],
         degeneracy_tol_meV=float(degeneracy_tol),
     )
 
 
-def _parse_valley_sectors(raw: dict[str, Any]) -> list[ValleySector]:
-    if "valley_manifolds" in raw:
-        if "valley_sectors" in raw and raw["valley_sectors"] != raw["valley_manifolds"]:
-            warnings.warn(
-                "valley_sectors is ignored because valley_manifolds is present.",
-                DeprecationWarning,
-                stacklevel=3,
-            )
-        sectors_raw = raw.get("valley_manifolds", [])
-    else:
-        sectors_raw = raw.get("valley_sectors", [])
+def _parse_valley_manifolds(raw: dict[str, Any]) -> list[ValleySector]:
+    if "valley_sectors" in raw:
+        raise ValueError("valley_sectors has been removed; use valley_manifolds")
+    sectors_raw = raw.get("valley_manifolds", [])
     return [ValleySector(item["name"], list(item["centers"])) for item in sectors_raw]
 
 
@@ -464,7 +452,7 @@ def load_config(path: str | Path) -> AppConfig:
         layer_transforms,
         moire_direct,
     )
-    sectors = _parse_valley_sectors(raw)
+    sectors = _parse_valley_manifolds(raw)
     analysis_raw = raw.get("analysis", {})
     projection_raw = raw.get("projection", {})
     allowed_projection_keys = {
@@ -487,7 +475,7 @@ def load_config(path: str | Path) -> AppConfig:
     if not centers:
         raise ValueError("valley_centers.centers must not be empty")
     if not sectors:
-        raise ValueError("valley_sectors must not be empty")
+        raise ValueError("valley_manifolds must not be empty")
     return AppConfig(
         input=InputConfig(
             wavefunction_h5=resolve_config_path(base, input_raw["wavefunction_h5"]),
@@ -495,7 +483,7 @@ def load_config(path: str | Path) -> AppConfig:
         ),
         analysis=_parse_analysis_config(analysis_raw),
         valley_centers=centers,
-        valley_sectors=sectors,
+        valley_manifolds=sectors,
         projection=ProjectionConfig(
             use_2d_momentum_only=bool(projection_raw.get("use_2d_momentum_only", True)),
             qcut_mode=_projection_qcut_mode(projection_raw),
