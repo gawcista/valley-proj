@@ -66,6 +66,8 @@ symmetry:
     rotation_order: auto
 
 rotation:
+  # strict keeps the conservative defaults; normal/loose are numerical readiness presets.
+  readiness_preset: strict
   unitarity_tol: 1.0e-4
   root_deviation_tol: 1.0e-6
   D_valley_offdiag_tol: 1.0e-6

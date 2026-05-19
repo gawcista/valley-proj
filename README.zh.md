@@ -347,6 +347,7 @@ spinor:
   benchmark: tMoTe2_VBM_C3_literature
 
 rotation:
+  readiness_preset: strict
   unitarity_tol: 1.0e-4
   root_deviation_tol: 1.0e-6
   D_valley_offdiag_tol: 1.0e-6
@@ -469,7 +470,7 @@ symmetry:
 
 当前对称分析会对当前支持的所有 proper valley-preserving little-group operations 尝试构造表示和本征值诊断，目前支持阶数为 `2`、`3`、`4`、`6`。non-valley-preserving operations 只作为诊断保留，不作为 single-valley eigenvalues。`rotation_order` 不再表示只对一个生成元对角化，而是作为 summary 兼容字段记录用户请求或自动解析出的旋转阶数。
 
-`root_deviation_tol` 和 `D_valley_offdiag_tol` 是 numerical readiness thresholds，不是普适物理常数。`root_deviation_tol` 检查计算得到的对称本征值是否足够接近允许的 root of unity。`D_valley_offdiag_tol` 检查当前双谷 benchmark 中 `D_valley` 的非对角范数。解释它们时必须同时看 qcut 稳定性、`W_val`、`P_v`、`S_min`、spinor benchmark、plane-wave mapping 质量和 symmetry tolerance。不要为了得到 `topology_input_ready=True` 而随意放宽。
+`root_deviation_tol` 和 `D_valley_offdiag_tol` 是 numerical readiness thresholds，不是普适物理常数。`root_deviation_tol` 检查计算得到的对称本征值是否足够接近允许的 root of unity。`D_valley_offdiag_tol` 检查当前双谷 benchmark 中 `D_valley` 的非对角范数。`readiness_preset` 支持 `strict`、`normal`、`loose`：默认 `strict` 对 root deviation 和双谷非对角检查都使用 `1.0e-6`；`normal` 使用 `1.0e-5` 与 `1.0e-3`；`loose` 使用 `1.0e-4` 与 `1.0e-2`。显式设置 `root_deviation_tol` 或 `D_valley_offdiag_tol` 会覆盖 preset。解释它们时必须同时看 qcut 稳定性、`W_val`、`P_v`、`S_min`、spinor benchmark、plane-wave mapping 质量和 symmetry tolerance。不要为了得到 `topology_input_ready=True` 而随意放宽。
 
 ## 读取输出
 

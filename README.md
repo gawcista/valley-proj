@@ -360,6 +360,7 @@ spinor:
   benchmark: tMoTe2_VBM_C3_literature
 
 rotation:
+  readiness_preset: strict
   unitarity_tol: 1.0e-4
   root_deviation_tol: 1.0e-6
   D_valley_offdiag_tol: 1.0e-6
@@ -489,7 +490,7 @@ A monolayer POSCAR cannot replace the moire POSCAR for symmetry-operation detect
 
 The current symmetry analysis lists the relevant little-group and valley-preserving operations, then attempts representation/eigenvalue diagnostics for all detected proper valley-preserving little-group operations whose order is currently supported (`2`, `3`, `4`, or `6`). Non-valley-preserving operations are still reported as diagnostics but are not used as single-valley eigenvalues. `rotation_order` no longer means that only one cyclic generator is diagonalized; it records the requested or automatically resolved rotation order for summary compatibility.
 
-`root_deviation_tol` and `D_valley_offdiag_tol` are numerical readiness thresholds, not universal physical constants. `root_deviation_tol` checks how close a computed symmetry eigenvalue is to the nearest allowed root of unity. `D_valley_offdiag_tol` checks the two-valley `D_valley` off-diagonal norm in the current valley-adapted benchmark. Interpret both together with qcut stability, `W_val`, `P_v`, `S_min`, spinor benchmark status, plane-wave mapping quality, and symmetry tolerance. Do not loosen them only to obtain `topology_input_ready=True`.
+`root_deviation_tol` and `D_valley_offdiag_tol` are numerical readiness thresholds, not universal physical constants. `root_deviation_tol` checks how close a computed symmetry eigenvalue is to the nearest allowed root of unity. `D_valley_offdiag_tol` checks the two-valley `D_valley` off-diagonal norm in the current valley-adapted benchmark. `readiness_preset` accepts `strict`, `normal`, and `loose`: `strict` is the default and keeps `1.0e-6` for both root deviation and two-valley off-diagonal checks; `normal` uses `1.0e-5` and `1.0e-3`; `loose` uses `1.0e-4` and `1.0e-2`. Explicit `root_deviation_tol` or `D_valley_offdiag_tol` values override the preset. Interpret all of them together with qcut stability, `W_val`, `P_v`, `S_min`, spinor benchmark status, plane-wave mapping quality, and symmetry tolerance. Do not loosen them only to obtain `topology_input_ready=True`.
 
 ## Reading the Outputs
 

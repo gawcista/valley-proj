@@ -320,12 +320,53 @@ def test_config_loader_accepts_rotation_order_integer_and_none(tmp_path):
     assert config.symmetry.filters.rotation_order is None
 
 
+def test_rotation_readiness_preset_applies_and_allows_explicit_overrides(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["rotation"] = {"readiness_preset": "loose"}
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    config = load_config(config_path)
+
+    assert config.rotation.readiness_preset == "loose"
+    assert config.rotation.unitarity_tol == pytest.approx(1.0e-4)
+    assert config.rotation.root_deviation_tol == pytest.approx(1.0e-4)
+    assert config.rotation.D_valley_offdiag_tol == pytest.approx(1.0e-2)
+
+    raw["rotation"]["D_valley_offdiag_tol"] = 5.0e-3
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    config = load_config(config_path)
+
+    assert config.rotation.readiness_preset == "loose"
+    assert config.rotation.root_deviation_tol == pytest.approx(1.0e-4)
+    assert config.rotation.D_valley_offdiag_tol == pytest.approx(5.0e-3)
+
+
+def test_rotation_readiness_preset_rejects_unknown_name(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["rotation"] = {"readiness_preset": "too_loose"}
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="rotation.readiness_preset"):
+        load_config(config_path)
+
+
 def test_config_template_uses_current_public_schema(tmp_path):
     template_path = Path("examples/config_template.yaml")
     template = template_path.read_text(encoding="utf-8")
     assert "analysis:\n  kpoints:" in template
     assert "  iband:" in template
     assert "valley_subspaces:" in template
+    assert "readiness_preset: strict" in template
     assert "root_deviation_tol:" in template
     assert "D_valley_offdiag_tol:" in template
     assert "target_bands_vasp" not in template
@@ -706,6 +747,7 @@ def test_readme_symmetry_example_uses_parser_schema(tmp_path):
     assert "P3 No.143" in readme
     assert "double-valued" in readme
     assert "`root_deviation_tol` and `D_valley_offdiag_tol` are numerical readiness thresholds" in readme
+    assert "`strict`, `normal`, and `loose`" in readme
 
     match = re.search(
         r"For a `generate_hexagonal_210\(9, 5, \.\.\.\)` style cell:\n\n```yaml\n(.*?)\n```",
@@ -763,6 +805,7 @@ def test_chinese_readme_uses_public_valley_vocabulary():
     assert "P3 No.143" in readme
     assert "double-valued" in readme
     assert "`root_deviation_tol` 和 `D_valley_offdiag_tol` 是 numerical readiness thresholds" in readme
+    assert "`strict`、`normal`、`loose`" in readme
     assert "header-only" in readme
 
 
@@ -1519,6 +1562,41 @@ def test_summary_exposes_symmetry_characters_as_first_class_rows(tmp_path):
             "accepted_for_single_valley_representation": True,
         }
     ]
+
+
+def test_summary_exposes_rotation_readiness_thresholds(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["rotation"] = {"readiness_preset": "normal"}
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    config = load_config(config_path)
+    from valleyscope.reports.summary_report import build_summary_payload
+
+    summary = build_summary_payload(
+        config=config,
+        qcut=0.5,
+        subspace_payload={"kpoints": {}},
+        symmetry_payload={
+            "status": "ok",
+            "detected_operations": [],
+            "candidate_rotations": [],
+            "little_group_check": {"status": "evaluated_per_kpoint"},
+            "valley_preservation_check": {"status": "completed"},
+        },
+        symmetry_rows=[],
+        output_paths={},
+    )
+
+    thresholds = summary["rotation_readiness_thresholds"]
+    assert thresholds["readiness_preset"] == "normal"
+    assert thresholds["root_deviation_tol"] == pytest.approx(1.0e-5)
+    assert thresholds["D_valley_offdiag_tol"] == pytest.approx(1.0e-3)
+    assert "not universal physical constants" in thresholds["interpretation"]
+    assert "do not loosen" in thresholds["recommended_action"]
 
 
 def test_single_band_and_not_degenerate_no_subspace_valley_status_mislabel(tmp_path):

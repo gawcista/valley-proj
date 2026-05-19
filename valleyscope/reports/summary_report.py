@@ -51,6 +51,7 @@ def build_summary_payload(
         "symmetry_analysis": _symmetry_analysis(symmetry_payload, config.analysis.kpoints),
         "symmetry_eigenvalues": eigen_rows,
         "symmetry_characters": _symmetry_character_rows(eigen_rows),
+        "rotation_readiness_thresholds": _rotation_readiness_thresholds(config),
         "warnings": warnings,
         "output_files": {name: str(path) for name, path in output_paths.items()},
         "legend": {
@@ -411,6 +412,23 @@ def _symmetry_character_rows(symmetry_rows: list[dict[str, Any]]) -> list[dict[s
         item["topology_input_ready"] = bool(item["topology_input_ready"]) and bool(row.get("topology_input_ready", False))
         item["diagnostic_only"] = bool(item["diagnostic_only"]) or bool(row.get("diagnostic_only", False))
     return list(grouped.values())
+
+
+def _rotation_readiness_thresholds(config: AppConfig) -> dict[str, Any]:
+    return {
+        "readiness_preset": config.rotation.readiness_preset,
+        "unitarity_tol": config.rotation.unitarity_tol,
+        "root_deviation_tol": config.rotation.root_deviation_tol,
+        "D_valley_offdiag_tol": config.rotation.D_valley_offdiag_tol,
+        "interpretation": (
+            "These are numerical readiness thresholds, not universal physical constants."
+        ),
+        "recommended_action": (
+            "Check qcut stability, valley purity, spinor benchmark, plane-wave mapping, "
+            "and representation quality; do not loosen thresholds only to obtain "
+            "topology_input_ready=True."
+        ),
+    }
 
 
 def _collect_warnings(

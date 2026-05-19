@@ -91,6 +91,7 @@ class SpinorConfig:
 
 @dataclass(frozen=True)
 class RotationConfig:
+    readiness_preset: str = "strict"
     unitarity_tol: float = 1.0e-4
     root_deviation_tol: float = 1.0e-6
     D_valley_offdiag_tol: float = 1.0e-6
@@ -427,11 +428,36 @@ def _parse_spinor_config(raw: dict[str, Any]) -> SpinorConfig:
     )
 
 
+ROTATION_READINESS_PRESETS: dict[str, dict[str, float]] = {
+    "strict": {
+        "unitarity_tol": 1.0e-4,
+        "root_deviation_tol": 1.0e-6,
+        "D_valley_offdiag_tol": 1.0e-6,
+    },
+    "normal": {
+        "unitarity_tol": 1.0e-4,
+        "root_deviation_tol": 1.0e-5,
+        "D_valley_offdiag_tol": 1.0e-3,
+    },
+    "loose": {
+        "unitarity_tol": 1.0e-4,
+        "root_deviation_tol": 1.0e-4,
+        "D_valley_offdiag_tol": 1.0e-2,
+    },
+}
+
+
 def _parse_rotation_config(raw: dict[str, Any]) -> RotationConfig:
+    preset = str(raw.get("readiness_preset", "strict")).lower()
+    if preset not in ROTATION_READINESS_PRESETS:
+        allowed = ", ".join(sorted(ROTATION_READINESS_PRESETS))
+        raise ValueError(f"rotation.readiness_preset must be one of: {allowed}")
+    values = dict(ROTATION_READINESS_PRESETS[preset])
     return RotationConfig(
-        unitarity_tol=float(raw.get("unitarity_tol", 1.0e-4)),
-        root_deviation_tol=float(raw.get("root_deviation_tol", 1.0e-6)),
-        D_valley_offdiag_tol=float(raw.get("D_valley_offdiag_tol", 1.0e-6)),
+        readiness_preset=preset,
+        unitarity_tol=float(raw.get("unitarity_tol", values["unitarity_tol"])),
+        root_deviation_tol=float(raw.get("root_deviation_tol", values["root_deviation_tol"])),
+        D_valley_offdiag_tol=float(raw.get("D_valley_offdiag_tol", values["D_valley_offdiag_tol"])),
     )
 
 
