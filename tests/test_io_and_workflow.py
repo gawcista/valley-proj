@@ -743,8 +743,10 @@ def test_readme_symmetry_example_uses_parser_schema(tmp_path):
     assert "`unreliable`" in readme
     assert "single-valley irrep" in readme
     assert "valley-preserving subgroup" in readme
-    assert "P321 No.150" in readme
-    assert "P3 No.143" in readme
+    assert "tMoTe2" not in readme
+    assert "P321 No.150" not in readme
+    assert "P3 No.143" not in readme
+    assert "Benchmark:" not in readme
     assert "double-valued" in readme
     assert "`root_deviation_tol` and `D_valley_offdiag_tol` are numerical readiness thresholds" in readme
     assert "`strict`, `normal`, and `loose`" in readme
@@ -801,8 +803,9 @@ def test_chinese_readme_uses_public_valley_vocabulary():
     assert "`unreliable`" in readme
     assert "single-valley irrep" in readme
     assert "谷保持子群" in readme
-    assert "P321 No.150" in readme
-    assert "P3 No.143" in readme
+    assert "tMoTe2" not in readme
+    assert "P321 No.150" not in readme
+    assert "P3 No.143" not in readme
     assert "double-valued" in readme
     assert "`root_deviation_tol` 和 `D_valley_offdiag_tol` 是 numerical readiness thresholds" in readme
     assert "`strict`、`normal`、`loose`" in readme
@@ -1223,7 +1226,7 @@ def test_summary_subspace_polarization_uses_min_eta_score(tmp_path):
     write_fixture(h5_path)
     write_config(config_path, h5_path, out_dir)
     config = load_config(config_path)
-    from valleyscope.reports.summary_report import build_summary_payload
+    from valleyscope.reports.summary_report import build_summary_payload, render_summary_text
 
     summary = build_summary_payload(
         config=config,
@@ -1267,7 +1270,7 @@ def test_summary_status_keeps_not_derived_and_unreliable_distinct(tmp_path):
     write_fixture(h5_path)
     write_config(config_path, h5_path, out_dir)
     config = load_config(config_path)
-    from valleyscope.reports.summary_report import build_summary_payload
+    from valleyscope.reports.summary_report import build_summary_payload, render_summary_text
 
     summary = build_summary_payload(
         config=config,
@@ -1449,15 +1452,29 @@ def test_summary_preserves_valley_preserving_subgroup_report(tmp_path):
     write_fixture(h5_path)
     write_config(config_path, h5_path, out_dir)
     config = load_config(config_path)
-    from valleyscope.reports.summary_report import build_summary_payload
+    from valleyscope.reports.summary_report import build_summary_payload, render_summary_text
 
     subgroup_report = {
-        "status": "operation_set_only",
-        "standard_group_match": None,
-        "standard_group_match_status": "not_attempted",
+        "status": "standard_group_matched",
+        "global_operation_set": {
+            "operation_set_label": "G_tau",
+            "allowed_operation_ids": [0, 1, 2],
+            "closure_status": "closed",
+        },
+        "standard_group_match": {
+            "number": 143,
+            "international_short": "P3",
+            "source": "spglib.get_spacegroup_type_from_symmetry",
+            "operation_ids": [0, 1, 2],
+        },
+        "standard_group_match_status": "matched",
+        "irrep_matching": {
+            "status": "table_mapping_deferred",
+            "table_source": "irreptables",
+        },
         "by_kpoint": {
             "KM": {
-                "operation_set_label": "G_tau(KM)",
+                "operation_set_label": "G_tau,k(KM)",
                 "allowed_operation_ids": [0, 1, 2],
                 "closure_status": "closed",
                 "missing_products": [],
@@ -1481,6 +1498,7 @@ def test_summary_preserves_valley_preserving_subgroup_report(tmp_path):
     )
 
     assert summary["symmetry_analysis"]["valley_preserving_subgroup_report"] == subgroup_report
+    assert "valley-preserving subgroup: P3 (143)" in render_summary_text(summary)
 
 
 def test_summary_exposes_symmetry_characters_as_first_class_rows(tmp_path):

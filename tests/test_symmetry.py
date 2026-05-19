@@ -836,11 +836,90 @@ def test_valley_preserving_subgroup_report_checks_operation_set_closure():
     gm_report = report["by_kpoint"]["GM"]
     assert report["status"] == "operation_set_only"
     assert report["standard_group_match"] is None
+    assert report["global_operation_set"]["allowed_operation_ids"] == [0, 1, 2]
     assert gm_report["allowed_operation_ids"] == [0, 1, 2]
     assert gm_report["valley_exchanging_operation_ids"] == [3]
     assert gm_report["closure_status"] == "closed"
     assert gm_report["missing_products"] == []
     assert gm_report["standard_group_match_status"] == "not_attempted"
+    assert report["irrep_matching"]["status"] == "table_mapping_deferred"
+    assert report["irrep_matching"]["table_source"] == "irreptables"
+
+
+def test_valley_preserving_subgroup_report_identifies_standard_global_subgroup():
+    c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]], dtype=int)
+    c3_square = c3 @ c3
+    lattice = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [-0.5, np.sqrt(3.0) / 2.0, 0.0],
+            [0.0, 0.0, 20.0],
+        ]
+    )
+    operations = [
+        {
+            "operation_id": 0,
+            "kind": "identity",
+            "order": 1,
+            "rotation_frac": np.eye(3, dtype=int),
+            "translation_frac": np.zeros(3),
+            "preserved": {"K_valley": True, "Kp_valley": True},
+            "sector_mapping": {"K_valley": "K_valley", "Kp_valley": "Kp_valley"},
+        },
+        {
+            "operation_id": 1,
+            "kind": "C3",
+            "order": 3,
+            "rotation_frac": c3,
+            "translation_frac": np.zeros(3),
+            "preserved": {"K_valley": True, "Kp_valley": True},
+            "sector_mapping": {"K_valley": "K_valley", "Kp_valley": "Kp_valley"},
+        },
+        {
+            "operation_id": 2,
+            "kind": "C3^2",
+            "order": 3,
+            "rotation_frac": c3_square,
+            "translation_frac": np.zeros(3),
+            "preserved": {"K_valley": True, "Kp_valley": True},
+            "sector_mapping": {"K_valley": "K_valley", "Kp_valley": "Kp_valley"},
+        },
+        {
+            "operation_id": 3,
+            "kind": "C2",
+            "order": 2,
+            "rotation_frac": np.diag([-1, -1, 1]),
+            "translation_frac": np.zeros(3),
+            "preserved": {"K_valley": False, "Kp_valley": False},
+            "sector_mapping": {"K_valley": "Kp_valley", "Kp_valley": "K_valley"},
+        },
+    ]
+    symmetry_payload = {
+        "detected_operations": operations,
+        "lattice_direct_cart": lattice,
+    }
+    update_valley_little_group_inventory(
+        symmetry_payload=symmetry_payload,
+        kpoint_name="GM",
+        k_frac=np.zeros(3),
+    )
+
+    report = build_valley_preserving_subgroup_report(
+        symmetry_payload=symmetry_payload,
+        target_kpoints=["GM"],
+    )
+
+    assert report["status"] == "standard_group_matched"
+    assert report["global_operation_set"]["operation_set_label"] == "G_tau"
+    assert report["global_operation_set"]["allowed_operation_ids"] == [0, 1, 2]
+    assert report["global_operation_set"]["valley_exchanging_operation_ids"] == [3]
+    assert report["global_operation_set"]["closure_status"] == "closed"
+    assert report["standard_group_match_status"] == "matched"
+    assert report["standard_group_match"]["number"] == 143
+    assert report["standard_group_match"]["international_short"] == "P3"
+    assert report["standard_group_match"]["operation_ids"] == [0, 1, 2]
+    assert report["standard_group_match"]["source"] == "spglib.get_spacegroup_type_from_symmetry"
+    assert report["by_kpoint"]["GM"]["operation_set_label"] == "G_tau,k(GM)"
 
 
 def test_valley_preserving_subgroup_report_records_missing_products():

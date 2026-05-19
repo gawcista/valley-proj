@@ -158,7 +158,7 @@ where $V_\tau$ is the selected monolayer valley subspace. It should not be inter
 
 With SOC, the comparison must use double-valued irreps. A spinor wavefunction changes sign under a $2\pi$ rotation, so spinful $C_3$ satisfies $C_3^3=-1$ and allows eigenvalues such as $\exp(+i\pi/3)$, $-1$, and $\exp(-i\pi/3)$.
 
-Benchmark: for spinful tMoTe2, the full moire space group is `P321 No.150`. After projection to the K/K' valleys, valley-exchanging C2-type operations are not single-valley operations, and the valley-preserving subgroup is `P3 No.143`. The full-group `-K6` irrep at $K_M$ should therefore be read after restriction to `P3 No.143`, giving the two single-valley double-valued C3 eigenvalues $\exp(+i\pi/3)$ and $\exp(-i\pi/3)$.
+After valley-preservation filtering, ValleyScope reports the detected global `G_tau` operation set and, when possible, identifies it as a standard space group using `spglib.get_spacegroup_type_from_symmetry`. The per-HSP entries are `G_tau,k`, the valley-preserving little groups used for character input. Automatic irrep labels remain deferred until the operation-to-table mapping and double-valued table convention are validated.
 
 ## Workflow
 
@@ -357,7 +357,7 @@ symmetry:
 spinor:
   convention: vasp_up_down_saxis_z
   convention_verified: true
-  benchmark: tMoTe2_VBM_C3_literature
+  benchmark: spinor_C3_reference_check
 
 rotation:
   readiness_preset: strict
@@ -422,9 +422,9 @@ eta_adapted: signed valley polarization in the valley-adapted basis
 
 The screen `status` values are `clean`, `approx`, `mixed`, `not_derived`, `unreliable`, and `n/a`. The first three describe valley concentration. `not_derived` means the target does not have enough valley-subspace weight, `unreliable` means projector-window or residual-weight checks failed, and `n/a` means the subspace diagnostic is not applicable.
 
-`Symmetry analysis` first reports the detected space group and symmetry operations, then lists which operations belong to each target HSP little group and which of those preserve the selected valley. Operations that exchange the two valleys are reported as `valley-exchanging`. The JSON summary also contains `symmetry_analysis.valley_preserving_subgroup_report`, a conservative operation-set report for `G_tau` at each HSP. It checks closure within the detected valley-preserving little-group operations and leaves `standard_group_match_status: not_attempted`; it does not identify a standard subgroup or match irreps. `Symmetry eigenvalues` reports the representation eigenvalues that were actually computed. `symmetry_characters` aggregates $\chi^\tau_k(g)=\mathrm{Tr}\,D^\tau_k(g)$ for computed operations that pass the little-group and valley-preservation checks; it is an input for later irrep analysis, not an irrep match. `topology_input_ready` only means that the HSP symmetry eigenvalue is suitable as an input to a later symmetry-based topology analysis; it does not validate full-mBZ valley-resolved topology.
+`Symmetry analysis` first reports the detected space group and symmetry operations, then lists which operations belong to each target HSP little group and which of those preserve the selected valley. Operations that exchange the two valleys are reported as `valley-exchanging`. The JSON summary also contains `symmetry_analysis.valley_preserving_subgroup_report`: it reports the global valley-preserving `G_tau` operation set, attempts standard space-group identification when enough operation data is available, and records per-HSP `G_tau,k` little-group operation sets. Irrep label matching remains deferred until table-operation mapping is validated. `Symmetry eigenvalues` reports the representation eigenvalues that were actually computed. `symmetry_characters` aggregates $\chi^\tau_k(g)=\mathrm{Tr}\,D^\tau_k(g)$ for computed operations that pass the little-group and valley-preservation checks; it is an input for later irrep analysis, not an irrep match. `topology_input_ready` only means that the HSP symmetry eigenvalue is suitable as an input to a later symmetry-based topology analysis; it does not validate full-mBZ valley-resolved topology.
 
-For SOC/spinor wavefunctions, ValleyScope applies the SU(2) spin rotation in the plane-wave representation. By default, VASP spinor phase conventions are treated as unverified, so spinful rows are reported with `spinor_rotation_applied=True`, `spinor_convention_verified=False`, and `diagnostic_only=True`. After an explicit benchmark, set `spinor.convention_verified: true` and record the benchmark name. For the tMoTe2 VBM C3 check used here, the benchmark is the literature pattern $\Gamma_M: -1$ and $K_M: e^{\pm i\pi/3}$ for the two spin-valley branches; this still does not validate full-mBZ valley-resolved topology.
+For SOC/spinor wavefunctions, ValleyScope applies the SU(2) spin rotation in the plane-wave representation. By default, VASP spinor phase conventions are treated as unverified, so spinful rows are reported with `spinor_rotation_applied=True`, `spinor_convention_verified=False`, and `diagnostic_only=True`. After an explicit spinor-convention check, set `spinor.convention_verified: true` and record the check name in `spinor.benchmark`; this still does not validate full-mBZ valley-resolved topology.
 
 Example screen summary:
 
@@ -434,7 +434,7 @@ Input
 wavefunction_h5: ./wave.h5
 operation structure: ./2dm-5370-7.34.vasp
 operation-detection backend: spglib
-spinor convention: vasp_up_down_saxis_z (verified=True, benchmark=tMoTe2_VBM_C3_literature)
+spinor convention: vasp_up_down_saxis_z (verified=True, benchmark=spinor_C3_reference_check)
 target k-points: GammaM, KM, MM
 iband (VASP): 2195, 2196
 qcut mode: relative_min_valley_distance
@@ -582,7 +582,7 @@ Use this transform for any later representation calculation in the valley-adapte
 
 This records the detected symmetry operations, including operation type, rotation matrix, translation, candidate rotation status, operation-detection backend, and little-group / valley-preservation diagnostics.
 
-The summary JSON additionally exposes `symmetry_analysis.valley_preserving_subgroup_report`. This operation-set diagnostic for `G_tau` lists allowed single-valley operation ids, valley-exchanging operation ids, and whether the detected allowed set is closed under composition. `standard_group_match` remains `null` until subgroup identification and double-valued irrep-table conventions are explicitly implemented.
+The summary JSON additionally exposes `symmetry_analysis.valley_preserving_subgroup_report`. This diagnostic lists the global `G_tau` operations, valley-exchanging operation ids, closure status, and any standard space-group match obtained from the detected valley-preserving operations. Per-HSP `G_tau,k` entries list the little-group operations used as character input. `irrep_matching.status` remains `table_mapping_deferred` until double-valued irrep-table conventions and operation mapping are explicitly validated.
 
 If the report says:
 

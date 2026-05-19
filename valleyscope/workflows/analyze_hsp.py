@@ -434,6 +434,7 @@ def _prepare_symmetry_payload(config: AppConfig, monolayer_recip: np.ndarray) ->
         "requested_rotation_order": symmetry.filters.rotation_order,
         "resolved_rotation_order": resolved_rotation_order,
         "symprec_scan_summary": symprec_scan_summary,
+        "lattice_direct_cart": lattice,
         "detected_operation_count": len(operations),
         "candidate_rotations": candidate_rotations,
         "detected_operations": operations,

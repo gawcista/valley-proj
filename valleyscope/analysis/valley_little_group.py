@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import spglib
 
 from valleyscope.symmetry.little_group import is_little_group_operation
 
@@ -67,6 +68,16 @@ def build_valley_preserving_subgroup_report(
         operation.get("operation_id"): operation
         for operation in symmetry_payload.get("detected_operations", [])
     }
+    global_operation_set = _global_valley_preserving_operation_set_report(
+        operation_lookup=operation_lookup,
+        tolerance=tolerance,
+    )
+    standard_match, standard_match_status = _match_standard_group_from_operations(
+        allowed_ids=global_operation_set["allowed_operation_ids"],
+        operation_lookup=operation_lookup,
+        lattice_direct_cart=symmetry_payload.get("lattice_direct_cart"),
+        symprec=float(symmetry_payload.get("symprec", tolerance)),
+    )
     if target_kpoints is None:
         ordered_kpoints = list(inventories)
     else:
@@ -110,7 +121,7 @@ def build_valley_preserving_subgroup_report(
             tolerance=tolerance,
         )
         by_kpoint[kpoint] = {
-            "operation_set_label": f"G_tau({kpoint})",
+            "operation_set_label": f"G_tau,k({kpoint})",
             "interpretation": "valley-preserving little-group operation set",
             "standard_group_match": None,
             "standard_group_match_status": "not_attempted",
@@ -125,14 +136,28 @@ def build_valley_preserving_subgroup_report(
             "missing_products": closure["missing_products"],
         }
 
+    status = (
+        "standard_group_matched"
+        if standard_match_status == "matched"
+        else "operation_set_only"
+    )
     report = {
-        "status": "operation_set_only",
+        "status": status,
         "interpretation": (
-            "G_tau is reported as a detected valley-preserving operation set; "
-            "standard space-group matching and irrep-table matching are deferred"
+            "G_tau is determined from detected valley-preserving operations; "
+            "G_tau,k entries are valley-preserving little-group operation sets"
         ),
-        "standard_group_match": None,
-        "standard_group_match_status": "not_attempted",
+        "global_operation_set": global_operation_set,
+        "standard_group_match": standard_match,
+        "standard_group_match_status": standard_match_status,
+        "irrep_matching": {
+            "status": "table_mapping_deferred",
+            "table_source": "irreptables",
+            "reason": (
+                "operation-to-table mapping and double-valued irrep convention "
+                "must be validated before automatic irrep labels are emitted"
+            ),
+        },
         "by_kpoint": by_kpoint,
     }
     symmetry_payload["valley_preserving_subgroup_report"] = report
@@ -144,6 +169,95 @@ def _preserves_all_valley_subspaces(operation: dict[str, Any]) -> bool:
     if not isinstance(preserved, dict) or not preserved:
         return False
     return all(bool(value) for value in preserved.values())
+
+
+def _global_valley_preserving_operation_set_report(
+    *,
+    operation_lookup: dict[Any, dict[str, Any]],
+    tolerance: float,
+) -> dict[str, Any]:
+    allowed_ids = [
+        operation_id
+        for operation_id, operation in operation_lookup.items()
+        if _preserves_all_valley_subspaces(operation)
+    ]
+    valley_exchanging_ids = [
+        operation_id
+        for operation_id, operation in operation_lookup.items()
+        if _is_valley_exchanging(operation)
+    ]
+    not_valley_preserving_ids = [
+        operation_id
+        for operation_id, operation in operation_lookup.items()
+        if not _preserves_all_valley_subspaces(operation)
+    ]
+    closure = _operation_set_closure_report(
+        allowed_ids=allowed_ids,
+        operation_lookup=operation_lookup,
+        tolerance=tolerance,
+    )
+    return {
+        "operation_set_label": "G_tau",
+        "interpretation": "global valley-preserving operation set",
+        "allowed_operation_ids": allowed_ids,
+        "valley_exchanging_operation_ids": valley_exchanging_ids,
+        "not_valley_preserving_operation_ids": not_valley_preserving_ids,
+        "operation_count": len(allowed_ids),
+        "closure_status": closure["closure_status"],
+        "identity_operation_id": closure["identity_operation_id"],
+        "missing_products": closure["missing_products"],
+    }
+
+
+def _match_standard_group_from_operations(
+    *,
+    allowed_ids: list[Any],
+    operation_lookup: dict[Any, dict[str, Any]],
+    lattice_direct_cart: Any,
+    symprec: float,
+) -> tuple[dict[str, Any] | None, str]:
+    if lattice_direct_cart is None:
+        return None, "not_attempted"
+    if not allowed_ids:
+        return None, "not_matched"
+    match_from_symmetry = getattr(spglib, "get_spacegroup_type_from_symmetry", None)
+    if match_from_symmetry is None:
+        return None, "not_matched"
+
+    rotations = []
+    translations = []
+    for operation_id in allowed_ids:
+        operation = operation_lookup.get(operation_id)
+        if operation is None:
+            return None, "not_matched"
+        rotation = np.asarray(operation.get("rotation_frac", np.eye(3)), dtype=float)
+        translation = np.asarray(operation.get("translation_frac", np.zeros(3)), dtype=float)
+        rotations.append(np.rint(rotation).astype(int))
+        translations.append(translation)
+
+    try:
+        spacegroup_type = match_from_symmetry(
+            np.asarray(rotations, dtype=int),
+            np.asarray(translations, dtype=float),
+            lattice=np.asarray(lattice_direct_cart, dtype=float),
+            symprec=symprec,
+        )
+    except Exception:
+        return None, "not_matched"
+    if spacegroup_type is None:
+        return None, "not_matched"
+
+    return {
+        "number": int(spacegroup_type.number),
+        "international_short": str(spacegroup_type.international_short),
+        "international": str(spacegroup_type.international),
+        "hall_number": int(spacegroup_type.hall_number),
+        "hall_symbol": str(spacegroup_type.hall_symbol),
+        "pointgroup_international": str(spacegroup_type.pointgroup_international),
+        "source": "spglib.get_spacegroup_type_from_symmetry",
+        "symprec": float(symprec),
+        "operation_ids": list(allowed_ids),
+    }, "matched"
 
 
 def _is_valley_exchanging(operation: dict[str, Any]) -> bool:

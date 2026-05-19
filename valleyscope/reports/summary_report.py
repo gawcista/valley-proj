@@ -158,6 +158,19 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     sym = summary["symmetry_analysis"]
     lines.append(f"status: {sym['status']}")
     lines.append(f"space group: {sym.get('international')} ({sym.get('spacegroup_number')})")
+    subgroup_report = sym.get("valley_preserving_subgroup_report", {})
+    if isinstance(subgroup_report, dict):
+        standard_match = subgroup_report.get("standard_group_match")
+        if isinstance(standard_match, dict):
+            lines.append(
+                "valley-preserving subgroup: "
+                f"{standard_match.get('international_short')} ({standard_match.get('number')})"
+            )
+        elif subgroup_report.get("standard_group_match_status"):
+            lines.append(
+                "valley-preserving subgroup: "
+                f"{subgroup_report.get('standard_group_match_status')}"
+            )
     lines.append(f"requested operation order: {sym.get('requested_rotation_order')}")
     lines.append(f"selected proper-rotation order: {sym.get('resolved_rotation_order')}")
     lines.append("")
