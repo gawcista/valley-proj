@@ -39,7 +39,7 @@ valley_centers:
       layer: bottom
       frac: [-0.333333333333, -0.333333333333, 0.0]
 
-valley_manifolds:
+valley_subspaces:
   - name: K_valley
     centers: [top_K, bottom_K]
   - name: Kp_valley
@@ -61,7 +61,14 @@ symmetry:
     angle_tolerance: -1.0
     symprec_scan: [1.0e-5, 3.0e-5, 1.0e-4, 3.0e-4, 1.0e-3]
   filters:
+    # The analyzer attempts all supported proper valley-preserving little-group operations;
+    # this field controls the requested/highlighted cyclic rotation order.
     rotation_order: auto
+
+rotation:
+  unitarity_tol: 1.0e-4
+  root_deviation_tol: 1.0e-6
+  D_valley_offdiag_tol: 1.0e-6
 
 output:
   directory: ./valley_analysis

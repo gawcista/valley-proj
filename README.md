@@ -94,6 +94,12 @@ The concentration score is classified into three public categories:
 - **approx**: concentration between the approximate and clean thresholds.
 - **mixed**: concentration below the approximate threshold; single-valley symmetry data should be treated as diagnostic-only.
 
+The public summary status vocabulary also includes gate and availability states:
+
+- **not_derived**: the target state or target subspace does not have enough weight in the user-defined valley subspace.
+- **unreliable**: projector windows or residual weight fail the configured reliability checks.
+- **n/a**: the subspace diagnostic is not applicable, for example for a single nondegenerate band.
+
 For a two-valley subspace ordered as K-valley followed by K'-valley, the signed valley polarization is
 
 ```math
@@ -139,6 +145,20 @@ ValleyScope performs symmetry-operation detection from the moire or bilayer stru
 2. The operation preserves the selected valley.
 
 The resulting matrix is a little-group representation in the valley-adapted subspace. Its eigenvalues are symmetry-analysis data. They can constrain topology in symmetry-based formulas, but ValleyScope does not infer a full integer Chern number from high-symmetry-point data alone.
+
+### Single-Valley Irrep Interpretation
+
+A single-valley irrep should be compared with irreps of the valley-preserving subgroup
+
+```math
+G_\tau=\{\,g\in G\mid gV_\tau=V_\tau\,\},
+```
+
+where $V_\tau$ is the selected monolayer valley subspace. It should not be interpreted as an irrep of the full moire space group unless the operation preserves that valley subspace.
+
+With SOC, the comparison must use double-valued irreps. A spinor wavefunction changes sign under a $2\pi$ rotation, so spinful $C_3$ satisfies $C_3^3=-1$ and allows eigenvalues such as $\exp(+i\pi/3)$, $-1$, and $\exp(-i\pi/3)$.
+
+Benchmark: for spinful tMoTe2, the full moire space group is `P321 No.150`. After projection to the K/K' valleys, valley-exchanging C2-type operations are not single-valley operations, and the valley-preserving subgroup is `P3 No.143`. The full-group `-K6` irrep at $K_M$ should therefore be read after restriction to `P3 No.143`, giving the two single-valley double-valued C3 eigenvalues $\exp(+i\pi/3)$ and $\exp(-i\pi/3)$.
 
 ## Workflow
 
@@ -380,7 +400,7 @@ W_overlap: projector-window overlap weight
 W_res:      residual weight
 ```
 
-The screen `status` is intentionally compact: `clean`, `approx`, or `mixed`.
+The screen `status` is intentionally compact but keeps gate failures distinct: `clean`, `approx`, `mixed`, `not_derived`, `unreliable`, or `n/a`.
 
 Use `Valley subspace analysis` for the target-band subspace as a whole. Raw VASP eigenvectors inside a near-degenerate subspace are gauge-dependent, so the per-band projection is not the final diagnostic. In a two-valley setting, ValleyScope forms
 
@@ -399,7 +419,9 @@ eta_adapted: signed valley polarization in the valley-adapted basis
 
 `S` checks whether the selected target bands are well described by the chosen valley subspace. `V` chooses the most valley-polarized basis inside that target subspace when two valleys are present. The reported values are subspace diagnostics, not a repeat of the raw-band table.
 
-`Symmetry analysis` first reports the detected space group and symmetry operations, then lists which operations belong to each target HSP little group and which of those preserve the selected valley. Operations that exchange the two valleys are reported as `valley-exchanging`. `Symmetry eigenvalues` reports the representation eigenvalues that were actually computed. `topology_input_ready` only means that the HSP symmetry eigenvalue is suitable as an input to a later symmetry-based topology analysis; it does not validate full-mBZ valley-resolved topology.
+The screen `status` values are `clean`, `approx`, `mixed`, `not_derived`, `unreliable`, and `n/a`. The first three describe valley concentration. `not_derived` means the target does not have enough valley-subspace weight, `unreliable` means projector-window or residual-weight checks failed, and `n/a` means the subspace diagnostic is not applicable.
+
+`Symmetry analysis` first reports the detected space group and symmetry operations, then lists which operations belong to each target HSP little group and which of those preserve the selected valley. Operations that exchange the two valleys are reported as `valley-exchanging`. The JSON summary also contains `symmetry_analysis.valley_preserving_subgroup_report`, a conservative operation-set report for `G_tau` at each HSP. It checks closure within the detected valley-preserving little-group operations and leaves `standard_group_match_status: not_attempted`; it does not identify a standard subgroup or match irreps. `Symmetry eigenvalues` reports the representation eigenvalues that were actually computed. `symmetry_characters` aggregates $\chi^\tau_k(g)=\mathrm{Tr}\,D^\tau_k(g)$ for computed operations that pass the little-group and valley-preservation checks; it is an input for later irrep analysis, not an irrep match. `topology_input_ready` only means that the HSP symmetry eigenvalue is suitable as an input to a later symmetry-based topology analysis; it does not validate full-mBZ valley-resolved topology.
 
 For SOC/spinor wavefunctions, ValleyScope applies the SU(2) spin rotation in the plane-wave representation. By default, VASP spinor phase conventions are treated as unverified, so spinful rows are reported with `spinor_rotation_applied=True`, `spinor_convention_verified=False`, and `diagnostic_only=True`. After an explicit benchmark, set `spinor.convention_verified: true` and record the benchmark name. For the tMoTe2 VBM C3 check used here, the benchmark is the literature pattern $\Gamma_M: -1$ and $K_M: e^{\pm i\pi/3}$ for the two spin-valley branches; this still does not validate full-mBZ valley-resolved topology.
 
@@ -459,13 +481,15 @@ symmetry:
 
 A monolayer POSCAR cannot replace the moire POSCAR for symmetry-operation detection. The moire POSCAR also should not be silently reused as a monolayer reciprocal lattice.
 
-`symmetry.filters.rotation_order` selects which proper-rotation order is used for symmetry-eigenvalue extraction:
+`symmetry.filters.rotation_order` controls whether symmetry-eigenvalue extraction is enabled and which cyclic rotation order is highlighted in the candidate-rotation summary:
 
 - `auto`: infer the target order from the detected moire space group and candidate rotations. For example, `P321` / `P312` resolves to `C3`, and `P422` resolves to `C4`.
-- integer `n`: analyze only `C_n`, currently with `n = 2, 3, 4, 6`.
+- integer `n`: select `C_n` as the requested cyclic rotation order, currently with `n = 2, 3, 4, 6`.
 - `None` / `none`: detect and report symmetry operations, but skip symmetry-eigenvalue extraction.
 
-The symmetry analysis lists the relevant little-group and valley-preserving operations. Symmetry eigenvalues are computed for one generator of each selected cyclic rotation subgroup by default, so `C3` and `C3^2` are not both diagonalized unless the workflow is explicitly extended for that purpose.
+The current symmetry analysis lists the relevant little-group and valley-preserving operations, then attempts representation/eigenvalue diagnostics for all detected proper valley-preserving little-group operations whose order is currently supported (`2`, `3`, `4`, or `6`). Non-valley-preserving operations are still reported as diagnostics but are not used as single-valley eigenvalues. `rotation_order` no longer means that only one cyclic generator is diagonalized; it records the requested or automatically resolved rotation order for summary compatibility.
+
+`root_deviation_tol` and `D_valley_offdiag_tol` are numerical readiness thresholds, not universal physical constants. `root_deviation_tol` checks how close a computed symmetry eigenvalue is to the nearest allowed root of unity. `D_valley_offdiag_tol` checks the two-valley `D_valley` off-diagonal norm in the current valley-adapted benchmark. Interpret both together with qcut stability, `W_val`, `P_v`, `S_min`, spinor benchmark status, plane-wave mapping quality, and symmetry tolerance. Do not loosen them only to obtain `topology_input_ready=True`.
 
 ## Reading the Outputs
 
@@ -535,6 +559,10 @@ The main columns mean:
 - `D_valley_offdiag_norm`: for two-valley diagnostics only, the off-diagonal norm of the representation matrix in the valley basis.
 - `valley_eta`: signed valley polarization of the valley-adapted state, when available.
 
+### `symmetry_characters` in `valley_summary.json`
+
+The summary JSON contains a first-class `symmetry_characters` list. Each row is grouped by `(kpoint, operation_id)` and records `character_raw`, `character_valley`, readiness flags, and whether the operation was accepted for single-valley representation. Rows are included only after the little-group and valley-preservation checks pass. This is the character input layer for later `G_tau` irrep matching; no character table or reduced EBR decomposition is applied here.
+
 ### `valley_basis_transform.h5`
 
 This file stores the transformation from the raw VASP band basis to the valley-adapted basis:
@@ -552,6 +580,8 @@ Use this transform for any later representation calculation in the valley-adapte
 ### `symmetry_report.json`
 
 This records the detected symmetry operations, including operation type, rotation matrix, translation, candidate rotation status, operation-detection backend, and little-group / valley-preservation diagnostics.
+
+The summary JSON additionally exposes `symmetry_analysis.valley_preserving_subgroup_report`. This operation-set diagnostic for `G_tau` lists allowed single-valley operation ids, valley-exchanging operation ids, and whether the detected allowed set is closed under composition. `standard_group_match` remains `null` until subgroup identification and double-valued irrep-table conventions are explicitly implemented.
 
 If the report says:
 

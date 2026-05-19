@@ -50,6 +50,7 @@ def build_summary_payload(
         "valley_subspace_analysis": _subspace_rows(subspace_payload),
         "symmetry_analysis": _symmetry_analysis(symmetry_payload, config.analysis.kpoints),
         "symmetry_eigenvalues": eigen_rows,
+        "symmetry_characters": _symmetry_character_rows(eigen_rows),
         "warnings": warnings,
         "output_files": {name: str(path) for name, path in output_paths.items()},
         "legend": {
@@ -370,6 +371,8 @@ def _symmetry_analysis(symmetry_payload: dict[str, Any], target_kpoints: list[st
         "detected_operation_count": symmetry_payload.get("detected_operation_count", 0),
         "candidate_rotations": symmetry_payload.get("candidate_rotations", []),
         "symprec_scan_summary": symmetry_payload.get("symprec_scan_summary", []),
+        "valley_little_group_inventory": symmetry_payload.get("valley_little_group_inventory", {}),
+        "valley_preserving_subgroup_report": symmetry_payload.get("valley_preserving_subgroup_report", {}),
         "kind_counts": kind_counts,
         "detected_operations": operations,
         "by_kpoint": ordered_by_kpoint,
@@ -377,6 +380,37 @@ def _symmetry_analysis(symmetry_payload: dict[str, Any], target_kpoints: list[st
         "valley_preservation_check": symmetry_payload.get("valley_preservation_check", {}),
         "rejected_operations": rejected,
     }
+
+
+def _symmetry_character_rows(symmetry_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, Any], dict[str, Any]] = {}
+    for row in symmetry_rows:
+        if not bool(row.get("little_group_passed", False)):
+            continue
+        if not bool(row.get("valley_preserving", False)):
+            continue
+        key = (str(row.get("kpoint", "")), row.get("operation_id"))
+        if key not in grouped:
+            grouped[key] = {
+                "kpoint": row.get("kpoint", ""),
+                "operation_id": row.get("operation_id"),
+                "kind": row.get("kind", ""),
+                "order": row.get("order"),
+                "basis": row.get("basis", ""),
+                "character_raw": "",
+                "character_valley": "",
+                "topology_input_ready": True,
+                "diagnostic_only": False,
+                "accepted_for_single_valley_representation": True,
+            }
+        item = grouped[key]
+        if row.get("character_raw"):
+            item["character_raw"] = row.get("character_raw")
+        if row.get("character_valley"):
+            item["character_valley"] = row.get("character_valley")
+        item["topology_input_ready"] = bool(item["topology_input_ready"]) and bool(row.get("topology_input_ready", False))
+        item["diagnostic_only"] = bool(item["diagnostic_only"]) or bool(row.get("diagnostic_only", False))
+    return list(grouped.values())
 
 
 def _collect_warnings(
@@ -478,6 +512,12 @@ def _short_matrix(value: Any) -> str:
 
 def _short_valley_status(status: Any) -> str:
     value = str(status)
+    if value in {"single_band", "not_degenerate", "requires_two_valley_sectors", "not_evaluated"}:
+        return "n/a"
+    if value == "not_valley_derived":
+        return "not_derived"
+    if value == "projector_unreliable":
+        return "unreliable"
     if value.endswith("clean") or value == "valley_separable_subspace":
         return "clean"
     if "approx" in value:

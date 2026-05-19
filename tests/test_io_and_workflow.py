@@ -320,6 +320,39 @@ def test_config_loader_accepts_rotation_order_integer_and_none(tmp_path):
     assert config.symmetry.filters.rotation_order is None
 
 
+def test_config_template_uses_current_public_schema(tmp_path):
+    template_path = Path("examples/config_template.yaml")
+    template = template_path.read_text(encoding="utf-8")
+    assert "analysis:\n  kpoints:" in template
+    assert "  iband:" in template
+    assert "valley_subspaces:" in template
+    assert "root_deviation_tol:" in template
+    assert "D_valley_offdiag_tol:" in template
+    assert "target_bands_vasp" not in template
+    assert "valley_sectors" not in template
+    assert "valley_manifolds" not in template
+
+    h5_path = tmp_path / "selected_wavefunctions.h5"
+    monolayer = tmp_path / "monolayer.vasp"
+    structure = tmp_path / "CONTCAR"
+    out_dir = tmp_path / "valley_analysis"
+    write_fixture(h5_path)
+    write_simple_poscar(monolayer)
+    write_simple_poscar(structure)
+
+    yaml_text = template
+    yaml_text = yaml_text.replace("./selected_wavefunctions.h5", str(h5_path))
+    yaml_text = yaml_text.replace("./monolayer.vasp", str(monolayer))
+    yaml_text = yaml_text.replace("./CONTCAR", str(structure))
+    yaml_text = yaml_text.replace("./valley_analysis", str(out_dir))
+    config_path = tmp_path / "config_template.yaml"
+    config_path.write_text(yaml_text, encoding="utf-8")
+
+    config = load_config(config_path)
+    assert config.analysis.iband == [101, 102]
+    assert [sector.name for sector in config.valley_subspaces] == ["K_valley", "Kp_valley"]
+
+
 def test_config_loader_prefers_new_symmetry_schema_over_legacy_fields(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "mixed.yaml"
@@ -551,7 +584,7 @@ def test_analyze_hsp_writes_csv_json_and_diagnostics_h5(tmp_path):
     assert "two_valley_subspace" not in summary
     subspace_rows = summary["valley_subspace_analysis"]
     assert subspace_rows
-    assert subspace_rows[0].get("status") in {"clean", "approx", "mixed", "n/a"}
+    assert subspace_rows[0].get("status") in {"clean", "approx", "mixed", "not_derived", "unreliable", "n/a"}
     assert "derived_score" not in summary["valley_projection_summary"][0]
     assert "polarization_score" not in summary["valley_projection_summary"][0]
     assert "valley_status" not in summary["valley_projection_summary"][0]
@@ -665,6 +698,14 @@ def test_readme_symmetry_example_uses_parser_schema(tmp_path):
     assert "Two-valley subspace" not in readme
     assert "S_min:      minimum target-valley-subspace weight" in readme
     assert "qcut mode:" in readme
+    assert "`not_derived`" in readme
+    assert "`unreliable`" in readme
+    assert "single-valley irrep" in readme
+    assert "valley-preserving subgroup" in readme
+    assert "P321 No.150" in readme
+    assert "P3 No.143" in readme
+    assert "double-valued" in readme
+    assert "`root_deviation_tol` and `D_valley_offdiag_tol` are numerical readiness thresholds" in readme
 
     match = re.search(
         r"For a `generate_hexagonal_210\(9, 5, \.\.\.\)` style cell:\n\n```yaml\n(.*?)\n```",
@@ -714,6 +755,15 @@ def test_chinese_readme_uses_public_valley_vocabulary():
     assert "Valley subspace analysis" in readme
     assert "Two-valley subspace" not in readme
     assert "S_min:      目标谷子空间权重下界" in readme
+    assert "`not_derived`" in readme
+    assert "`unreliable`" in readme
+    assert "single-valley irrep" in readme
+    assert "谷保持子群" in readme
+    assert "P321 No.150" in readme
+    assert "P3 No.143" in readme
+    assert "double-valued" in readme
+    assert "`root_deviation_tol` 和 `D_valley_offdiag_tol` 是 numerical readiness thresholds" in readme
+    assert "header-only" in readme
 
 
 def test_analyze_hsp_writes_valley_subspace_analysis_transform_for_degenerate_pair(tmp_path):
@@ -903,6 +953,55 @@ def test_symmetry_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp
     assert "spinor_benchmark" in summary["symmetry_eigenvalues"][0]
     assert outputs["symmetry_eigenvalues_csv"].exists()
     assert "symmetry_eigenvalues_csv" in summary["output_files"]
+
+
+def test_symmetry_eigenvalues_csv_is_header_only_when_no_rows(tmp_path, monkeypatch):
+    import importlib
+
+    workflow_module = importlib.import_module("valleyscope.workflows.analyze_hsp")
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+
+    def fake_prepare_symmetry_payload(config, monolayer_recip):
+        return {
+            "status": "ok",
+            "operation_detection_backend": "spglib",
+            "structure_file": "fake-CONTCAR",
+            "spacegroup_number": 150,
+            "international": "P321",
+            "symmetry_eigenvalue_enabled": True,
+            "requested_rotation_order": "auto",
+            "resolved_rotation_order": 3,
+            "detected_operation_count": 0,
+            "detected_operations": [],
+            "candidate_rotations": [],
+            "symprec_scan_summary": [],
+            "little_group_check": {"required": True, "status": "evaluated_per_kpoint"},
+            "valley_preservation_check": {"required": True, "status": "completed"},
+        }
+
+    def fake_symmetry_diagnostic(**kwargs):
+        return []
+
+    monkeypatch.setattr(workflow_module, "_prepare_symmetry_payload", fake_prepare_symmetry_payload)
+    monkeypatch.setattr(workflow_module, "symmetry_eigenvalue_diagnostics_for_kpoint", fake_symmetry_diagnostic)
+
+    outputs = workflow_module.analyze_hsp(config_path)
+
+    assert outputs["symmetry_eigenvalues_csv"].exists()
+    with outputs["symmetry_eigenvalues_csv"].open(encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        assert {"kpoint", "operation_id", "root_deviation", "D_valley_offdiag_norm"} <= set(reader.fieldnames or [])
+        assert list(reader) == []
+    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    assert "symmetry_eigenvalues_csv" in summary["output_files"]
+    subgroup_report = summary["symmetry_analysis"]["valley_preserving_subgroup_report"]
+    assert subgroup_report["status"] == "operation_set_only"
+    assert subgroup_report["standard_group_match_status"] == "not_attempted"
+    assert subgroup_report["by_kpoint"]["GammaM"]["closure_status"] == "empty"
 
 
 def test_write_detailed_files_false_writes_only_summary_files(tmp_path):
@@ -1118,6 +1217,53 @@ def test_summary_subspace_polarization_uses_min_eta_score(tmp_path):
     assert summary["valley_subspace_analysis"][0]["P_v_min"] == pytest.approx(0.6)
 
 
+def test_summary_status_keeps_not_derived_and_unreliable_distinct(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    config = load_config(config_path)
+    from valleyscope.reports.summary_report import build_summary_payload
+
+    summary = build_summary_payload(
+        config=config,
+        qcut=0.5,
+        subspace_payload={
+            "kpoints": {
+                "GammaM": {
+                    "weights": [
+                        {"band_vasp": 101, "valley_status": "not_valley_derived", "W_val": 0.2},
+                        {"band_vasp": 102, "valley_status": "projector_unreliable", "W_overlap": 0.2},
+                    ],
+                    "warnings": [],
+                    "subspace_valley_status": "projector_unreliable",
+                    "valley_adapted_subspace": {"status": "two_valley_adapted"},
+                },
+                "KM": {
+                    "weights": [],
+                    "warnings": [],
+                    "valley_adapted_subspace": {"status": "single_band"},
+                },
+            }
+        },
+        symmetry_payload={
+            "status": "skipped",
+            "reason": "no structure",
+            "detected_operations": [],
+            "candidate_rotations": [],
+            "little_group_check": {"status": "not_run"},
+            "valley_preservation_check": {"status": "not_run"},
+        },
+        symmetry_rows=[],
+        output_paths={},
+    )
+
+    assert [row["status"] for row in summary["valley_projection_summary"]] == ["not_derived", "unreliable"]
+    assert summary["valley_subspace_analysis"][0]["status"] == "unreliable"
+    assert summary["valley_subspace_analysis"][1]["status"] == "n/a"
+
+
 def test_symmetry_analysis_distinguishes_computed_from_diagnostic_only(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "config.yaml"
@@ -1209,6 +1355,170 @@ def test_symmetry_summary_orders_hsp_and_labels_valley_exchanging(tmp_path):
     text = render_summary_text(summary)
     assert text.index("GammaM: little group") < text.index("KM: little group")
     assert "valley-exchanging" in text
+
+
+def test_summary_preserves_valley_little_group_inventory(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    config = load_config(config_path)
+    from valleyscope.reports.summary_report import build_summary_payload
+
+    inventory = {
+        "KM": [
+            {
+                "operation_id": 7,
+                "kind": "C3",
+                "order": 3,
+                "little_group_passed": True,
+                "valley_preserving": True,
+                "valley_exchanging": False,
+                "allowed_for_single_valley_representation": True,
+                "reason": "",
+            }
+        ]
+    }
+    summary = build_summary_payload(
+        config=config,
+        qcut=0.5,
+        subspace_payload={"kpoints": {}},
+        symmetry_payload={
+            "status": "ok",
+            "detected_operations": [],
+            "candidate_rotations": [],
+            "valley_little_group_inventory": inventory,
+            "little_group_check": {"status": "evaluated_per_kpoint"},
+            "valley_preservation_check": {"status": "completed"},
+        },
+        symmetry_rows=[],
+        output_paths={},
+    )
+
+    assert summary["symmetry_analysis"]["valley_little_group_inventory"] == inventory
+
+
+def test_summary_preserves_valley_preserving_subgroup_report(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    config = load_config(config_path)
+    from valleyscope.reports.summary_report import build_summary_payload
+
+    subgroup_report = {
+        "status": "operation_set_only",
+        "standard_group_match": None,
+        "standard_group_match_status": "not_attempted",
+        "by_kpoint": {
+            "KM": {
+                "operation_set_label": "G_tau(KM)",
+                "allowed_operation_ids": [0, 1, 2],
+                "closure_status": "closed",
+                "missing_products": [],
+            }
+        },
+    }
+    summary = build_summary_payload(
+        config=config,
+        qcut=0.5,
+        subspace_payload={"kpoints": {}},
+        symmetry_payload={
+            "status": "ok",
+            "detected_operations": [],
+            "candidate_rotations": [],
+            "valley_preserving_subgroup_report": subgroup_report,
+            "little_group_check": {"status": "evaluated_per_kpoint"},
+            "valley_preservation_check": {"status": "completed"},
+        },
+        symmetry_rows=[],
+        output_paths={},
+    )
+
+    assert summary["symmetry_analysis"]["valley_preserving_subgroup_report"] == subgroup_report
+
+
+def test_summary_exposes_symmetry_characters_as_first_class_rows(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    config = load_config(config_path)
+    from valleyscope.reports.summary_report import build_summary_payload
+
+    symmetry_rows = [
+        {
+            "kpoint": "KM",
+            "operation_id": 7,
+            "kind": "C3",
+            "order": 3,
+            "basis": "valley_adapted",
+            "little_group_passed": True,
+            "valley_preserving": True,
+            "character_raw": "1.000000+0.000000j",
+            "character_valley": "0.500000+0.866025j",
+            "topology_input_ready": True,
+            "diagnostic_only": False,
+        },
+        {
+            "kpoint": "KM",
+            "operation_id": 7,
+            "kind": "C3",
+            "order": 3,
+            "basis": "valley_adapted",
+            "little_group_passed": True,
+            "valley_preserving": True,
+            "character_raw": "",
+            "character_valley": "",
+            "topology_input_ready": True,
+            "diagnostic_only": False,
+        },
+        {
+            "kpoint": "KM",
+            "operation_id": 8,
+            "kind": "C2",
+            "order": 2,
+            "basis": "valley_adapted",
+            "little_group_passed": True,
+            "valley_preserving": False,
+            "character_raw": "0.000000+0.000000j",
+            "character_valley": "0.000000+0.000000j",
+            "topology_input_ready": False,
+            "diagnostic_only": True,
+        },
+    ]
+    summary = build_summary_payload(
+        config=config,
+        qcut=0.5,
+        subspace_payload={"kpoints": {}},
+        symmetry_payload={
+            "status": "ok",
+            "detected_operations": [],
+            "candidate_rotations": [],
+            "little_group_check": {"status": "evaluated_per_kpoint"},
+            "valley_preservation_check": {"status": "completed"},
+        },
+        symmetry_rows=symmetry_rows,
+        output_paths={},
+    )
+
+    assert summary["symmetry_characters"] == [
+        {
+            "kpoint": "KM",
+            "operation_id": 7,
+            "kind": "C3",
+            "order": 3,
+            "basis": "valley_adapted",
+            "character_raw": "1.000000+0.000000j",
+            "character_valley": "0.500000+0.866025j",
+            "topology_input_ready": True,
+            "diagnostic_only": False,
+            "accepted_for_single_valley_representation": True,
+        }
+    ]
 
 
 def test_single_band_and_not_degenerate_no_subspace_valley_status_mislabel(tmp_path):
@@ -1315,7 +1625,7 @@ def test_rotation_order_none_yields_not_requested_symmetry_status(tmp_path):
     assert not (out_dir / "symmetry_eigenvalues.csv").exists()
 
 
-def test_workflow_uses_rotation_generators_by_default(tmp_path, monkeypatch):
+def test_workflow_requests_all_valley_preserving_little_group_operations(tmp_path, monkeypatch):
     import importlib
 
     workflow_module = importlib.import_module("valleyscope.workflows.analyze_hsp")
@@ -1353,7 +1663,7 @@ def test_workflow_uses_rotation_generators_by_default(tmp_path, monkeypatch):
 
     workflow_module.analyze_hsp(config_path)
 
-    assert calls == [True]
+    assert calls == [False]
 
 
 def test_subspace_projector_unreliable_when_band_overlap_exceeds_threshold(tmp_path):

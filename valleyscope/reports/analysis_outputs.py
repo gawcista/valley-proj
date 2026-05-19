@@ -85,7 +85,7 @@ def _write_detailed_outputs(
             weight_rows,
             sector_names,
         )
-        if symmetry_rows:
+        if symmetry_payload.get("symmetry_eigenvalue_enabled", False):
             outputs["symmetry_eigenvalues_csv"] = write_symmetry_eigenvalues_csv(
                 output_dir / "symmetry_eigenvalues.csv",
                 symmetry_rows,

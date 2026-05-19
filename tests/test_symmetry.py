@@ -11,6 +11,10 @@ from valleyscope.symmetry.rotation_selection import mark_rotation_generators, re
 from valleyscope.symmetry.spglib_finder import find_symmetry_operations
 from valleyscope.symmetry.valley_preservation import map_valley_sectors
 from valleyscope.analysis.symmetry_eigenvalue_diagnostic import symmetry_eigenvalue_diagnostics_for_kpoint
+from valleyscope.analysis.valley_little_group import (
+    build_valley_preserving_subgroup_report,
+    update_valley_little_group_inventory,
+)
 
 
 RECIP = np.array(
@@ -679,3 +683,202 @@ class TestLittleGroupExtendedDiagnostics:
         assert "character_valley" in rows[0]
         assert "little_group_passed" in rows[0]
         assert "valley_preserving" in rows[0]
+
+    def test_spinful_c3_double_valued_character_in_valley_adapted_basis(self):
+        coeffs = np.zeros((2, 2, 1), dtype=np.complex128)
+        coeffs[0, 0, 0] = 1.0
+        coeffs[1, 1, 0] = 1.0
+        angle = 2.0 * np.pi / 3.0
+        c3_cart = np.array(
+            [
+                [np.cos(angle), -np.sin(angle), 0.0],
+                [np.sin(angle), np.cos(angle), 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+        )
+        operations = [
+            {
+                "operation_id": 3,
+                "candidate_rotation": True,
+                "order": 3,
+                "kind": "C3",
+                "rotation_frac": np.eye(3, dtype=int),
+                "rotation_cart": c3_cart,
+                "translation_cart": np.zeros(3),
+                "preserved": {"K_valley": True},
+                "sector_mapping": {"K_valley": "K_valley"},
+            }
+        ]
+        representation_payload: dict[str, object] = {}
+
+        rows = symmetry_eigenvalue_diagnostics_for_kpoint(
+            kpoint_name="GM",
+            k_frac=np.zeros(3),
+            q_cart=np.zeros((1, 3)),
+            coefficients=coeffs,
+            symmetry_payload=self._toy_symmetry_payload(operations),
+            basis_payload={
+                "valid_valley_subspace": True,
+                "transform": np.eye(2, dtype=np.complex128),
+                "eta": np.array([1.0, -1.0]),
+            },
+            representation_payload=representation_payload,
+            spinor_convention_verified=True,
+        )
+
+        assert {row["nearest_root_of_unity"] for row in rows} == {
+            "exp(2pii*1/6)",
+            "exp(2pii*5/6)",
+        }
+        assert all(row["topology_input_ready"] for row in rows)
+        assert rows[0]["character_valley"] == "1.000000+0.000000j"
+
+
+def test_valley_little_group_inventory_marks_allowed_and_valley_exchanging_operations():
+    operations = [
+        {
+            "operation_id": 0,
+            "kind": "identity",
+            "order": 1,
+            "rotation_frac": np.eye(3, dtype=int),
+            "preserved": {"K_valley": True, "Kp_valley": True},
+            "sector_mapping": {"K_valley": "K_valley", "Kp_valley": "Kp_valley"},
+        },
+        {
+            "operation_id": 1,
+            "kind": "C2",
+            "order": 2,
+            "rotation_frac": np.eye(3, dtype=int),
+            "preserved": {"K_valley": False, "Kp_valley": False},
+            "sector_mapping": {"K_valley": "Kp_valley", "Kp_valley": "K_valley"},
+        },
+        {
+            "operation_id": 2,
+            "kind": "C2",
+            "order": 2,
+            "rotation_frac": np.diag([-1, -1, 1]),
+            "preserved": {"K_valley": True, "Kp_valley": True},
+            "sector_mapping": {"K_valley": "K_valley", "Kp_valley": "Kp_valley"},
+        },
+    ]
+    symmetry_payload = {"detected_operations": operations}
+
+    inventory = update_valley_little_group_inventory(
+        symmetry_payload=symmetry_payload,
+        kpoint_name="KM",
+        k_frac=np.array([1.0 / 3.0, 0.0, 0.0]),
+    )
+
+    assert [row["operation_id"] for row in inventory] == [0, 1, 2]
+    assert inventory[0]["allowed_for_single_valley_representation"] is True
+    assert inventory[1]["little_group_passed"] is True
+    assert inventory[1]["valley_exchanging"] is True
+    assert inventory[1]["reason"] == "valley-exchanging"
+    assert inventory[2]["little_group_passed"] is False
+    assert inventory[2]["reason"] == "not in little group"
+    assert operations[1]["rejection_reason_by_kpoint"]["KM"] == "valley-exchanging"
+    assert symmetry_payload["valley_little_group_inventory"]["KM"] == inventory
+
+
+def test_valley_preserving_subgroup_report_checks_operation_set_closure():
+    c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]], dtype=int)
+    c3_square = c3 @ c3
+    operations = [
+        {
+            "operation_id": 0,
+            "kind": "identity",
+            "order": 1,
+            "rotation_frac": np.eye(3, dtype=int),
+            "translation_frac": np.zeros(3),
+            "preserved": {"K_valley": True},
+            "sector_mapping": {"K_valley": "K_valley"},
+        },
+        {
+            "operation_id": 1,
+            "kind": "C3",
+            "order": 3,
+            "rotation_frac": c3,
+            "translation_frac": np.zeros(3),
+            "preserved": {"K_valley": True},
+            "sector_mapping": {"K_valley": "K_valley"},
+        },
+        {
+            "operation_id": 2,
+            "kind": "C3^2",
+            "order": 3,
+            "rotation_frac": c3_square,
+            "translation_frac": np.zeros(3),
+            "preserved": {"K_valley": True},
+            "sector_mapping": {"K_valley": "K_valley"},
+        },
+        {
+            "operation_id": 3,
+            "kind": "C2",
+            "order": 2,
+            "rotation_frac": np.eye(3, dtype=int),
+            "translation_frac": np.zeros(3),
+            "preserved": {"K_valley": False},
+            "sector_mapping": {"K_valley": "Kp_valley"},
+        },
+    ]
+    symmetry_payload = {"detected_operations": operations}
+    update_valley_little_group_inventory(
+        symmetry_payload=symmetry_payload,
+        kpoint_name="GM",
+        k_frac=np.zeros(3),
+    )
+
+    report = build_valley_preserving_subgroup_report(
+        symmetry_payload=symmetry_payload,
+        target_kpoints=["GM"],
+    )
+
+    gm_report = report["by_kpoint"]["GM"]
+    assert report["status"] == "operation_set_only"
+    assert report["standard_group_match"] is None
+    assert gm_report["allowed_operation_ids"] == [0, 1, 2]
+    assert gm_report["valley_exchanging_operation_ids"] == [3]
+    assert gm_report["closure_status"] == "closed"
+    assert gm_report["missing_products"] == []
+    assert gm_report["standard_group_match_status"] == "not_attempted"
+
+
+def test_valley_preserving_subgroup_report_records_missing_products():
+    c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]], dtype=int)
+    operations = [
+        {
+            "operation_id": 0,
+            "kind": "identity",
+            "order": 1,
+            "rotation_frac": np.eye(3, dtype=int),
+            "translation_frac": np.zeros(3),
+            "preserved": {"K_valley": True},
+            "sector_mapping": {"K_valley": "K_valley"},
+        },
+        {
+            "operation_id": 1,
+            "kind": "C3",
+            "order": 3,
+            "rotation_frac": c3,
+            "translation_frac": np.zeros(3),
+            "preserved": {"K_valley": True},
+            "sector_mapping": {"K_valley": "K_valley"},
+        },
+    ]
+    symmetry_payload = {"detected_operations": operations}
+    update_valley_little_group_inventory(
+        symmetry_payload=symmetry_payload,
+        kpoint_name="GM",
+        k_frac=np.zeros(3),
+    )
+
+    report = build_valley_preserving_subgroup_report(
+        symmetry_payload=symmetry_payload,
+        target_kpoints=["GM"],
+    )
+
+    gm_report = report["by_kpoint"]["GM"]
+    assert gm_report["closure_status"] == "not_closed"
+    assert gm_report["missing_products"] == [
+        {"left_operation_id": 1, "right_operation_id": 1}
+    ]

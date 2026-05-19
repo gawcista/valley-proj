@@ -91,6 +91,12 @@ P_v=\frac{\max_i W_i}{W_{\rm val}},\qquad W_{\rm val}>0 .
 - **approx**：介于 approximate 和 clean 阈值之间。
 - **mixed**：低于 approximate 阈值；单谷对称性数据只应作为诊断参考。
 
+公开摘要中的 `status` 还包括：
+
+- **not_derived**：目标态或目标子空间在用户定义谷子空间中的权重不足。
+- **unreliable**：投影窗口或剩余权重没有通过当前可靠性检查。
+- **n/a**：该子空间诊断不适用，例如单条非简并能带。
+
 对两谷子空间，有符号谷极化为
 
 ```math
@@ -134,6 +140,20 @@ ValleyScope 用 spglib 从 moire/bilayer 结构文件中自动识别对称操作
 2. 该操作保持所选谷。
 
 得到的矩阵是谷适配子空间中的小群表示。其本征值是对称性分析数据，可用于基于对称性的拓扑公式约束，但 ValleyScope 不从少数高对称点自动推断完整整数陈数。
+
+### 单谷不可约表示的解释
+
+single-valley irrep 应当与谷保持子群（valley-preserving subgroup）的不可约表示比较：
+
+```math
+G_\tau=\{\,g\in G\mid gV_\tau=V_\tau\,\},
+```
+
+其中 $V_\tau$ 是选定的单层谷子空间。除非某个操作保持该谷子空间，否则单谷表示不应解释为完整 moire space group 的不可约表示。
+
+含 SOC 时必须使用 double-valued irreps。spinor 波函数在 $2\pi$ 旋转下变号，因此 spinful $C_3$ 满足 $C_3^3=-1$，允许 $\exp(+i\pi/3)$、$-1$、$\exp(-i\pi/3)$ 等本征值。
+
+benchmark：spinful tMoTe2 的完整 moire space group 为 `P321 No.150`。投影到 K/K' 谷后，交换两个谷的 C2-type operations 不属于单谷操作，谷保持子群为 `P3 No.143`。完整群下 $K_M$ VBM 的 `-K6` 应理解为限制到 `P3 No.143` 后得到两个 single-valley double-valued C3 本征值 $\exp(+i\pi/3)$ 与 $\exp(-i\pi/3)$。
 
 ## 运行流程
 
@@ -363,7 +383,7 @@ W_overlap: 投影窗口重叠权重
 W_res:      剩余权重
 ```
 
-屏幕上的 `status` 只保留三类：`clean`、`approx`、`mixed`。
+屏幕上的 `status` 保持紧凑，但会区分前置失败：`clean`、`approx`、`mixed`、`not_derived`、`unreliable` 或 `n/a`。
 
 再看 `Valley subspace analysis`。近简并子空间中的原始 VASP 本征矢依赖规范选择，逐条能带投影不是最终诊断。对于双谷设置，ValleyScope 在目标子空间中构造
 
@@ -382,7 +402,9 @@ eta_adapted: 谷适配基中的有符号谷极化
 
 `S` 判断所选目标能带是否能被选定的谷子空间良好描述；`V` 在存在两个谷时选出最谷极化的基。这里输出的是对子空间整体的诊断，不是逐条原始能带投影表的重复。
 
-`Symmetry analysis` 先列出空间群和检测到的对称操作，再按高对称点列出 little-group 操作和 valley-preserving 操作。把一个谷映射到另一个谷的操作会标记为 `valley-exchanging`。`Symmetry eigenvalues` 只列出实际构造了表示矩阵并求得本征值的操作。`topology_input_ready` 只表示该高对称点对称本征值可作为后续基于对称性的拓扑分析输入，不验证整个 mBZ 的谷分辨拓扑。
+屏幕摘要的 `status` 取值为 `clean`、`approx`、`mixed`、`not_derived`、`unreliable` 和 `n/a`。前三者描述谷集中度；`not_derived` 表示目标谷子空间权重不足，`unreliable` 表示投影窗口或剩余权重检查失败，`n/a` 表示该子空间诊断不适用。
+
+`Symmetry analysis` 先列出空间群和检测到的对称操作，再按高对称点列出 little-group 操作和 valley-preserving 操作。把一个谷映射到另一个谷的操作会标记为 `valley-exchanging`。JSON 摘要还包含 `symmetry_analysis.valley_preserving_subgroup_report`，这是每个 HSP 上 `G_tau` 的保守 operation-set 报告：它检查检测到的谷保持 little-group 操作在复合下是否闭合，并保留 `standard_group_match_status: not_attempted`；它不自动识别标准子群，也不匹配 irreps。`Symmetry eigenvalues` 只列出实际构造了表示矩阵并求得本征值的操作。`symmetry_characters` 聚合通过 little-group 和 valley-preservation 检查的 $\chi^\tau_k(g)=\mathrm{Tr}\,D^\tau_k(g)$；它是后续 irrep 分析输入，不是 irrep 匹配结果。`topology_input_ready` 只表示该高对称点对称本征值可作为后续基于对称性的拓扑分析输入，不验证整个 mBZ 的谷分辨拓扑。
 
 对于 SOC spinor 波函数，ValleyScope 在平面波表示中施加 SU(2) 自旋旋转。默认 VASP 自旋约定未验证时标记为 `diagnostic_only=True`。完成基准测试后可设置 `spinor.convention_verified: true`。
 
@@ -440,12 +462,14 @@ symmetry:
 
 单层 POSCAR 不能替代 moire POSCAR 做对称操作识别。
 
-`symmetry.filters.rotation_order` 选择用于对称本征值提取的 proper-rotation 阶数：
+`symmetry.filters.rotation_order` 控制是否启用对称本征值提取，并记录 candidate-rotation summary 中突出显示的循环旋转阶数：
 - `auto`：从空间群推断（如 `P321`/`P312` → `C3`，`P422` → `C4`）
-- 整数 `n`：只分析 `C_n`
+- 整数 `n`：请求以 `C_n` 作为循环旋转阶数
 - `None`/`none`：跳过对称本征值提取
 
-默认只计算每个循环旋转子群的一个生成元。
+当前对称分析会对当前支持的所有 proper valley-preserving little-group operations 尝试构造表示和本征值诊断，目前支持阶数为 `2`、`3`、`4`、`6`。non-valley-preserving operations 只作为诊断保留，不作为 single-valley eigenvalues。`rotation_order` 不再表示只对一个生成元对角化，而是作为 summary 兼容字段记录用户请求或自动解析出的旋转阶数。
+
+`root_deviation_tol` 和 `D_valley_offdiag_tol` 是 numerical readiness thresholds，不是普适物理常数。`root_deviation_tol` 检查计算得到的对称本征值是否足够接近允许的 root of unity。`D_valley_offdiag_tol` 检查当前双谷 benchmark 中 `D_valley` 的非对角范数。解释它们时必须同时看 qcut 稳定性、`W_val`、`P_v`、`S_min`、spinor benchmark、plane-wave mapping 质量和 symmetry tolerance。不要为了得到 `topology_input_ready=True` 而随意放宽。
 
 ## 读取输出
 
@@ -480,6 +504,8 @@ kpoint, band_vasp, energy_eV, K_valley, Kp_valley, W_val, P_v, eta, W_overlap, W
 
 只有操作通过表示矩阵检查后才写入：真旋转且阶数在 `[2,3,4,6]`、属于 HSP 小群、保持所选谷。
 
+只有 header-only 的空文件不一定是错误；它通常表示当前 HSP 与谷设置下没有操作通过这些检查。
+
 主要列：
 
 - `kpoint`：moiré 高对称点
@@ -492,6 +518,10 @@ kpoint, band_vasp, energy_eV, K_valley, Kp_valley, W_val, P_v, eta, W_overlap, W
 - `diagnostic_only`：仅供诊断
 - `D_valley_offdiag_norm`：双谷基中表示矩阵非对角块范数
 - `valley_eta`：谷适配态的有符号谷极化
+
+### valley_summary.json 中的 symmetry_characters
+
+summary JSON 包含一等字段 `symmetry_characters`。每一行按 `(kpoint, operation_id)` 聚合，记录 `character_raw`、`character_valley`、readiness flags，以及该操作是否可作为 single-valley representation。只有通过 little-group 和 valley-preservation 检查的操作会进入这里。这是为后续 `G_tau` irrep matching 准备的 character 输入层；这里不使用 character table，也不做 reduced EBR decomposition。
 
 ### valley_basis_transform.h5
 
@@ -506,6 +536,8 @@ kpoint, band_vasp, energy_eV, K_valley, Kp_valley, W_val, P_v, eta, W_overlap, W
 ### symmetry_report.json
 
 记录检测到的对称操作（类型、旋转矩阵、平移、候选旋转状态、后端、小群/谷保持检查结果）。
+
+summary JSON 额外暴露 `symmetry_analysis.valley_preserving_subgroup_report`。这是 `G_tau` operation-set 诊断：列出允许作为 single-valley 表示的操作编号、valley-exchanging 操作编号，以及允许集合是否在操作复合下闭合。`standard_group_match` 在子群识别和 double-valued irrep table 约定明确前保持为 `null`。
 
 `"status": "skipped"` 通常表示 `symmetry.operations.structure_file` 未设置或路径错误。
 

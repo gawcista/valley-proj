@@ -11,6 +11,10 @@ from valleyscope.analysis.decision_tree import (
     derive_valley_status,
 )
 from valleyscope.analysis.symmetry_eigenvalue_diagnostic import symmetry_eigenvalue_diagnostics_for_kpoint
+from valleyscope.analysis.valley_little_group import (
+    build_valley_preserving_subgroup_report,
+    update_valley_little_group_inventory,
+)
 from valleyscope.geometry.lattice import (
     cart_rotation_from_fractional,
     cart_translation_from_fractional,
@@ -195,6 +199,12 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     for entry in scan.entries
                 ],
             }
+        if symmetry_payload["status"] == "ok":
+            update_valley_little_group_inventory(
+                symmetry_payload=symmetry_payload,
+                kpoint_name=kpoint_name,
+                k_frac=kpoint.frac,
+            )
         if symmetry_payload["status"] == "ok" and symmetry_payload.get("symmetry_eigenvalue_enabled", True):
             symmetry_rows.extend(
                 symmetry_eigenvalue_diagnostics_for_kpoint(
@@ -211,11 +221,17 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     unitarity_tol=config.rotation.unitarity_tol,
                     root_deviation_tol=config.rotation.root_deviation_tol,
                     d_valley_offdiag_tol=config.rotation.D_valley_offdiag_tol,
-                    generators_only=True,
+                    generators_only=False,
                 )
             )
         kpoint_subspace["symmetry_status"] = _resolve_symmetry_status(
             symmetry_payload, symmetry_rows, kpoint_name,
+        )
+
+    if symmetry_payload["status"] == "ok":
+        build_valley_preserving_subgroup_report(
+            symmetry_payload=symmetry_payload,
+            target_kpoints=config.analysis.kpoints,
         )
 
     sector_names = list(projectors_by_kpoint[next(iter(projectors_by_kpoint))].sector_masks)
