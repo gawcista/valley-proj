@@ -48,6 +48,16 @@ class StandardIrrepTable:
             indices.update(irrep.characters)
         return sorted(indices)
 
+    def match_kpoint_label(self, k_frac: np.ndarray, *, tolerance: float = 1e-6) -> str | None:
+        k_frac = np.asarray(k_frac, dtype=float)
+        labels_by_coordinate: dict[str, np.ndarray] = {}
+        for irrep in self.irreps:
+            labels_by_coordinate.setdefault(irrep.kpoint_label, irrep.k_frac)
+        for label, table_k_frac in labels_by_coordinate.items():
+            if _kpoint_matches(k_frac, table_k_frac, tolerance):
+                return label
+        return None
+
 
 @dataclass(frozen=True, slots=True)
 class OperationMappingReport:
@@ -143,6 +153,12 @@ def _match_one_operation(
 
 
 def _translation_matches(left: np.ndarray, right: np.ndarray, tolerance: float) -> bool:
+    delta = np.asarray(left, dtype=float) - np.asarray(right, dtype=float)
+    delta_mod_lattice = delta - np.rint(delta)
+    return bool(np.linalg.norm(delta_mod_lattice) <= tolerance)
+
+
+def _kpoint_matches(left: np.ndarray, right: np.ndarray, tolerance: float) -> bool:
     delta = np.asarray(left, dtype=float) - np.asarray(right, dtype=float)
     delta_mod_lattice = delta - np.rint(delta)
     return bool(np.linalg.norm(delta_mod_lattice) <= tolerance)

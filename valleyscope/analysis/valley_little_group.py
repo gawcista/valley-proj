@@ -5,6 +5,7 @@ from typing import Any
 import numpy as np
 import spglib
 
+from valleyscope.irreps.tables import load_standard_irrep_table, match_table_operations
 from valleyscope.symmetry.little_group import is_little_group_operation
 
 
@@ -46,6 +47,10 @@ def update_valley_little_group_inventory(
         operation.setdefault("rejection_reason_by_kpoint", {})[kpoint_name] = reason
 
     symmetry_payload.setdefault("valley_little_group_inventory", {})[kpoint_name] = inventory
+    symmetry_payload.setdefault("kpoint_frac_by_name", {})[kpoint_name] = np.asarray(
+        k_frac,
+        dtype=float,
+    ).tolist()
     return inventory
 
 
@@ -150,14 +155,15 @@ def build_valley_preserving_subgroup_report(
         "global_operation_set": global_operation_set,
         "standard_group_match": standard_match,
         "standard_group_match_status": standard_match_status,
-        "irrep_matching": {
-            "status": "table_mapping_deferred",
-            "table_source": "irreptables",
-            "reason": (
-                "operation-to-table mapping and double-valued irrep convention "
-                "must be validated before automatic irrep labels are emitted"
-            ),
-        },
+        "irrep_matching": _build_irrep_table_diagnostics(
+            symmetry_payload=symmetry_payload,
+            operation_lookup=operation_lookup,
+            global_operation_set=global_operation_set,
+            standard_match=standard_match,
+            standard_match_status=standard_match_status,
+            by_kpoint=by_kpoint,
+            tolerance=tolerance,
+        ),
         "by_kpoint": by_kpoint,
     }
     symmetry_payload["valley_preserving_subgroup_report"] = report
@@ -169,6 +175,148 @@ def _preserves_all_valley_subspaces(operation: dict[str, Any]) -> bool:
     if not isinstance(preserved, dict) or not preserved:
         return False
     return all(bool(value) for value in preserved.values())
+
+
+def _build_irrep_table_diagnostics(
+    *,
+    symmetry_payload: dict[str, Any],
+    operation_lookup: dict[Any, dict[str, Any]],
+    global_operation_set: dict[str, Any],
+    standard_match: dict[str, Any] | None,
+    standard_match_status: str,
+    by_kpoint: dict[str, Any],
+    tolerance: float,
+) -> dict[str, Any]:
+    base = {
+        "table_source": "irreptables",
+        "label_matching": "deferred",
+        "reason": (
+            "automatic irrep labels are not emitted until character-to-table "
+            "matching is explicitly enabled"
+        ),
+    }
+    if standard_match_status != "matched" or standard_match is None:
+        return {
+            **base,
+            "status": "table_mapping_deferred",
+            "operation_to_table_mapping_status": "not_attempted",
+            "reason": "standard valley-preserving subgroup is not matched",
+            "by_kpoint": {},
+        }
+
+    spinor = bool(symmetry_payload.get("spinor_wavefunction", False))
+    try:
+        table = load_standard_irrep_table(int(standard_match["number"]), spinor=spinor)
+    except Exception as exc:
+        return {
+            **base,
+            "status": "table_load_failed",
+            "spacegroup_number": int(standard_match["number"]),
+            "spinor": spinor,
+            "operation_to_table_mapping_status": "not_attempted",
+            "reason": str(exc),
+            "by_kpoint": {},
+        }
+
+    allowed_operations = [
+        operation_lookup[operation_id]
+        for operation_id in global_operation_set.get("allowed_operation_ids", [])
+        if operation_id in operation_lookup
+    ]
+    mapping_report = match_table_operations(
+        allowed_operations,
+        table,
+        tolerance=tolerance,
+    )
+    kpoint_diagnostics = _build_table_kpoint_diagnostics(
+        by_kpoint=by_kpoint,
+        kpoint_frac_by_name=symmetry_payload.get("kpoint_frac_by_name", {}),
+        table=table,
+        operation_mapping=mapping_report.mapping_by_operation_id,
+        tolerance=max(tolerance, 1e-6),
+    )
+    by_kpoint_complete = all(
+        row.get("status") == "table_kpoint_matched"
+        for row in kpoint_diagnostics.values()
+    )
+    mapping_complete = mapping_report.status == "complete" and by_kpoint_complete
+    return {
+        **base,
+        "status": "table_mapping_complete" if mapping_complete else "table_mapping_incomplete",
+        "spacegroup_number": table.number,
+        "table_name": table.name,
+        "spinor": table.spinor,
+        "operation_to_table_mapping_status": mapping_report.status,
+        "operation_to_table_mapping": mapping_report.mapping_by_operation_id,
+        "unmatched_operation_ids": mapping_report.unmatched_operation_ids,
+        "unused_table_operation_indices": mapping_report.unused_table_operation_indices,
+        "by_kpoint": kpoint_diagnostics,
+    }
+
+
+def _build_table_kpoint_diagnostics(
+    *,
+    by_kpoint: dict[str, Any],
+    kpoint_frac_by_name: Any,
+    table,
+    operation_mapping: dict[Any, int],
+    tolerance: float,
+) -> dict[str, Any]:
+    if not isinstance(kpoint_frac_by_name, dict):
+        kpoint_frac_by_name = {}
+    diagnostics: dict[str, Any] = {}
+    for kpoint, payload in by_kpoint.items():
+        k_frac = kpoint_frac_by_name.get(kpoint)
+        if k_frac is None:
+            diagnostics[kpoint] = {
+                "status": "missing_kpoint_coordinate",
+                "table_kpoint_label": None,
+            }
+            continue
+        table_label = table.match_kpoint_label(np.asarray(k_frac, dtype=float), tolerance=tolerance)
+        if table_label is None:
+            diagnostics[kpoint] = {
+                "status": "table_kpoint_not_matched",
+                "input_k_frac": list(np.asarray(k_frac, dtype=float)),
+                "table_kpoint_label": None,
+            }
+            continue
+        table_indices = table.operation_indices_for_kpoint(table_label)
+        allowed_ids = list(payload.get("allowed_operation_ids", []))
+        mapped_indices = sorted(
+            operation_mapping[operation_id]
+            for operation_id in allowed_ids
+            if operation_id in operation_mapping
+        )
+        missing_indices = [
+            table_index
+            for table_index in table_indices
+            if table_index not in mapped_indices
+        ]
+        extra_indices = [
+            table_index
+            for table_index in mapped_indices
+            if table_index not in table_indices
+        ]
+        status = (
+            "table_kpoint_matched"
+            if not missing_indices and not extra_indices
+            else "table_operation_set_mismatch"
+        )
+        diagnostics[kpoint] = {
+            "status": status,
+            "input_k_frac": list(np.asarray(k_frac, dtype=float)),
+            "table_kpoint_label": table_label,
+            "table_k_frac": list(table.irreps_by_kpoint(table_label)[0].k_frac),
+            "table_operation_indices": table_indices,
+            "mapped_allowed_table_operation_indices": mapped_indices,
+            "missing_table_operation_indices": missing_indices,
+            "extra_mapped_table_operation_indices": extra_indices,
+            "available_irrep_labels": [
+                irrep.label for irrep in table.irreps_by_kpoint(table_label)
+            ],
+        }
+    return diagnostics
 
 
 def _global_valley_preserving_operation_set_report(

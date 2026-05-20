@@ -91,6 +91,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     basis_transforms: dict[str, dict[str, np.ndarray]] = {}
     symmetry_representation_payload: dict[str, object] = {}
     symmetry_payload: dict[str, object] = _prepare_symmetry_payload(config, monolayer_recip)
+    symmetry_payload["spinor_wavefunction"] = bool(wavefunctions.metadata.spinor)
 
     for kpoint_name in config.analysis.kpoints:
         kpoint = wavefunctions.find_kpoint(kpoint_name)

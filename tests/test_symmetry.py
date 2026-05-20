@@ -922,6 +922,80 @@ def test_valley_preserving_subgroup_report_identifies_standard_global_subgroup()
     assert report["by_kpoint"]["GM"]["operation_set_label"] == "G_tau,k(GM)"
 
 
+def test_valley_preserving_subgroup_report_maps_operations_to_irreptables():
+    c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]], dtype=int)
+    c3_square = c3 @ c3
+    lattice = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [-0.5, np.sqrt(3.0) / 2.0, 0.0],
+            [0.0, 0.0, 20.0],
+        ]
+    )
+    operations = [
+        {
+            "operation_id": 0,
+            "kind": "identity",
+            "order": 1,
+            "rotation_frac": np.eye(3, dtype=int),
+            "translation_frac": np.zeros(3),
+            "preserved": {"K_valley": True, "Kp_valley": True},
+            "sector_mapping": {"K_valley": "K_valley", "Kp_valley": "Kp_valley"},
+        },
+        {
+            "operation_id": 1,
+            "kind": "C3",
+            "order": 3,
+            "rotation_frac": c3,
+            "translation_frac": np.zeros(3),
+            "preserved": {"K_valley": True, "Kp_valley": True},
+            "sector_mapping": {"K_valley": "K_valley", "Kp_valley": "Kp_valley"},
+        },
+        {
+            "operation_id": 2,
+            "kind": "C3^2",
+            "order": 3,
+            "rotation_frac": c3_square,
+            "translation_frac": np.zeros(3),
+            "preserved": {"K_valley": True, "Kp_valley": True},
+            "sector_mapping": {"K_valley": "K_valley", "Kp_valley": "Kp_valley"},
+        },
+    ]
+    symmetry_payload = {
+        "detected_operations": operations,
+        "lattice_direct_cart": lattice,
+        "spinor_wavefunction": True,
+    }
+    update_valley_little_group_inventory(
+        symmetry_payload=symmetry_payload,
+        kpoint_name="KM",
+        k_frac=np.array([1.0 / 3.0, 1.0 / 3.0, 0.0]),
+    )
+
+    report = build_valley_preserving_subgroup_report(
+        symmetry_payload=symmetry_payload,
+        target_kpoints=["KM"],
+    )
+
+    matching = report["irrep_matching"]
+    assert matching["status"] == "table_mapping_complete"
+    assert matching["table_source"] == "irreptables"
+    assert matching["spacegroup_number"] == 143
+    assert matching["spinor"] is True
+    assert matching["operation_to_table_mapping_status"] == "complete"
+    assert matching["operation_to_table_mapping"] == {0: 1, 1: 2, 2: 3}
+    assert matching["unmatched_operation_ids"] == []
+    assert matching["unused_table_operation_indices"] == []
+    km_matching = matching["by_kpoint"]["KM"]
+    assert km_matching["status"] == "table_kpoint_matched"
+    assert km_matching["table_kpoint_label"] == "K"
+    assert km_matching["table_operation_indices"] == [1, 2, 3]
+    assert km_matching["mapped_allowed_table_operation_indices"] == [1, 2, 3]
+    assert km_matching["missing_table_operation_indices"] == []
+    assert km_matching["extra_mapped_table_operation_indices"] == []
+    assert {"-K4", "-K5", "-K6"} <= set(km_matching["available_irrep_labels"])
+
+
 def test_valley_preserving_subgroup_report_records_missing_products():
     c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]], dtype=int)
     operations = [
