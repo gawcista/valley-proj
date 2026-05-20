@@ -4,7 +4,10 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from irreptables import IrrepTable
+try:
+    from irreptables.irreps import IrrepTable  # irreptables >= 3.0
+except ImportError:
+    from irreptables import IrrepTable         # irreptables < 3.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +71,7 @@ class OperationMappingReport:
 
 
 def load_standard_irrep_table(spacegroup_number: int, *, spinor: bool) -> StandardIrrepTable:
-    raw_table = IrrepTable(spacegroup_number, spinor=spinor)
+    raw_table = IrrepTable(str(spacegroup_number), spinor=spinor)
     operations = tuple(
         StandardTableOperation(
             table_index=index,
@@ -92,8 +95,11 @@ def load_standard_irrep_table(spacegroup_number: int, *, spinor: bool) -> Standa
         )
         for irrep in raw_table.irreps
     )
+    number_raw = getattr(raw_table, "number_str", None)
+    if number_raw is None:
+        number_raw = raw_table.number  # irreptables < 3.0
     return StandardIrrepTable(
-        number=int(raw_table.number),
+        number=int(number_raw),
         name=str(raw_table.name).strip(),
         spinor=bool(raw_table.spinor),
         operations=operations,
