@@ -512,13 +512,17 @@ def _collect_state_diagonal_characters(
         operation_id = table_to_operation.get(table_index)
         if operation_id is None:
             continue
-        op_payload = kp_representations.get(str(operation_id), {})
+        op_payload = kp_representations.get(f"operation_{operation_id}")
+        if op_payload is None:
+            op_payload = kp_representations.get(str(operation_id), {})
         if not isinstance(op_payload, dict):
             continue
         d_valley = op_payload.get("D_valley")
         if d_valley is None:
             continue
         d_valley = np.asarray(d_valley, dtype=np.complex128)
+        if d_valley.ndim != 2 or d_valley.shape[0] != d_valley.shape[1]:
+            continue
         n = d_valley.shape[0]
         if n < 1:
             continue

@@ -1999,7 +1999,7 @@ def _fake_diagnostics_with_dvalley(kpoint_name, representation_payload, **kwargs
     d_valleys = _p3_d_valley_matrices()
     kp_repr = representation_payload.setdefault(kpoint_name, {})
     for op_id, d_valley in d_valleys.items():
-        kp_repr[str(op_id)] = {
+        kp_repr[f"operation_{op_id}"] = {
             "D_valley": d_valley,
             "unitarity_deviation": 0.0,
             "mapping_miss_count": 0,
@@ -2012,7 +2012,7 @@ def _fake_diagnostics_with_dvalley_incomplete(kpoint_name, representation_payloa
     d_valleys = _p3_d_valley_matrices()
     kp_repr = representation_payload.setdefault(kpoint_name, {})
     for op_id, d_valley in d_valleys.items():
-        kp_repr[str(op_id)] = {
+        kp_repr[f"operation_{op_id}"] = {
             "D_valley": d_valley,
             "unitarity_deviation": 0.0,
             "mapping_miss_count": 0,
@@ -2025,7 +2025,7 @@ def _fake_diagnostics_dvalley_mixed(kpoint_name, representation_payload, **kwarg
     d_valleys = _p3_d_valley_matrices(operation_2_offdiag=0.5)
     kp_repr = representation_payload.setdefault(kpoint_name, {})
     for op_id, d_valley in d_valleys.items():
-        kp_repr[str(op_id)] = {
+        kp_repr[f"operation_{op_id}"] = {
             "D_valley": d_valley,
             "unitarity_deviation": 0.0,
             "mapping_miss_count": 0,
