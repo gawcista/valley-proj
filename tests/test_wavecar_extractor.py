@@ -6,6 +6,7 @@ import h5py
 import numpy as np
 import yaml
 
+from valleyscope.io.wavecar import _choose_target, _target_candidates
 from valleyscope.workflows.extract_wavecar import extract_wavecar_to_h5
 from valleyscope.cli import main
 
@@ -165,6 +166,9 @@ def test_extract_wavecar_accepts_spinor_count_in_nplane_record(tmp_path):
         assert h5["metadata/spinor"][()] == np.bool_(True)
         kp = h5["kpoints/0"]
         assert kp["coefficients"].shape == (1, 2, 1)
+        assert kp["target_g_count"][()] == 1
+        assert kp["generated_g_count_at_header_encut"][()] == 1
+        assert kp["generated_g_count_final"][()] == 1
         assert np.isclose(np.sum(np.abs(kp["coefficients"][()]) ** 2), 1.0)
 
 
@@ -197,6 +201,8 @@ def test_ecut_adjust_overgenerate_negative_delta(tmp_path):
 
     with h5py.File(output_h5, "r") as h5:
         assert h5["metadata/g_list_reconstruction_mode"][()].decode() == "ecut_adjusted"
+        assert h5["metadata/reconstruction_encut_eV"][()] < h5["metadata/original_encut_eV"][()]
+        assert h5["metadata/ecut_adjust_delta_eV"][()] < 0.0
         kp = h5["kpoints/0"]
         delta = kp["ecut_adjust_delta_eV"][()]
         assert delta < 0.0, f"Expected negative delta, got {delta}"
@@ -333,9 +339,10 @@ def test_stdout_reports_ecut_adjustment(tmp_path, capsys):
     extract_wavecar_to_h5(config_path)
 
     captured = capsys.readouterr().out
-    assert "ENCUT adjustment:" in captured
+    assert "original ENCUT:" in captured
+    assert "adjusted ENCUT:" in captured
+    assert "delta_Ecut:" in captured
     assert "final G count:" in captured
-    assert "delta" not in captured.lower() or "eV" in captured
 
 
 # -----------------------------------------------------------------------
@@ -382,6 +389,13 @@ def test_wavecar_g_vectors_follow_vasp_record_order(tmp_path):
     order_keys = list(zip(raw[:, 2], raw[:, 1], raw[:, 0]))
 
     assert order_keys == sorted(order_keys)
+
+
+def test_spinor_target_candidates_exclude_generated_count_and_choose_half_count():
+    candidates = _target_candidates(554236, 277150)
+
+    assert candidates == [277118, 554236]
+    assert _choose_target(candidates, 277150) == 277118
 
 
 # -----------------------------------------------------------------------

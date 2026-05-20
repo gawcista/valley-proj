@@ -55,7 +55,8 @@ def extract_wavecar_to_h5(config_path: str | Path) -> Path:
         kpoints_group = h5.create_group("kpoints")
 
         g_list_mode = "exact"
-        ecut_adjust_delta_max = 0.0
+        representative_delta = 0.0
+        representative_reconstruction_encut = reader.header.encut_eV
         spinor_seen = False
         for out_index, item in enumerate(kpoints):
             name = str(item["name"])
@@ -68,7 +69,9 @@ def extract_wavecar_to_h5(config_path: str | Path) -> Path:
 
             if adjust is not None:
                 g_list_mode = "ecut_adjusted"
-                ecut_adjust_delta_max = max(ecut_adjust_delta_max, abs(adjust.delta_eV))
+                if abs(adjust.delta_eV) > abs(representative_delta):
+                    representative_delta = adjust.delta_eV
+                    representative_reconstruction_encut = adjust.reconstruction_encut_eV
                 _print_adjustment(name, header.nplane_record, adjust)
 
             coeffs = []
@@ -104,19 +107,15 @@ def extract_wavecar_to_h5(config_path: str | Path) -> Path:
                 group["generated_g_count_final"] = adjust.generated_at_recon_encut
                 group["ecut_adjust_delta_eV"] = adjust.delta_eV
             else:
-                group["target_g_count"] = header.nplane_record
+                group["target_g_count"] = len(g_frac)
                 group["generated_g_count_at_header_encut"] = len(g_frac)
                 group["generated_g_count_final"] = len(g_frac)
                 group["ecut_adjust_delta_eV"] = 0.0
 
         metadata["spinor"] = bool(spinor_seen)
         metadata["g_list_reconstruction_mode"] = g_list_mode
-        metadata["reconstruction_encut_eV"] = (
-            reader.header.encut_eV + ecut_adjust_delta_max
-            if g_list_mode == "ecut_adjusted"
-            else reader.header.encut_eV
-        )
-        metadata["ecut_adjust_delta_eV"] = ecut_adjust_delta_max
+        metadata["reconstruction_encut_eV"] = representative_reconstruction_encut
+        metadata["ecut_adjust_delta_eV"] = representative_delta
     return output_h5
 
 
@@ -125,9 +124,11 @@ def _print_adjustment(kpoint_name: str, nplane_record: int, adjust) -> None:
         "WAVECAR G-list reconstruction:\n"
         f"  kpoint: {kpoint_name}\n"
         f"  nplane_record: {nplane_record}\n"
+        f"  original ENCUT: {adjust.original_encut_eV:.6f} eV\n"
+        f"  adjusted ENCUT: {adjust.reconstruction_encut_eV:.6f} eV\n"
         f"  target G count: {adjust.target_g_count}\n"
         f"  generated at header ENCUT: {adjust.generated_at_header_encut}\n"
-        f"  ENCUT adjustment: {adjust.delta_eV:+.6f} eV\n"
+        f"  delta_Ecut: {adjust.delta_eV:+.6f} eV\n"
         f"  final G count: {adjust.generated_at_recon_encut}"
     )
 

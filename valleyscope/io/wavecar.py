@@ -345,8 +345,6 @@ def _target_candidates(nplane_record: int, count_at_header: int) -> list[int]:
     cand = [nplane_record]
     if nplane_record % 2 == 0:
         cand.append(nplane_record // 2)
-    if count_at_header not in cand:
-        cand.append(count_at_header)
     return sorted(set(cand))
 
 
