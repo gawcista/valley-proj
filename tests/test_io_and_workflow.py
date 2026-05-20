@@ -1833,6 +1833,142 @@ def test_workflow_passes_hdf5_spinor_flag_to_subgroup_report(tmp_path, monkeypat
     assert captured == [True]
 
 
+def _p3_fake_symmetry_payload() -> dict:
+    c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]], dtype=int)
+    lattice = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [-0.5, np.sqrt(3.0) / 2.0, 0.0],
+            [0.0, 0.0, 20.0],
+        ]
+    )
+    operations = []
+    for operation_id, rotation in enumerate([np.eye(3, dtype=int), c3, c3 @ c3]):
+        operations.append(
+            {
+                "operation_id": operation_id,
+                "kind": "identity" if operation_id == 0 else "C3",
+                "order": 1 if operation_id == 0 else 3,
+                "rotation_frac": rotation,
+                "translation_frac": np.zeros(3),
+                "rotation_cart": rotation.astype(float),
+                "translation_cart": np.zeros(3),
+                "det": 1,
+                "candidate_rotation": operation_id != 0,
+                "preserved": {"K_valley": True, "Kp_valley": True},
+                "sector_mapping": {"K_valley": "K_valley", "Kp_valley": "Kp_valley"},
+            }
+        )
+    return {
+        "status": "ok",
+        "operation_detection_backend": "spglib",
+        "structure_file": "fake-CONTCAR",
+        "spacegroup_number": 143,
+        "international": "P3",
+        "symmetry_eigenvalue_enabled": True,
+        "requested_rotation_order": "auto",
+        "resolved_rotation_order": 3,
+        "detected_operation_count": len(operations),
+        "detected_operations": operations,
+        "candidate_rotations": [1, 2],
+        "symprec_scan_summary": [],
+        "lattice_direct_cart": lattice,
+        "little_group_check": {"required": True, "status": "evaluated_per_kpoint"},
+        "valley_preservation_check": {"required": True, "status": "completed"},
+    }
+
+
+def _ready_character_rows(kpoint: str, *, operation_2_state_1_ready: bool = True) -> list[dict]:
+    rows = []
+    for operation_id in [1, 2]:
+        for state_index in [0, 1]:
+            ready = operation_id != 2 or state_index != 1 or operation_2_state_1_ready
+            rows.append(
+                {
+                    "kpoint": kpoint,
+                    "operation_id": operation_id,
+                    "kind": "C3",
+                    "order": 3,
+                    "basis": "valley_adapted",
+                    "state_index": state_index,
+                    "phase_2pi": 0.0,
+                    "nearest_root_of_unity": "1",
+                    "root_deviation": 0.0,
+                    "rotation_ready": ready,
+                    "D_valley_offdiag_norm": 0.0,
+                    "character_valley": "1.000000+0.000000j" if state_index == 0 else "",
+                    "character_raw": "",
+                    "little_group_passed": True,
+                    "valley_preserving": True,
+                    "topology_input_ready": ready,
+                    "diagnostic_only": not ready,
+                    "reason": "" if ready else "root deviation too large",
+                }
+            )
+    return rows
+
+
+def test_workflow_writes_irrep_results_when_characters_are_ready(tmp_path, monkeypatch):
+    import importlib
+
+    workflow_module = importlib.import_module("valleyscope.workflows.analyze_hsp")
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    with h5py.File(h5_path, "r+") as h5:
+        h5["metadata/spinor"][()] = True
+    write_config(config_path, h5_path, out_dir)
+
+    monkeypatch.setattr(workflow_module, "_prepare_symmetry_payload", lambda config, monolayer_recip: _p3_fake_symmetry_payload())
+    monkeypatch.setattr(
+        workflow_module,
+        "symmetry_eigenvalue_diagnostics_for_kpoint",
+        lambda **kwargs: _ready_character_rows(kwargs["kpoint_name"]),
+    )
+
+    outputs = workflow_module.analyze_hsp(config_path)
+
+    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    matching = summary["symmetry_analysis"]["valley_preserving_subgroup_report"]["irrep_matching"]
+    assert matching["character_matching_status"] == "matched"
+    result = matching["irrep_results_by_kpoint"]["GammaM"]
+    assert result["status"] == "matched"
+    assert result["table_kpoint_label"] == "GM"
+    assert result["irrep_multiplicities"] == {"-GM5": 1, "-GM6": 1}
+    assert "GammaM: -GM5 x 1, -GM6 x 1" in outputs["valley_summary_txt"].read_text(encoding="utf-8")
+
+
+def test_workflow_keeps_irrep_results_incomplete_when_an_operation_has_non_ready_rows(tmp_path, monkeypatch):
+    import importlib
+
+    workflow_module = importlib.import_module("valleyscope.workflows.analyze_hsp")
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    with h5py.File(h5_path, "r+") as h5:
+        h5["metadata/spinor"][()] = True
+    write_config(config_path, h5_path, out_dir)
+
+    monkeypatch.setattr(workflow_module, "_prepare_symmetry_payload", lambda config, monolayer_recip: _p3_fake_symmetry_payload())
+    monkeypatch.setattr(
+        workflow_module,
+        "symmetry_eigenvalue_diagnostics_for_kpoint",
+        lambda **kwargs: _ready_character_rows(kwargs["kpoint_name"], operation_2_state_1_ready=False),
+    )
+
+    outputs = workflow_module.analyze_hsp(config_path)
+
+    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    matching = summary["symmetry_analysis"]["valley_preserving_subgroup_report"]["irrep_matching"]
+    assert matching["character_matching_status"] == "incomplete"
+    result = matching["irrep_results_by_kpoint"]["GammaM"]
+    assert result["status"] == "missing_characters"
+    assert result["irrep_multiplicities"] == {}
+    assert result["missing_table_operation_indices"] == [3]
+
+
 def test_subspace_projector_unreliable_when_band_overlap_exceeds_threshold(tmp_path):
     """P2-4: adapted subspace with band W_overlap > threshold → projector_unreliable."""
     h5_path = tmp_path / "wf.h5"
