@@ -178,6 +178,8 @@ def add_valley_irrep_results(
     *,
     symmetry_payload: dict[str, Any],
     symmetry_rows: list[dict[str, Any]],
+    representation_payload: dict[str, Any] | None = None,
+    state_diagonal_tol: float = 1e-3,
     tolerance: float = 1e-5,
 ) -> dict[str, Any]:
     report = symmetry_payload.get("valley_preserving_subgroup_report", {})
@@ -195,12 +197,15 @@ def add_valley_irrep_results(
         spinor=bool(matching.get("spinor", False)),
     )
     operation_to_table = dict(matching.get("operation_to_table_mapping", {}))
+    table_to_operation = {v: k for k, v in operation_to_table.items()}
     results_by_kpoint: dict[str, Any] = {}
     for kpoint, kpoint_info in matching.get("by_kpoint", {}).items():
         if not isinstance(kpoint_info, dict) or kpoint_info.get("status") != "table_kpoint_matched":
             results_by_kpoint[kpoint] = {
                 "status": "table_kpoint_not_ready",
                 "failure_reasons": ["Table k-point mapping is not complete"],
+                "state_irrep_assignment_status": "not_attempted",
+                "state_irrep_results": [],
             }
             continue
         character_data = _collect_computed_characters(
@@ -220,11 +225,22 @@ def add_valley_irrep_results(
             computed_characters=computed_characters,
             tolerance=tolerance,
         )
+
+        # State-level: collect from D_valley diagonal, not eigenvalue ordering
+        state_diag = _collect_state_diagonal_characters(
+            representation_payload=representation_payload,
+            kpoint=kpoint,
+            table_to_operation=table_to_operation,
+            table_operation_indices=kpoint_info.get("table_operation_indices", []),
+            symmetry_rows=symmetry_rows,
+            operation_to_table=operation_to_table,
+            state_diagonal_tol=state_diagonal_tol,
+        )
         state_irrep_result = _match_single_state_irreps(
             table=table,
             table_kpoint_label=str(kpoint_info["table_kpoint_label"]),
             table_operation_indices=kpoint_info.get("table_operation_indices", []),
-            state_characters=character_data["state_characters"],
+            state_characters=state_diag["state_characters"],
             tolerance=tolerance,
         )
         results_by_kpoint[kpoint] = {
@@ -405,10 +421,15 @@ def _collect_computed_characters(
     kpoint: str,
     operation_to_table: dict[Any, int],
 ) -> dict[str, Any]:
+    """Collect aggregate (trace-level) characters from valley-adapted character rows.
+
+    State-level characters are collected separately via
+    ``_collect_state_diagonal_characters`` from the fixed valley-adapted
+    D_valley matrix.
+    """
     computed_characters: dict[int, complex] = {}
     ready_row_counts: dict[int, int] = {}
     rows_by_table_operation: dict[int, list[dict[str, Any]]] = {}
-    state_characters: dict[int, dict[int, complex]] = {}
     for row in symmetry_rows:
         if str(row.get("kpoint", "")) != kpoint:
             continue
@@ -421,12 +442,6 @@ def _collect_computed_characters(
             continue
         table_index = operation_to_table[operation_id]
         rows_by_table_operation.setdefault(table_index, []).append(row)
-
-        if bool(row.get("topology_input_ready", False)):
-            eigenvalue = _row_eigenvalue(row)
-            if eigenvalue is not None:
-                state_index = int(row.get("state_index", 0))
-                state_characters.setdefault(state_index, {})[table_index] = eigenvalue
 
     for table_index, rows in rows_by_table_operation.items():
         if not rows or not all(bool(row.get("topology_input_ready", False)) for row in rows):
@@ -441,7 +456,90 @@ def _collect_computed_characters(
     return {
         "computed_characters": computed_characters,
         "ready_row_counts": ready_row_counts,
+    }
+
+
+def _collect_state_diagonal_characters(
+    *,
+    representation_payload: dict[str, Any] | None,
+    kpoint: str,
+    table_to_operation: dict[int, Any],
+    table_operation_indices: Any,
+    symmetry_rows: list[dict[str, Any]],
+    operation_to_table: dict[Any, int],
+    state_diagonal_tol: float,
+) -> dict[str, Any]:
+    """Collect per-state characters from D_valley diagonal entries.
+
+    Uses the fixed valley-adapted basis D_valley(g)[i,i] rather than
+    eigenvalue ordering, which is not stable across different operations.
+    Only includes entries where ALL rows for a given operation pass
+    readiness gates and the off-diagonal norm is below tolerance.
+    """
+    state_characters: dict[int, dict[int, complex]] = {}
+    offdiag_warnings: list[str] = []
+    if representation_payload is None:
+        return {"state_characters": state_characters, "offdiag_warnings": ["no_representation_payload"]}
+
+    kp_representations = representation_payload.get(kpoint, {})
+    if not isinstance(kp_representations, dict):
+        return {"state_characters": state_characters, "offdiag_warnings": ["no_kpoint_representations"]}
+
+    # Collect rows by table index and check full readiness (mirrors aggregate gate)
+    rows_by_table: dict[int, list[dict[str, Any]]] = {}
+    for row in symmetry_rows:
+        if str(row.get("kpoint", "")) != kpoint:
+            continue
+        if not bool(row.get("little_group_passed", False)):
+            continue
+        if not bool(row.get("valley_preserving", False)):
+            continue
+        operation_id = row.get("operation_id")
+        if operation_id not in operation_to_table:
+            continue
+        table_index = operation_to_table[operation_id]
+        rows_by_table.setdefault(table_index, []).append(row)
+
+    # Only use operations where ALL rows pass topology_input_ready
+    ready_table_indices: set[int] = set()
+    for table_index, rows in rows_by_table.items():
+        if rows and all(bool(r.get("topology_input_ready", False)) for r in rows):
+            ready_table_indices.add(table_index)
+
+    for table_index in table_operation_indices:
+        if table_index not in ready_table_indices:
+            continue
+        operation_id = table_to_operation.get(table_index)
+        if operation_id is None:
+            continue
+        op_payload = kp_representations.get(str(operation_id), {})
+        if not isinstance(op_payload, dict):
+            continue
+        d_valley = op_payload.get("D_valley")
+        if d_valley is None:
+            continue
+        d_valley = np.asarray(d_valley, dtype=np.complex128)
+        n = d_valley.shape[0]
+        if n < 1:
+            continue
+
+        # Check off-diagonal norm
+        off_diag = d_valley.copy()
+        np.fill_diagonal(off_diag, 0.0)
+        off_norm = float(np.linalg.norm(off_diag))
+        if off_norm > state_diagonal_tol:
+            offdiag_warnings.append(
+                f"D_valley off-diagonal norm {off_norm:.2e} exceeds "
+                f"state_diagonal_tol={state_diagonal_tol:.2e} for operation {operation_id}"
+            )
+            continue
+
+        for i in range(n):
+            state_characters.setdefault(i, {})[table_index] = d_valley[i, i]
+
+    return {
         "state_characters": state_characters,
+        "offdiag_warnings": offdiag_warnings,
     }
 
 
@@ -503,13 +601,6 @@ def _fill_identity_character_if_needed(
     computed_characters[1] = complex(float(inferred_dimension), 0.0)
     return "inferred_from_ready_rows"
 
-
-def _row_eigenvalue(row: dict[str, Any]) -> complex | None:
-    real = row.get("eigenvalue_real")
-    imag = row.get("eigenvalue_imag")
-    if real in (None, "") or imag in (None, ""):
-        return None
-    return complex(float(real), float(imag))
 
 
 def _parse_complex_character(value: Any) -> complex:
