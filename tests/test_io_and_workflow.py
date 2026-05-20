@@ -13,6 +13,7 @@ from valleyscope.io.config import load_config
 from valleyscope.io.h5_reader import read_wavefunction_h5
 from valleyscope.geometry.lattice import read_poscar_cell, read_poscar_lattice
 from valleyscope.cli import main as cli_main
+from valleyscope.projection.sector_projectors import SectorProjectors
 from valleyscope.workflows.analyze_hsp import analyze_hsp
 
 
@@ -737,7 +738,9 @@ def test_readme_symmetry_example_uses_parser_schema(tmp_path):
     assert "Valley projection summary" in readme
     assert "Valley subspace analysis" in readme
     assert "Two-valley subspace" not in readme
-    assert "S_min:      minimum target-valley-subspace weight" in readme
+    assert "S_min" in readme and "minimum target-valley-subspace weight" in readme
+    assert "min_concentration" in readme
+    assert "assigned_valleys" in readme
     assert "qcut mode:" in readme
     assert "`not_derived`" in readme
     assert "`unreliable`" in readme
@@ -800,7 +803,9 @@ def test_chinese_readme_uses_public_valley_vocabulary():
     assert "Valley subspaces" in readme
     assert "Valley subspace analysis" in readme
     assert "Two-valley subspace" not in readme
-    assert "S_min:      目标谷子空间权重下界" in readme
+    assert "S_min:              目标谷子空间权重下界" in readme
+    assert "min_concentration:" in readme
+    assert "assigned_valleys:" in readme
     assert "`not_derived`" in readme
     assert "`unreliable`" in readme
     assert "single-valley irrep" in readme
@@ -811,6 +816,8 @@ def test_chinese_readme_uses_public_valley_vocabulary():
     assert "P321 No.150" not in readme
     assert "P3 No.143" not in readme
     assert "double-valued" in readme
+    assert "valley_weights_adapted" in readme
+    assert "assigned_valleys" in readme
     assert "`root_deviation_tol` 和 `D_valley_offdiag_tol` 是 numerical readiness thresholds" in readme
     assert "`strict`、`normal`、`loose`" in readme
     assert "header-only" in readme
@@ -853,12 +860,55 @@ def test_analyze_hsp_writes_valley_subspace_analysis_transform_for_degenerate_pa
     with h5py.File(outputs["valley_basis_transform_h5"], "r") as h5:
         assert "GammaM" in h5
         assert h5["GammaM/transform"].shape == (2, 2)
+        assert h5["GammaM/eta"].shape == (2,)
+        assert h5["GammaM/v_matrix"].shape == (2, 2)
+        assert [value.decode() for value in h5["GammaM/sectors"][()]] == ["K_valley", "Kp_valley"]
+        assert [value.decode() for value in h5["GammaM/valleys"][()]] == ["K_valley", "Kp_valley"]
     subspace = json.loads(outputs["valley_subspace_json"].read_text(encoding="utf-8"))
     diagnostic = subspace["kpoints"]["GammaM"]["valley_adapted_subspace"]
-    assert diagnostic["status"] == "two_valley_adapted"
+    assert diagnostic["status"] == "valley_separable"
     assert diagnostic["valid_valley_subspace"] is True
     assert diagnostic["s_min"] == pytest.approx(1.0)
     assert diagnostic["s_max"] == pytest.approx(1.0)
+    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    assert summary["valley_subspace_analysis"][0]["status"] == "clean"
+
+
+def test_multivalley_subspace_status_uses_pv_thresholds_for_concentration():
+    from valleyscope.workflows.analyze_hsp import _add_valley_subspace_diagnostic
+
+    coefficients = np.zeros((2, 1, 3), dtype=np.complex128)
+    coefficients[0, 0, 0] = 1.0
+    coefficients[1, 0, 1] = np.sqrt(0.92)
+    coefficients[1, 0, 2] = np.sqrt(0.08)
+    projectors = SectorProjectors(
+        sector_masks={
+            "A_valley": np.array([True, False, False]),
+            "B_valley": np.array([False, True, False]),
+            "C_valley": np.array([False, False, True]),
+        },
+        center_masks={},
+        overlap_mask=np.zeros(3, dtype=bool),
+        qcut=0.5,
+        warnings=[],
+    )
+    payload: dict[str, object] = {}
+    basis_transforms: dict[str, dict[str, np.ndarray]] = {}
+
+    _add_valley_subspace_diagnostic(
+        payload,
+        basis_transforms,
+        "GammaM",
+        np.array([101, 102]),
+        np.array([0.1, 0.1001]),
+        coefficients,
+        projectors,
+        degeneracy_tol_meV=1.0,
+        thresholds={"W_val_min": 0.8, "P_v_clean": 0.95, "P_v_approx": 0.85},
+    )
+
+    assert payload["polarization_score"] == pytest.approx(0.92)
+    assert payload["subspace_valley_status"] == "valley_approximately_separable_subspace"
 
 
 def test_symmetry_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp_path):
@@ -1831,6 +1881,142 @@ def test_workflow_passes_hdf5_spinor_flag_to_subgroup_report(tmp_path, monkeypat
     workflow_module.analyze_hsp(config_path)
 
     assert captured == [True]
+
+
+def _p3_fake_symmetry_payload() -> dict:
+    c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]], dtype=int)
+    lattice = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [-0.5, np.sqrt(3.0) / 2.0, 0.0],
+            [0.0, 0.0, 20.0],
+        ]
+    )
+    operations = []
+    for operation_id, rotation in enumerate([np.eye(3, dtype=int), c3, c3 @ c3]):
+        operations.append(
+            {
+                "operation_id": operation_id,
+                "kind": "identity" if operation_id == 0 else "C3",
+                "order": 1 if operation_id == 0 else 3,
+                "rotation_frac": rotation,
+                "translation_frac": np.zeros(3),
+                "rotation_cart": rotation.astype(float),
+                "translation_cart": np.zeros(3),
+                "det": 1,
+                "candidate_rotation": operation_id != 0,
+                "preserved": {"K_valley": True, "Kp_valley": True},
+                "sector_mapping": {"K_valley": "K_valley", "Kp_valley": "Kp_valley"},
+            }
+        )
+    return {
+        "status": "ok",
+        "operation_detection_backend": "spglib",
+        "structure_file": "fake-CONTCAR",
+        "spacegroup_number": 143,
+        "international": "P3",
+        "symmetry_eigenvalue_enabled": True,
+        "requested_rotation_order": "auto",
+        "resolved_rotation_order": 3,
+        "detected_operation_count": len(operations),
+        "detected_operations": operations,
+        "candidate_rotations": [1, 2],
+        "symprec_scan_summary": [],
+        "lattice_direct_cart": lattice,
+        "little_group_check": {"required": True, "status": "evaluated_per_kpoint"},
+        "valley_preservation_check": {"required": True, "status": "completed"},
+    }
+
+
+def _ready_character_rows(kpoint: str, *, operation_2_state_1_ready: bool = True) -> list[dict]:
+    rows = []
+    for operation_id in [1, 2]:
+        for state_index in [0, 1]:
+            ready = operation_id != 2 or state_index != 1 or operation_2_state_1_ready
+            rows.append(
+                {
+                    "kpoint": kpoint,
+                    "operation_id": operation_id,
+                    "kind": "C3",
+                    "order": 3,
+                    "basis": "valley_adapted",
+                    "state_index": state_index,
+                    "phase_2pi": 0.0,
+                    "nearest_root_of_unity": "1",
+                    "root_deviation": 0.0,
+                    "rotation_ready": ready,
+                    "D_valley_offdiag_norm": 0.0,
+                    "character_valley": "1.000000+0.000000j" if state_index == 0 else "",
+                    "character_raw": "",
+                    "little_group_passed": True,
+                    "valley_preserving": True,
+                    "topology_input_ready": ready,
+                    "diagnostic_only": not ready,
+                    "reason": "" if ready else "root deviation too large",
+                }
+            )
+    return rows
+
+
+def test_workflow_writes_irrep_results_when_characters_are_ready(tmp_path, monkeypatch):
+    import importlib
+
+    workflow_module = importlib.import_module("valleyscope.workflows.analyze_hsp")
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    with h5py.File(h5_path, "r+") as h5:
+        h5["metadata/spinor"][()] = True
+    write_config(config_path, h5_path, out_dir)
+
+    monkeypatch.setattr(workflow_module, "_prepare_symmetry_payload", lambda config, monolayer_recip: _p3_fake_symmetry_payload())
+    monkeypatch.setattr(
+        workflow_module,
+        "symmetry_eigenvalue_diagnostics_for_kpoint",
+        lambda **kwargs: _ready_character_rows(kwargs["kpoint_name"]),
+    )
+
+    outputs = workflow_module.analyze_hsp(config_path)
+
+    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    matching = summary["symmetry_analysis"]["valley_preserving_subgroup_report"]["irrep_matching"]
+    assert matching["character_matching_status"] == "matched"
+    result = matching["irrep_results_by_kpoint"]["GammaM"]
+    assert result["status"] == "matched"
+    assert result["table_kpoint_label"] == "GM"
+    assert result["irrep_multiplicities"] == {"-GM5": 1, "-GM6": 1}
+    assert "GammaM: -GM5 x 1, -GM6 x 1" in outputs["valley_summary_txt"].read_text(encoding="utf-8")
+
+
+def test_workflow_keeps_irrep_results_incomplete_when_an_operation_has_non_ready_rows(tmp_path, monkeypatch):
+    import importlib
+
+    workflow_module = importlib.import_module("valleyscope.workflows.analyze_hsp")
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    with h5py.File(h5_path, "r+") as h5:
+        h5["metadata/spinor"][()] = True
+    write_config(config_path, h5_path, out_dir)
+
+    monkeypatch.setattr(workflow_module, "_prepare_symmetry_payload", lambda config, monolayer_recip: _p3_fake_symmetry_payload())
+    monkeypatch.setattr(
+        workflow_module,
+        "symmetry_eigenvalue_diagnostics_for_kpoint",
+        lambda **kwargs: _ready_character_rows(kwargs["kpoint_name"], operation_2_state_1_ready=False),
+    )
+
+    outputs = workflow_module.analyze_hsp(config_path)
+
+    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    matching = summary["symmetry_analysis"]["valley_preserving_subgroup_report"]["irrep_matching"]
+    assert matching["character_matching_status"] == "incomplete"
+    result = matching["irrep_results_by_kpoint"]["GammaM"]
+    assert result["status"] == "missing_characters"
+    assert result["irrep_multiplicities"] == {}
+    assert result["missing_table_operation_indices"] == [3]
 
 
 def test_subspace_projector_unreliable_when_band_overlap_exceeds_threshold(tmp_path):

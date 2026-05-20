@@ -87,7 +87,7 @@ The valley purity is
 P_v=\frac{\max_i W_i}{W_{\rm val}},
 \qquad W_{\rm val}>0 .
 ```
-It measures whether the assigned valley weight is concentrated in one valley or distributed among several valleys. In the two-valley case, `P_v` and `|eta|` are redundant: `P_v = (1 + |eta|) / 2`. For three or more valleys, `|eta|` is undefined and `P_v` is used directly as the concentration score.
+It measures whether the assigned valley weight is concentrated in one valley or distributed among several valleys. For two valleys, `P_v` and `|eta|` are related: `P_v = (1 + |eta|) / 2`. For three or more valleys (e.g., the M-valley star in a hexagonal lattice), `|eta|` is not a general metric; the concentration score `P_v` (or `valley_concentration_alpha` in the adapted basis) is used instead.
 
 The concentration score is classified into three public categories:
 - **clean**: concentration above the clean threshold (default `P_v=0.95`, equivalent to `|eta|=0.90` in a two-valley analysis).
@@ -126,16 +126,36 @@ For a normalized state, ValleyScope reports the decomposition $W_{\rm val}+W_{\r
 
 For an isolated nondegenerate band, the single-state quantities above can be read directly. For a near-degenerate target subspace, raw VASP eigenvectors are gauge-dependent: any unitary rotation inside the degenerate subspace gives an equally valid set of eigenvectors. Row-by-row projection of individual VASP bands is therefore not the main physical diagnostic.
 
-ValleyScope instead projects the target subspace and constructs the projected valley operator. For a two-valley subspace spanned by raw VASP states $\{|\psi_m\rangle\}$,
+ValleyScope instead projects the target subspace and constructs the projected valley operators. Given $N_v$ valley projectors $P_a$ and raw VASP states $\{|\psi_i\rangle\}$, the projected valley matrices are
 
 ```math
-S_{mn}=
-\langle\psi_m|(P_K+P_{K'})|\psi_n\rangle,
+P_a^{\rm sub}_{ij}=
+\langle\psi_i|P_a|\psi_j\rangle,
 \qquad
-V_{mn}=
-\langle\psi_m|(P_K-P_{K'})|\psi_n\rangle .
+S=\sum_a P_a^{\rm sub}.
 ```
-The matrix $S$ tests whether the target subspace lies in the chosen valley subspace. The matrix $V$ fixes a valley-adapted basis inside the target subspace. In practice, the `valley_subspace.json` and `valley_basis_transform.h5` files are the primary outputs for near-degenerate states.
+
+The matrix $S$ tests whether the target subspace lies in the chosen valley subspace (generalization of $W_{\rm val}$ to the subspace level). $s_{\rm min} = \min\,{\rm eig}(S)$ is the subspace-level derived score.
+
+To fix a valley-adapted basis, ValleyScope constructs a label operator
+
+```math
+L = \sum_a \lambda_a P_a^{\rm sub},
+```
+
+where $\lambda_a$ are distinct real numbers (e.g., $-1, 1$ for two valleys, or $0,1,2,\dots$ for more). Diagonalizing $L$ yields the valley-adapted basis $|\phi_\alpha\rangle = \sum_i |\psi_i\rangle U_{i\alpha}$. In this basis,
+
+```math
+w_{\alpha a} = \langle\phi_\alpha|P_a|\phi_\alpha\rangle,
+\qquad
+{\rm assigned\_valley}_\alpha = \arg\max_a w_{\alpha a},
+\qquad
+{\rm concentration}_\alpha = \frac{\max_a w_{\alpha a}}{\sum_a w_{\alpha a}}.
+```
+
+For the special case of exactly two valleys, the signed polarization $\eta_\alpha = (w_{\alpha 1} - w_{\alpha 2})/(w_{\alpha 1} + w_{\alpha 2})$ is provided as a compatibility diagnostic, and $P_{v,\alpha} = (1 + |\eta_\alpha|)/2$. The old $V = P_K - P_{K'}$ is a special case, not the general multi-valley definition.
+
+For three or more valleys, $\eta$ is undefined; use `valley_weights_adapted`, `assigned_valleys`, and `valley_concentration` instead. The `valley_subspace.json` and `valley_basis_transform.h5` files are the primary diagnostics for near-degenerate states.
 
 ### Symmetry Diagnostics
 
@@ -403,26 +423,22 @@ W_res:      residual weight
 
 The screen `status` is intentionally compact but keeps gate failures distinct: `clean`, `approx`, `mixed`, `not_derived`, `unreliable`, or `n/a`.
 
-Use `Valley subspace analysis` for the target-band subspace as a whole. Raw VASP eigenvectors inside a near-degenerate subspace are gauge-dependent, so the per-band projection is not the final diagnostic. In a two-valley setting, ValleyScope forms
-
-```math
-S=P_K+P_{K'}, \qquad V=P_K-P_{K'} .
-```
+Use `Valley subspace analysis` for the target-band subspace as a whole. Raw VASP eigenvectors inside a near-degenerate subspace are gauge-dependent, so the per-band projection is not the final diagnostic. ValleyScope constructs general projected valley matrices $P_a^{\rm sub}$ and a label operator $L = \sum_a \lambda_a P_a^{\rm sub}$:
 
 ```text
-S=P_K+P_Kp: target-valley-subspace projector in the selected target bands
-V=P_K-P_Kp: projected valley operator for valley-basis fixing in a two-valley setting
-S_min:      minimum target-valley-subspace weight
-S_max:      maximum target-valley-subspace weight
-P_v_min:    minimum valley purity after valley-basis fixing
-eta_adapted: signed valley polarization in the valley-adapted basis
+S = sum_a P_a^sub:  target-valley-subspace projector in the selected target bands
+S_min:              minimum target-valley-subspace weight
+S_max:              maximum target-valley-subspace weight
+min_concentration:  minimum valley concentration in the valley-adapted basis
+assigned_valleys:   valley assignment per adapted state
+eta_adapted:        signed valley polarization (two-valley compatibility only)
 ```
 
-`S` checks whether the selected target bands are well described by the chosen valley subspace. `V` chooses the most valley-polarized basis inside that target subspace when two valleys are present. The reported values are subspace diagnostics, not a repeat of the raw-band table.
+`S` checks whether the selected target bands are well described by the chosen valley subspace. The label operator `L` fixes the valley-adapted basis for any number of valleys. For two valleys, `eta_adapted` is provided as a compatibility diagnostic. For three or more valleys (e.g., M-valley star), `eta` is absent; use `valley_weights_adapted`, `assigned_valleys`, and `valley_concentration` instead. The two-valley $V = P_K - P_{K'}$ is a special case of this general framework.
 
-The screen `status` values are `clean`, `approx`, `mixed`, `not_derived`, `unreliable`, and `n/a`. The first three describe valley concentration. `not_derived` means the target does not have enough valley-subspace weight, `unreliable` means projector-window or residual-weight checks failed, and `n/a` means the subspace diagnostic is not applicable.
+The screen `status` values are `clean`, `approx`, `mixed`, `not_derived`, `unreliable`, and `n/a`.
 
-`Symmetry analysis` first reports the detected space group and symmetry operations, then lists which operations belong to each target HSP little group and which of those preserve the selected valley. Operations that exchange the two valleys are reported as `valley-exchanging`. The JSON summary also contains `symmetry_analysis.valley_preserving_subgroup_report`: it reports the global valley-preserving `G_tau` operation set, attempts standard space-group identification when enough operation data is available, and records per-HSP `G_tau,k` little-group operation sets. If `irreptables` table mapping and character matching are complete, `irrep_matching.irrep_results_by_kpoint` records HSP irrep multiplicities such as `{"-K5": 1, "-K6": 1}`. `Symmetry eigenvalues` reports the representation eigenvalues that were actually computed. `symmetry_characters` aggregates $\chi^\tau_k(g)=\mathrm{Tr}\,D^\tau_k(g)$ for computed operations that pass the little-group and valley-preservation checks; it is the character input layer for irrep matching. `topology_input_ready` only means that the HSP symmetry eigenvalue is suitable as an input to a later symmetry-based topology analysis; it does not validate full-mBZ valley-resolved topology.
+`Symmetry analysis` first reports the detected space group and symmetry operations, then lists which operations belong to each target HSP little group and which of those preserve the selected valley. Operations that exchange valleys are reported as `valley-exchanging`. The JSON summary also contains `symmetry_analysis.valley_preserving_subgroup_report`: it reports the global valley-preserving `G_tau` operation set, attempts standard space-group identification when enough operation data is available, and records per-HSP `G_tau,k` little-group operation sets. If `irreptables` table mapping and character matching are complete, `irrep_matching.irrep_results_by_kpoint` records HSP irrep multiplicities such as `{"-K5": 1, "-K6": 1}`. `Symmetry eigenvalues` reports the representation eigenvalues that were actually computed. `symmetry_characters` aggregates $\chi^\tau_k(g)=\mathrm{Tr}\,D^\tau_k(g)$ for computed operations that pass the little-group and valley-preservation checks; it is the character input layer for irrep matching. `topology_input_ready` only means that the HSP symmetry eigenvalue is suitable as an input to a later symmetry-based topology analysis; it does not validate full-mBZ valley-resolved topology.
 
 For SOC/spinor wavefunctions, ValleyScope applies the SU(2) spin rotation in the plane-wave representation. By default, VASP spinor phase conventions are treated as unverified, so spinful rows are reported with `spinor_rotation_applied=True`, `spinor_convention_verified=False`, and `diagnostic_only=True`. After an explicit spinor-convention check, set `spinor.convention_verified: true` and record the check name in `spinor.benchmark`; this still does not validate full-mBZ valley-resolved topology.
 
@@ -500,7 +516,7 @@ The analyzer writes results under `output.directory`:
 valley_summary.txt          ← read first (human-readable)
 valley_summary.json
 valley_weights.csv          ← quick scan
-valley_subspace.json        ← two-valley subspace data
+valley_subspace.json        ← multi-valley subspace data
 symmetry_eigenvalues.csv    ← symmetry eigenvalues
 symmetry_report.json        ← symmetry analysis
 valley_basis_transform.h5   ← basis transform for later calculations
@@ -521,7 +537,18 @@ Use this file for a first scan. For near-degenerate target states, the raw band 
 
 ### `valley_subspace.json`
 
-This is the primary summary for near-degenerate states. It records the projected valley operator, the valley-adapted basis diagnostics, and the eigenvalues indicating how well the target subspace lies in the selected valley subspace.
+This is the primary summary for near-degenerate states. It records the projected valley matrices $P_a^{\rm sub}$, the label operator $L$, the valley-adapted basis diagnostics, and S-matrix eigenvalues. For general multi-valley analysis, the key fields are:
+
+- `valley_labels`: list of valley names
+- `s_matrix` / `s_eigenvalues` / `s_min` / `s_max`: subspace-level diagnostics
+- `valley_matrices`: projected valley matrices $P_a^{\rm sub}$
+- `label_operator`: the valley label operator $L$
+- `valley_weights_adapted`: per-state valley weights in the adapted basis
+- `assigned_valleys`: valley assignment per adapted state
+- `valley_concentration` / `min_valley_concentration`: concentration scores
+- `eta_adapted`: signed polarization (only for exactly two valleys)
+- `commutator_norm_max` / `idempotency_deviation_max`: numerical diagnostics
+- `stably_separable` / `reason`: stability verdict
 
 ### `symmetry_eigenvalues.csv`
 
@@ -540,7 +567,7 @@ rotation_ready, topology_input_ready, topology_ready, spinor_rotation_applied,
 spinor_convention_verified, diagnostic_only, D_valley_offdiag_norm
 ```
 
-`rotation_ready` checks whether the representation matrix was constructed without missing plane-wave mappings and with small unitarity deviation. `topology_input_ready` additionally requires a valid two-valley basis, small root-of-unity deviation, and small two-valley `D_valley_offdiag_norm`. It does not claim a full valley Chern number. For compatibility, `topology_ready` stores the same value. `D_valley_offdiag_norm` is only a two-valley quality measure; it is not a general multi-valley or multidimensional-irrep criterion.
+`rotation_ready` checks whether the representation matrix was constructed without missing plane-wave mappings and with small unitarity deviation. `topology_input_ready` additionally requires a valid valley-adapted basis, small root-of-unity deviation, and small `D_valley_offdiag_norm`. It does not claim a full valley Chern number. For compatibility, `topology_ready` stores the same value. `D_valley_offdiag_norm` is a two-valley quality measure; it is not a general multi-valley criterion.
 
 Spinor rows remain diagnostic-only unless the VASP spinor convention is benchmark-verified. If `spinor.convention_verified: true` is used, the benchmark label is written to `spinor_benchmark` so the result remains auditable.
 
@@ -570,13 +597,18 @@ This file stores the transformation from the raw VASP band basis to the valley-a
 
 ```text
 /GammaM/transform
-/GammaM/eta
+/GammaM/eta                 (two-valley only)
 /GammaM/s_matrix
-/GammaM/v_matrix
+/GammaM/label_operator
+/GammaM/s_eigenvalues
+/GammaM/valley_weights_adapted
+/GammaM/assigned_valleys
+/GammaM/valley_concentration
 /GammaM/band_indices_vasp
+/GammaM/valid_valley_subspace
 ```
 
-Use this transform for any later representation calculation in the valley-adapted subspace.
+For exactly two valleys, `eta` and `v_matrix` are included as compatibility fields. For three or more valleys, use `valley_weights_adapted` and `assigned_valleys`. Use this transform for any later representation calculation in the valley-adapted subspace.
 
 ### `symmetry_report.json`
 

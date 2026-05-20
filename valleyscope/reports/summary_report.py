@@ -57,7 +57,9 @@ def build_summary_payload(
         "legend": {
             "W_val": "valley-subspace weight",
             "P_v": "valley purity",
-            "eta": "signed valley polarization for a two-valley diagnostic",
+            "eta": "signed valley polarization for a two-valley diagnostic (legacy)",
+            "valley_weights_adapted": "valley weights in valley-adapted basis",
+            "valley_concentration": "max weight fraction in assigned valley (general multi-valley)",
             "W_overlap": "projector-window overlap weight",
             "W_res": "residual weight",
             "topology_input_ready": (
@@ -130,21 +132,22 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     lines.append("")
 
     _section(lines, "Valley subspace analysis")
-    lines.append("S=P_K+P_Kp: target-valley-subspace projector in the selected target bands")
-    lines.append("V=P_K-P_Kp: projected valley operator for valley-basis fixing in a two-valley setting")
+    lines.append("S = sum_a P_a^sub: target-valley-subspace projector in the selected target bands")
     lines.append("S_min:      minimum target-valley-subspace weight")
     lines.append("S_max:      maximum target-valley-subspace weight")
-    lines.append("P_v_min:    minimum valley purity after valley-basis fixing")
-    lines.append("eta_adapted: signed valley polarization in the valley-adapted basis")
+    lines.append("min_concentration: minimum valley concentration in valley-adapted basis")
+    lines.append("assigned_valleys:  valley assignment per adapted state")
+    lines.append("eta_adapted: signed valley polarization (two-valley only)")
     lines.extend(
         _table(
-            ["kpoint", "S_min", "S_max", "P_v_min", "eta_adapted", "status"],
+            ["kpoint", "S_min", "S_max", "min_concentration", "assigned_valleys", "eta_adapted", "status"],
             [
                 [
                     row["kpoint"],
                     _fmt(row.get("s_min")),
                     _fmt(row.get("s_max")),
-                    _fmt(row.get("P_v_min")),
+                    _fmt(row.get("min_valley_concentration")),
+                    _short_list(row.get("assigned_valleys")),
                     _short_list(row.get("eta_adapted")),
                     row.get("status", ""),
                 ]
@@ -326,12 +329,17 @@ def _subspace_rows(subspace_payload: dict[str, Any]) -> list[dict[str, Any]]:
             {
                 "kpoint": kpoint,
                 "basis_status": diagnostic.get("status", ""),
+                "n_valleys": diagnostic.get("n_valleys", 0),
                 "s_eigenvalues": diagnostic.get("s_eigenvalues"),
                 "s_min": diagnostic.get("s_min"),
                 "s_max": diagnostic.get("s_max"),
                 "P_v_min": p_v_min,
                 "eta_adapted": diagnostic.get("eta"),
+                "min_valley_concentration": diagnostic.get("min_valley_concentration"),
+                "assigned_valleys": diagnostic.get("assigned_valleys"),
+                "valley_concentration": diagnostic.get("valley_concentration"),
                 "valid_valley_subspace": diagnostic.get("valid_valley_subspace"),
+                "stably_separable": diagnostic.get("stably_separable"),
                 "status": _short_valley_status(payload.get("subspace_valley_status", "")),
             }
         )
@@ -477,13 +485,13 @@ def _collect_warnings(
         diagnostic = payload.get("valley_adapted_subspace", {})
         sv_status = payload.get("subspace_valley_status", "")
         if sv_status == "valley_mixed_subspace":
-            warnings.append(f"{kpoint}: two-valley subspace is mixed; symmetry eigenvalues are diagnostic-only")
+            warnings.append(f"{kpoint}: valley subspace is mixed; symmetry eigenvalues are diagnostic-only")
         if sv_status == "valley_approximately_separable_subspace":
             pass
         if sv_status == "not_valley_derived":
-            warnings.append(f"{kpoint}: target subspace has insufficient valley weight")
+            warnings.append(f"{kpoint}: target subspace has insufficient valley weight (S_min below threshold)")
         if sv_status == "projector_unreliable":
-            warnings.append(f"{kpoint}: projector windows are unreliable; check W_overlap and W_res")
+            warnings.append(f"{kpoint}: valley projectors unreliable; check commutator norms and idempotency")
         for row_weight in payload.get("weights", []):
             w_v_status = row_weight.get("valley_status", "")
             if w_v_status == "projector_unreliable":
@@ -562,13 +570,14 @@ def _short_matrix(value: Any) -> str:
 
 def _short_valley_status(status: Any) -> str:
     value = str(status)
-    if value in {"single_band", "not_degenerate", "requires_two_valley_sectors", "not_evaluated"}:
+    if value in {"single_band", "not_degenerate", "requires_two_valley_sectors", "not_evaluated",
+                 "no_valley_sectors"}:
         return "n/a"
-    if value == "not_valley_derived":
+    if value == "not_valley_derived" or value == "poor_valley_manifold":
         return "not_derived"
     if value == "projector_unreliable":
         return "unreliable"
-    if value.endswith("clean") or value == "valley_separable_subspace":
+    if value.endswith("clean") or value == "valley_separable_subspace" or value == "valley_separable":
         return "clean"
     if "approx" in value:
         return "approx"

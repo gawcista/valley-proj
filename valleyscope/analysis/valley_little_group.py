@@ -16,7 +16,7 @@ def update_valley_little_group_inventory(
     kpoint_name: str,
     k_frac: np.ndarray,
 ) -> list[dict[str, Any]]:
-    """Classify detected operations for valley-preserving little-group diagnostics."""
+    """Classify detected operations for valley-preserving little-group analysis."""
     inventory: list[dict[str, Any]] = []
     for operation in symmetry_payload.get("detected_operations", []):
         rotation = np.asarray(operation.get("rotation_frac", np.eye(3)), dtype=float)
@@ -296,7 +296,7 @@ def _build_irrep_table_matching(
         table,
         tolerance=tolerance,
     )
-    kpoint_diagnostics = _build_table_kpoint_diagnostics(
+    kpoint_matching = _build_table_kpoint_matching(
         by_kpoint=by_kpoint,
         kpoint_frac_by_name=symmetry_payload.get("kpoint_frac_by_name", {}),
         table=table,
@@ -305,7 +305,7 @@ def _build_irrep_table_matching(
     )
     by_kpoint_complete = all(
         row.get("status") == "table_kpoint_matched"
-        for row in kpoint_diagnostics.values()
+        for row in kpoint_matching.values()
     )
     mapping_complete = mapping_report.status == "complete" and by_kpoint_complete
     return {
@@ -318,11 +318,11 @@ def _build_irrep_table_matching(
         "operation_to_table_mapping": mapping_report.mapping_by_operation_id,
         "unmatched_operation_ids": mapping_report.unmatched_operation_ids,
         "unused_table_operation_indices": mapping_report.unused_table_operation_indices,
-        "by_kpoint": kpoint_diagnostics,
+        "by_kpoint": kpoint_matching,
     }
 
 
-def _build_table_kpoint_diagnostics(
+def _build_table_kpoint_matching(
     *,
     by_kpoint: dict[str, Any],
     kpoint_frac_by_name: Any,
@@ -332,18 +332,18 @@ def _build_table_kpoint_diagnostics(
 ) -> dict[str, Any]:
     if not isinstance(kpoint_frac_by_name, dict):
         kpoint_frac_by_name = {}
-    diagnostics: dict[str, Any] = {}
+    matching_by_kpoint: dict[str, Any] = {}
     for kpoint, payload in by_kpoint.items():
         k_frac = kpoint_frac_by_name.get(kpoint)
         if k_frac is None:
-            diagnostics[kpoint] = {
+            matching_by_kpoint[kpoint] = {
                 "status": "missing_kpoint_coordinate",
                 "table_kpoint_label": None,
             }
             continue
         table_label = table.match_kpoint_label(np.asarray(k_frac, dtype=float), tolerance=tolerance)
         if table_label is None:
-            diagnostics[kpoint] = {
+            matching_by_kpoint[kpoint] = {
                 "status": "table_kpoint_not_matched",
                 "input_k_frac": list(np.asarray(k_frac, dtype=float)),
                 "table_kpoint_label": None,
@@ -371,7 +371,7 @@ def _build_table_kpoint_diagnostics(
             if not missing_indices and not extra_indices
             else "table_operation_set_mismatch"
         )
-        diagnostics[kpoint] = {
+        matching_by_kpoint[kpoint] = {
             "status": status,
             "input_k_frac": list(np.asarray(k_frac, dtype=float)),
             "table_kpoint_label": table_label,
@@ -384,7 +384,7 @@ def _build_table_kpoint_diagnostics(
                 irrep.label for irrep in table.irreps_by_kpoint(table_label)
             ],
         }
-    return diagnostics
+    return matching_by_kpoint
 
 
 def _collect_computed_characters(
@@ -395,6 +395,7 @@ def _collect_computed_characters(
 ) -> dict[str, Any]:
     computed_characters: dict[int, complex] = {}
     ready_row_counts: dict[int, int] = {}
+    rows_by_table_operation: dict[int, list[dict[str, Any]]] = {}
     for row in symmetry_rows:
         if str(row.get("kpoint", "")) != kpoint:
             continue
@@ -402,14 +403,20 @@ def _collect_computed_characters(
             continue
         if not bool(row.get("valley_preserving", False)):
             continue
-        if not bool(row.get("topology_input_ready", False)):
-            continue
         operation_id = row.get("operation_id")
         if operation_id not in operation_to_table:
             continue
         table_index = operation_to_table[operation_id]
-        ready_row_counts[table_index] = ready_row_counts.get(table_index, 0) + 1
-        character = row.get("character_valley", "")
+        rows_by_table_operation.setdefault(table_index, []).append(row)
+
+    for table_index, rows in rows_by_table_operation.items():
+        if not rows or not all(bool(row.get("topology_input_ready", False)) for row in rows):
+            continue
+        ready_row_counts[table_index] = len(rows)
+        character = next(
+            (row.get("character_valley", "") for row in rows if row.get("character_valley", "")),
+            "",
+        )
         if character:
             computed_characters[table_index] = _parse_complex_character(character)
     return {

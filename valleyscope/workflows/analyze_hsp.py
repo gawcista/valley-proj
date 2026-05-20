@@ -32,7 +32,11 @@ from valleyscope.projection.sector_projectors import SectorProjectors, build_sec
 from valleyscope.projection.weights import compute_valley_weights
 from valleyscope.reports.analysis_outputs import write_analysis_outputs
 from valleyscope.reports.csv_report import weight_row
-from valleyscope.subspace.valley_basis import build_two_valley_adapted_basis
+from valleyscope.subspace.valley_basis import (
+    build_two_valley_adapted_basis,
+    build_valley_adapted_basis,
+    diagnose_valley_separability,
+)
 from valleyscope.symmetry.operation_classifier import classify_operation
 from valleyscope.symmetry.rotation_selection import mark_rotation_generators, resolve_rotation_order
 from valleyscope.symmetry.spglib_finder import find_symmetry_operations
@@ -273,50 +277,91 @@ def _add_valley_subspace_diagnostic(
     max_w_res: float = 0.0,
 ) -> None:
     w_val_min = float(thresholds.get("W_val_min", 0.8)) if thresholds else 0.8
+    concentration_threshold = float(thresholds.get("concentration_threshold", 0.95)) if thresholds else 0.95
     sector_names = projectors.sector_names
+    n_valleys = len(sector_names)
     energy_span_meV = float((np.max(energies_eV) - np.min(energies_eV)) * 1000.0)
     diagnostic: dict[str, object] = {
         "band_indices_vasp": np.asarray(band_indices_vasp, dtype=int),
         "energy_span_meV": energy_span_meV,
         "status": "not_evaluated",
+        "n_valleys": n_valleys,
     }
-    if len(sector_names) != 2:
-        diagnostic["status"] = "requires_two_valley_sectors"
-    elif coefficients.shape[0] < 2:
+    if coefficients.shape[0] < 2:
         diagnostic["status"] = "single_band"
     elif energy_span_meV > degeneracy_tol_meV:
         diagnostic["status"] = "not_degenerate"
+    elif n_valleys < 1:
+        diagnostic["status"] = "no_valley_sectors"
     else:
-        result = build_two_valley_adapted_basis(
+        # General multi-valley adapted basis
+        result = build_valley_adapted_basis(
             coefficients,
             projectors.sector_masks,
-            sector_names[0],
-            sector_names[1],
         )
-        s_eigenvalues = np.linalg.eigvalsh(result.s_matrix)
+        diagnosed = diagnose_valley_separability(
+            result,
+            w_val_min=w_val_min,
+            concentration_threshold=concentration_threshold,
+        )
+        s_eigenvalues = np.linalg.eigvalsh(diagnosed.s_matrix)
         s_min = float(np.min(s_eigenvalues)) if len(s_eigenvalues) else 0.0
         s_max = float(np.max(s_eigenvalues)) if len(s_eigenvalues) else 0.0
-        valid_valley_subspace = bool(s_min >= w_val_min)
-        status = "two_valley_adapted" if valid_valley_subspace else "poor_valley_manifold"
-        max_abs_eta = float(max(abs(v) for v in result.eta)) if len(result.eta) else 0.0
+        valid_valley_subspace = bool(diagnosed.stably_separable)
+
+        # Map separability to status string
+        if diagnosed.stably_separable:
+            status = "valley_separable"
+        elif "insufficient_valley_derived" in diagnosed.reason:
+            status = "poor_valley_manifold"
+        elif diagnosed.min_valley_concentration >= concentration_threshold * 0.9:
+            status = "valley_approximately_separable"
+        elif "concentration" in diagnosed.reason:
+            status = "valley_mixed"
+        elif "commut" in diagnosed.reason or "idempotency" in diagnosed.reason:
+            status = "projector_unreliable"
+        else:
+            status = "valley_mixed"
+
         subspace_derived = derive_derived_score(analysis_level="adapted_subspace", s_min=s_min)
+        # Use concentration for polarization score in multi-valley, eta for two-valley
         subspace_polarization = derive_polarization_score(
-            analysis_level="adapted_subspace", eta_adapted=result.eta
+            analysis_level="adapted_subspace",
+            eta_adapted=diagnosed.eta_adapted,
+            purity=diagnosed.min_valley_concentration,
         )
         diagnostic.update(
             {
                 "status": status,
-                "sectors": sector_names,
-                "eta": result.eta,
+                "valleys": sector_names,
+                "n_valleys": n_valleys,
                 "s_eigenvalues": s_eigenvalues,
                 "s_min": s_min,
                 "s_max": s_max,
-                "max_abs_eta": max_abs_eta,
                 "valid_valley_subspace": valid_valley_subspace,
-                "v_eigenvalues": np.linalg.eigvalsh(result.v_matrix),
+                "valley_weights_adapted": diagnosed.valley_weights_adapted,
+                "assigned_valleys": diagnosed.assigned_valleys,
+                "valley_concentration": diagnosed.valley_concentration,
+                "min_valley_concentration": diagnosed.min_valley_concentration,
+                "stably_separable": diagnosed.stably_separable,
+                "reason": diagnosed.reason,
+                "commutator_norm_max": diagnosed.commutator_norm_max,
+                "idempotency_deviation_max": diagnosed.idempotency_deviation_max,
                 "transform_h5_group": kpoint_name,
             }
         )
+        if n_valleys == 2:
+            diagnostic["eta"] = diagnosed.eta_adapted
+            diagnostic["max_abs_eta"] = (
+                float(max(abs(v) for v in diagnosed.eta_adapted))
+                if diagnosed.eta_adapted is not None and len(diagnosed.eta_adapted) > 0
+                else 0.0
+            )
+            # Also provide legacy v_matrix for two-valley backward compat
+            diagnostic["v_eigenvalues"] = np.linalg.eigvalsh(
+                diagnosed.valley_matrices[sector_names[0]]
+                - diagnosed.valley_matrices[sector_names[1]]
+            )
         payload["derived_score"] = subspace_derived
         payload["polarization_score"] = subspace_polarization
         payload["subspace_valley_status"] = derive_valley_status(
@@ -326,18 +371,30 @@ def _add_valley_subspace_diagnostic(
             w_overlap=max_w_overlap,
             w_res=max_w_res,
             thresholds=thresholds,
+            two_sector=(n_valleys == 2),
         )
         if valid_valley_subspace:
-            basis_transforms[kpoint_name] = {
-                "transform": result.transform,
-                "eta": result.eta,
-                "s_matrix": result.s_matrix,
-                "v_matrix": result.v_matrix,
+            transform_entry: dict[str, object] = {
+                "transform": diagnosed.transform,
+                "s_matrix": diagnosed.s_matrix,
                 "band_indices_vasp": np.asarray(band_indices_vasp, dtype=int),
                 "sectors": np.asarray(sector_names, dtype="S"),
+                "valleys": np.asarray(sector_names, dtype="S"),
                 "valid_valley_subspace": np.asarray(valid_valley_subspace),
                 "s_eigenvalues": s_eigenvalues,
+                "valley_weights_adapted": diagnosed.valley_weights_adapted,
+                "assigned_valleys": np.asarray(diagnosed.assigned_valleys, dtype="S"),
+                "valley_concentration": diagnosed.valley_concentration,
+                "label_operator": diagnosed.label_operator,
             }
+            if diagnosed.eta_adapted is not None:
+                transform_entry["eta"] = diagnosed.eta_adapted
+            if n_valleys == 2:
+                transform_entry["v_matrix"] = (
+                    diagnosed.valley_matrices[sector_names[0]]
+                    - diagnosed.valley_matrices[sector_names[1]]
+                )
+            basis_transforms[kpoint_name] = transform_entry
     payload["valley_adapted_subspace"] = diagnostic
 
 

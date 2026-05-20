@@ -73,7 +73,12 @@ def write_basis_transform_h5(path: str | Path, transforms: dict[str, object]) ->
             if isinstance(payload, dict):
                 group = h5.create_group(name)
                 for dataset_name, value in payload.items():
-                    group[dataset_name] = np.asarray(value)
+                    arr = np.asarray(value)
+                    # string arrays need special handling in HDF5
+                    if arr.dtype.kind in ("U", "S"):
+                        group[dataset_name] = arr.astype("S")
+                    else:
+                        group[dataset_name] = arr
             else:
                 h5[name] = np.asarray(payload)
     return out
