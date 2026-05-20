@@ -12,6 +12,7 @@ from valleyscope.symmetry.spglib_finder import find_symmetry_operations
 from valleyscope.symmetry.valley_preservation import map_valley_sectors
 from valleyscope.analysis.symmetry_eigenvalue_diagnostic import symmetry_eigenvalue_diagnostics_for_kpoint
 from valleyscope.analysis.valley_little_group import (
+    add_valley_irrep_results,
     build_valley_preserving_subgroup_report,
     update_valley_little_group_inventory,
 )
@@ -994,6 +995,119 @@ def test_valley_preserving_subgroup_report_maps_operations_to_irreptables():
     assert km_matching["missing_table_operation_indices"] == []
     assert km_matching["extra_mapped_table_operation_indices"] == []
     assert {"-K4", "-K5", "-K6"} <= set(km_matching["available_irrep_labels"])
+
+
+def test_valley_irrep_results_match_characters_to_irrep_multiplicities():
+    c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]], dtype=int)
+    c3_square = c3 @ c3
+    lattice = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [-0.5, np.sqrt(3.0) / 2.0, 0.0],
+            [0.0, 0.0, 20.0],
+        ]
+    )
+    operations = [
+        {
+            "operation_id": 0,
+            "kind": "identity",
+            "order": 1,
+            "rotation_frac": np.eye(3, dtype=int),
+            "translation_frac": np.zeros(3),
+            "preserved": {"K_valley": True, "Kp_valley": True},
+            "sector_mapping": {"K_valley": "K_valley", "Kp_valley": "Kp_valley"},
+        },
+        {
+            "operation_id": 1,
+            "kind": "C3",
+            "order": 3,
+            "rotation_frac": c3,
+            "translation_frac": np.zeros(3),
+            "preserved": {"K_valley": True, "Kp_valley": True},
+            "sector_mapping": {"K_valley": "K_valley", "Kp_valley": "Kp_valley"},
+        },
+        {
+            "operation_id": 2,
+            "kind": "C3^2",
+            "order": 3,
+            "rotation_frac": c3_square,
+            "translation_frac": np.zeros(3),
+            "preserved": {"K_valley": True, "Kp_valley": True},
+            "sector_mapping": {"K_valley": "K_valley", "Kp_valley": "Kp_valley"},
+        },
+    ]
+    symmetry_payload = {
+        "detected_operations": operations,
+        "lattice_direct_cart": lattice,
+        "spinor_wavefunction": True,
+    }
+    update_valley_little_group_inventory(
+        symmetry_payload=symmetry_payload,
+        kpoint_name="KM",
+        k_frac=np.array([1.0 / 3.0, 1.0 / 3.0, 0.0]),
+    )
+    build_valley_preserving_subgroup_report(
+        symmetry_payload=symmetry_payload,
+        target_kpoints=["KM"],
+    )
+    symmetry_rows = [
+        {
+            "kpoint": "KM",
+            "operation_id": 1,
+            "state_index": 0,
+            "character_valley": "1.000000+0.000000j",
+            "little_group_passed": True,
+            "valley_preserving": True,
+            "topology_input_ready": True,
+        },
+        {
+            "kpoint": "KM",
+            "operation_id": 1,
+            "state_index": 1,
+            "character_valley": "",
+            "little_group_passed": True,
+            "valley_preserving": True,
+            "topology_input_ready": True,
+        },
+        {
+            "kpoint": "KM",
+            "operation_id": 2,
+            "state_index": 0,
+            "character_valley": "1.000000+0.000000j",
+            "little_group_passed": True,
+            "valley_preserving": True,
+            "topology_input_ready": True,
+        },
+        {
+            "kpoint": "KM",
+            "operation_id": 2,
+            "state_index": 1,
+            "character_valley": "",
+            "little_group_passed": True,
+            "valley_preserving": True,
+            "topology_input_ready": True,
+        },
+    ]
+
+    add_valley_irrep_results(
+        symmetry_payload=symmetry_payload,
+        symmetry_rows=symmetry_rows,
+    )
+
+    matching = symmetry_payload["valley_preserving_subgroup_report"]["irrep_matching"]
+    assert matching["character_matching_status"] == "matched"
+    assert matching["label_matching"] == "matched"
+    km_result = matching["irrep_results_by_kpoint"]["KM"]
+    assert km_result["status"] == "matched"
+    assert km_result["table_kpoint_label"] == "K"
+    assert km_result["identity_character_source"] == "inferred_from_ready_rows"
+    assert km_result["computed_characters"] == {
+        "1": "2.000000+0.000000j",
+        "2": "1.000000+0.000000j",
+        "3": "1.000000+0.000000j",
+    }
+    assert km_result["irrep_multiplicities"] == {"-K5": 1, "-K6": 1}
+    assert km_result["failure_reasons"] == []
 
 
 def test_valley_preserving_subgroup_report_records_missing_products():

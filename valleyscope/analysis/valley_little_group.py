@@ -5,6 +5,7 @@ from typing import Any
 import numpy as np
 import spglib
 
+from valleyscope.irreps.matching import decompose_characters_into_irreps
 from valleyscope.irreps.tables import load_standard_irrep_table, match_table_operations
 from valleyscope.symmetry.little_group import is_little_group_operation
 
@@ -155,7 +156,7 @@ def build_valley_preserving_subgroup_report(
         "global_operation_set": global_operation_set,
         "standard_group_match": standard_match,
         "standard_group_match_status": standard_match_status,
-        "irrep_matching": _build_irrep_table_diagnostics(
+        "irrep_matching": _build_irrep_table_matching(
             symmetry_payload=symmetry_payload,
             operation_lookup=operation_lookup,
             global_operation_set=global_operation_set,
@@ -170,6 +171,73 @@ def build_valley_preserving_subgroup_report(
     return report
 
 
+def add_valley_irrep_results(
+    *,
+    symmetry_payload: dict[str, Any],
+    symmetry_rows: list[dict[str, Any]],
+    tolerance: float = 1e-5,
+) -> dict[str, Any]:
+    report = symmetry_payload.get("valley_preserving_subgroup_report", {})
+    if not isinstance(report, dict):
+        return {}
+    matching = report.get("irrep_matching", {})
+    if not isinstance(matching, dict):
+        return {}
+    if matching.get("status") != "table_mapping_complete":
+        matching["character_matching_status"] = "not_attempted"
+        return matching
+
+    table = load_standard_irrep_table(
+        int(matching["spacegroup_number"]),
+        spinor=bool(matching.get("spinor", False)),
+    )
+    operation_to_table = dict(matching.get("operation_to_table_mapping", {}))
+    results_by_kpoint: dict[str, Any] = {}
+    for kpoint, kpoint_info in matching.get("by_kpoint", {}).items():
+        if not isinstance(kpoint_info, dict) or kpoint_info.get("status") != "table_kpoint_matched":
+            results_by_kpoint[kpoint] = {
+                "status": "table_kpoint_not_ready",
+                "failure_reasons": ["Table k-point mapping is not complete"],
+            }
+            continue
+        character_data = _collect_computed_characters(
+            symmetry_rows=symmetry_rows,
+            kpoint=kpoint,
+            operation_to_table=operation_to_table,
+        )
+        computed_characters = dict(character_data["computed_characters"])
+        identity_source = _fill_identity_character_if_needed(
+            computed_characters=computed_characters,
+            table_operation_indices=kpoint_info.get("table_operation_indices", []),
+            ready_row_counts=character_data["ready_row_counts"],
+        )
+        match_result = decompose_characters_into_irreps(
+            table=table,
+            table_kpoint_label=str(kpoint_info["table_kpoint_label"]),
+            computed_characters=computed_characters,
+            tolerance=tolerance,
+        )
+        results_by_kpoint[kpoint] = {
+            "status": match_result.status,
+            "table_kpoint_label": match_result.table_kpoint_label,
+            "computed_characters": _format_complex_character_dict(match_result.computed_characters),
+            "identity_character_source": identity_source,
+            "irrep_weights": match_result.irrep_weights,
+            "irrep_multiplicities": match_result.irrep_multiplicities,
+            "missing_table_operation_indices": match_result.missing_table_operation_indices,
+            "failure_reasons": match_result.failure_reasons,
+        }
+
+    all_matched = bool(results_by_kpoint) and all(
+        result.get("status") == "matched"
+        for result in results_by_kpoint.values()
+    )
+    matching["character_matching_status"] = "matched" if all_matched else "incomplete"
+    matching["label_matching"] = "matched" if all_matched else "deferred"
+    matching["irrep_results_by_kpoint"] = results_by_kpoint
+    return matching
+
+
 def _preserves_all_valley_subspaces(operation: dict[str, Any]) -> bool:
     preserved = operation.get("preserved", {})
     if not isinstance(preserved, dict) or not preserved:
@@ -177,7 +245,7 @@ def _preserves_all_valley_subspaces(operation: dict[str, Any]) -> bool:
     return all(bool(value) for value in preserved.values())
 
 
-def _build_irrep_table_diagnostics(
+def _build_irrep_table_matching(
     *,
     symmetry_payload: dict[str, Any],
     operation_lookup: dict[Any, dict[str, Any]],
@@ -317,6 +385,69 @@ def _build_table_kpoint_diagnostics(
             ],
         }
     return diagnostics
+
+
+def _collect_computed_characters(
+    *,
+    symmetry_rows: list[dict[str, Any]],
+    kpoint: str,
+    operation_to_table: dict[Any, int],
+) -> dict[str, Any]:
+    computed_characters: dict[int, complex] = {}
+    ready_row_counts: dict[int, int] = {}
+    for row in symmetry_rows:
+        if str(row.get("kpoint", "")) != kpoint:
+            continue
+        if not bool(row.get("little_group_passed", False)):
+            continue
+        if not bool(row.get("valley_preserving", False)):
+            continue
+        if not bool(row.get("topology_input_ready", False)):
+            continue
+        operation_id = row.get("operation_id")
+        if operation_id not in operation_to_table:
+            continue
+        table_index = operation_to_table[operation_id]
+        ready_row_counts[table_index] = ready_row_counts.get(table_index, 0) + 1
+        character = row.get("character_valley", "")
+        if character:
+            computed_characters[table_index] = _parse_complex_character(character)
+    return {
+        "computed_characters": computed_characters,
+        "ready_row_counts": ready_row_counts,
+    }
+
+
+def _fill_identity_character_if_needed(
+    *,
+    computed_characters: dict[int, complex],
+    table_operation_indices: Any,
+    ready_row_counts: dict[int, int],
+) -> str:
+    if 1 not in table_operation_indices:
+        return "not_required"
+    if 1 in computed_characters:
+        return "computed"
+    if not ready_row_counts:
+        return "missing"
+    inferred_dimension = max(ready_row_counts.values())
+    computed_characters[1] = complex(float(inferred_dimension), 0.0)
+    return "inferred_from_ready_rows"
+
+
+def _parse_complex_character(value: Any) -> complex:
+    if isinstance(value, complex):
+        return value
+    if isinstance(value, (int, float, np.number)):
+        return complex(float(value), 0.0)
+    return complex(str(value).replace(" ", ""))
+
+
+def _format_complex_character_dict(values: dict[int, complex]) -> dict[str, str]:
+    return {
+        str(table_index): f"{value.real:.6f}{value.imag:+.6f}j"
+        for table_index, value in sorted(values.items())
+    }
 
 
 def _global_valley_preserving_operation_set_report(

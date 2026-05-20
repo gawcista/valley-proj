@@ -743,6 +743,8 @@ def test_readme_symmetry_example_uses_parser_schema(tmp_path):
     assert "`unreliable`" in readme
     assert "single-valley irrep" in readme
     assert "valley-preserving subgroup" in readme
+    assert "irrep_results_by_kpoint" in readme
+    assert "irrep_multiplicities" in readme
     assert "tMoTe2" not in readme
     assert "P321 No.150" not in readme
     assert "P3 No.143" not in readme
@@ -803,6 +805,8 @@ def test_chinese_readme_uses_public_valley_vocabulary():
     assert "`unreliable`" in readme
     assert "single-valley irrep" in readme
     assert "谷保持子群" in readme
+    assert "irrep_results_by_kpoint" in readme
+    assert "irrep_multiplicities" in readme
     assert "tMoTe2" not in readme
     assert "P321 No.150" not in readme
     assert "P3 No.143" not in readme
@@ -1469,8 +1473,18 @@ def test_summary_preserves_valley_preserving_subgroup_report(tmp_path):
         },
         "standard_group_match_status": "matched",
         "irrep_matching": {
-            "status": "table_mapping_deferred",
+            "status": "table_mapping_complete",
             "table_source": "irreptables",
+            "label_matching": "matched",
+            "character_matching_status": "matched",
+            "irrep_results_by_kpoint": {
+                "KM": {
+                    "status": "matched",
+                    "table_kpoint_label": "K",
+                    "irrep_multiplicities": {"-K5": 1, "-K6": 1},
+                    "failure_reasons": [],
+                }
+            },
         },
         "by_kpoint": {
             "KM": {
@@ -1498,7 +1512,10 @@ def test_summary_preserves_valley_preserving_subgroup_report(tmp_path):
     )
 
     assert summary["symmetry_analysis"]["valley_preserving_subgroup_report"] == subgroup_report
-    assert "valley-preserving subgroup: P3 (143)" in render_summary_text(summary)
+    text = render_summary_text(summary)
+    assert "valley-preserving subgroup: P3 (143)" in text
+    assert "irrep matching: matched" in text
+    assert "KM: -K5 x 1, -K6 x 1" in text
 
 
 def test_summary_exposes_symmetry_characters_as_first_class_rows(tmp_path):

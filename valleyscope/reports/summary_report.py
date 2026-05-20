@@ -171,6 +171,25 @@ def render_summary_text(summary: dict[str, Any]) -> str:
                 "valley-preserving subgroup: "
                 f"{subgroup_report.get('standard_group_match_status')}"
             )
+        irrep_matching = subgroup_report.get("irrep_matching")
+        if isinstance(irrep_matching, dict):
+            label_matching = irrep_matching.get("label_matching", irrep_matching.get("status", ""))
+            if label_matching:
+                lines.append(f"irrep matching: {label_matching}")
+            irrep_results = irrep_matching.get("irrep_results_by_kpoint", {})
+            if isinstance(irrep_results, dict) and irrep_results:
+                for kpoint, result in irrep_results.items():
+                    if not isinstance(result, dict):
+                        continue
+                    multiplicities = result.get("irrep_multiplicities", {})
+                    if not multiplicities:
+                        lines.append(f"{kpoint}: {result.get('status', 'none')}")
+                        continue
+                    terms = ", ".join(
+                        f"{label} x {multiplicity}"
+                        for label, multiplicity in multiplicities.items()
+                    )
+                    lines.append(f"{kpoint}: {terms}")
     lines.append(f"requested operation order: {sym.get('requested_rotation_order')}")
     lines.append(f"selected proper-rotation order: {sym.get('resolved_rotation_order')}")
     lines.append("")

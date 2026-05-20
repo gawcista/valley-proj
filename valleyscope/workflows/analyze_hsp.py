@@ -12,6 +12,7 @@ from valleyscope.analysis.decision_tree import (
 )
 from valleyscope.analysis.symmetry_eigenvalue_diagnostic import symmetry_eigenvalue_diagnostics_for_kpoint
 from valleyscope.analysis.valley_little_group import (
+    add_valley_irrep_results,
     build_valley_preserving_subgroup_report,
     update_valley_little_group_inventory,
 )
@@ -233,6 +234,10 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         build_valley_preserving_subgroup_report(
             symmetry_payload=symmetry_payload,
             target_kpoints=config.analysis.kpoints,
+        )
+        add_valley_irrep_results(
+            symmetry_payload=symmetry_payload,
+            symmetry_rows=symmetry_rows,
         )
 
     sector_names = list(projectors_by_kpoint[next(iter(projectors_by_kpoint))].sector_masks)

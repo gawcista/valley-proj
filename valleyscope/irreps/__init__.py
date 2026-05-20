@@ -8,12 +8,15 @@ from valleyscope.irreps.tables import (
     load_standard_irrep_table,
     match_table_operations,
 )
+from valleyscope.irreps.matching import IrrepMatchResult, decompose_characters_into_irreps
 
 __all__ = [
+    "IrrepMatchResult",
     "OperationMappingReport",
     "StandardIrrep",
     "StandardIrrepTable",
     "StandardTableOperation",
+    "decompose_characters_into_irreps",
     "load_standard_irrep_table",
     "match_table_operations",
 ]

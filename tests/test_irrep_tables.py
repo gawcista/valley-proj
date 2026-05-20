@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from valleyscope.irreps.tables import load_standard_irrep_table, match_table_operations
+from valleyscope.irreps.matching import decompose_characters_into_irreps
 
 
 def test_load_sg143_spinor_table_exposes_double_valued_k_irreps():
@@ -65,3 +66,36 @@ def test_match_table_operations_reports_unmatched_extra_operation():
     assert report.mapping_by_operation_id == {0: 1}
     assert report.unmatched_operation_ids == [9]
     assert report.unused_table_operation_indices == [2, 3]
+
+
+def test_decompose_characters_into_sg143_spinor_k_irrep_multiplicities():
+    table = load_standard_irrep_table(143, spinor=True)
+
+    result = decompose_characters_into_irreps(
+        table=table,
+        table_kpoint_label="K",
+        computed_characters={1: 2.0 + 0.0j, 2: 1.0 + 0.0j, 3: 1.0 + 0.0j},
+    )
+
+    assert result.status == "matched"
+    assert result.irrep_multiplicities == {"-K5": 1, "-K6": 1}
+    assert result.irrep_weights["-K4"] == pytest.approx(0.0, abs=1e-8)
+    assert result.irrep_weights["-K5"] == pytest.approx(1.0, abs=1e-5)
+    assert result.irrep_weights["-K6"] == pytest.approx(1.0, abs=1e-5)
+    assert result.missing_table_operation_indices == []
+    assert result.failure_reasons == []
+
+
+def test_decompose_characters_reports_missing_table_operations():
+    table = load_standard_irrep_table(143, spinor=True)
+
+    result = decompose_characters_into_irreps(
+        table=table,
+        table_kpoint_label="K",
+        computed_characters={1: 2.0 + 0.0j, 2: 1.0 + 0.0j},
+    )
+
+    assert result.status == "missing_characters"
+    assert result.irrep_multiplicities == {}
+    assert result.missing_table_operation_indices == [3]
+    assert result.failure_reasons == ["Missing computed characters for table operations: [3]"]
