@@ -242,6 +242,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         add_valley_irrep_results(
             symmetry_payload=symmetry_payload,
             symmetry_rows=symmetry_rows,
+            representation_payload=symmetry_representation_payload,
         )
 
     sector_names = list(projectors_by_kpoint[next(iter(projectors_by_kpoint))].sector_masks)

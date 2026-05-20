@@ -193,6 +193,20 @@ def render_summary_text(summary: dict[str, Any]) -> str:
                         for label, multiplicity in multiplicities.items()
                     )
                     lines.append(f"{kpoint}: {terms}")
+                    state_results = result.get("state_irrep_results", [])
+                    if (
+                        result.get("state_irrep_assignment_status") == "matched"
+                        and isinstance(state_results, list)
+                    ):
+                        state_terms = [
+                            f"state {s.get('state_index')} -> {s.get('irrep_label')}"
+                            for s in state_results
+                            if isinstance(s, dict)
+                            and s.get("status") == "matched"
+                            and s.get("irrep_label")
+                        ]
+                        if state_terms:
+                            lines.append(f"{kpoint} state irreps: {', '.join(state_terms)}")
     lines.append(f"requested operation order: {sym.get('requested_rotation_order')}")
     lines.append(f"selected proper-rotation order: {sym.get('resolved_rotation_order')}")
     lines.append("")
