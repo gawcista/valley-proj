@@ -625,7 +625,7 @@ def test_analyze_hsp_writes_csv_json_and_diagnostics_h5(tmp_path):
     assert "two_valley_subspace" not in summary
     subspace_rows = summary["valley_subspace_analysis"]
     assert subspace_rows
-    assert subspace_rows[0].get("status") in {"clean", "approx", "mixed", "not_derived", "unreliable", "n/a"}
+    assert subspace_rows[0].get("status") in {"valley_separable", "valley_approx", "clean", "approx", "mixed", "not_derived", "unreliable", "n/a"}
     assert "derived_score" not in summary["valley_projection_summary"][0]
     assert "polarization_score" not in summary["valley_projection_summary"][0]
     assert "valley_status" not in summary["valley_projection_summary"][0]
@@ -737,7 +737,9 @@ def test_readme_symmetry_example_uses_parser_schema(tmp_path):
     assert "Valley projection summary" in readme
     assert "Valley subspace analysis" in readme
     assert "Two-valley subspace" not in readme
-    assert "S_min:      minimum target-valley-subspace weight" in readme
+    assert "S_min" in readme and "minimum target-valley-subspace weight" in readme
+    assert "min_concentration" in readme
+    assert "assigned_valleys" in readme
     assert "qcut mode:" in readme
     assert "`not_derived`" in readme
     assert "`unreliable`" in readme
@@ -855,7 +857,7 @@ def test_analyze_hsp_writes_valley_subspace_analysis_transform_for_degenerate_pa
         assert h5["GammaM/transform"].shape == (2, 2)
     subspace = json.loads(outputs["valley_subspace_json"].read_text(encoding="utf-8"))
     diagnostic = subspace["kpoints"]["GammaM"]["valley_adapted_subspace"]
-    assert diagnostic["status"] == "two_valley_adapted"
+    assert diagnostic["status"] == "valley_separable"
     assert diagnostic["valid_valley_subspace"] is True
     assert diagnostic["s_min"] == pytest.approx(1.0)
     assert diagnostic["s_max"] == pytest.approx(1.0)

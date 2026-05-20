@@ -121,16 +121,28 @@ ValleyScope 报告分解 $W_{\rm val}+W_{\rm overlap}+W_{\rm res}=1$。在 CSV/J
 
 对孤立非简并能带，可以直接读取上述单态诊断。对近简并目标子空间，VASP 原始本征矢是规范依赖的：子空间内部任意酉变换都合法。
 
-ValleyScope 投影整个目标子空间并构造投影谷算符。对两谷子空间，
+ValleyScope 投影整个目标子空间并构造投影谷矩阵。给定 $N_v$ 个谷投影算符 $P_a$ 和目标态 $\{|\psi_i\rangle\}$，
 
 ```math
-S_{mn}=
-\langle\psi_m|(P_K+P_{K'})|\psi_n\rangle,
+P_a^{\rm sub}_{ij}=
+\langle\psi_i|P_a|\psi_j\rangle,
 \qquad
-V_{mn}=
-\langle\psi_m|(P_K-P_{K'})|\psi_n\rangle .
+S=\sum_a P_a^{\rm sub},
+\qquad
+L = \sum_a \lambda_a P_a^{\rm sub}.
 ```
-矩阵 $S$ 检查目标子空间是否落在选定谷子空间中。矩阵 $V$ 在目标子空间内选出谷适配基。实际应主要看 `valley_subspace.json` 和 `valley_basis_transform.h5`。
+
+矩阵 $S$ 检查目标子空间是否落在选定谷子空间中（$W_{\rm val}$ 的子空间推广）。谷标签算符 $L$ 在任意谷数下固定谷适配基。对角化 $L$ 得到适配基 $|\phi_\alpha\rangle$：
+
+```math
+w_{\alpha a} = \langle\phi_\alpha|P_a|\phi_\alpha\rangle,
+\qquad
+{\rm assigned\_valley}_\alpha = \arg\max_a w_{\alpha a},
+\qquad
+{\rm concentration}_\alpha = \frac{\max_a w_{\alpha a}}{\sum_a w_{\alpha a}}.
+```
+
+旧两谷 $V = P_K - P_{K'}$ 只是 $N_v=2$ 时的特例。对三谷及以上（如六角晶格 M-valley star），不应使用 $\eta$；应使用 `valley_weights_adapted`、`assigned_valleys`、`valley_concentration`。实际应主要看 `valley_subspace.json` 和 `valley_basis_transform.h5`。
 
 ### 对称性诊断
 
