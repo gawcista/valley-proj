@@ -21,6 +21,7 @@ def write_symmetry_eigenvalues_csv(path: str | Path, rows: list[dict[str, object
     out = Path(path)
     fieldnames = [
         "kpoint",
+        "target_valley",
         "operation_id",
         "kind",
         "order",
@@ -42,6 +43,7 @@ def write_symmetry_eigenvalues_csv(path: str | Path, rows: list[dict[str, object
         "spinor_benchmark",
         "diagnostic_only",
         "D_valley_offdiag_norm",
+        "D_block_leakage_norm",
         "character_valley",
         "character_raw",
         "little_group_passed",

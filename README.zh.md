@@ -149,9 +149,11 @@ w_{\alpha a} = \langle\phi_\alpha|P_a|\phi_\alpha\rangle,
 ValleyScope 用 spglib 从 moire/bilayer 结构文件中自动识别对称操作，支持 `symprec` 和 `symprec_scan`。对称本征值仅在两项检查通过后才报告：
 
 1. 该操作属于目标高对称点的小群。
-2. 该操作保持所选谷。
+2. 该操作保持**当前分析的特定 valley**（per-valley stabilizer 条件），而非所有选定 valley。
 
-得到的矩阵是谷适配子空间中的小群表示。其本征值是对称性分析数据，可用于基于对称性的拓扑公式约束，但 ValleyScope 不从少数高对称点自动推断完整整数陈数。
+得到的矩阵是谷适配子空间中限定到当前 valley block 的小群表示。其本征值是对称性分析数据，可用于基于对称性的拓扑公式约束，但 ValleyScope 不从少数高对称点自动推断完整整数陈数。
+
+每个 valley 的 stabilizer 单独报告。Valley orbit、operation mapping 和 coset representative 包含在 subgroup report 中。all-valley intersection（保持所有选定 valley 的操作集合）作为 debug 字段保留，但不用于 single-valley irrep matching。
 
 ### 单谷不可约表示的解释
 
@@ -492,12 +494,19 @@ symmetry:
 
 单层 POSCAR 不能替代 moire POSCAR 做对称操作识别。
 
-`symmetry.filters.rotation_order` 控制是否启用对称本征值提取，并记录 candidate-rotation summary 中突出显示的循环旋转阶数：
+`symmetry.filters.rotation_order` 是遗留的 summary/highlight 字段。V1.1 中它不控制哪些操作进入对称性分析。所有检测到的 proper little-group 操作（阶数 `2`、`3`、`4`、`6`）都会被枚举并按 per-valley stabilizer 过滤。`rotation_order` 记录用户请求或自动解析出的旋转阶数，仅用于 summary 兼容：
+
 - `auto`：从空间群推断（如 `P321`/`P312` → `C3`，`P422` → `C4`）
-- 整数 `n`：请求以 `C_n` 作为循环旋转阶数
+- 整数 `n`：以 `C_n` 作为突出显示的循环旋转阶数
 - `None`/`none`：跳过对称本征值提取
 
-当前对称分析会对当前支持的所有 proper valley-preserving little-group operations 尝试构造表示和本征值诊断，目前支持阶数为 `2`、`3`、`4`、`6`。non-valley-preserving operations 只作为诊断保留，不作为 single-valley eigenvalues。`rotation_order` 不再表示只对一个生成元对角化，而是作为 summary 兼容字段记录用户请求或自动解析出的旋转阶数。
+Per-valley stabilizer gate 为：
+
+```math
+\text{little\_group\_passed}(g, k) \land \text{mapped\_valley}[v_a] = v_a
+```
+
+而非旧的 all-valley intersection。一个保持某个 valley 但交换其他 valley 的操作，对被保持的 valley 是合法的 single-valley 操作。valley-changing operations 作为 valley-orbit 数据报告，不进入源 valley 的 single-valley eigenvalue 行。
 
 `root_deviation_tol` 和 `D_valley_offdiag_tol` 是 numerical readiness thresholds，不是普适物理常数。`root_deviation_tol` 检查计算得到的对称本征值是否足够接近允许的 root of unity。`D_valley_offdiag_tol` 检查当前双谷 benchmark 中 `D_valley` 的非对角范数。`readiness_preset` 支持 `strict`、`normal`、`loose`：默认 `strict` 对 root deviation 和双谷非对角检查都使用 `1.0e-6`；`normal` 使用 `1.0e-5` 与 `1.0e-3`；`loose` 使用 `1.0e-4` 与 `1.0e-2`。显式设置 `root_deviation_tol` 或 `D_valley_offdiag_tol` 会覆盖 preset。解释它们时必须同时看 qcut 稳定性、`W_val`、`P_v`、`S_min`、spinor benchmark、plane-wave mapping 质量和 symmetry tolerance。不要为了得到 `topology_input_ready=True` 而随意放宽。
 

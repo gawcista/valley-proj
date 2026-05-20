@@ -140,7 +140,7 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     lines.append("eta_adapted: signed valley polarization (two-valley only)")
     lines.extend(
         _table(
-            ["kpoint", "S_min", "S_max", "min_concentration", "assigned_valleys", "eta_adapted", "status"],
+            ["kpoint", "S_min", "S_max", "min_concentration", "assigned_valleys", "eta_adapted", "basis", "status"],
             [
                 [
                     row["kpoint"],
@@ -149,6 +149,7 @@ def render_summary_text(summary: dict[str, Any]) -> str:
                     _fmt(row.get("min_valley_concentration")),
                     _short_list(row.get("assigned_valleys")),
                     _short_list(row.get("eta_adapted")),
+                    _subspace_basis_label(row),
                     row.get("status", ""),
                 ]
                 for row in summary["valley_subspace_analysis"]
@@ -163,6 +164,21 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     lines.append(f"space group: {sym.get('international')} ({sym.get('spacegroup_number')})")
     subgroup_report = sym.get("valley_preserving_subgroup_report", {})
     if isinstance(subgroup_report, dict):
+        # Per-valley stabilizers
+        valley_stabilizers = subgroup_report.get("valley_stabilizers", {})
+        if isinstance(valley_stabilizers, dict) and valley_stabilizers:
+            for vname, stab in valley_stabilizers.items():
+                if isinstance(stab, dict):
+                    ops = ", ".join(str(v) for v in stab.get("operation_ids", [])) or "none"
+                    lines.append(f"stabilizer({vname}): [{ops}]")
+        # All-valley intersection (debug)
+        all_valley = subgroup_report.get("all_valley_intersection", {})
+        if isinstance(all_valley, dict) and all_valley.get("allowed_operation_ids"):
+            lines.append(
+                "all-valley intersection (debug): "
+                f"{all_valley.get('allowed_operation_ids')}"
+            )
+        # Legacy standard group match
         standard_match = subgroup_report.get("standard_group_match")
         if isinstance(standard_match, dict):
             lines.append(
@@ -174,6 +190,15 @@ def render_summary_text(summary: dict[str, Any]) -> str:
                 "valley-preserving subgroup: "
                 f"{subgroup_report.get('standard_group_match_status')}"
             )
+        # Valley orbits
+        orbits = subgroup_report.get("valley_orbits", [])
+        if isinstance(orbits, list) and orbits:
+            for orbit in orbits:
+                if isinstance(orbit, dict):
+                    vals = orbit.get("valleys", [])
+                    coset = orbit.get("coset_representative_operation_ids", [])
+                    if vals:
+                        lines.append(f"valley orbit: {vals} (coset ops: {coset})")
         irrep_matching = subgroup_report.get("irrep_matching")
         if isinstance(irrep_matching, dict):
             label_matching = irrep_matching.get("label_matching", irrep_matching.get("status", ""))
@@ -181,32 +206,64 @@ def render_summary_text(summary: dict[str, Any]) -> str:
                 lines.append(f"irrep matching: {label_matching}")
             irrep_results = irrep_matching.get("irrep_results_by_kpoint", {})
             if isinstance(irrep_results, dict) and irrep_results:
-                for kpoint, result in irrep_results.items():
-                    if not isinstance(result, dict):
+                for kpoint, kp_result in irrep_results.items():
+                    if not isinstance(kp_result, dict):
                         continue
-                    multiplicities = result.get("irrep_multiplicities", {})
-                    if not multiplicities:
-                        lines.append(f"{kpoint}: {result.get('status', 'none')}")
-                        continue
-                    terms = ", ".join(
-                        f"{label} x {multiplicity}"
-                        for label, multiplicity in multiplicities.items()
-                    )
-                    lines.append(f"{kpoint}: {terms}")
-                    state_results = result.get("state_irrep_results", [])
-                    if (
-                        result.get("state_irrep_assignment_status") == "matched"
-                        and isinstance(state_results, list)
-                    ):
-                        state_terms = [
-                            f"state {s.get('state_index')} -> {s.get('irrep_label')}"
-                            for s in state_results
-                            if isinstance(s, dict)
-                            and s.get("status") == "matched"
-                            and s.get("irrep_label")
-                        ]
-                        if state_terms:
-                            lines.append(f"{kpoint} state irreps: {', '.join(state_terms)}")
+                    # Check if per-valley format: {valley_name: result}
+                    sample_val = next(iter(kp_result.values()), None) if kp_result else None
+                    if isinstance(sample_val, dict) and "irrep_multiplicities" in sample_val:
+                        # Per-valley format
+                        for valley_name, result in kp_result.items():
+                            if not isinstance(result, dict):
+                                continue
+                            multiplicities = result.get("irrep_multiplicities", {})
+                            if not multiplicities:
+                                lines.append(f"{kpoint}/{valley_name}: {result.get('status', 'none')}")
+                                continue
+                            terms = ", ".join(
+                                f"{label} x {multiplicity}"
+                                for label, multiplicity in multiplicities.items()
+                            )
+                            lines.append(f"{kpoint}/{valley_name}: {terms}")
+                            state_results = result.get("state_irrep_results", [])
+                            if (
+                                result.get("state_irrep_assignment_status") == "matched"
+                                and isinstance(state_results, list)
+                            ):
+                                state_terms = [
+                                    f"state {s.get('state_index')} -> {s.get('irrep_label')}"
+                                    for s in state_results
+                                    if isinstance(s, dict)
+                                    and s.get("status") == "matched"
+                                    and s.get("irrep_label")
+                                ]
+                                if state_terms:
+                                    lines.append(f"{kpoint}/{valley_name} state irreps: {', '.join(state_terms)}")
+                    else:
+                        # Legacy flat format
+                        multiplicities = kp_result.get("irrep_multiplicities", {})
+                        if not multiplicities:
+                            lines.append(f"{kpoint}: {kp_result.get('status', 'none')}")
+                            continue
+                        terms = ", ".join(
+                            f"{label} x {multiplicity}"
+                            for label, multiplicity in multiplicities.items()
+                        )
+                        lines.append(f"{kpoint}: {terms}")
+                        state_results = kp_result.get("state_irrep_results", [])
+                        if (
+                            kp_result.get("state_irrep_assignment_status") == "matched"
+                            and isinstance(state_results, list)
+                        ):
+                            state_terms = [
+                                f"state {s.get('state_index')} -> {s.get('irrep_label')}"
+                                for s in state_results
+                                if isinstance(s, dict)
+                                and s.get("status") == "matched"
+                                and s.get("irrep_label")
+                            ]
+                            if state_terms:
+                                lines.append(f"{kpoint} state irreps: {', '.join(state_terms)}")
     lines.append(f"requested operation order: {sym.get('requested_rotation_order')}")
     lines.append(f"selected proper-rotation order: {sym.get('resolved_rotation_order')}")
     lines.append("")
@@ -231,9 +288,23 @@ def render_summary_text(summary: dict[str, Any]) -> str:
         lines.append("")
         lines.append("Little group and valley preservation:")
         for kpoint, payload in sym["by_kpoint"].items():
-            little_ops = ", ".join(str(v) for v in payload.get("little_group_operations", [])) or "none"
-            preserving_ops = ", ".join(str(v) for v in payload.get("valley_preserving_operations", [])) or "none"
-            lines.append(f"{kpoint}: little group [{little_ops}], valley-preserving [{preserving_ops}]")
+            if not isinstance(payload, dict):
+                continue
+            # Per-valley data is nested under "per_valley" key
+            per_valley = payload.get("per_valley", {})
+            if isinstance(per_valley, dict) and per_valley:
+                valley_names = list(per_valley.keys())
+                for vname in valley_names:
+                    vp = per_valley.get(vname, {})
+                    if isinstance(vp, dict):
+                        allowed = ", ".join(str(v) for v in vp.get("allowed_operation_ids", [])) or "none"
+                        changing = ", ".join(str(v) for v in vp.get("valley_changing_operation_ids", [])) or "none"
+                        lines.append(f"{kpoint}/{vname}: stabilizer [{allowed}], valley-changing [{changing}]")
+            else:
+                # Legacy flat format
+                little_ops = ", ".join(str(v) for v in payload.get("little_group_operations", [])) or "none"
+                preserving_ops = ", ".join(str(v) for v in payload.get("valley_preserving_operations", [])) or "none"
+                lines.append(f"{kpoint}: little group [{little_ops}], valley-preserving [{preserving_ops}]")
     if sym.get("rejected_operations"):
         lines.append("")
         lines.append("rejected operations:")
@@ -344,6 +415,8 @@ def _subspace_rows(subspace_payload: dict[str, Any]) -> list[dict[str, Any]]:
                 "kpoint": kpoint,
                 "basis_status": diagnostic.get("status", ""),
                 "n_valleys": diagnostic.get("n_valleys", 0),
+                "energy_span_meV": diagnostic.get("energy_span_meV"),
+                "subspace_energy_tol_meV": subspace_payload.get("degeneracy_tol_meV"),
                 "s_eigenvalues": diagnostic.get("s_eigenvalues"),
                 "s_min": diagnostic.get("s_min"),
                 "s_max": diagnostic.get("s_max"),
@@ -365,6 +438,9 @@ def _symmetry_analysis(symmetry_payload: dict[str, Any], target_kpoints: list[st
     kind_counts: dict[str, int] = {}
     operations: list[dict[str, Any]] = []
     by_kpoint: dict[str, dict[str, list[int]]] = {}
+    subgroup_report = symmetry_payload.get("valley_preserving_subgroup_report", {})
+    per_valley_by_kpoint = subgroup_report.get("by_kpoint", {}) if isinstance(subgroup_report, dict) else {}
+
     for operation in symmetry_payload.get("detected_operations", []):
         kind = str(operation.get("kind", "unknown"))
         kind_counts[kind] = kind_counts.get(kind, 0) + 1
@@ -414,6 +490,13 @@ def _symmetry_analysis(symmetry_payload: dict[str, Any], target_kpoints: list[st
         )
     )
 
+    # Merge per-valley by_kpoint data from subgroup report
+    merged_by_kpoint: dict[str, Any] = {}
+    for kpoint in ordered_by_kpoint:
+        merged_by_kpoint[kpoint] = dict(ordered_by_kpoint[kpoint])
+        if kpoint in per_valley_by_kpoint and isinstance(per_valley_by_kpoint[kpoint], dict):
+            merged_by_kpoint[kpoint]["per_valley"] = per_valley_by_kpoint[kpoint]
+
     return {
         "status": symmetry_payload.get("status"),
         "operation_detection_backend": symmetry_payload.get("operation_detection_backend"),
@@ -427,10 +510,10 @@ def _symmetry_analysis(symmetry_payload: dict[str, Any], target_kpoints: list[st
         "candidate_rotations": symmetry_payload.get("candidate_rotations", []),
         "symprec_scan_summary": symmetry_payload.get("symprec_scan_summary", []),
         "valley_little_group_inventory": symmetry_payload.get("valley_little_group_inventory", {}),
-        "valley_preserving_subgroup_report": symmetry_payload.get("valley_preserving_subgroup_report", {}),
+        "valley_preserving_subgroup_report": subgroup_report,
         "kind_counts": kind_counts,
         "detected_operations": operations,
-        "by_kpoint": ordered_by_kpoint,
+        "by_kpoint": merged_by_kpoint,
         "little_group_check": symmetry_payload.get("little_group_check", {}),
         "valley_preservation_check": symmetry_payload.get("valley_preservation_check", {}),
         "rejected_operations": rejected,
@@ -438,16 +521,17 @@ def _symmetry_analysis(symmetry_payload: dict[str, Any], target_kpoints: list[st
 
 
 def _symmetry_character_rows(symmetry_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    grouped: dict[tuple[str, Any], dict[str, Any]] = {}
+    grouped: dict[tuple[str, Any, str], dict[str, Any]] = {}
     for row in symmetry_rows:
         if not bool(row.get("little_group_passed", False)):
             continue
         if not bool(row.get("valley_preserving", False)):
             continue
-        key = (str(row.get("kpoint", "")), row.get("operation_id"))
+        key = (str(row.get("kpoint", "")), row.get("operation_id"), str(row.get("target_valley", "")))
         if key not in grouped:
             grouped[key] = {
                 "kpoint": row.get("kpoint", ""),
+                "target_valley": row.get("target_valley", ""),
                 "operation_id": row.get("operation_id"),
                 "kind": row.get("kind", ""),
                 "order": row.get("order"),
@@ -584,9 +668,12 @@ def _short_matrix(value: Any) -> str:
 
 def _short_valley_status(status: Any) -> str:
     value = str(status)
-    if value in {"single_band", "not_degenerate", "requires_two_valley_sectors", "not_evaluated",
-                 "no_valley_sectors"}:
+    if value in {"single_band", "requires_two_valley_sectors", "no_valley_sectors"}:
         return "n/a"
+    if value == "not_degenerate":
+        return "not_degenerate"
+    if value == "not_evaluated":
+        return "not_evaluated"
     if value == "not_valley_derived" or value == "poor_valley_manifold":
         return "not_derived"
     if value == "projector_unreliable":
@@ -598,6 +685,19 @@ def _short_valley_status(status: Any) -> str:
     if not value:
         return "n/a"
     return "mixed"
+
+
+def _subspace_basis_label(row: dict[str, Any]) -> str:
+    status = str(row.get("basis_status", ""))
+    if status == "not_degenerate":
+        span = _fmt(row.get("energy_span_meV"))
+        tol = _fmt(row.get("subspace_energy_tol_meV"))
+        return f"not_degenerate (span={span} meV > tol={tol} meV)"
+    if status == "single_band":
+        return "single_band"
+    if status in ("not_evaluated", ""):
+        return "n/a"
+    return status
 
 
 def _format_root_label(value: Any) -> str:
@@ -635,6 +735,15 @@ def _subspace_purity_min(eta: Any) -> float | None:
     if array.size == 0:
         return None
     return float((1.0 + np.min(np.abs(array))) / 2.0)
+
+
+def _infer_valley_names_from_by_kpoint(by_kpoint: dict[str, Any]) -> list[str]:
+    for payload in by_kpoint.values():
+        if isinstance(payload, dict):
+            for key, val in payload.items():
+                if isinstance(val, dict) and "allowed_operation_ids" in val:
+                    return list(payload.keys())
+    return []
 
 
 def _output_file_label(name: str) -> str:

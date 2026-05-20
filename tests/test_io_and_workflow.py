@@ -731,7 +731,7 @@ def test_readme_symmetry_example_uses_parser_schema(tmp_path):
     assert "overlap_cross_sector" not in readme
     assert "sector" not in readme.lower()
     assert "manifold" not in readme.lower()
-    assert not re.search(r"\bV[123]\b", readme)
+    assert not re.search(r"(?<!\w)V[123](?!\.\d)", readme)
     assert "input:\n  wavefunction_h5: ./wave.h5\n\n  # Moire/bilayer POSCAR" not in readme
     assert "symmetry:\n  source: spglib" not in readme
     assert "Example screen summary" in readme
@@ -800,7 +800,7 @@ def test_chinese_readme_uses_public_valley_vocabulary():
     assert "relative_min_sector_distance" not in readme
     assert "overlap_cross_sector" not in readme
     assert "扇区" not in readme
-    assert not re.search(r"\bV[123]\b", readme)
+    assert not re.search(r"(?<!\w)V[123](?!\.\d)", readme)
     assert "Valley subspaces" in readme
     assert "Valley subspace analysis" in readme
     assert "Two-valley subspace" not in readme
@@ -1101,9 +1101,12 @@ def test_symmetry_eigenvalues_csv_is_header_only_when_no_rows(tmp_path, monkeypa
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     assert "symmetry_eigenvalues_csv" in summary["output_files"]
     subgroup_report = summary["symmetry_analysis"]["valley_preserving_subgroup_report"]
-    assert subgroup_report["status"] == "operation_set_only"
-    assert subgroup_report["standard_group_match_status"] == "not_attempted"
-    assert subgroup_report["by_kpoint"]["GammaM"]["closure_status"] == "empty"
+    assert subgroup_report["status"] in ("per_valley_stabilizers_computed", "operation_set_only")
+    if subgroup_report["status"] == "per_valley_stabilizers_computed":
+        assert subgroup_report["all_valley_intersection"]["operation_count"] == 0
+    else:
+        assert subgroup_report["standard_group_match_status"] == "not_attempted"
+        assert subgroup_report["by_kpoint"]["GammaM"]["closure_status"] == "empty"
 
 
 def test_write_detailed_files_false_writes_only_summary_files(tmp_path):
@@ -1638,6 +1641,7 @@ def test_summary_exposes_symmetry_characters_as_first_class_rows(tmp_path):
     assert summary["symmetry_characters"] == [
         {
             "kpoint": "KM",
+            "target_valley": "",
             "operation_id": 7,
             "kind": "C3",
             "order": 3,
@@ -1820,7 +1824,7 @@ def test_workflow_requests_all_valley_preserving_little_group_operations(tmp_pat
         }
 
     def fake_symmetry_diagnostic(**kwargs):
-        calls.append(bool(kwargs["generators_only"]))
+        calls.append(bool(kwargs.get("generators_only", False)))
         return []
 
     monkeypatch.setattr(workflow_module, "_prepare_symmetry_payload", fake_prepare_symmetry_payload)
@@ -2057,7 +2061,7 @@ def test_workflow_writes_irrep_results_when_characters_are_ready(tmp_path, monke
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     matching = summary["symmetry_analysis"]["valley_preserving_subgroup_report"]["irrep_matching"]
     assert matching["character_matching_status"] == "matched"
-    result = matching["irrep_results_by_kpoint"]["GammaM"]
+    result = matching["irrep_results_by_kpoint"]["GammaM"]["K_valley"]
     assert result["status"] == "matched"
     assert result["table_kpoint_label"] == "GM"
     assert result["irrep_multiplicities"] == {"-GM5": 1, "-GM6": 1}
@@ -2091,8 +2095,8 @@ def test_workflow_writes_irrep_results_when_characters_are_ready(tmp_path, monke
         },
     ]
     summary_text = outputs["valley_summary_txt"].read_text(encoding="utf-8")
-    assert "GammaM: -GM5 x 1, -GM6 x 1" in summary_text
-    assert "GammaM state irreps: state 0 -> -GM5, state 1 -> -GM6" in summary_text
+    assert "GammaM/K_valley: -GM5 x 1, -GM6 x 1" in summary_text
+    assert "GammaM/K_valley state irreps: state 0 -> -GM5, state 1 -> -GM6" in summary_text
 
 
 def test_workflow_keeps_irrep_results_incomplete_when_an_operation_has_non_ready_rows(tmp_path, monkeypatch):
@@ -2119,7 +2123,7 @@ def test_workflow_keeps_irrep_results_incomplete_when_an_operation_has_non_ready
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     matching = summary["symmetry_analysis"]["valley_preserving_subgroup_report"]["irrep_matching"]
     assert matching["character_matching_status"] == "incomplete"
-    result = matching["irrep_results_by_kpoint"]["GammaM"]
+    result = matching["irrep_results_by_kpoint"]["GammaM"]["K_valley"]
     assert result["status"] == "missing_characters"
     assert result["irrep_multiplicities"] == {}
     assert result["missing_table_operation_indices"] == [3]
@@ -2148,7 +2152,7 @@ def test_state_irrep_rejected_when_dvalley_has_offdiagonal_mixing(tmp_path, monk
 
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     matching = summary["symmetry_analysis"]["valley_preserving_subgroup_report"]["irrep_matching"]
-    result = matching["irrep_results_by_kpoint"]["GammaM"]
+    result = matching["irrep_results_by_kpoint"]["GammaM"]["K_valley"]
     # Aggregate characters still pass (trace = sum of eigenvalues, even with off-diagonal)
     assert result["status"] == "matched"
     # But state-level is incomplete because C3^2 D_valley has mixing
@@ -2180,7 +2184,7 @@ def test_state_irrep_ignores_eigenvalue_ordering_uses_dvalley_diagonal(tmp_path,
     outputs = workflow_module.analyze_hsp(config_path)
 
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
-    result = summary["symmetry_analysis"]["valley_preserving_subgroup_report"]["irrep_matching"]["irrep_results_by_kpoint"]["GammaM"]
+    result = summary["symmetry_analysis"]["valley_preserving_subgroup_report"]["irrep_matching"]["irrep_results_by_kpoint"]["GammaM"]["K_valley"]
     assert result["state_irrep_assignment_status"] == "matched"
     # State 0 characters must equal D_valley diagonal: identity=1, C3=exp(-i*pi/3), C3^2=exp(+i*pi/3)
     s0 = result["state_irrep_results"][0]

@@ -61,8 +61,10 @@ symmetry:
     angle_tolerance: -1.0
     symprec_scan: [1.0e-5, 3.0e-5, 1.0e-4, 3.0e-4, 1.0e-3]
   filters:
-    # The analyzer attempts all supported proper valley-preserving little-group operations;
-    # this field controls the requested/highlighted cyclic rotation order.
+    # Legacy summary/highlight field for the cyclic rotation order.
+    # V1.1 does NOT use this to select which operations enter symmetry analysis;
+    # all proper little-group operations (order 2,3,4,6) are enumerated and
+    # filtered by per-valley stabilizer.  Accepted values: auto, integer n, none.
     rotation_order: auto
 
 rotation:

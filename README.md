@@ -162,9 +162,11 @@ For three or more valleys, $\eta$ is undefined; use `valley_weights_adapted`, `a
 ValleyScope performs symmetry-operation detection from the moire or bilayer structure file. By default, candidate symmetry operations are detected from the moire structure file using spglib, with user-controlled symprec and optional symprec_scan. A symmetry eigenvalue is reported only after two checks:
 
 1. The operation belongs to the little group of the analyzed HSP.
-2. The operation preserves the selected valley.
+2. The operation preserves the **specific valley being analyzed** (per-valley stabilizer condition), not all selected valleys.
 
-The resulting matrix is a little-group representation in the valley-adapted subspace. Its eigenvalues are symmetry-analysis data. They can constrain topology in symmetry-based formulas, but ValleyScope does not infer a full integer Chern number from high-symmetry-point data alone.
+The resulting matrix is a little-group representation in the valley-adapted subspace, restricted to the current valley block. Its eigenvalues are symmetry-analysis data. They can constrain topology in symmetry-based formulas, but ValleyScope does not infer a full integer Chern number from high-symmetry-point data alone.
+
+Per-valley stabilizers are reported separately for each valley. Valley orbits, operation mappings, and coset representatives are included in the subgroup report. The all-valley intersection (operations preserving every selected valley) is retained as a debug field but is not used for single-valley irrep matching.
 
 ### Single-Valley Irrep Interpretation
 
@@ -514,13 +516,19 @@ symmetry:
 
 A monolayer POSCAR cannot replace the moire POSCAR for symmetry-operation detection. The moire POSCAR also should not be silently reused as a monolayer reciprocal lattice.
 
-`symmetry.filters.rotation_order` controls whether symmetry-eigenvalue extraction is enabled and which cyclic rotation order is highlighted in the candidate-rotation summary:
+`symmetry.filters.rotation_order` is a legacy summary/highlight field. In V1.1 it does **not** control which operations enter symmetry analysis. All detected proper little-group operations (order `2`, `3`, `4`, `6`) are enumerated and filtered by per-valley stabilizer membership. `rotation_order` records the requested or automatically resolved rotation order for summary compatibility:
 
-- `auto`: infer the target order from the detected moire space group and candidate rotations. For example, `P321` / `P312` resolves to `C3`, and `P422` resolves to `C4`.
-- integer `n`: select `C_n` as the requested cyclic rotation order, currently with `n = 2, 3, 4, 6`.
+- `auto`: infer the target order from the detected moire space group (e.g., `P321` / `P312` → `C3`, `P422` → `C4`).
+- integer `n`: select `C_n` as the highlighted cyclic rotation order (`n = 2, 3, 4, 6`).
 - `None` / `none`: detect and report symmetry operations, but skip symmetry-eigenvalue extraction.
 
-The current symmetry analysis lists the relevant little-group and valley-preserving operations, then attempts representation/eigenvalue diagnostics for all detected proper valley-preserving little-group operations whose order is currently supported (`2`, `3`, `4`, or `6`). Non-valley-preserving operations are still reported as diagnostics but are not used as single-valley eigenvalues. `rotation_order` no longer means that only one cyclic generator is diagonalized; it records the requested or automatically resolved rotation order for summary compatibility.
+The per-valley stabilizer gate is:
+
+```math
+\text{little\_group\_passed}(g, k) \land \text{mapped\_valley}[v_a] = v_a
+```
+
+not the old all-valley intersection. An operation that preserves one valley while exchanging others is a valid single-valley operation for the preserved valley. Valley-changing operations are reported as valley-orbit data but do not enter the source valley's single-valley eigenvalue rows.
 
 `root_deviation_tol` and `D_valley_offdiag_tol` are numerical readiness thresholds, not universal physical constants. `root_deviation_tol` checks how close a computed symmetry eigenvalue is to the nearest allowed root of unity. `D_valley_offdiag_tol` checks the two-valley `D_valley` off-diagonal norm in the current valley-adapted benchmark. `readiness_preset` accepts `strict`, `normal`, and `loose`: `strict` is the default and keeps `1.0e-6` for both root deviation and two-valley off-diagonal checks; `normal` uses `1.0e-5` and `1.0e-3`; `loose` uses `1.0e-4` and `1.0e-2`. Explicit `root_deviation_tol` or `D_valley_offdiag_tol` values override the preset. Interpret all of them together with qcut stability, `W_val`, `P_v`, `S_min`, spinor benchmark status, plane-wave mapping quality, and symmetry tolerance. Do not loosen them only to obtain `topology_input_ready=True`.
 

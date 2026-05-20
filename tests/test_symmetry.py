@@ -540,7 +540,7 @@ class TestLittleGroupExtendedDiagnostics:
         return {"status": "ok", "detected_operations": operations, "little_group_check": {}, "valley_preservation_check": {}}
 
     def test_generators_only_default_behavior_unchanged(self):
-        """Default generators_only=True should match old behavior."""
+        """Default generators_only=False enumerates all proper rotations. generators_only=True matches old behavior."""
         from valleyscope.analysis.symmetry_eigenvalue_diagnostic import symmetry_eigenvalue_diagnostics_for_kpoint
         coeffs = np.array([[[1.0 + 0.0j]]], dtype=np.complex128)
         ops = [
@@ -559,7 +559,7 @@ class TestLittleGroupExtendedDiagnostics:
         rows = symmetry_eigenvalue_diagnostics_for_kpoint(
             kpoint_name="GM", k_frac=np.zeros(3), q_cart=np.zeros((1, 3)),
             coefficients=coeffs, symmetry_payload=self._toy_symmetry_payload(ops),
-            basis_payload=None, representation_payload={},
+            basis_payload=None, representation_payload={}, generators_only=True,
         )
         assert len(rows) > 0
         assert all(row["operation_id"] == 0 for row in rows)
@@ -764,21 +764,30 @@ def test_valley_little_group_inventory_marks_allowed_and_valley_exchanging_opera
     ]
     symmetry_payload = {"detected_operations": operations}
 
-    inventory = update_valley_little_group_inventory(
+    per_valley = update_valley_little_group_inventory(
         symmetry_payload=symmetry_payload,
         kpoint_name="KM",
         k_frac=np.array([1.0 / 3.0, 0.0, 0.0]),
+        valley_names=["K_valley", "Kp_valley"],
     )
 
-    assert [row["operation_id"] for row in inventory] == [0, 1, 2]
-    assert inventory[0]["allowed_for_single_valley_representation"] is True
-    assert inventory[1]["little_group_passed"] is True
-    assert inventory[1]["valley_exchanging"] is True
-    assert inventory[1]["reason"] == "valley-exchanging"
-    assert inventory[2]["little_group_passed"] is False
-    assert inventory[2]["reason"] == "not in little group"
+    # Per-valley: K_valley inventory
+    kv_rows = per_valley["K_valley"]
+    assert [row["operation_id"] for row in kv_rows] == [0, 1, 2]
+    assert kv_rows[0]["allowed_for_single_valley_representation"] is True
+    assert kv_rows[1]["little_group_passed"] is True
+    assert kv_rows[1]["valley_preserving"] is False
+    assert "valley-changing" in kv_rows[1]["reason"]
+    assert kv_rows[2]["little_group_passed"] is False
+    assert kv_rows[2]["reason"] == "not in little group"
     assert operations[1]["rejection_reason_by_kpoint"]["KM"] == "valley-exchanging"
-    assert symmetry_payload["valley_little_group_inventory"]["KM"] == inventory
+
+    # Flat inventory still stored for backward compat
+    flat = symmetry_payload["valley_little_group_inventory"]["KM"]
+    assert [row["operation_id"] for row in flat] == [0, 1, 2]
+    assert flat[0]["allowed_for_single_valley_representation"] is True
+    assert flat[1]["valley_exchanging"] is True
+    assert flat[1]["reason"] == "valley-exchanging"
 
 
 def test_valley_preserving_subgroup_report_checks_operation_set_closure():
@@ -827,6 +836,7 @@ def test_valley_preserving_subgroup_report_checks_operation_set_closure():
         symmetry_payload=symmetry_payload,
         kpoint_name="GM",
         k_frac=np.zeros(3),
+        valley_names=["K_valley"],
     )
 
     report = build_valley_preserving_subgroup_report(
@@ -834,17 +844,18 @@ def test_valley_preserving_subgroup_report_checks_operation_set_closure():
         target_kpoints=["GM"],
     )
 
-    gm_report = report["by_kpoint"]["GM"]
-    assert report["status"] == "operation_set_only"
-    assert report["standard_group_match"] is None
-    assert report["global_operation_set"]["allowed_operation_ids"] == [0, 1, 2]
-    assert gm_report["allowed_operation_ids"] == [0, 1, 2]
-    assert gm_report["valley_exchanging_operation_ids"] == [3]
-    assert gm_report["closure_status"] == "closed"
-    assert gm_report["missing_products"] == []
-    assert gm_report["standard_group_match_status"] == "not_attempted"
-    assert report["irrep_matching"]["status"] == "table_mapping_deferred"
-    assert report["irrep_matching"]["table_source"] == "irreptables"
+    assert report["status"] == "per_valley_stabilizers_computed"
+    # Per-valley stabilizer for K_valley
+    assert report["valley_stabilizers"]["K_valley"]["operation_ids"] == [0, 1, 2]
+    # All-valley intersection (debug)
+    assert report["all_valley_intersection"]["allowed_operation_ids"] == [0, 1, 2]
+    # Per-valley by_kpoint
+    gm_k = report["by_kpoint"]["GM"]["K_valley"]
+    assert gm_k["allowed_operation_ids"] == [0, 1, 2]
+    assert gm_k["valley_changing_operation_ids"] == [3]
+    assert gm_k["closure_status"] == "closed"
+    assert gm_k["missing_products"] == []
+    assert report["irrep_matching"]["status"] == "table_mapping_incomplete"
 
 
 def test_valley_preserving_subgroup_report_identifies_standard_global_subgroup():
@@ -903,6 +914,7 @@ def test_valley_preserving_subgroup_report_identifies_standard_global_subgroup()
         symmetry_payload=symmetry_payload,
         kpoint_name="GM",
         k_frac=np.zeros(3),
+        valley_names=["K_valley", "Kp_valley"],
     )
 
     report = build_valley_preserving_subgroup_report(
@@ -910,17 +922,20 @@ def test_valley_preserving_subgroup_report_identifies_standard_global_subgroup()
         target_kpoints=["GM"],
     )
 
-    assert report["status"] == "standard_group_matched"
-    assert report["global_operation_set"]["operation_set_label"] == "G_tau"
-    assert report["global_operation_set"]["allowed_operation_ids"] == [0, 1, 2]
-    assert report["global_operation_set"]["valley_exchanging_operation_ids"] == [3]
-    assert report["global_operation_set"]["closure_status"] == "closed"
-    assert report["standard_group_match_status"] == "matched"
-    assert report["standard_group_match"]["number"] == 143
-    assert report["standard_group_match"]["international_short"] == "P3"
-    assert report["standard_group_match"]["operation_ids"] == [0, 1, 2]
-    assert report["standard_group_match"]["source"] == "spglib.get_spacegroup_type_from_symmetry"
-    assert report["by_kpoint"]["GM"]["operation_set_label"] == "G_tau,k(GM)"
+    assert report["status"] == "per_valley_stabilizers_computed"
+    # All-valley intersection (debug)
+    assert report["all_valley_intersection"]["operation_set_label"] == "all_valley_intersection"
+    assert report["all_valley_intersection"]["allowed_operation_ids"] == [0, 1, 2]
+    assert report["all_valley_intersection"]["valley_exchanging_operation_ids"] == [3]
+    assert report["all_valley_intersection"]["closure_status"] == "closed"
+    # Per-valley stabilizers both match P3 since both valleys are preserved by C3
+    k_match = report["per_valley_standard_matches"]["K_valley"]
+    assert k_match["standard_group_match_status"] == "matched"
+    assert k_match["standard_group_match"]["number"] == 143
+    assert k_match["standard_group_match"]["international_short"] == "P3"
+    # Per-valley by_kpoint
+    gm_k = report["by_kpoint"]["GM"]["K_valley"]
+    assert gm_k["closure_status"] == "closed"
 
 
 def test_valley_preserving_subgroup_report_maps_operations_to_irreptables():
@@ -971,6 +986,7 @@ def test_valley_preserving_subgroup_report_maps_operations_to_irreptables():
         symmetry_payload=symmetry_payload,
         kpoint_name="KM",
         k_frac=np.array([1.0 / 3.0, 1.0 / 3.0, 0.0]),
+        valley_names=["K_valley", "Kp_valley"],
     )
 
     report = build_valley_preserving_subgroup_report(
@@ -981,13 +997,15 @@ def test_valley_preserving_subgroup_report_maps_operations_to_irreptables():
     matching = report["irrep_matching"]
     assert matching["status"] == "table_mapping_complete"
     assert matching["table_source"] == "irreptables"
-    assert matching["spacegroup_number"] == 143
-    assert matching["spinor"] is True
-    assert matching["operation_to_table_mapping_status"] == "complete"
-    assert matching["operation_to_table_mapping"] == {0: 1, 1: 2, 2: 3}
-    assert matching["unmatched_operation_ids"] == []
-    assert matching["unused_table_operation_indices"] == []
-    km_matching = matching["by_kpoint"]["KM"]
+    # Per-valley matching
+    kv_match = matching["per_valley"]["K_valley"]
+    assert kv_match["spacegroup_number"] == 143
+    assert kv_match["spinor"] is True
+    assert kv_match["operation_to_table_mapping_status"] == "complete"
+    assert kv_match["operation_to_table_mapping"] == {0: 1, 1: 2, 2: 3}
+    assert kv_match["unmatched_operation_ids"] == []
+    assert kv_match["unused_table_operation_indices"] == []
+    km_matching = kv_match["by_kpoint"]["KM"]
     assert km_matching["status"] == "table_kpoint_matched"
     assert km_matching["table_kpoint_label"] == "K"
     assert km_matching["table_operation_indices"] == [1, 2, 3]
@@ -1045,6 +1063,7 @@ def test_valley_irrep_results_match_characters_to_irrep_multiplicities():
         symmetry_payload=symmetry_payload,
         kpoint_name="KM",
         k_frac=np.array([1.0 / 3.0, 1.0 / 3.0, 0.0]),
+        valley_names=["K_valley", "Kp_valley"],
     )
     build_valley_preserving_subgroup_report(
         symmetry_payload=symmetry_payload,
@@ -1053,6 +1072,7 @@ def test_valley_irrep_results_match_characters_to_irrep_multiplicities():
     symmetry_rows = [
         {
             "kpoint": "KM",
+            "target_valley": "K_valley",
             "operation_id": 1,
             "state_index": 0,
             "character_valley": "1.000000+0.000000j",
@@ -1062,6 +1082,7 @@ def test_valley_irrep_results_match_characters_to_irrep_multiplicities():
         },
         {
             "kpoint": "KM",
+            "target_valley": "K_valley",
             "operation_id": 1,
             "state_index": 1,
             "character_valley": "",
@@ -1071,6 +1092,7 @@ def test_valley_irrep_results_match_characters_to_irrep_multiplicities():
         },
         {
             "kpoint": "KM",
+            "target_valley": "K_valley",
             "operation_id": 2,
             "state_index": 0,
             "character_valley": "1.000000+0.000000j",
@@ -1080,6 +1102,7 @@ def test_valley_irrep_results_match_characters_to_irrep_multiplicities():
         },
         {
             "kpoint": "KM",
+            "target_valley": "K_valley",
             "operation_id": 2,
             "state_index": 1,
             "character_valley": "",
@@ -1095,9 +1118,7 @@ def test_valley_irrep_results_match_characters_to_irrep_multiplicities():
     )
 
     matching = symmetry_payload["valley_preserving_subgroup_report"]["irrep_matching"]
-    assert matching["character_matching_status"] == "matched"
-    assert matching["label_matching"] == "matched"
-    km_result = matching["irrep_results_by_kpoint"]["KM"]
+    km_result = matching["irrep_results_by_kpoint"]["KM"]["K_valley"]
     assert km_result["status"] == "matched"
     assert km_result["table_kpoint_label"] == "K"
     assert km_result["identity_character_source"] == "inferred_from_ready_rows"
@@ -1108,6 +1129,9 @@ def test_valley_irrep_results_match_characters_to_irrep_multiplicities():
     }
     assert km_result["irrep_multiplicities"] == {"-K5": 1, "-K6": 1}
     assert km_result["failure_reasons"] == []
+    # Kp_valley has table mapping but no character rows -> missing_characters
+    kp_result = matching["irrep_results_by_kpoint"]["KM"]["Kp_valley"]
+    assert kp_result["status"] == "missing_characters"
 
 
 def test_valley_preserving_subgroup_report_records_missing_products():
@@ -1137,6 +1161,7 @@ def test_valley_preserving_subgroup_report_records_missing_products():
         symmetry_payload=symmetry_payload,
         kpoint_name="GM",
         k_frac=np.zeros(3),
+        valley_names=["K_valley"],
     )
 
     report = build_valley_preserving_subgroup_report(
@@ -1144,8 +1169,390 @@ def test_valley_preserving_subgroup_report_records_missing_products():
         target_kpoints=["GM"],
     )
 
-    gm_report = report["by_kpoint"]["GM"]
-    assert gm_report["closure_status"] == "not_closed"
-    assert gm_report["missing_products"] == [
+    gm_k = report["by_kpoint"]["GM"]["K_valley"]
+    assert gm_k["closure_status"] == "not_closed"
+    assert gm_k["missing_products"] == [
         {"left_operation_id": 1, "right_operation_id": 1}
     ]
+
+
+class TestV11PerValleyStabilizer:
+    """V1.1 per-valley stabilizer tests: three-valley orbit, per-valley gates,
+    block-leakage diagnostic, and rotation_order independence."""
+
+    @staticmethod
+    def _c3_cart():
+        angle = 2.0 * np.pi / 3.0
+        return np.array([
+            [np.cos(angle), -np.sin(angle), 0.0],
+            [np.sin(angle), np.cos(angle), 0.0],
+            [0.0, 0.0, 1.0],
+        ])
+
+    @staticmethod
+    def _c2_m1_cart():
+        """C2 that preserves M1 valley (at [1,0,0]) and exchanges M2/M3."""
+        return np.array([
+            [1.0, 0.0, 0.0],
+            [0.0, -1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ])
+
+    @staticmethod
+    def _c2_m2_cart():
+        """C2 that preserves M2 valley (at [-1/2, sqrt(3)/2, 0]) and exchanges M1/M3."""
+        angle = 2.0 * np.pi / 3.0
+        cos_a = np.cos(angle)
+        sin_a = np.sin(angle)
+        c3 = np.array([[cos_a, -sin_a, 0.0], [sin_a, cos_a, 0.0], [0.0, 0.0, 1.0]])
+        c2_m1 = np.array([[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0]])
+        return c3 @ c2_m1 @ c3.T
+
+    @staticmethod
+    def _c2_m3_cart():
+        """C2 that preserves M3 valley (at [-1/2, -sqrt(3)/2, 0]) and exchanges M1/M2."""
+        angle = 2.0 * np.pi / 3.0
+        cos_a = np.cos(angle)
+        sin_a = np.sin(angle)
+        c3_inv = np.array([[cos_a, sin_a, 0.0], [-sin_a, cos_a, 0.0], [0.0, 0.0, 1.0]])
+        c2_m1 = np.array([[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0]])
+        return c3_inv @ c2_m1 @ c3_inv.T
+
+    def _three_valley_operations(self):
+        """Build operations for 3-valley M1/M2/M3 orbit under C3.
+
+        M1 at [1, 0, 0], M2 at [-1/2, sqrt(3)/2, 0], M3 at [-1/2, -sqrt(3)/2, 0].
+        Operations:
+          E  (id=0): identity
+          C3 (id=1): cycles M1->M2->M3->M1
+          C3^2 (id=2): cycles M1->M3->M2->M1
+          C2_M1 (id=3): fixes M1, exchanges M2<->M3
+          C2_M2 (id=4): fixes M2, exchanges M1<->M3
+          C2_M3 (id=5): fixes M3, exchanges M1<->M2
+        """
+        c3 = self._c3_cart()
+        c3_sq = c3 @ c3
+        c2_m1 = self._c2_m1_cart()
+        c2_m2 = self._c2_m2_cart()
+        c2_m3 = self._c2_m3_cart()
+
+        def sector_map(m1_tgt, m2_tgt, m3_tgt):
+            return {"M1_valley": m1_tgt, "M2_valley": m2_tgt, "M3_valley": m3_tgt}
+
+        def preserved(m1, m2, m3):
+            return {"M1_valley": m1, "M2_valley": m2, "M3_valley": m3}
+
+        return [
+            {
+                "operation_id": 0, "kind": "identity", "order": 1,
+                "rotation_frac": np.eye(3, dtype=int),
+                "translation_frac": np.zeros(3),
+                "rotation_cart": np.eye(3),
+                "translation_cart": np.zeros(3),
+                "det": 1,
+                "sector_mapping": sector_map("M1_valley", "M2_valley", "M3_valley"),
+                "preserved": preserved(True, True, True),
+            },
+            {
+                "operation_id": 1, "kind": "C3", "order": 3,
+                "rotation_frac": np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]]),
+                "translation_frac": np.zeros(3),
+                "rotation_cart": c3,
+                "translation_cart": np.zeros(3),
+                "det": 1,
+                "sector_mapping": sector_map("M2_valley", "M3_valley", "M1_valley"),
+                "preserved": preserved(False, False, False),
+            },
+            {
+                "operation_id": 2, "kind": "C3^2", "order": 3,
+                "rotation_frac": np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]]) @ np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]]),
+                "translation_frac": np.zeros(3),
+                "rotation_cart": c3_sq,
+                "translation_cart": np.zeros(3),
+                "det": 1,
+                "sector_mapping": sector_map("M3_valley", "M1_valley", "M2_valley"),
+                "preserved": preserved(False, False, False),
+            },
+            {
+                "operation_id": 3, "kind": "C2", "order": 2,
+                "rotation_frac": np.diag([1, -1, 1]),
+                "translation_frac": np.zeros(3),
+                "rotation_cart": c2_m1,
+                "translation_cart": np.zeros(3),
+                "det": 1,
+                "sector_mapping": sector_map("M1_valley", "M3_valley", "M2_valley"),
+                "preserved": preserved(True, False, False),
+            },
+            {
+                "operation_id": 4, "kind": "C2", "order": 2,
+                "rotation_frac": np.eye(3, dtype=int),  # simplified
+                "translation_frac": np.zeros(3),
+                "rotation_cart": c2_m2,
+                "translation_cart": np.zeros(3),
+                "det": 1,
+                "sector_mapping": sector_map("M3_valley", "M2_valley", "M1_valley"),
+                "preserved": preserved(False, True, False),
+            },
+            {
+                "operation_id": 5, "kind": "C2", "order": 2,
+                "rotation_frac": np.eye(3, dtype=int),  # simplified
+                "translation_frac": np.zeros(3),
+                "rotation_cart": c2_m3,
+                "translation_cart": np.zeros(3),
+                "det": 1,
+                "sector_mapping": sector_map("M2_valley", "M1_valley", "M3_valley"),
+                "preserved": preserved(False, False, True),
+            },
+        ]
+
+    def test_three_valley_orbit_and_per_valley_stabilizers(self):
+        """C3 cycles M1/M2/M3; each C2 fixes one valley and exchanges the other two.
+        Each stabilizer is E + corresponding C2.  All-valley intersection is just E."""
+        operations = self._three_valley_operations()
+        symmetry_payload = {"detected_operations": operations}
+        update_valley_little_group_inventory(
+            symmetry_payload=symmetry_payload,
+            kpoint_name="GM",
+            k_frac=np.zeros(3),
+            valley_names=["M1_valley", "M2_valley", "M3_valley"],
+        )
+
+        report = build_valley_preserving_subgroup_report(
+            symmetry_payload=symmetry_payload,
+            target_kpoints=["GM"],
+        )
+
+        # Valley orbits: one orbit with all three M valleys
+        orbits = report["valley_orbits"]
+        assert len(orbits) == 1
+        assert set(orbits[0]["valleys"]) == {"M1_valley", "M2_valley", "M3_valley"}
+        # C3 should appear as a coset/valley-orbit operation
+        assert 1 in orbits[0]["coset_representative_operation_ids"]
+
+        # Per-valley stabilizers
+        stabilizers = report["valley_stabilizers"]
+        # M1 stabilizer: E(0) + C2_M1(3)
+        assert stabilizers["M1_valley"]["operation_ids"] == [0, 3]
+        assert stabilizers["M1_valley"]["closure_status"] == "closed"
+        # M2 stabilizer: E(0) + C2_M2(4)
+        assert stabilizers["M2_valley"]["operation_ids"] == [0, 4]
+        # M3 stabilizer: E(0) + C2_M3(5)
+        assert stabilizers["M3_valley"]["operation_ids"] == [0, 5]
+
+        # All-valley intersection (debug only): just identity
+        intersection = report["all_valley_intersection"]
+        assert intersection["allowed_operation_ids"] == [0]
+        assert "debug" in intersection.get("interpretation", "").lower()
+
+        # Per-valley by_kpoint
+        gm = report["by_kpoint"]["GM"]
+        assert gm["M1_valley"]["allowed_operation_ids"] == [0, 3]
+        assert 1 in gm["M1_valley"]["valley_changing_operation_ids"]  # C3
+        assert gm["M2_valley"]["allowed_operation_ids"] == [0, 4]
+        assert gm["M3_valley"]["allowed_operation_ids"] == [0, 5]
+
+    def test_operation_preserving_m1_allowed_for_m1_not_for_m2_m3(self):
+        """C2_M1 preserves M1 and exchanges M2/M3.
+        It is allowed for M1 single-valley representation but NOT for M2 or M3."""
+        operations = self._three_valley_operations()
+        symmetry_payload = {"detected_operations": operations}
+        per_valley = update_valley_little_group_inventory(
+            symmetry_payload=symmetry_payload,
+            kpoint_name="GM",
+            k_frac=np.zeros(3),
+            valley_names=["M1_valley", "M2_valley", "M3_valley"],
+        )
+
+        # C2_M1 (id=3) in M1_valley inventory
+        m1_rows = {row["operation_id"]: row for row in per_valley["M1_valley"]}
+        assert m1_rows[3]["valley_preserving"] is True
+        assert m1_rows[3]["allowed_for_single_valley_representation"] is True
+        assert m1_rows[3]["mapped_valley"] == "M1_valley"
+
+        # C2_M1 in M2_valley inventory
+        m2_rows = {row["operation_id"]: row for row in per_valley["M2_valley"]}
+        assert m2_rows[3]["valley_preserving"] is False
+        assert m2_rows[3]["allowed_for_single_valley_representation"] is False
+        assert "valley-changing" in m2_rows[3]["reason"]
+
+        # C2_M1 in M3_valley inventory
+        m3_rows = {row["operation_id"]: row for row in per_valley["M3_valley"]}
+        assert m3_rows[3]["valley_preserving"] is False
+        assert m3_rows[3]["allowed_for_single_valley_representation"] is False
+
+    def test_symmetry_rows_contain_target_valley(self):
+        """Symmetry eigenvalue rows must include target_valley field."""
+        c2z = np.diag([-1.0, -1.0, 1.0])
+        operations = [
+            {
+                "operation_id": 0, "candidate_rotation": True,
+                "order": 2, "kind": "C2",
+                "rotation_frac": np.diag([-1, -1, 1]),
+                "rotation_cart": c2z,
+                "translation_cart": np.zeros(3),
+                "preserved": {"K_valley": True, "Kp_valley": True},
+                "sector_mapping": {"K_valley": "K_valley", "Kp_valley": "Kp_valley"},
+            },
+        ]
+        coefficients = np.array([[[1.0 + 0.0j]]], dtype=np.complex128)
+        symmetry_payload = {"detected_operations": operations}
+
+        rows = symmetry_eigenvalue_diagnostics_for_kpoint(
+            kpoint_name="GM", k_frac=np.zeros(3), q_cart=np.zeros((1, 3)),
+            coefficients=coefficients, symmetry_payload=symmetry_payload,
+            basis_payload=None, representation_payload={},
+            valley_names=["K_valley", "Kp_valley"],
+        )
+
+        # C2z preserves both valleys at GM → 1 row per valley
+        assert len(rows) == 2
+        target_valleys = {row["target_valley"] for row in rows}
+        assert target_valleys == {"K_valley", "Kp_valley"}
+        for row in rows:
+            assert row["valley_preserving"] is True
+            assert row["target_valley"] in ("K_valley", "Kp_valley")
+
+    def test_valley_changing_operation_no_single_valley_eigenvalue(self):
+        """C2x exchanges K and Kp. It must NOT produce eigenvalue rows for either valley."""
+        c2x = np.array([[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0]])
+        operations = [
+            {
+                "operation_id": 0, "candidate_rotation": True,
+                "order": 2, "kind": "C2",
+                "rotation_frac": np.diag([1, -1, 1]),
+                "rotation_cart": c2x,
+                "translation_cart": np.zeros(3),
+                "preserved": {"K_valley": False, "Kp_valley": False},
+                "sector_mapping": {"K_valley": "Kp_valley", "Kp_valley": "K_valley"},
+            },
+        ]
+        coefficients = np.array([[[1.0 + 0.0j]]], dtype=np.complex128)
+        symmetry_payload = {"detected_operations": operations}
+
+        rows = symmetry_eigenvalue_diagnostics_for_kpoint(
+            kpoint_name="GM", k_frac=np.zeros(3), q_cart=np.zeros((1, 3)),
+            coefficients=coefficients, symmetry_payload=symmetry_payload,
+            basis_payload=None, representation_payload={},
+            valley_names=["K_valley", "Kp_valley"],
+        )
+
+        # Operation is valley-changing for both valleys → no eigenvalue rows
+        assert rows == []
+
+    def test_block_leakage_reported_as_diagnostic_only(self):
+        """A representation matrix with leakage out of the target valley block
+        should be diagnostic-only."""
+        from valleyscope.analysis.symmetry_eigenvalue_diagnostic import _select_valley_block
+
+        n = 4
+        # Two K_valley states (indices 0,1) and two Kp_valley states (indices 2,3)
+        assigned = ["K_valley", "K_valley", "Kp_valley", "Kp_valley"]
+        # D_valley with significant coupling between K_valley and Kp_valley blocks
+        d_valley = np.eye(n, dtype=np.complex128)
+        d_valley[0, 2] = 0.3  # leakage from K to Kp
+        d_valley[2, 0] = 0.3  # leakage from Kp to K
+        d_valley[1, 3] = 0.2
+        d_valley[3, 1] = 0.2
+
+        block, leakage = _select_valley_block(d_valley, assigned, "K_valley")
+
+        assert block.shape == (2, 2)
+        assert leakage > 0.3  # significant leakage
+        # Block should still be extractable but leakage is non-zero
+        np.testing.assert_allclose(np.diag(block), [1.0, 1.0])
+
+        # Test with no leakage
+        d_clean = np.eye(n, dtype=np.complex128)
+        block_clean, leakage_clean = _select_valley_block(d_clean, assigned, "K_valley")
+        assert block_clean.shape == (2, 2)
+        assert leakage_clean == 0.0
+
+    def test_block_leakage_makes_topology_input_not_ready(self):
+        """When D_block_leakage_norm exceeds D_valley_offdiag_tol,
+        topology_input_ready should be False."""
+        from valleyscope.analysis.symmetry_eigenvalue_diagnostic import _topology_input_ready
+
+        # All other gates pass
+        ready = _topology_input_ready(
+            rotation_ready=True,
+            basis="valley_adapted",
+            valid_valley_subspace=True,
+            spinor_convention_verified=True,
+            root_deviation=1e-10,
+            d_valley_offdiag_norm=None,
+            d_block_leakage_norm=0.5,
+            root_deviation_tol=1e-6,
+            d_valley_offdiag_tol=1e-4,
+        )
+        assert ready is False
+
+        # With small leakage it should pass
+        ready_small = _topology_input_ready(
+            rotation_ready=True,
+            basis="valley_adapted",
+            valid_valley_subspace=True,
+            spinor_convention_verified=True,
+            root_deviation=1e-10,
+            d_valley_offdiag_norm=None,
+            d_block_leakage_norm=1e-8,
+            root_deviation_tol=1e-6,
+            d_valley_offdiag_tol=1e-4,
+        )
+        assert ready_small is True
+
+    def test_operation_inclusion_independent_of_rotation_order(self):
+        """V1.1: all proper little-group operations (order 2,3,4,6) enter
+        the analysis regardless of rotation_order.  Non-candidate operations
+        are not excluded."""
+        c3_angle = 2.0 * np.pi / 3.0
+        c3_cart = np.array([
+            [np.cos(c3_angle), -np.sin(c3_angle), 0.0],
+            [np.sin(c3_angle), np.cos(c3_angle), 0.0],
+            [0.0, 0.0, 1.0],
+        ])
+        c2z = np.diag([-1.0, -1.0, 1.0])
+        operations = [
+            {
+                "operation_id": 0, "candidate_rotation": True, "order": 3, "kind": "C3",
+                "rotation_frac": np.eye(3, dtype=int),
+                "rotation_cart": c3_cart, "translation_cart": np.zeros(3),
+                "preserved": {"K": True},
+                "sector_mapping": {"K": "K"},
+            },
+            {
+                "operation_id": 1, "candidate_rotation": False, "order": 2, "kind": "C2",
+                "rotation_frac": np.eye(3, dtype=int),
+                "rotation_cart": c2z, "translation_cart": np.zeros(3),
+                "preserved": {"K": True},
+                "sector_mapping": {"K": "K"},
+            },
+        ]
+        coefficients = np.array([[[1.0 + 0.0j]]], dtype=np.complex128)
+        symmetry_payload = {"detected_operations": operations}
+
+        rows = symmetry_eigenvalue_diagnostics_for_kpoint(
+            kpoint_name="GM", k_frac=np.zeros(3), q_cart=np.zeros((1, 3)),
+            coefficients=coefficients, symmetry_payload=symmetry_payload,
+            basis_payload=None, representation_payload={},
+            valley_names=["K"], generators_only=False,
+        )
+
+        # Both C3 (candidate) and C2 (non-candidate) are included
+        op_ids = {row["operation_id"] for row in rows}
+        assert op_ids == {0, 1}, f"Expected both C3 and C2, got {op_ids}"
+
+    def test_not_degenerate_shown_in_valley_subspace_analysis(self):
+        """not_degenerate status should not be squashed to n/a in summary."""
+        from valleyscope.reports.summary_report import _short_valley_status, _subspace_basis_label
+
+        assert _short_valley_status("not_degenerate") == "not_degenerate"
+        assert _short_valley_status("single_band") == "n/a"
+
+        label = _subspace_basis_label({
+            "basis_status": "not_degenerate",
+            "energy_span_meV": 5.2,
+            "subspace_energy_tol_meV": 1.0,
+        })
+        assert "not_degenerate" in label
+        assert "5.2" in label
+        assert "1" in label
