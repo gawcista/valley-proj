@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -33,6 +34,17 @@ class WavecarBandHeader:
 class WavecarBandData:
     coefficients: np.ndarray
     nspinor: int
+
+
+@dataclass
+class GVectorAdjustment:
+    """Record of an ECUT adjustment applied during G-list reconstruction."""
+    original_encut_eV: float
+    reconstruction_encut_eV: float
+    delta_eV: float
+    target_g_count: int
+    generated_at_header_encut: int
+    generated_at_recon_encut: int
 
 
 class WavecarReader:
@@ -143,10 +155,61 @@ class WavecarReader:
                 data = data / norm
         return WavecarBandData(coefficients=data.astype(np.complex128), nspinor=nspinor)
 
-    def generate_g_vectors_frac(self, k_frac: np.ndarray, nplane_record: int) -> np.ndarray:
+    def generate_g_vectors_frac(
+        self,
+        k_frac: np.ndarray,
+        nplane_record: int,
+        *,
+        ecut_adjust_tol: float = 0.0,
+    ) -> tuple[np.ndarray, GVectorAdjustment | None]:
+        """Generate fractional G-vectors matching VASP's WAVECAR record ordering.
+
+        Parameters
+        ----------
+        k_frac : fractional k-point coordinate
+        nplane_record : expected plane-wave count from the WAVECAR band header
+        ecut_adjust_tol : maximum allowed |delta_Ecut| in eV for automatic
+            cutoff adjustment (default 0.0 = strict exact-match only).
+
+        Returns
+        -------
+        g_vectors : fractional G-vector array [nG, 3]
+        adjustment : GVectorAdjustment if ECUT was adjusted, else None
+        """
+        header_encut = self.header.encut_eV
         reciprocal = self.header.lattice.reciprocal_cart
+
+        # 1. Try header ENCUT first
+        arr = self._generate_g_vectors_with_encut(k_frac, header_encut, reciprocal)
+        count_at_header = len(arr)
+
+        # Exact match at header ENCUT — no adjustment needed
+        target = _resolve_target_count(nplane_record, count_at_header)
+        if target is not None:
+            return arr, None
+
+        # 2. Strict mode: no tolerance — raise immediately
+        if ecut_adjust_tol <= 0.0:
+            targets = _target_candidates(nplane_record, count_at_header)
+            hint = _format_hint(nplane_record, targets)
+            raise ValueError(
+                f"Generated {count_at_header} G-vectors but WAVECAR reports {nplane_record} "
+                f"(expected {hint}). Unsupported WAVECAR variant or cutoff/G-list convention "
+                f"mismatch. To attempt automatic ENCUT adjustment within a small tolerance, "
+                f"set extract.ecut_adjust_tol to a positive value (e.g. 0.1 eV)."
+            )
+
+        # 3. Automatic adjustment
+        return self._adjust_encut(
+            k_frac, nplane_record, count_at_header, header_encut, ecut_adjust_tol, reciprocal
+        )
+
+    def _generate_g_vectors_with_encut(
+        self, k_frac: np.ndarray, encut: float, reciprocal: np.ndarray
+    ) -> np.ndarray:
+        """Generate G-vectors for a specific ENCUT in VASP loop order."""
         direct = self.header.lattice.direct_cart
-        gcut = np.sqrt(self.header.encut_eV / HBAR2_OVER_2M_EV_A2)
+        gcut = np.sqrt(encut / HBAR2_OVER_2M_EV_A2)
         max_indices = np.ceil(gcut * np.linalg.norm(direct, axis=1) / (2.0 * np.pi)).astype(int) + 1
         vectors: list[list[int]] = []
         for k_raw in range(2 * max_indices[2] + 1):
@@ -158,18 +221,150 @@ class WavecarReader:
                     g_frac = np.array([i, j, k], dtype=float)
                     q_cart = (g_frac + k_frac) @ reciprocal
                     energy = HBAR2_OVER_2M_EV_A2 * float(q_cart @ q_cart)
-                    if energy < self.header.encut_eV:
+                    if energy < encut:
                         vectors.append([i, j, k])
-        arr = np.asarray(vectors, dtype=int)
-        if len(arr) == nplane_record:
-            return arr
-        if nplane_record % 2 == 0 and len(arr) == nplane_record // 2:
-            return arr
-        hint = f"{nplane_record} or {nplane_record // 2} for spinor-count records" if nplane_record % 2 == 0 else str(nplane_record)
-        raise ValueError(
-            f"Generated {len(arr)} G-vectors but WAVECAR reports {nplane_record} "
-            f"(expected {hint}). Unsupported WAVECAR variant or cutoff/G-list convention mismatch."
+        return np.asarray(vectors, dtype=int)
+
+    def _generate_g_vectors_with_energies(
+        self, k_frac: np.ndarray, encut: float, reciprocal: np.ndarray
+    ) -> tuple[list[list[int]], list[float]]:
+        """Generate G-vectors and their kinetic energies in VASP loop order."""
+        direct = self.header.lattice.direct_cart
+        gcut = np.sqrt(encut / HBAR2_OVER_2M_EV_A2)
+        max_indices = np.ceil(gcut * np.linalg.norm(direct, axis=1) / (2.0 * np.pi)).astype(int) + 1
+        vectors: list[list[int]] = []
+        energies: list[float] = []
+        for k_raw in range(2 * max_indices[2] + 1):
+            k = _wrap_fft_index(k_raw, max_indices[2])
+            for j_raw in range(2 * max_indices[1] + 1):
+                j = _wrap_fft_index(j_raw, max_indices[1])
+                for i_raw in range(2 * max_indices[0] + 1):
+                    i = _wrap_fft_index(i_raw, max_indices[0])
+                    g_frac = np.array([i, j, k], dtype=float)
+                    q_cart = (g_frac + k_frac) @ reciprocal
+                    energy = HBAR2_OVER_2M_EV_A2 * float(q_cart @ q_cart)
+                    if energy < encut:
+                        vectors.append([i, j, k])
+                        energies.append(energy)
+        return vectors, energies
+
+    def _adjust_encut(
+        self,
+        k_frac: np.ndarray,
+        nplane_record: int,
+        count_at_header: int,
+        header_encut: float,
+        ecut_adjust_tol: float,
+        reciprocal: np.ndarray,
+    ) -> tuple[np.ndarray, GVectorAdjustment | None]:
+        """Search for an adjusted ENCUT within tolerance that yields exact target count."""
+        # Determine target count
+        target_candidates = _target_candidates(nplane_record, count_at_header)
+        target_count = _choose_target(target_candidates, count_at_header)
+
+        # Collect candidate G-vectors up to header_encut + ecut_adjust_tol
+        max_encut = header_encut + ecut_adjust_tol
+        raw_vectors, raw_energies = self._generate_g_vectors_with_energies(
+            k_frac, max_encut, reciprocal
         )
+
+        if target_count > len(raw_energies):
+            raise ValueError(
+                f"Cannot reach target G count {target_count}: only {len(raw_energies)} "
+                f"candidates within [{header_encut:.6f}, {max_encut:.6f}] eV. "
+                f"Header ENCUT={header_encut:.4f} eV, ecut_adjust_tol={ecut_adjust_tol:.4f} eV. "
+                f"Suggested action: increase ecut_adjust_tol if this is a known "
+                f"cutoff-boundary reconstruction issue."
+            )
+
+        # Sort by energy to find the boundary
+        sorted_idx = np.argsort(raw_energies)
+        sorted_energies = np.asarray(raw_energies)[sorted_idx]
+
+        # ecut_recon is placed between the target_count-th and (target_count+1)-th
+        if target_count < len(sorted_energies):
+            ecut_recon = (sorted_energies[target_count - 1] + sorted_energies[target_count]) / 2.0
+        else:
+            ecut_recon = sorted_energies[-1] + _TINY_ENERGY_EV
+
+        delta = ecut_recon - header_encut
+
+        if abs(delta) > ecut_adjust_tol + 1e-10:
+            closest_achievable = len(sorted_energies)
+            if target_count < len(sorted_energies):
+                alt_delta = sorted_energies[target_count - 1] - header_encut
+            else:
+                alt_delta = float("inf")
+            raise ValueError(
+                f"Required ENCUT adjustment {delta:.6f} eV exceeds "
+                f"ecut_adjust_tol={ecut_adjust_tol:.4f} eV. "
+                f"Header ENCUT={header_encut:.4f} eV, generated {count_at_header} vectors. "
+                f"Target G count={target_count}, closest achievable={closest_achievable}. "
+                f"Closest achievable |delta_Ecut| would be ~{abs(alt_delta):.6f} eV. "
+                f"Suggested action: increase ecut_adjust_tol only if the mismatch is known "
+                f"to be a cutoff-boundary reconstruction issue."
+            )
+
+        # Regenerate with adjusted ENCUT
+        arr = self._generate_g_vectors_with_encut(k_frac, ecut_recon, reciprocal)
+
+        if len(arr) != target_count:
+            raise ValueError(
+                f"ENCUT adjustment failed: generated {len(arr)} vectors at "
+                f"reconstruction ENCUT={ecut_recon:.6f} eV, expected {target_count}. "
+                f"This may indicate degenerate energies at the cutoff boundary."
+            )
+
+        return arr, GVectorAdjustment(
+            original_encut_eV=header_encut,
+            reconstruction_encut_eV=ecut_recon,
+            delta_eV=delta,
+            target_g_count=target_count,
+            generated_at_header_encut=count_at_header,
+            generated_at_recon_encut=len(arr),
+        )
+
+
+_TINY_ENERGY_EV = 1e-9
+
+
+def _resolve_target_count(nplane_record: int, count_at_header: int) -> int | None:
+    """Return the matching target count or None if no exact match.
+
+    Handles both scalar (nplane_record = nG) and spinor (nplane_record = 2*nG).
+    """
+    if count_at_header == nplane_record:
+        return nplane_record
+    if nplane_record % 2 == 0 and count_at_header == nplane_record // 2:
+        return nplane_record // 2
+    return None
+
+
+def _target_candidates(nplane_record: int, count_at_header: int) -> list[int]:
+    """Return list of plausible target G counts."""
+    cand = [nplane_record]
+    if nplane_record % 2 == 0:
+        cand.append(nplane_record // 2)
+    return sorted(set(cand))
+
+
+def _choose_target(candidates: list[int], count_at_header: int) -> int:
+    """Choose the best target count among candidates derived from nplane_record.
+
+    Excludes count_at_header itself (which is what we already have) and
+    picks the remaining candidate closest to it. This ensures the target
+    comes from the WAVECAR's actual record, not from our reconstruction.
+    """
+    primary = [c for c in candidates if c != count_at_header]
+    if primary:
+        return min(primary, key=lambda t: abs(t - count_at_header))
+    return count_at_header
+
+
+def _format_hint(nplane_record: int, targets: list[int]) -> str:
+    if len(targets) == 1:
+        return str(targets[0])
+    return f"{targets[0]} or {targets[1]} for spinor-count records"
 
 
 def _wrap_fft_index(raw: int, max_index: int) -> int:

@@ -16,5 +16,13 @@ extract:
   # Noncollinear/SOC spinor records are detected from coefficient record length.
   spin_index: 1
 
+  # Maximum allowed |delta_Ecut| in eV for automatic G-list reconstruction
+  # cutoff adjustment.  Default 0.0 = strict exact-match only.
+  # For large SOC / noncollinear moire WAVECAR files, a small adjustment
+  # (e.g. 0.1 eV) can resolve cutoff-boundary mismatches between VASP's
+  # internal G-list and the reconstructed G-list from header ENCUT.
+  # Non-zero adjustments are written to HDF5 metadata and reported on stdout.
+  # ecut_adjust_tol: 0.0
+
 output:
   wavefunction_h5: ./selected_wavefunctions.h5
