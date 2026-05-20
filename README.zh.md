@@ -124,7 +124,7 @@ ValleyScope 报告分解 $W_{\rm val}+W_{\rm overlap}+W_{\rm res}=1$。在 CSV/J
 ValleyScope 投影整个目标子空间并构造投影谷矩阵。给定 $N_v$ 个谷投影算符 $P_a$ 和目标态 $\{|\psi_i\rangle\}$，
 
 ```math
-P_a^{\rm sub}_{ij}=
+\left(P_a^{\rm sub}\right)_{ij}=
 \langle\psi_i|P_a|\psi_j\rangle,
 \qquad
 S=\sum_a P_a^{\rm sub},

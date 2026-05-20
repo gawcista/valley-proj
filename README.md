@@ -129,7 +129,7 @@ For an isolated nondegenerate band, the single-state quantities above can be rea
 ValleyScope instead projects the target subspace and constructs the projected valley operators. Given $N_v$ valley projectors $P_a$ and raw VASP states $\{|\psi_i\rangle\}$, the projected valley matrices are
 
 ```math
-P_a^{\rm sub}_{ij}=
+\left(P_a^{\rm sub}\right)_{ij}=
 \langle\psi_i|P_a|\psi_j\rangle,
 \qquad
 S=\sum_a P_a^{\rm sub}.
