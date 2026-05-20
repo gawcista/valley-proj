@@ -371,12 +371,14 @@ def _add_valley_subspace_diagnostic(
             w_overlap=max_w_overlap,
             w_res=max_w_res,
             thresholds=thresholds,
+            two_sector=(n_valleys == 2),
         )
         if valid_valley_subspace:
             transform_entry: dict[str, object] = {
                 "transform": diagnosed.transform,
                 "s_matrix": diagnosed.s_matrix,
                 "band_indices_vasp": np.asarray(band_indices_vasp, dtype=int),
+                "sectors": np.asarray(sector_names, dtype="S"),
                 "valleys": np.asarray(sector_names, dtype="S"),
                 "valid_valley_subspace": np.asarray(valid_valley_subspace),
                 "s_eigenvalues": s_eigenvalues,
@@ -387,6 +389,11 @@ def _add_valley_subspace_diagnostic(
             }
             if diagnosed.eta_adapted is not None:
                 transform_entry["eta"] = diagnosed.eta_adapted
+            if n_valleys == 2:
+                transform_entry["v_matrix"] = (
+                    diagnosed.valley_matrices[sector_names[0]]
+                    - diagnosed.valley_matrices[sector_names[1]]
+                )
             basis_transforms[kpoint_name] = transform_entry
     payload["valley_adapted_subspace"] = diagnostic
 

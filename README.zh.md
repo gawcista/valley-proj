@@ -398,22 +398,23 @@ W_res:      剩余权重
 
 屏幕上的 `status` 保持紧凑，但会区分前置失败：`clean`、`approx`、`mixed`、`not_derived`、`unreliable` 或 `n/a`。
 
-再看 `Valley subspace analysis`。近简并子空间中的原始 VASP 本征矢依赖规范选择，逐条能带投影不是最终诊断。对于双谷设置，ValleyScope 在目标子空间中构造
+再看 `Valley subspace analysis`。近简并子空间中的原始 VASP 本征矢依赖规范选择，逐条能带投影不是最终诊断。ValleyScope 在目标子空间中构造通用投影谷矩阵 $P_a^{\rm sub}$ 和标签算符 $L = \sum_a \lambda_a P_a^{\rm sub}$：
 
 ```math
-S=P_K+P_{K'}, \qquad V=P_K-P_{K'} .
+S=\sum_a P_a^{\rm sub}, \qquad
+L=\sum_a \lambda_a P_a^{\rm sub}.
 ```
 
 ```text
-S=P_K+P_Kp: 目标能带中的目标谷子空间投影算符
-V=P_K-P_Kp: 用于双谷设置中固定谷基的投影谷算符
-S_min:      目标谷子空间权重下界
-S_max:      目标谷子空间权重上界
-P_v_min:    固定谷基后的最低谷纯度
-eta_adapted: 谷适配基中的有符号谷极化
+S = sum_a P_a^sub:  目标能带中的目标谷子空间投影算符
+S_min:              目标谷子空间权重下界
+S_max:              目标谷子空间权重上界
+min_concentration:  谷适配基中的最低谷集中度
+assigned_valleys:   每个适配态的谷归属
+eta_adapted:        有符号谷极化（仅双谷兼容字段）
 ```
 
-`S` 判断所选目标能带是否能被选定的谷子空间良好描述；`V` 在存在两个谷时选出最谷极化的基。这里输出的是对子空间整体的诊断，不是逐条原始能带投影表的重复。
+`S` 判断所选目标能带是否能被选定的谷子空间良好描述；标签算符 `L` 在任意谷数下固定谷适配基。对双谷，`eta_adapted` 作为兼容字段继续输出；对三谷及以上，应使用 `valley_weights_adapted`、`assigned_valleys` 和 `valley_concentration`。双谷 $V=P_K-P_{K'}$ 是这个通用框架的特例。这里输出的是对子空间整体的诊断，不是逐条原始能带投影表的重复。
 
 屏幕摘要的 `status` 取值为 `clean`、`approx`、`mixed`、`not_derived`、`unreliable` 和 `n/a`。前三者描述谷集中度；`not_derived` 表示目标谷子空间权重不足，`unreliable` 表示投影窗口或剩余权重检查失败，`n/a` 表示该子空间诊断不适用。
 
@@ -540,11 +541,18 @@ summary JSON 包含一等字段 `symmetry_characters`。每一行按 `(kpoint, o
 
 ```text
 /GammaM/transform
-/GammaM/eta
+/GammaM/eta                 （仅双谷）
 /GammaM/s_matrix
-/GammaM/v_matrix
+/GammaM/label_operator
+/GammaM/s_eigenvalues
+/GammaM/valley_weights_adapted
+/GammaM/assigned_valleys
+/GammaM/valley_concentration
 /GammaM/band_indices_vasp
+/GammaM/valid_valley_subspace
 ```
+
+对正好两个谷，`eta` 和 `v_matrix` 会作为兼容字段继续写出。对三谷及以上，应使用 `valley_weights_adapted` 和 `assigned_valleys`。后续在谷适配子空间中构造表示矩阵时使用这里的 `transform`。
 
 ### symmetry_report.json
 

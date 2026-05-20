@@ -31,15 +31,15 @@ def test_degenerate_two_valley_subspace_recovers_pure_valley_basis():
 
     # Legacy API
     legacy = build_two_valley_adapted_basis(coefficients, masks, "K_valley", "Kp_valley")
-    assert sorted(np.round(legacy.eta.real, 8).tolist()) == [-1.0, 1.0]
+    assert np.round(legacy.eta.real, 8).tolist() == [1.0, -1.0]
     assert legacy.transform.shape == (2, 2)
     assert np.allclose(legacy.transform.conj().T @ legacy.transform, np.eye(2))
 
     # New general API
     result = build_valley_adapted_basis(coefficients, masks)
     assert result.eta_adapted is not None
-    assert sorted(np.round(result.eta_adapted.real, 8).tolist()) == [-1.0, 1.0]
-    assert result.assigned_valleys == ["Kp_valley", "K_valley"] or result.assigned_valleys == ["K_valley", "Kp_valley"]
+    assert np.round(result.eta_adapted.real, 8).tolist() == [1.0, -1.0]
+    assert result.assigned_valleys == ["K_valley", "Kp_valley"]
     assert np.allclose(result.min_valley_concentration, 1.0, atol=1e-8)
     assert result.valley_weights_adapted.shape == (2, 2)
 

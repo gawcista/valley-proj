@@ -64,9 +64,9 @@ def _projector_matrix(coefficients: np.ndarray, mask: np.ndarray) -> np.ndarray:
 
 
 def _default_valley_labels(n_valleys: int) -> tuple[list[str], np.ndarray]:
-    """Deterministic labels: linspace(-1, 1, n) for 2, else 0,1,2,..."""
+    """Deterministic labels matching legacy two-valley ordering."""
     if n_valleys == 2:
-        values = np.linspace(-1.0, 1.0, 2)
+        values = np.array([1.0, -1.0], dtype=float)
     else:
         values = np.arange(n_valleys, dtype=float)
     labels = [f"valley_{i}" for i in range(n_valleys)]

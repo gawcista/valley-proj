@@ -13,6 +13,7 @@ from valleyscope.io.config import load_config
 from valleyscope.io.h5_reader import read_wavefunction_h5
 from valleyscope.geometry.lattice import read_poscar_cell, read_poscar_lattice
 from valleyscope.cli import main as cli_main
+from valleyscope.projection.sector_projectors import SectorProjectors
 from valleyscope.workflows.analyze_hsp import analyze_hsp
 
 
@@ -625,7 +626,7 @@ def test_analyze_hsp_writes_csv_json_and_diagnostics_h5(tmp_path):
     assert "two_valley_subspace" not in summary
     subspace_rows = summary["valley_subspace_analysis"]
     assert subspace_rows
-    assert subspace_rows[0].get("status") in {"valley_separable", "valley_approx", "clean", "approx", "mixed", "not_derived", "unreliable", "n/a"}
+    assert subspace_rows[0].get("status") in {"clean", "approx", "mixed", "not_derived", "unreliable", "n/a"}
     assert "derived_score" not in summary["valley_projection_summary"][0]
     assert "polarization_score" not in summary["valley_projection_summary"][0]
     assert "valley_status" not in summary["valley_projection_summary"][0]
@@ -802,7 +803,9 @@ def test_chinese_readme_uses_public_valley_vocabulary():
     assert "Valley subspaces" in readme
     assert "Valley subspace analysis" in readme
     assert "Two-valley subspace" not in readme
-    assert "S_min:      目标谷子空间权重下界" in readme
+    assert "S_min:              目标谷子空间权重下界" in readme
+    assert "min_concentration:" in readme
+    assert "assigned_valleys:" in readme
     assert "`not_derived`" in readme
     assert "`unreliable`" in readme
     assert "single-valley irrep" in readme
@@ -813,6 +816,8 @@ def test_chinese_readme_uses_public_valley_vocabulary():
     assert "P321 No.150" not in readme
     assert "P3 No.143" not in readme
     assert "double-valued" in readme
+    assert "valley_weights_adapted" in readme
+    assert "assigned_valleys" in readme
     assert "`root_deviation_tol` 和 `D_valley_offdiag_tol` 是 numerical readiness thresholds" in readme
     assert "`strict`、`normal`、`loose`" in readme
     assert "header-only" in readme
@@ -855,12 +860,55 @@ def test_analyze_hsp_writes_valley_subspace_analysis_transform_for_degenerate_pa
     with h5py.File(outputs["valley_basis_transform_h5"], "r") as h5:
         assert "GammaM" in h5
         assert h5["GammaM/transform"].shape == (2, 2)
+        assert h5["GammaM/eta"].shape == (2,)
+        assert h5["GammaM/v_matrix"].shape == (2, 2)
+        assert [value.decode() for value in h5["GammaM/sectors"][()]] == ["K_valley", "Kp_valley"]
+        assert [value.decode() for value in h5["GammaM/valleys"][()]] == ["K_valley", "Kp_valley"]
     subspace = json.loads(outputs["valley_subspace_json"].read_text(encoding="utf-8"))
     diagnostic = subspace["kpoints"]["GammaM"]["valley_adapted_subspace"]
     assert diagnostic["status"] == "valley_separable"
     assert diagnostic["valid_valley_subspace"] is True
     assert diagnostic["s_min"] == pytest.approx(1.0)
     assert diagnostic["s_max"] == pytest.approx(1.0)
+    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    assert summary["valley_subspace_analysis"][0]["status"] == "clean"
+
+
+def test_multivalley_subspace_status_uses_pv_thresholds_for_concentration():
+    from valleyscope.workflows.analyze_hsp import _add_valley_subspace_diagnostic
+
+    coefficients = np.zeros((2, 1, 3), dtype=np.complex128)
+    coefficients[0, 0, 0] = 1.0
+    coefficients[1, 0, 1] = np.sqrt(0.92)
+    coefficients[1, 0, 2] = np.sqrt(0.08)
+    projectors = SectorProjectors(
+        sector_masks={
+            "A_valley": np.array([True, False, False]),
+            "B_valley": np.array([False, True, False]),
+            "C_valley": np.array([False, False, True]),
+        },
+        center_masks={},
+        overlap_mask=np.zeros(3, dtype=bool),
+        qcut=0.5,
+        warnings=[],
+    )
+    payload: dict[str, object] = {}
+    basis_transforms: dict[str, dict[str, np.ndarray]] = {}
+
+    _add_valley_subspace_diagnostic(
+        payload,
+        basis_transforms,
+        "GammaM",
+        np.array([101, 102]),
+        np.array([0.1, 0.1001]),
+        coefficients,
+        projectors,
+        degeneracy_tol_meV=1.0,
+        thresholds={"W_val_min": 0.8, "P_v_clean": 0.95, "P_v_approx": 0.85},
+    )
+
+    assert payload["polarization_score"] == pytest.approx(0.92)
+    assert payload["subspace_valley_status"] == "valley_approximately_separable_subspace"
 
 
 def test_symmetry_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp_path):

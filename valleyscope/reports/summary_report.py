@@ -578,9 +578,9 @@ def _short_valley_status(status: Any) -> str:
     if value == "projector_unreliable":
         return "unreliable"
     if value.endswith("clean") or value == "valley_separable_subspace" or value == "valley_separable":
-        return "valley_separable"
+        return "clean"
     if "approx" in value:
-        return "valley_approx"
+        return "approx"
     if not value:
         return "n/a"
     return "mixed"
