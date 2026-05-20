@@ -276,6 +276,12 @@ extract:
   # For SOC/noncollinear WAVECAR files, the extractor detects spinor records.
   spin_index: 1
 
+  # Optional: max |delta_Ecut| in eV for automatic G-list reconstruction
+  # cutoff adjustment.  For large SOC/noncollinear moire WAVECAR files,
+  # a small value (e.g. 0.1 eV) resolves cutoff-boundary mismatches between
+  # VASP's internal G-list and header-ENCUT reconstruction. Default 0.0.
+  # ecut_adjust_tol: 0.0
+
 output:
   wavefunction_h5: ./wave.h5
 ```
@@ -290,15 +296,25 @@ After extraction, check that the HDF5 file contains the intended k points and ba
 
 ```text
 /metadata/g_vector_order
+/metadata/g_list_reconstruction_mode   (exact or ecut_adjusted)
+/metadata/original_encut_eV
+/metadata/reconstruction_encut_eV
+/metadata/ecut_adjust_tol_eV
+/metadata/ecut_adjust_delta_eV
 /kpoints/N/name
 /kpoints/N/frac
 /kpoints/N/g_vectors_frac
 /kpoints/N/coefficients       [nb, nspinor, nG]
 /kpoints/N/energies_eV
 /kpoints/N/band_indices_vasp
+/kpoints/N/nplane_record
+/kpoints/N/target_g_count
+/kpoints/N/generated_g_count_at_header_encut
+/kpoints/N/generated_g_count_final
+/kpoints/N/ecut_adjust_delta_eV
 ```
 
-If the extractor reports a G-vector count mismatch, stop there. That usually means the current WAVECAR variant or G-list convention is not supported yet.
+If the extractor reports a G-vector count mismatch, first try adding a small `ecut_adjust_tol` (e.g. 0.1 eV) to the config. WAVECAR files from large SOC/noncollinear moire supercells can show small differences between VASP's internal G-list cutoff and the reconstructed cutoff. If a large adjustment is required, the WAVECAR variant, lattice convention, or G-list ordering may have a more fundamental mismatch.
 
 ### Analyze HSP Wavefunctions (Full Reference)
 

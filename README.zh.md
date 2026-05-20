@@ -258,6 +258,12 @@ extract:
   # SOC/非共线 WAVECAR 由抽取器自动检测 spinor
   spin_index: 1
 
+  # 可选：自动 G-list 重建 cutoff 微调的最大 |delta_Ecut|，单位 eV。
+  # 对大型 SOC/非共线 moire WAVECAR，设置一个小值（如 0.1 eV）
+  # 可解决 VASP 内部 G-list 与 header ENCUT 重建之间的 cutoff 边界差异。
+  # 默认 0.0 = 严格精确匹配模式。
+  # ecut_adjust_tol: 0.0
+
 output:
   wavefunction_h5: ./wave.h5
 ```
@@ -270,15 +276,25 @@ valleyscope extract-wavecar extract.yaml
 
 ```text
 /metadata/g_vector_order
+/metadata/g_list_reconstruction_mode   (exact 或 ecut_adjusted)
+/metadata/original_encut_eV
+/metadata/reconstruction_encut_eV
+/metadata/ecut_adjust_tol_eV
+/metadata/ecut_adjust_delta_eV
 /kpoints/N/name
 /kpoints/N/frac
 /kpoints/N/g_vectors_frac
 /kpoints/N/coefficients       [nb, nspinor, nG]
 /kpoints/N/energies_eV
 /kpoints/N/band_indices_vasp
+/kpoints/N/nplane_record
+/kpoints/N/target_g_count
+/kpoints/N/generated_g_count_at_header_encut
+/kpoints/N/generated_g_count_final
+/kpoints/N/ecut_adjust_delta_eV
 ```
 
-如果抽取器报 G-vector 数量不匹配，说明当前 WAVECAR 变体或 G-list 约定尚不支持。
+如果抽取器报 G-vector 数量不匹配，先尝试添加一个小 `ecut_adjust_tol`（如 0.1 eV）。大型 SOC/非共线 moire 超胞的 WAVECAR 可能因 cutoff 边界约定出现小差异。如果需要较大 adjustment，说明 WAVECAR 变体、晶格约定或 G-list 排序可能有更根本的不匹配。
 
 ### 分析高对称点波函数
 
