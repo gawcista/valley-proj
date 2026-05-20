@@ -5,7 +5,10 @@ from typing import Any
 import numpy as np
 import spglib
 
-from valleyscope.irreps.matching import decompose_characters_into_irreps
+from valleyscope.irreps.matching import (
+    decompose_characters_into_irreps,
+    match_single_state_irrep,
+)
 from valleyscope.irreps.tables import load_standard_irrep_table, match_table_operations
 from valleyscope.symmetry.little_group import is_little_group_operation
 
@@ -217,6 +220,13 @@ def add_valley_irrep_results(
             computed_characters=computed_characters,
             tolerance=tolerance,
         )
+        state_irrep_result = _match_single_state_irreps(
+            table=table,
+            table_kpoint_label=str(kpoint_info["table_kpoint_label"]),
+            table_operation_indices=kpoint_info.get("table_operation_indices", []),
+            state_characters=character_data["state_characters"],
+            tolerance=tolerance,
+        )
         results_by_kpoint[kpoint] = {
             "status": match_result.status,
             "table_kpoint_label": match_result.table_kpoint_label,
@@ -226,6 +236,8 @@ def add_valley_irrep_results(
             "irrep_multiplicities": match_result.irrep_multiplicities,
             "missing_table_operation_indices": match_result.missing_table_operation_indices,
             "failure_reasons": match_result.failure_reasons,
+            "state_irrep_assignment_status": state_irrep_result["status"],
+            "state_irrep_results": state_irrep_result["results"],
         }
 
     all_matched = bool(results_by_kpoint) and all(
@@ -396,6 +408,7 @@ def _collect_computed_characters(
     computed_characters: dict[int, complex] = {}
     ready_row_counts: dict[int, int] = {}
     rows_by_table_operation: dict[int, list[dict[str, Any]]] = {}
+    state_characters: dict[int, dict[int, complex]] = {}
     for row in symmetry_rows:
         if str(row.get("kpoint", "")) != kpoint:
             continue
@@ -408,6 +421,12 @@ def _collect_computed_characters(
             continue
         table_index = operation_to_table[operation_id]
         rows_by_table_operation.setdefault(table_index, []).append(row)
+
+        if bool(row.get("topology_input_ready", False)):
+            eigenvalue = _row_eigenvalue(row)
+            if eigenvalue is not None:
+                state_index = int(row.get("state_index", 0))
+                state_characters.setdefault(state_index, {})[table_index] = eigenvalue
 
     for table_index, rows in rows_by_table_operation.items():
         if not rows or not all(bool(row.get("topology_input_ready", False)) for row in rows):
@@ -422,7 +441,50 @@ def _collect_computed_characters(
     return {
         "computed_characters": computed_characters,
         "ready_row_counts": ready_row_counts,
+        "state_characters": state_characters,
     }
+
+
+def _match_single_state_irreps(
+    *,
+    table,
+    table_kpoint_label: str,
+    table_operation_indices: Any,
+    state_characters: dict[int, dict[int, complex]],
+    tolerance: float,
+) -> dict[str, Any]:
+    table_indices = list(table_operation_indices)
+    results: list[dict[str, Any]] = []
+    for state_index in sorted(state_characters):
+        characters = dict(state_characters[state_index])
+        if 1 in table_indices and 1 not in characters:
+            characters[1] = 1.0 + 0.0j
+        result = match_single_state_irrep(
+            table=table,
+            table_kpoint_label=table_kpoint_label,
+            state_index=state_index,
+            computed_characters=characters,
+            tolerance=tolerance,
+        )
+        results.append(
+            {
+                "state_index": result.state_index,
+                "status": result.status,
+                "irrep_label": result.irrep_label,
+                "computed_characters": _format_complex_character_dict(result.computed_characters),
+                "irrep_multiplicities": result.irrep_multiplicities,
+                "missing_table_operation_indices": result.missing_table_operation_indices,
+                "failure_reasons": result.failure_reasons,
+            }
+        )
+
+    if not results:
+        status = "not_attempted"
+    elif all(result["status"] == "matched" for result in results):
+        status = "matched"
+    else:
+        status = "incomplete"
+    return {"status": status, "results": results}
 
 
 def _fill_identity_character_if_needed(
@@ -440,6 +502,14 @@ def _fill_identity_character_if_needed(
     inferred_dimension = max(ready_row_counts.values())
     computed_characters[1] = complex(float(inferred_dimension), 0.0)
     return "inferred_from_ready_rows"
+
+
+def _row_eigenvalue(row: dict[str, Any]) -> complex | None:
+    real = row.get("eigenvalue_real")
+    imag = row.get("eigenvalue_imag")
+    if real in (None, "") or imag in (None, ""):
+        return None
+    return complex(float(real), float(imag))
 
 
 def _parse_complex_character(value: Any) -> complex:

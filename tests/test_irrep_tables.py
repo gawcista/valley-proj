@@ -2,7 +2,10 @@ import numpy as np
 import pytest
 
 from valleyscope.irreps.tables import load_standard_irrep_table, match_table_operations
-from valleyscope.irreps.matching import decompose_characters_into_irreps
+from valleyscope.irreps.matching import (
+    decompose_characters_into_irreps,
+    match_single_state_irrep,
+)
 
 
 def test_load_sg143_spinor_table_exposes_double_valued_k_irreps():
@@ -99,3 +102,83 @@ def test_decompose_characters_reports_missing_table_operations():
     assert result.irrep_multiplicities == {}
     assert result.missing_table_operation_indices == [3]
     assert result.failure_reasons == ["Missing computed characters for table operations: [3]"]
+
+
+# -------------------------------------------------------------------------
+# Single-state irrep matching tests
+# -------------------------------------------------------------------------
+
+def test_match_single_state_irrep_identifies_clean_one_dimensional_result():
+    table = load_standard_irrep_table(143, spinor=True)
+
+    result = match_single_state_irrep(
+        table=table,
+        table_kpoint_label="K",
+        state_index=0,
+        computed_characters={
+            1: 1.0 + 0.0j,
+            2: np.exp(-1j * np.pi / 3.0),
+            3: np.exp(+1j * np.pi / 3.0),
+        },
+    )
+
+    assert result.status == "matched"
+    assert result.irrep_label == "-K5"
+    assert result.state_index == 0
+    assert result.irrep_multiplicities == {"-K5": 1}
+    assert result.failure_reasons == []
+
+
+def test_match_single_state_irrep_returns_missing_characters_when_operation_missing():
+    table = load_standard_irrep_table(143, spinor=True)
+
+    result = match_single_state_irrep(
+        table=table,
+        table_kpoint_label="K",
+        state_index=0,
+        computed_characters={1: 1.0 + 0.0j, 2: np.exp(-1j * np.pi / 3.0)},
+    )
+
+    assert result.status == "missing_characters"
+    assert result.irrep_label is None
+
+
+def test_match_single_state_irrep_rejects_ambiguous_decomposition():
+    table = load_standard_irrep_table(143, spinor=True)
+
+    result = match_single_state_irrep(
+        table=table,
+        table_kpoint_label="K",
+        state_index=0,
+        computed_characters={
+            1: 2.0 + 0.0j,  # two-dimensional aggregate → ambiguous per state
+            2: 1.0 + 0.0j,
+            3: 1.0 + 0.0j,
+        },
+    )
+
+    assert result.status == "ambiguous_irrep_label"
+    assert result.irrep_label is None
+
+
+def test_match_single_state_irrep_rejects_non_one_dimensional_irrep():
+    """Characters that decompose to >1 irrep or multiplicity >1 are ambiguous per state."""
+    table = load_standard_irrep_table(143, spinor=True)
+
+    # Characters decomposing to -K4 (1) + -K5 (1) → ambiguous
+    k4 = table.irreps_by_kpoint("K")[0]  # -K4
+    k5 = table.irreps_by_kpoint("K")[1]  # -K5
+    chars = {
+        op: k4.characters[op] + k5.characters[op]
+        for op in [1, 2, 3]
+    }
+
+    result = match_single_state_irrep(
+        table=table,
+        table_kpoint_label="K",
+        state_index=0,
+        computed_characters=chars,
+    )
+
+    assert result.status == "ambiguous_irrep_label"
+    assert result.irrep_label is None

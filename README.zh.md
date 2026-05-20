@@ -165,7 +165,7 @@ G_\tau=\{\,g\in G\mid gV_\tau=V_\tau\,\},
 
 含 SOC 时必须使用 double-valued irreps。spinor 波函数在 $2\pi$ 旋转下变号，因此 spinful $C_3$ 满足 $C_3^3=-1$，允许 $\exp(+i\pi/3)$、$-1$、$\exp(-i\pi/3)$ 等本征值。
 
-经过 valley-preservation 过滤后，ValleyScope 会报告全局 `G_tau` 操作集合；在操作数据足够时，会用 `spglib.get_spacegroup_type_from_symmetry` 尝试识别标准空间群。每个 HSP 的条目记为 `G_tau,k`，表示用于 character 输入的谷保持小群。当 operation-to-table mapping 完成时，`irrep_matching.irrep_results_by_kpoint` 会通过 character decomposition 给出 representation-level `irrep_multiplicities`。per-state label 只应在一维结果足够 clean 时再解释，不会贴给 raw VASP states。
+经过 valley-preservation 过滤后，ValleyScope 会报告全局 `G_tau` 操作集合；在操作数据足够时，会用 `spglib.get_spacegroup_type_from_symmetry` 尝试识别标准空间群。每个 HSP 的条目记为 `G_tau,k`，表示用于 character 输入的谷保持小群。当 operation-to-table mapping 完成时，`irrep_matching.irrep_results_by_kpoint` 会通过 character decomposition 给出 representation-level `irrep_multiplicities`。当每个 ready state 可单独匹配唯一的一维 irrep 时，同一结果会包含 `state_irrep_results` 记录 per-state 标签。这些是谷保持子群 character matching 结果，不是 reduced EBR decomposition 或拓扑结论。
 
 ## 运行流程
 
@@ -434,7 +434,7 @@ eta_adapted:        有符号谷极化（仅双谷兼容字段）
 
 屏幕摘要的 `status` 取值为 `clean`、`approx`、`mixed`、`not_derived`、`unreliable` 和 `n/a`。前三者描述谷集中度；`not_derived` 表示目标谷子空间权重不足，`unreliable` 表示投影窗口或剩余权重检查失败，`n/a` 表示该子空间诊断不适用。
 
-`Symmetry analysis` 先列出空间群和检测到的对称操作，再按高对称点列出 little-group 操作和 valley-preserving 操作。把一个谷映射到另一个谷的操作会标记为 `valley-exchanging`。JSON 摘要还包含 `symmetry_analysis.valley_preserving_subgroup_report`：它报告全局谷保持 `G_tau` 操作集合，在操作数据足够时尝试识别标准空间群，并记录每个 HSP 的 `G_tau,k` 小群操作集合。如果 `irreptables` table mapping 和 character matching 完成，`irrep_matching.irrep_results_by_kpoint` 会记录 HSP irrep multiplicities，例如 `{"-K5": 1, "-K6": 1}`。`Symmetry eigenvalues` 只列出实际构造了表示矩阵并求得本征值的操作。`symmetry_characters` 聚合通过 little-group 和 valley-preservation 检查的 $\chi^\tau_k(g)=\mathrm{Tr}\,D^\tau_k(g)$；它是 irrep matching 的 character 输入层。`topology_input_ready` 只表示该高对称点对称本征值可作为后续基于对称性的拓扑分析输入，不验证整个 mBZ 的谷分辨拓扑。
+`Symmetry analysis` 先列出空间群和检测到的对称操作，再按高对称点列出 little-group 操作和 valley-preserving 操作。把一个谷映射到另一个谷的操作会标记为 `valley-exchanging`。JSON 摘要还包含 `symmetry_analysis.valley_preserving_subgroup_report`：它报告全局谷保持 `G_tau` 操作集合，在操作数据足够时尝试识别标准空间群，并记录每个 HSP 的 `G_tau,k` 小群操作集合。如果 `irreptables` table mapping 和 character matching 完成，`irrep_matching.irrep_results_by_kpoint` 会记录 HSP irrep multiplicities，例如 `{"-K5": 1, "-K6": 1}`。当每个 ready state 可独立匹配唯一的一维 irrep 时，同一结果会包含 `state_irrep_results`。`Symmetry eigenvalues` 只列出实际构造了表示矩阵并求得本征值的操作。`symmetry_characters` 聚合通过 little-group 和 valley-preservation 检查的 $\chi^\tau_k(g)=\mathrm{Tr}\,D^\tau_k(g)$；它是 irrep matching 的 character 输入层。`topology_input_ready` 只表示该高对称点对称本征值可作为后续基于对称性的拓扑分析输入，不验证整个 mBZ 的谷分辨拓扑。
 
 对于 SOC spinor 波函数，ValleyScope 在平面波表示中施加 SU(2) 自旋旋转。默认 VASP 自旋约定未验证时标记为 `diagnostic_only=True`。完成基准测试后可设置 `spinor.convention_verified: true`。
 
@@ -574,7 +574,7 @@ summary JSON 包含一等字段 `symmetry_characters`。每一行按 `(kpoint, o
 
 记录检测到的对称操作（类型、旋转矩阵、平移、候选旋转状态、后端、小群/谷保持检查结果）。
 
-summary JSON 额外暴露 `symmetry_analysis.valley_preserving_subgroup_report`。该结果列出全局 `G_tau` 操作、valley-exchanging 操作编号、闭合状态，以及从检测到的谷保持操作得到的标准空间群匹配。每个 HSP 的 `G_tau,k` 条目列出作为 character 输入的小群操作。`irrep_matching` 记录 table mapping；当有足够的 ready characters 时，`irrep_results_by_kpoint` 给出 representation-level `irrep_multiplicities`。
+summary JSON 额外暴露 `symmetry_analysis.valley_preserving_subgroup_report`。该结果列出全局 `G_tau` 操作、valley-exchanging 操作编号、闭合状态，以及从检测到的谷保持操作得到的标准空间群匹配。每个 HSP 的 `G_tau,k` 条目列出作为 character 输入的小群操作。`irrep_matching` 记录 table mapping；当有足够的 ready characters 时，`irrep_results_by_kpoint` 给出 representation-level `irrep_multiplicities` 和 clean one-dimensional `state_irrep_results`。
 
 `"status": "skipped"` 通常表示 `symmetry.operations.structure_file` 未设置或路径错误。
 

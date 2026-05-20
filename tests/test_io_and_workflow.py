@@ -748,6 +748,7 @@ def test_readme_symmetry_example_uses_parser_schema(tmp_path):
     assert "valley-preserving subgroup" in readme
     assert "irrep_results_by_kpoint" in readme
     assert "irrep_multiplicities" in readme
+    assert "state_irrep_results" in readme
     assert "tMoTe2" not in readme
     assert "P321 No.150" not in readme
     assert "P3 No.143" not in readme
@@ -812,6 +813,7 @@ def test_chinese_readme_uses_public_valley_vocabulary():
     assert "谷保持子群" in readme
     assert "irrep_results_by_kpoint" in readme
     assert "irrep_multiplicities" in readme
+    assert "state_irrep_results" in readme
     assert "tMoTe2" not in readme
     assert "P321 No.150" not in readme
     assert "P3 No.143" not in readme
@@ -1930,9 +1932,23 @@ def _p3_fake_symmetry_payload() -> dict:
 
 def _ready_character_rows(kpoint: str, *, operation_2_state_1_ready: bool = True) -> list[dict]:
     rows = []
+    # Per-state eigenvalues for the valley-adapted basis at GM (k=0):
+    #   state 0: C3 -> exp(-i*pi/3),  C3^2 -> exp(+i*pi/3)
+    #   state 1: C3 -> exp(+i*pi/3),  C3^2 -> exp(-i*pi/3)
+    eigenvalues = {
+        1: [                # C3 (table index 2)
+            np.exp(-1j * np.pi / 3.0),
+            np.exp(+1j * np.pi / 3.0),
+        ],
+        2: [                # C3^2 (table index 3)
+            np.exp(+1j * np.pi / 3.0),
+            np.exp(-1j * np.pi / 3.0),
+        ],
+    }
     for operation_id in [1, 2]:
         for state_index in [0, 1]:
             ready = operation_id != 2 or state_index != 1 or operation_2_state_1_ready
+            eigenvalue = eigenvalues[operation_id][state_index]
             rows.append(
                 {
                     "kpoint": kpoint,
@@ -1946,6 +1962,8 @@ def _ready_character_rows(kpoint: str, *, operation_2_state_1_ready: bool = True
                     "root_deviation": 0.0,
                     "rotation_ready": ready,
                     "D_valley_offdiag_norm": 0.0,
+                    "eigenvalue_real": float(eigenvalue.real),
+                    "eigenvalue_imag": float(eigenvalue.imag),
                     "character_valley": "1.000000+0.000000j" if state_index == 0 else "",
                     "character_raw": "",
                     "little_group_passed": True,
@@ -1986,7 +2004,38 @@ def test_workflow_writes_irrep_results_when_characters_are_ready(tmp_path, monke
     assert result["status"] == "matched"
     assert result["table_kpoint_label"] == "GM"
     assert result["irrep_multiplicities"] == {"-GM5": 1, "-GM6": 1}
-    assert "GammaM: -GM5 x 1, -GM6 x 1" in outputs["valley_summary_txt"].read_text(encoding="utf-8")
+    assert result["state_irrep_assignment_status"] == "matched"
+    assert result["state_irrep_results"] == [
+        {
+            "state_index": 0,
+            "status": "matched",
+            "irrep_label": "-GM5",
+            "computed_characters": {
+                "1": "1.000000+0.000000j",
+                "2": "0.500000-0.866025j",
+                "3": "0.500000+0.866025j",
+            },
+            "irrep_multiplicities": {"-GM5": 1},
+            "missing_table_operation_indices": [],
+            "failure_reasons": [],
+        },
+        {
+            "state_index": 1,
+            "status": "matched",
+            "irrep_label": "-GM6",
+            "computed_characters": {
+                "1": "1.000000+0.000000j",
+                "2": "0.500000+0.866025j",
+                "3": "0.500000-0.866025j",
+            },
+            "irrep_multiplicities": {"-GM6": 1},
+            "missing_table_operation_indices": [],
+            "failure_reasons": [],
+        },
+    ]
+    summary_text = outputs["valley_summary_txt"].read_text(encoding="utf-8")
+    assert "GammaM: -GM5 x 1, -GM6 x 1" in summary_text
+    assert "GammaM state irreps: state 0 -> -GM5, state 1 -> -GM6" in summary_text
 
 
 def test_workflow_keeps_irrep_results_incomplete_when_an_operation_has_non_ready_rows(tmp_path, monkeypatch):
@@ -2017,6 +2066,7 @@ def test_workflow_keeps_irrep_results_incomplete_when_an_operation_has_non_ready
     assert result["status"] == "missing_characters"
     assert result["irrep_multiplicities"] == {}
     assert result["missing_table_operation_indices"] == [3]
+    assert result["state_irrep_assignment_status"] == "incomplete"
 
 
 def test_subspace_projector_unreliable_when_band_overlap_exceeds_threshold(tmp_path):
