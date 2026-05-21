@@ -17,11 +17,12 @@ extract:
   spin_index: 1
 
   # Maximum allowed |delta_Ecut| in eV for automatic G-list reconstruction
-  # cutoff adjustment.  Default 0.0 = strict exact-match only.
-  # For large SOC / noncollinear moire WAVECAR files, a small adjustment
-  # (e.g. 0.1 eV) can resolve cutoff-boundary mismatches between VASP's
-  # internal G-list and the reconstructed G-list from header ENCUT.
-  # Non-zero adjustments are written to HDF5 metadata and reported on stdout.
+  # cutoff adjustment (default 0.0 = strict exact-match only).
+  # Start from 0.005 eV or 0.01 eV.  Values near 0.05 eV or larger are
+  # suspicious -- check WAVECAR variant, lattice convention, G-list ordering,
+  # and k-point convention before raising the tolerance.
+  # ecut_adjust_tol does NOT modify the DFT ENCUT; it only adjusts the
+  # post-processing G-list reconstruction effective cutoff tolerance.
   # ecut_adjust_tol: 0.0
 
 output:

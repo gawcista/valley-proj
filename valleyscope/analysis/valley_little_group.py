@@ -574,6 +574,7 @@ def _compute_valley_orbits(
         orbits.append({
             "valleys": component,
             "operation_mappings": op_mappings,
+            "valley_permuting_operation_ids": coset_reps,
             "coset_representative_operation_ids": coset_reps,
         })
 

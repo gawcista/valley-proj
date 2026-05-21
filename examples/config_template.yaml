@@ -50,8 +50,9 @@ projection:
   qcut_scan: [0.15, 0.20, 0.25, 0.30]
   thresholds:
     W_val_min: 0.8
-    P_v_clean: 0.95
-    P_v_approx: 0.85
+    valley_concentration_clean: 0.95
+    valley_concentration_approx: 0.85
+    # Legacy aliases (still accepted): P_v_clean, P_v_approx
 
 symmetry:
   operations:

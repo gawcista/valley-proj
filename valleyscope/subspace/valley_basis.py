@@ -47,6 +47,7 @@ class ValleyBasisResult:
     reason: str
     commutator_norm_max: float = 0.0
     idempotency_deviation_max: float = 0.0
+    diagnostic_notes: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +272,13 @@ def diagnose_valley_separability(
     commutator_tol: float | None = None,
     idempotency_tol: float | None = None,
 ) -> ValleyBasisResult:
-    """Attach ``stably_separable`` and ``reason`` to a ValleyBasisResult."""
+    """Attach ``stably_separable``, ``reason``, and ``diagnostic_notes``.
+
+    The idempotency deviation of projected valley matrices is collected as a
+    diagnostic note rather than a hard rejection gate.  In a finite target-band
+    subspace, P_a^sub is generally not a strict projector, so idempotency
+    failure alone does not invalidate valley separability.
+    """
     w_val_min = _DEFAULT_W_VAL_MIN if w_val_min is None else w_val_min
     concentration_threshold = (
         _DEFAULT_CONCENTRATION_CLEAN if concentration_threshold is None
@@ -286,51 +293,18 @@ def diagnose_valley_separability(
 
     s_eig = np.linalg.eigvalsh(result.s_matrix)
     s_min = float(np.min(s_eig)) if len(s_eig) else 0.0
-
-    if s_min < w_val_min:
-        reason = "insufficient_valley_derived_score"
-        return ValleyBasisResult(
-            transform=result.transform,
-            valley_labels=result.valley_labels,
-            valley_label_values=result.valley_label_values,
-            valley_weights_adapted=result.valley_weights_adapted,
-            assigned_valleys=result.assigned_valleys,
-            valley_concentration=result.valley_concentration,
-            min_valley_concentration=result.min_valley_concentration,
-            s_expectation=result.s_expectation,
-            eta_adapted=result.eta_adapted,
-            s_matrix=result.s_matrix,
-            valley_matrices=result.valley_matrices,
-            label_operator=result.label_operator,
-            stably_separable=False,
-            reason=reason,
-            commutator_norm_max=result.commutator_norm_max,
-            idempotency_deviation_max=result.idempotency_deviation_max,
-        )
-
-    if result.commutator_norm_max > commutator_tol:
-        reason = "non_commuting_valley_projectors"
-        return ValleyBasisResult(
-            transform=result.transform,
-            valley_labels=result.valley_labels,
-            valley_label_values=result.valley_label_values,
-            valley_weights_adapted=result.valley_weights_adapted,
-            assigned_valleys=result.assigned_valleys,
-            valley_concentration=result.valley_concentration,
-            min_valley_concentration=result.min_valley_concentration,
-            s_expectation=result.s_expectation,
-            eta_adapted=result.eta_adapted,
-            s_matrix=result.s_matrix,
-            valley_matrices=result.valley_matrices,
-            label_operator=result.label_operator,
-            stably_separable=False,
-            reason=reason,
-            commutator_norm_max=result.commutator_norm_max,
-            idempotency_deviation_max=result.idempotency_deviation_max,
-        )
+    diagnostic_notes: list[str] = []
 
     if result.idempotency_deviation_max > idempotency_tol:
-        reason = "projector_idempotency_deviation"
+        diagnostic_notes.append(
+            f"projected valley matrix idempotency deviation "
+            f"({result.idempotency_deviation_max:.2e}) exceeds "
+            f"diagnostic tol ({idempotency_tol:.2e}); "
+            f"this is expected in finite target-band subspaces and is "
+            f"not a hard separability rejection"
+        )
+
+    def _final(stably_separable: bool, reason: str) -> ValleyBasisResult:
         return ValleyBasisResult(
             transform=result.transform,
             valley_labels=result.valley_labels,
@@ -344,51 +318,23 @@ def diagnose_valley_separability(
             s_matrix=result.s_matrix,
             valley_matrices=result.valley_matrices,
             label_operator=result.label_operator,
-            stably_separable=False,
+            stably_separable=stably_separable,
             reason=reason,
             commutator_norm_max=result.commutator_norm_max,
             idempotency_deviation_max=result.idempotency_deviation_max,
+            diagnostic_notes=diagnostic_notes,
         )
+
+    if s_min < w_val_min:
+        return _final(False, "insufficient_valley_derived_score")
+
+    if result.commutator_norm_max > commutator_tol:
+        return _final(False, "non_commuting_valley_projectors")
 
     if result.min_valley_concentration < concentration_threshold:
-        reason = "insufficient_valley_concentration"
-        return ValleyBasisResult(
-            transform=result.transform,
-            valley_labels=result.valley_labels,
-            valley_label_values=result.valley_label_values,
-            valley_weights_adapted=result.valley_weights_adapted,
-            assigned_valleys=result.assigned_valleys,
-            valley_concentration=result.valley_concentration,
-            min_valley_concentration=result.min_valley_concentration,
-            s_expectation=result.s_expectation,
-            eta_adapted=result.eta_adapted,
-            s_matrix=result.s_matrix,
-            valley_matrices=result.valley_matrices,
-            label_operator=result.label_operator,
-            stably_separable=False,
-            reason=reason,
-            commutator_norm_max=result.commutator_norm_max,
-            idempotency_deviation_max=result.idempotency_deviation_max,
-        )
+        return _final(False, "insufficient_valley_concentration")
 
-    return ValleyBasisResult(
-        transform=result.transform,
-        valley_labels=result.valley_labels,
-        valley_label_values=result.valley_label_values,
-        valley_weights_adapted=result.valley_weights_adapted,
-        assigned_valleys=result.assigned_valleys,
-        valley_concentration=result.valley_concentration,
-        min_valley_concentration=result.min_valley_concentration,
-        s_expectation=result.s_expectation,
-        eta_adapted=result.eta_adapted,
-        s_matrix=result.s_matrix,
-        valley_matrices=result.valley_matrices,
-        label_operator=result.label_operator,
-        stably_separable=True,
-        reason="stably_separable",
-        commutator_norm_max=result.commutator_norm_max,
-        idempotency_deviation_max=result.idempotency_deviation_max,
-    )
+    return _final(True, "stably_separable")
 
 
 # ---------------------------------------------------------------------------

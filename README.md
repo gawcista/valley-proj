@@ -90,8 +90,8 @@ P_v=\frac{\max_i W_i}{W_{\rm val}},
 It measures whether the assigned valley weight is concentrated in one valley or distributed among several valleys. For two valleys, `P_v` and `|eta|` are related: `P_v = (1 + |eta|) / 2`. For three or more valleys (e.g., the M-valley star in a hexagonal lattice), `|eta|` is not a general metric; the concentration score `P_v` (or `valley_concentration_alpha` in the adapted basis) is used instead.
 
 The concentration score is classified into three public categories:
-- **clean**: concentration above the clean threshold (default `P_v=0.95`, equivalent to `|eta|=0.90` in a two-valley analysis).
-- **approx**: concentration between the approximate and clean thresholds.
+- **clean**: concentration above `valley_concentration_clean` (default 0.95, equivalent to `|eta|=0.90` in a two-valley analysis). Legacy alias: `P_v_clean`.
+- **approx**: concentration between `valley_concentration_approx` (default 0.85) and the clean threshold. Legacy alias: `P_v_approx`.
 - **mixed**: concentration below the approximate threshold; single-valley symmetry data should be treated as diagnostic-only.
 
 The public summary status vocabulary also includes gate and availability states:
@@ -166,7 +166,7 @@ ValleyScope performs symmetry-operation detection from the moire or bilayer stru
 
 The resulting matrix is a little-group representation in the valley-adapted subspace, restricted to the current valley block. Its eigenvalues are symmetry-analysis data. They can constrain topology in symmetry-based formulas, but ValleyScope does not infer a full integer Chern number from high-symmetry-point data alone.
 
-Per-valley stabilizers are reported separately for each valley. Valley orbits, operation mappings, and coset representatives are included in the subgroup report. The all-valley intersection (operations preserving every selected valley) is retained as a debug field but is not used for single-valley irrep matching.
+Per-valley stabilizers are reported separately for each valley. Valley orbits and valley-permuting operation mappings are included in the subgroup report. The current V1.1 reports valley orbits and operation mappings; strict minimal coset representatives and induced representation relations are not yet fully automated. The all-valley intersection (operations preserving every selected valley) is retained as a debug field but is not used for single-valley irrep matching.
 
 ### Single-Valley Irrep Interpretation
 
@@ -181,6 +181,37 @@ where $V_\tau$ is the selected monolayer valley subspace. It should not be inter
 With SOC, the comparison must use double-valued irreps. A spinor wavefunction changes sign under a $2\pi$ rotation, so spinful $C_3$ satisfies $C_3^3=-1$ and allows eigenvalues such as $\exp(+i\pi/3)$, $-1$, and $\exp(-i\pi/3)$.
 
 After valley-preservation filtering, ValleyScope reports the stabilizer of each selected valley, not the all-valley intersection. For valley $v_a$, the single-valley group is the stabilizer $H_{v_a}=\{g\in G\mid g v_a=v_a+\mathbf G\}$. Operations that move $v_a$ to another selected valley are reported as valley-changing orbit data and are not used as single-valley eigenvalue rows for $v_a$. When operation-to-table mapping is complete, `irrep_matching.irrep_results_by_kpoint` reports representation-level `irrep_multiplicities` from character decomposition. When every ready state independently selects a unique one-dimensional irrep, `state_irrep_results` records per-state irrep labels. These are valley-stabilizer character matching results, not reduced EBR decompositions or topology conclusions.
+
+### M-Star Valley Orbit and Stabilizer Structure
+
+For a three-valley M-star in a hexagonal moire cell (e.g., $P321$ / $P312$), the three M points form a single orbit under the full space group $G$:
+
+```math
+\text{orbit} = \{M_1, M_2, M_3\}
+```
+
+Each $M_i$ has its own stabilizer:
+
+```math
+H_{M_1} = \{ g \in G \mid g M_1 = M_1 + \mathbf G_{\rm rec} \}
+```
+
+For a $C_3$-symmetric cell, the three stabilizers are conjugate:
+
+```math
+H_{M_2} = C_3 H_{M_1} C_3^{-1}, \qquad
+H_{M_3} = C_3^2 H_{M_1} C_3^{-2}
+```
+
+When the orbit size is 3, the full group decomposes as:
+
+```math
+G = H_{M_1} \sqcup C_3 H_{M_1} \sqcup C_3^2 H_{M_1}
+```
+
+In practice, each $H_{M_i}$ typically contains the identity and one $C_2$ rotation that fixes $M_i$ while exchanging the other two M points. $C_3$ and $C_3^2$ act as valley-orbit operations, not as single-$M_i$ symmetry operations.
+
+**V1.1 scope:** ValleyScope currently reports per-valley stabilizers, valley orbits, and operation mappings. Strict minimal coset representatives, induced representation decomposition, and reduced EBR decomposition are deferred to later work. Single-valley irreps are irreps of the stabilizer $H_{M_i}$; full-group irreps describe the entire M-star manifold. If both full-group and valley-subgroup irreps are presented, the orbit, mapping, and induction-subduction relations must also be stated, otherwise the information is incomplete.
 
 ## Workflow
 
@@ -279,9 +310,12 @@ extract:
   spin_index: 1
 
   # Optional: max |delta_Ecut| in eV for automatic G-list reconstruction
-  # cutoff adjustment.  For large SOC/noncollinear moire WAVECAR files,
-  # a small value (e.g. 0.1 eV) resolves cutoff-boundary mismatches between
-  # VASP's internal G-list and header-ENCUT reconstruction. Default 0.0.
+  # cutoff adjustment (default 0.0 = strict exact-match only).
+  # Start from 0.005 eV or 0.01 eV.  Values near 0.05 eV or larger are
+  # suspicious -- check WAVECAR variant, lattice convention, G-list ordering,
+  # and k-point convention before raising the tolerance.
+  # ecut_adjust_tol does NOT modify the DFT ENCUT; it only adjusts the
+  # post-processing G-list reconstruction effective cutoff tolerance.
   # ecut_adjust_tol: 0.0
 
 output:
@@ -316,7 +350,7 @@ After extraction, check that the HDF5 file contains the intended k points and ba
 /kpoints/N/ecut_adjust_delta_eV
 ```
 
-If the extractor reports a G-vector count mismatch, first try adding a small `ecut_adjust_tol` (e.g. 0.1 eV) to the config. WAVECAR files from large SOC/noncollinear moire supercells can show small differences between VASP's internal G-list cutoff and the reconstructed cutoff. If a large adjustment is required, the WAVECAR variant, lattice convention, or G-list ordering may have a more fundamental mismatch.
+If the extractor reports a G-vector count mismatch, first try adding a small `ecut_adjust_tol` (start from 0.005 eV or 0.01 eV) to the config. WAVECAR files from large SOC/noncollinear moire supercells can show small differences between VASP's internal G-list cutoff and the reconstructed cutoff. Values near 0.05 eV or larger are suspicious — check the WAVECAR variant, lattice convention, G-list ordering, and k-point convention. `ecut_adjust_tol` is a post-processing G-list reconstruction tolerance, not a modification of the DFT ENCUT. Strict mode (`ecut_adjust_tol: 0.0`) remains the default.
 
 ### Analyze HSP Wavefunctions (Full Reference)
 
@@ -379,8 +413,8 @@ projection:
   qcut_scan: [0.15, 0.20, 0.25, 0.30]
   thresholds:
     W_val_min: 0.8
-    P_v_clean: 0.95
-    P_v_approx: 0.85
+    valley_concentration_clean: 0.95
+    valley_concentration_approx: 0.85
 
 symmetry:
   operations:
@@ -572,6 +606,8 @@ This is the primary summary for near-degenerate states. It records the projected
 - `eta_adapted`: signed polarization (only for exactly two valleys)
 - `commutator_norm_max` / `idempotency_deviation_max`: numerical diagnostics
 - `stably_separable` / `reason`: stability verdict
+
+Note: `valley_weights` and `sector_weights` hold the same data in `valley_subspace.json`. The `sector_weights` key is retained as a legacy alias. New code should prefer `valley_weights`. Similarly, `diagnostics.h5` stores masks under both `valley_masks` (preferred) and `sector_masks` (legacy). Internal class names such as `SectorProjectors` may still use "sector" for historical reasons.
 
 ### `symmetry_eigenvalues.csv`
 

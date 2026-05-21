@@ -4,11 +4,53 @@ import numpy as np
 
 DEFAULT_THRESHOLDS = {
     "W_val_min": 0.8,
+    "valley_concentration_clean": 0.95,
+    "valley_concentration_approx": 0.85,
     "P_v_clean": 0.95,
     "P_v_approx": 0.85,
     "overlap_warn": 0.05,
     "residual_warn": 0.20,
 }
+
+
+def _resolve_concentration_thresholds(
+    thresholds: dict[str, float] | None,
+) -> tuple[float, float]:
+    """Resolve valley concentration clean/approx thresholds.
+
+    Prefers ``valley_concentration_clean`` / ``valley_concentration_approx``
+    over legacy ``P_v_clean`` / ``P_v_approx``.  Returns (clean, approx).
+    """
+    if thresholds is None:
+        return (
+            float(DEFAULT_THRESHOLDS["valley_concentration_clean"]),
+            float(DEFAULT_THRESHOLDS["valley_concentration_approx"]),
+        )
+    has_new = "valley_concentration_clean" in thresholds
+    has_legacy = "P_v_clean" in thresholds
+    if has_new:
+        clean = float(thresholds["valley_concentration_clean"])
+        approx = float(thresholds.get(
+            "valley_concentration_approx",
+            DEFAULT_THRESHOLDS["valley_concentration_approx"],
+        ))
+        if has_legacy:
+            import warnings
+            warnings.warn(
+                "Both valley_concentration_clean and legacy P_v_clean are set; "
+                "using valley_concentration_clean",
+                DeprecationWarning, stacklevel=3,
+            )
+        return clean, approx
+    if has_legacy:
+        return (
+            float(thresholds["P_v_clean"]),
+            float(thresholds.get("P_v_approx", DEFAULT_THRESHOLDS["P_v_approx"])),
+        )
+    return (
+        float(DEFAULT_THRESHOLDS["valley_concentration_clean"]),
+        float(DEFAULT_THRESHOLDS["valley_concentration_approx"]),
+    )
 
 
 def _resolve_eta_thresholds(thresholds: dict[str, float] | None) -> tuple[float, float]:
@@ -18,19 +60,18 @@ def _resolve_eta_thresholds(thresholds: dict[str, float] | None) -> tuple[float,
     if "eta_clean" in values:
         eta_clean = float(values["eta_clean"])
     else:
-        eta_clean = 2.0 * float(values["P_v_clean"]) - 1.0
+        pv_clean, _ = _resolve_concentration_thresholds(thresholds)
+        eta_clean = 2.0 * pv_clean - 1.0
     if "eta_approx" in values:
         eta_approx = float(values["eta_approx"])
     else:
-        eta_approx = 2.0 * float(values["P_v_approx"]) - 1.0
+        _, pv_approx = _resolve_concentration_thresholds(thresholds)
+        eta_approx = 2.0 * pv_approx - 1.0
     return eta_clean, eta_approx
 
 
 def _resolve_pv_thresholds(thresholds: dict[str, float] | None) -> tuple[float, float]:
-    values = DEFAULT_THRESHOLDS.copy()
-    if thresholds:
-        values.update(thresholds)
-    return float(values["P_v_clean"]), float(values["P_v_approx"])
+    return _resolve_concentration_thresholds(thresholds)
 
 
 def derive_valley_status(

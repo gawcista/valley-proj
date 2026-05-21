@@ -87,8 +87,8 @@ P_v=\frac{\max_i W_i}{W_{\rm val}},\qquad W_{\rm val}>0 .
 对于双谷情形，`P_v` 与 `|eta|` 存在冗余关系：`P_v = (1 + |eta|) / 2`。三谷及以上 `|eta|` 无定义，直接使用 `P_v` 作为谷集中度分数。
 
 谷集中度分数分为三档：
-- **clean**：高于 clean 阈值（默认 `P_v=0.95`；在双谷分析中等价于 `|eta|=0.90`）。
-- **approx**：介于 approximate 和 clean 阈值之间。
+- **clean**：高于 `valley_concentration_clean`（默认 0.95；在双谷分析中等价于 `|eta|=0.90`）。旧名称：`P_v_clean`。
+- **approx**：介于 `valley_concentration_approx`（默认 0.85）和 clean 阈值之间。旧名称：`P_v_approx`。
 - **mixed**：低于 approximate 阈值；单谷对称性数据只应作为诊断参考。
 
 公开摘要中的 `status` 还包括：
@@ -153,7 +153,7 @@ ValleyScope 用 spglib 从 moire/bilayer 结构文件中自动识别对称操作
 
 得到的矩阵是谷适配子空间中限定到当前 valley block 的小群表示。其本征值是对称性分析数据，可用于基于对称性的拓扑公式约束，但 ValleyScope 不从少数高对称点自动推断完整整数陈数。
 
-每个 valley 的 stabilizer 单独报告。Valley orbit、operation mapping 和 coset representative 包含在 subgroup report 中。all-valley intersection（保持所有选定 valley 的操作集合）作为 debug 字段保留，但不用于 single-valley irrep matching。
+每个 valley 的 stabilizer 单独报告。Valley orbit 和 valley-permuting operation mapping 包含在 subgroup report 中。当前 V1.1 报告 valley orbit 和 operation mapping；严格 minimal coset representatives 和 induced representation relation 尚未自动完成。all-valley intersection（保持所有选定 valley 的操作集合）作为 debug 字段保留，但不用于 single-valley irrep matching。
 
 ### 单谷不可约表示的解释
 
@@ -168,6 +168,37 @@ G_\tau=\{\,g\in G\mid gV_\tau=V_\tau\,\},
 含 SOC 时必须使用 double-valued irreps。spinor 波函数在 $2\pi$ 旋转下变号，因此 spinful $C_3$ 满足 $C_3^3=-1$，允许 $\exp(+i\pi/3)$、$-1$、$\exp(-i\pi/3)$ 等本征值。
 
 经过 valley-preservation 过滤后，ValleyScope 报告每个选定 valley 各自的 stabilizer，而不是 all-valley intersection。对 valley $v_a$，single-valley group 是 stabilizer $H_{v_a}=\{g\in G\mid g v_a=v_a+\mathbf G\}$。把 $v_a$ 映射到另一个选定 valley 的操作会作为 valley-changing orbit 数据报告，但不会作为 $v_a$ 的 single-valley eigenvalue row。当 operation-to-table mapping 完成时，`irrep_matching.irrep_results_by_kpoint` 会通过 character decomposition 给出 representation-level `irrep_multiplicities`。当每个 ready state 可单独匹配唯一的一维 irrep 时，同一结果会包含 `state_irrep_results` 记录 per-state 标签。这些是 valley-stabilizer character matching 结果，不是 reduced EBR decomposition 或拓扑结论。
+
+### M-Star Valley Orbit 与 Stabilizer 结构
+
+对六角 moire 超胞（如 $P321$/ $P312$）中的三谷 M-star，三个 M 点在完整空间群 $G$ 下构成单个轨道：
+
+```math
+\text{orbit} = \{M_1, M_2, M_3\}
+```
+
+每个 $M_i$ 有自己的 stabilizer：
+
+```math
+H_{M_1} = \{ g \in G \mid g M_1 = M_1 + \mathbf G_{\rm rec} \}
+```
+
+对 $C_3$ 对称的超胞，三个 stabilizer 彼此共轭：
+
+```math
+H_{M_2} = C_3 H_{M_1} C_3^{-1}, \qquad
+H_{M_3} = C_3^2 H_{M_1} C_3^{-2}
+```
+
+轨道大小为 3 时，完整群可分解为：
+
+```math
+G = H_{M_1} \sqcup C_3 H_{M_1} \sqcup C_3^2 H_{M_1}
+```
+
+实际计算中，每个 $H_{M_i}$ 通常包含恒等操作和一个保持 $M_i$ 不变但交换其余两个 M 点的 $C_2$ 旋转。$C_3$ 和 $C_3^2$ 是 valley-orbit 操作，不是 single-$M_i$ 的对称操作。
+
+**V1.1 范围：** ValleyScope 目前输出 per-valley stabilizers、valley orbits 和 operation mappings。严格 minimal coset representatives、induced representation decomposition 和 reduced EBR decomposition 留待后续工作。Single-valley irrep 是 stabilizer $H_{M_i}$ 的 irrep；full-group irrep 描述整个 M-star manifold。如果同时列出 full-group irrep 和 valley-subgroup irrep，还必须说明 orbit、mapping 和 induction-subduction 关系，否则信息仍不完整。
 
 ## 运行流程
 
@@ -260,10 +291,12 @@ extract:
   # SOC/非共线 WAVECAR 由抽取器自动检测 spinor
   spin_index: 1
 
-  # 可选：自动 G-list 重建 cutoff 微调的最大 |delta_Ecut|，单位 eV。
-  # 对大型 SOC/非共线 moire WAVECAR，设置一个小值（如 0.1 eV）
-  # 可解决 VASP 内部 G-list 与 header ENCUT 重建之间的 cutoff 边界差异。
-  # 默认 0.0 = 严格精确匹配模式。
+  # 可选：自动 G-list 重建 cutoff 微调的最大 |delta_Ecut|，单位 eV
+  # （默认 0.0 = 严格精确匹配模式）。
+  # 建议从 0.005 eV 或 0.01 eV 开始。接近 0.05 eV 或更大时应视为
+  # suspicious —— 检查 WAVECAR 变体、晶格约定、G-list 排序和 k-point 约定。
+  # ecut_adjust_tol 不修改 DFT 的 ENCUT，只是后处理 G-list 重建的
+  # effective cutoff tolerance。
   # ecut_adjust_tol: 0.0
 
 output:
@@ -296,7 +329,7 @@ valleyscope extract-wavecar extract.yaml
 /kpoints/N/ecut_adjust_delta_eV
 ```
 
-如果抽取器报 G-vector 数量不匹配，先尝试添加一个小 `ecut_adjust_tol`（如 0.1 eV）。大型 SOC/非共线 moire 超胞的 WAVECAR 可能因 cutoff 边界约定出现小差异。如果需要较大 adjustment，说明 WAVECAR 变体、晶格约定或 G-list 排序可能有更根本的不匹配。
+如果抽取器报 G-vector 数量不匹配，先尝试添加一个小 `ecut_adjust_tol`（建议从 0.005 eV 或 0.01 eV 开始）。大型 SOC/非共线 moire 超胞的 WAVECAR 可能因 cutoff 边界约定出现小差异。接近 0.05 eV 或更大时应视为 suspicious —— 检查 WAVECAR 变体、晶格约定、G-list 排序和 k-point 约定。`ecut_adjust_tol` 是后处理 G-list 重建 tolerance，不修改 DFT 的 ENCUT。严格模式（`ecut_adjust_tol: 0.0`）仍为默认。
 
 ### 分析高对称点波函数
 
@@ -358,8 +391,8 @@ projection:
   qcut_scan: [0.15, 0.20, 0.25, 0.30]
   thresholds:
     W_val_min: 0.8
-    P_v_clean: 0.95
-    P_v_approx: 0.85
+    valley_concentration_clean: 0.95
+    valley_concentration_approx: 0.85
 
 symmetry:
   operations:
@@ -537,6 +570,8 @@ kpoint, band_vasp, energy_eV, K_valley, Kp_valley, W_val, P_v, eta, W_overlap, W
 ### valley_subspace.json
 
 近简并态的主要摘要文件。记录投影谷算符、谷适配基诊断，以及目标子空间落在所选谷子空间中的程度。
+
+注意：`valley_weights` 和 `sector_weights` 在 `valley_subspace.json` 中保存相同数据。`sector_weights` 作为 legacy alias 保留；新代码应优先使用 `valley_weights`。类似地，`diagnostics.h5` 在 `valley_masks`（推荐）和 `sector_masks`（legacy）下各存一份 mask。内部类名如 `SectorProjectors` 可能仍使用 "sector" 出于历史原因。
 
 ### symmetry_eigenvalues.csv
 

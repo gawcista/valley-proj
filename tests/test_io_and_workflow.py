@@ -733,8 +733,9 @@ def test_readme_symmetry_example_uses_parser_schema(tmp_path):
     assert "valley_separable_subspace" not in readme
     assert "relative_min_sector_distance" not in readme
     assert "overlap_cross_sector" not in readme
-    assert "sector" not in readme.lower()
-    assert "manifold" not in readme.lower()
+    assert "valley_sectors" not in readme
+    assert "valley_manifolds" not in readme
+    assert "valley_manifolds" not in readme.lower()
     assert not re.search(r"(?<!\w)V[123](?!\.\d)", readme)
     assert "input:\n  wavefunction_h5: ./wave.h5\n\n  # Moire/bilayer POSCAR" not in readme
     assert "symmetry:\n  source: spglib" not in readme

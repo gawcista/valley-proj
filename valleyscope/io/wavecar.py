@@ -193,10 +193,12 @@ class WavecarReader:
             targets = _target_candidates(nplane_record, count_at_header)
             hint = _format_hint(nplane_record, targets)
             raise ValueError(
-                f"Generated {count_at_header} G-vectors but WAVECAR reports {nplane_record} "
-                f"(expected {hint}). Unsupported WAVECAR variant or cutoff/G-list convention "
-                f"mismatch. To attempt automatic ENCUT adjustment within a small tolerance, "
-                f"set extract.ecut_adjust_tol to a positive value (e.g. 0.1 eV)."
+                f"G-vector count mismatch: generated {count_at_header} at header ENCUT "
+                f"({self.header.encut_eV:.4f} eV), but WAVECAR reports {nplane_record} "
+                f"(expected target G count {hint}). "
+                f"This is a strict exact-match failure. "
+                f"To attempt automatic ENCUT adjustment, set extract.ecut_adjust_tol "
+                f"to a small positive value (start from 0.005 eV or 0.01 eV)."
             )
 
         # 3. Automatic adjustment
@@ -271,10 +273,12 @@ class WavecarReader:
         if target_count > len(raw_energies):
             raise ValueError(
                 f"Cannot reach target G count {target_count}: only {len(raw_energies)} "
-                f"candidates within [{header_encut:.6f}, {max_encut:.6f}] eV. "
-                f"Header ENCUT={header_encut:.4f} eV, ecut_adjust_tol={ecut_adjust_tol:.4f} eV. "
-                f"Suggested action: increase ecut_adjust_tol if this is a known "
-                f"cutoff-boundary reconstruction issue."
+                f"G-vector candidates within [{header_encut:.6f}, {max_encut:.6f}] eV.\n"
+                f"  Generated at header ENCUT: {count_at_header} G-vectors\n"
+                f"  Header ENCUT: {header_encut:.4f} eV\n"
+                f"  ecut_adjust_tol: {ecut_adjust_tol:.4f} eV\n"
+                f"  Suggested action: increase ecut_adjust_tol if this is a genuine "
+                f"cutoff-boundary issue, or verify WAVECAR variant / lattice convention."
             )
 
         # Sort by energy to find the boundary
@@ -292,17 +296,26 @@ class WavecarReader:
         if abs(delta) > ecut_adjust_tol + 1e-10:
             closest_achievable = len(sorted_energies)
             if target_count < len(sorted_energies):
-                alt_delta = sorted_energies[target_count - 1] - header_encut
+                lower_boundary_delta = sorted_energies[target_count - 1] - header_encut
+                upper_boundary_delta = sorted_energies[target_count] - header_encut
             else:
-                alt_delta = float("inf")
+                lower_boundary_delta = float("inf")
+                upper_boundary_delta = float("inf")
             raise ValueError(
-                f"Required ENCUT adjustment {delta:.6f} eV exceeds "
-                f"ecut_adjust_tol={ecut_adjust_tol:.4f} eV. "
-                f"Header ENCUT={header_encut:.4f} eV, generated {count_at_header} vectors. "
-                f"Target G count={target_count}, closest achievable={closest_achievable}. "
-                f"Closest achievable |delta_Ecut| would be ~{abs(alt_delta):.6f} eV. "
-                f"Suggested action: increase ecut_adjust_tol only if the mismatch is known "
-                f"to be a cutoff-boundary reconstruction issue."
+                f"Reconstruction cutoff delta {delta:+.6f} eV (midpoint) exceeds "
+                f"ecut_adjust_tol={ecut_adjust_tol:.4f} eV.\n"
+                f"  Header ENCUT: {header_encut:.4f} eV\n"
+                f"  Generated at header ENCUT: {count_at_header} G-vectors\n"
+                f"  Target G count: {target_count}\n"
+                f"  Closest achievable count within tolerance: {closest_achievable}\n"
+                f"  Lower boundary delta_Ecut: {lower_boundary_delta:+.6f} eV "
+                f"(energy of last included G-vector minus header ENCUT)\n"
+                f"  Upper boundary delta_Ecut: {upper_boundary_delta:+.6f} eV "
+                f"(energy of first excluded G-vector minus header ENCUT)\n"
+                f"  Suggested action: if the mismatch is a genuine cutoff-boundary "
+                f"reconstruction issue, increase ecut_adjust_tol. "
+                f"Otherwise check WAVECAR variant, lattice convention, G-list ordering, "
+                f"and k-point convention."
             )
 
         # Regenerate with adjusted ENCUT

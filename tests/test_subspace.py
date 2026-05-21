@@ -201,3 +201,67 @@ def test_eta_adapted_none_for_three_valleys():
     }
     result = build_valley_adapted_basis(coeffs, masks)
     assert result.eta_adapted is None
+
+
+# -----------------------------------------------------------------------
+# G. Idempotency deviation is diagnostic, not a hard gate
+# -----------------------------------------------------------------------
+
+def test_idempotency_deviation_does_not_hard_reject_when_core_criteria_pass():
+    """High idempotency deviation alone should not cause stably_separable=False
+    when S_min, commutator, and concentration all pass."""
+    coeffs = np.zeros((2, 1, 4), dtype=np.complex128)
+    coeffs[0, 0, 0] = 1.0
+    coeffs[0, 0, 1] = 0.5   # leak into valley B region
+    coeffs[1, 0, 2] = 1.0
+    coeffs[1, 0, 3] = 0.5   # leak into valley A region
+
+    # Overlapping masks create high idempotency deviation
+    masks = {
+        "valley_A": np.array([True, True, False, False]),
+        "valley_B": np.array([False, True, True, True]),
+    }
+
+    result = build_valley_adapted_basis(coefficients=coeffs, valley_masks=masks)
+    # S_min, commutator, concentration are fine; idempotency is high
+    diagnosed = diagnose_valley_separability(
+        result, w_val_min=0.5, concentration_threshold=0.5,
+        commutator_tol=1.0, idempotency_tol=1e-8,
+    )
+
+    # Core criteria pass → stably_separable should be True
+    assert diagnosed.stably_separable
+    assert diagnosed.reason == "stably_separable"
+    # But idempotency warning should be in diagnostic_notes
+    assert len(diagnosed.diagnostic_notes) >= 1
+    assert any("idempotency" in note for note in diagnosed.diagnostic_notes)
+    assert diagnosed.idempotency_deviation_max > 0.0
+
+
+def test_idempotency_diagnostic_note_absent_when_deviation_small():
+    """When idempotency deviation is below tol, no diagnostic note is added."""
+    coeffs = np.zeros((2, 1, 3), dtype=np.complex128)
+    coeffs[0, 0, 0] = 1.0
+    coeffs[1, 0, 1] = 1.0
+    masks = {
+        "valley_A": np.array([True, False, False]),
+        "valley_B": np.array([False, True, False]),
+    }
+    result = build_valley_adapted_basis(coefficients=coeffs, valley_masks=masks)
+    diagnosed = diagnose_valley_separability(
+        result, w_val_min=0.5, idempotency_tol=1.0,
+    )
+    assert diagnosed.stably_separable
+    assert not any("idempotency" in note for note in diagnosed.diagnostic_notes)
+
+
+def test_legacy_diagnose_multivalley_subspace_still_rejects_non_idempotent():
+    """Legacy diagnose_multivalley_subspace keeps its hard idempotency gate
+    for backward compatibility."""
+    m1 = np.array([[1.0, 0.0], [0.0, 0.0]], dtype=np.complex128)
+    m2 = np.array([[0.6, 0.4], [0.4, 0.6]], dtype=np.complex128)
+    diagnostic = diagnose_multivalley_subspace(
+        {"A": m1, "B": m2}, eig_tol=1e-6, commutator_tol=1.0,
+    )
+    assert diagnostic.stably_separable is False
+    assert "idempotent" in diagnostic.reason

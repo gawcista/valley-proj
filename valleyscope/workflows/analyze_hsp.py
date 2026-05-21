@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 
 from valleyscope.analysis.decision_tree import (
+    _resolve_concentration_thresholds,
     derive_derived_score,
     derive_polarization_score,
     derive_symmetry_status,
@@ -281,7 +282,9 @@ def _add_valley_subspace_diagnostic(
     max_w_res: float = 0.0,
 ) -> None:
     w_val_min = float(thresholds.get("W_val_min", 0.8)) if thresholds else 0.8
-    concentration_threshold = float(thresholds.get("concentration_threshold", 0.95)) if thresholds else 0.95
+    # Resolve via new naming with legacy fallback
+    concentration_clean, _ = _resolve_concentration_thresholds(thresholds)
+    concentration_threshold = concentration_clean
     sector_names = projectors.sector_names
     n_valleys = len(sector_names)
     energy_span_meV = float((np.max(energies_eV) - np.min(energies_eV)) * 1000.0)
@@ -608,6 +611,7 @@ def _build_weight_entry(
         "derived_score": derived,
         "polarization_score": polarization,
         "valley_status": status,
+        "valley_weights": result.sector_weights,
         "sector_weights": result.sector_weights,
         "W_val": result.w_val,
         "P_v": result.purity,

@@ -196,9 +196,10 @@ def render_summary_text(summary: dict[str, Any]) -> str:
             for orbit in orbits:
                 if isinstance(orbit, dict):
                     vals = orbit.get("valleys", [])
-                    coset = orbit.get("coset_representative_operation_ids", [])
+                    permuting = orbit.get("valley_permuting_operation_ids",
+                                          orbit.get("coset_representative_operation_ids", []))
                     if vals:
-                        lines.append(f"valley orbit: {vals} (coset ops: {coset})")
+                        lines.append(f"valley orbit: {vals} (permuting ops: {permuting})")
         irrep_matching = subgroup_report.get("irrep_matching")
         if isinstance(irrep_matching, dict):
             label_matching = irrep_matching.get("label_matching", irrep_matching.get("status", ""))
