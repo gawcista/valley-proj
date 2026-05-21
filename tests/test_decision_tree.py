@@ -368,6 +368,30 @@ class TestMultiSectorPolarization:
         )
         assert status == "raw_valley_approx"
 
+    def test_valley_concentration_approx_only_overrides_default(self):
+        status = derive_valley_status(
+            analysis_level="raw_state", derived_score=0.95,
+            polarization_score=0.82, w_overlap=0.0, w_res=0.0,
+            thresholds={"valley_concentration_approx": 0.80},
+            two_sector=False,
+        )
+        assert status == "raw_valley_approx"
+
+    def test_valley_concentration_names_override_legacy_aliases(self):
+        with pytest.warns(DeprecationWarning, match="legacy P_v"):
+            status = derive_valley_status(
+                analysis_level="raw_state", derived_score=0.95,
+                polarization_score=0.82, w_overlap=0.0, w_res=0.0,
+                thresholds={
+                    "valley_concentration_clean": 0.95,
+                    "valley_concentration_approx": 0.80,
+                    "P_v_clean": 0.70,
+                    "P_v_approx": 0.90,
+                },
+                two_sector=False,
+            )
+        assert status == "raw_valley_approx"
+
     def test_two_sector_still_uses_eta_conversion(self):
         status = derive_valley_status(
             analysis_level="raw_state", derived_score=0.95,

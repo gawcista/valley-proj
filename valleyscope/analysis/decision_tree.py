@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 
 DEFAULT_THRESHOLDS = {
@@ -26,31 +28,31 @@ def _resolve_concentration_thresholds(
             float(DEFAULT_THRESHOLDS["valley_concentration_clean"]),
             float(DEFAULT_THRESHOLDS["valley_concentration_approx"]),
         )
-    has_new = "valley_concentration_clean" in thresholds
-    has_legacy = "P_v_clean" in thresholds
-    if has_new:
-        clean = float(thresholds["valley_concentration_clean"])
-        approx = float(thresholds.get(
-            "valley_concentration_approx",
-            DEFAULT_THRESHOLDS["valley_concentration_approx"],
-        ))
-        if has_legacy:
-            import warnings
-            warnings.warn(
-                "Both valley_concentration_clean and legacy P_v_clean are set; "
-                "using valley_concentration_clean",
-                DeprecationWarning, stacklevel=3,
-            )
-        return clean, approx
-    if has_legacy:
-        return (
-            float(thresholds["P_v_clean"]),
-            float(thresholds.get("P_v_approx", DEFAULT_THRESHOLDS["P_v_approx"])),
+    has_new_clean = "valley_concentration_clean" in thresholds
+    has_new_approx = "valley_concentration_approx" in thresholds
+    has_legacy_clean = "P_v_clean" in thresholds
+    has_legacy_approx = "P_v_approx" in thresholds
+
+    if (has_new_clean or has_new_approx) and (has_legacy_clean or has_legacy_approx):
+        warnings.warn(
+            "Both valley_concentration_* and legacy P_v_* thresholds are set; "
+            "using valley_concentration_* values where provided",
+            DeprecationWarning, stacklevel=3,
         )
-    return (
-        float(DEFAULT_THRESHOLDS["valley_concentration_clean"]),
-        float(DEFAULT_THRESHOLDS["valley_concentration_approx"]),
+
+    clean = float(
+        thresholds.get(
+            "valley_concentration_clean",
+            thresholds.get("P_v_clean", DEFAULT_THRESHOLDS["valley_concentration_clean"]),
+        )
     )
+    approx = float(
+        thresholds.get(
+            "valley_concentration_approx",
+            thresholds.get("P_v_approx", DEFAULT_THRESHOLDS["valley_concentration_approx"]),
+        )
+    )
+    return clean, approx
 
 
 def _resolve_eta_thresholds(thresholds: dict[str, float] | None) -> tuple[float, float]:
