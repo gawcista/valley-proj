@@ -2259,6 +2259,112 @@ def test_workflow_keeps_irrep_results_incomplete_when_an_operation_has_non_ready
     assert result["state_irrep_assignment_status"] == "incomplete"
 
 
+def test_workflow_keeps_irrep_results_incomplete_when_covariance_fails(tmp_path, monkeypatch):
+    import importlib
+
+    workflow_module = importlib.import_module("valleyscope.workflows.analyze_hsp")
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    with h5py.File(h5_path, "r+") as h5:
+        h5["metadata/spinor"][()] = True
+    write_config(config_path, h5_path, out_dir)
+
+    covariance_report = {
+        "status": "covariance_failures_detected",
+        "warn_tol": 0.01,
+        "fail_tol": 0.1,
+        "by_kpoint": {
+            "GammaM": {
+                "seed_projector_covariance": [
+                    {
+                        "operation_id": 1,
+                        "source_valley": "K_valley",
+                        "mapped_valley": "K_valley",
+                        "epsilon_seed": 0.5,
+                        "little_group_passed": True,
+                        "status": "failed",
+                        "reason": "",
+                    },
+                    {
+                        "operation_id": 2,
+                        "source_valley": "K_valley",
+                        "mapped_valley": "K_valley",
+                        "epsilon_seed": 0.4,
+                        "little_group_passed": True,
+                        "status": "failed",
+                        "reason": "",
+                    },
+                ]
+            }
+        },
+    }
+
+    def fake_diagnostics_with_target_valleys(kpoint_name, representation_payload, **kwargs):
+        rows = _fake_diagnostics_with_dvalley(kpoint_name, representation_payload, **kwargs)
+        return [
+            {**row, "target_valley": valley_name}
+            for valley_name in ("K_valley", "Kp_valley")
+            for row in rows
+        ]
+
+    monkeypatch.setattr(workflow_module, "_prepare_symmetry_payload", lambda config, monolayer_recip: _p3_fake_symmetry_payload())
+    monkeypatch.setattr(
+        workflow_module,
+        "symmetry_eigenvalue_diagnostics_for_kpoint",
+        fake_diagnostics_with_target_valleys,
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "compute_projector_covariance",
+        lambda **kwargs: covariance_report,
+    )
+
+    outputs = workflow_module.analyze_hsp(config_path)
+
+    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    matching = summary["symmetry_analysis"]["valley_preserving_subgroup_report"]["irrep_matching"]
+    assert matching["character_matching_status"] == "incomplete"
+    result = matching["irrep_results_by_kpoint"]["GammaM"]["K_valley"]
+    assert result["status"] == "missing_characters"
+    rows = [
+        row for row in summary["symmetry_eigenvalues"]
+        if row["operation_id"] == 1 and row["target_valley"] == "K_valley"
+    ]
+    assert rows
+    assert all(row["diagnostic_only"] is True for row in rows)
+    assert all(row["topology_input_ready"] is False for row in rows)
+    assert all(row["projector_covariance_status"] == "failed" for row in rows)
+
+
+def test_workflow_writes_covariance_report_when_no_seed_data(tmp_path, monkeypatch):
+    import importlib
+
+    workflow_module = importlib.import_module("valleyscope.workflows.analyze_hsp")
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+
+    monkeypatch.setattr(workflow_module, "_prepare_symmetry_payload", lambda config, monolayer_recip: _p3_fake_symmetry_payload())
+    monkeypatch.setattr(
+        workflow_module,
+        "symmetry_eigenvalue_diagnostics_for_kpoint",
+        lambda **kwargs: [],
+    )
+
+    outputs = workflow_module.analyze_hsp(config_path)
+
+    cov_path = outputs["projector_covariance_report_json"]
+    covariance = json.loads(cov_path.read_text(encoding="utf-8"))
+    assert covariance["status"] == "no_data"
+
+    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    assert summary["projector_covariance"]["status"] == "no_data"
+
+
 def test_state_irrep_rejected_when_dvalley_has_offdiagonal_mixing(tmp_path, monkeypatch):
     """Mixing gate: D_valley with large off-diagonal → no state label."""
     import importlib

@@ -97,7 +97,7 @@ def _write_detailed_outputs(
     if config.output.write_json:
         outputs["valley_subspace_json"] = write_json(output_dir / "valley_subspace.json", subspace_payload)
         outputs["symmetry_report_json"] = write_json(output_dir / "symmetry_report.json", symmetry_payload)
-        if covariance_report:
+        if covariance_report is not None:
             outputs["projector_covariance_report_json"] = write_json(
                 output_dir / "projector_covariance_report.json", covariance_report
             )

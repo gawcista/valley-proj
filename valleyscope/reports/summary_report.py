@@ -76,7 +76,7 @@ def build_summary_payload(
     }
     if symmetry_eigenvalue_summary:
         payload["symmetry_eigenvalue_summary"] = symmetry_eigenvalue_summary
-    if covariance_report:
+    if covariance_report is not None:
         payload["projector_covariance"] = _compact_covariance(covariance_report)
     return payload
 

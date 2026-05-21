@@ -64,11 +64,24 @@ def compute_projector_covariance(
             if not isinstance(op_data, dict):
                 continue
             d_raw = op_data.get("D_raw")
-            if d_raw is None:
-                continue
-            d_raw = np.asarray(d_raw, dtype=np.complex128)
             sector_mapping = op_data.get("sector_mapping", {})
             little_group_passed = bool(op_data.get("little_group_passed", True))
+            if d_raw is None:
+                reason = str(op_data.get("skipped_reason", "D_raw not available"))
+                for source_valley in valley_matrices:
+                    mapped_valley = sector_mapping.get(source_valley)
+                    kp_rows.append({
+                        "operation_id": operation_id,
+                        "source_valley": source_valley,
+                        "mapped_valley": None if mapped_valley is None else str(mapped_valley),
+                        "epsilon_seed": None,
+                        "little_group_passed": little_group_passed,
+                        "status": "not_evaluated",
+                        "reason": reason,
+                    })
+                    any_missing_mapping = True
+                continue
+            d_raw = np.asarray(d_raw, dtype=np.complex128)
 
             for source_valley in valley_matrices:
                 p_a = np.asarray(valley_matrices[source_valley], dtype=np.complex128)
@@ -155,3 +168,70 @@ def compute_projector_covariance(
         ),
         "by_kpoint": by_kpoint,
     }
+
+
+def apply_projector_covariance_gate(
+    *,
+    symmetry_rows: list[dict[str, object]],
+    covariance_report: dict[str, object] | None,
+) -> None:
+    """Attach seed-covariance diagnostics to symmetry rows and demote failures."""
+    if not covariance_report:
+        return
+
+    covariance_by_row: dict[tuple[str, str, str], dict[str, object]] = {}
+    by_kpoint = covariance_report.get("by_kpoint", {})
+    if not isinstance(by_kpoint, dict):
+        return
+    for kpoint, kp_data in by_kpoint.items():
+        if not isinstance(kp_data, dict):
+            continue
+        rows = kp_data.get("seed_projector_covariance", [])
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            operation_id = row.get("operation_id")
+            source_valley = row.get("source_valley")
+            if operation_id is None or source_valley is None:
+                continue
+            covariance_by_row[(str(kpoint), str(operation_id), str(source_valley))] = row
+
+    for row in symmetry_rows:
+        kpoint = str(row.get("kpoint", ""))
+        operation_id = row.get("operation_id")
+        target_valley = row.get("target_valley")
+        if operation_id is None or target_valley is None:
+            continue
+        covariance = covariance_by_row.get((kpoint, str(operation_id), str(target_valley)))
+        if covariance is None:
+            continue
+
+        status = str(covariance.get("status", ""))
+        row["projector_covariance_status"] = status
+        row["projector_covariance_mapped_valley"] = covariance.get("mapped_valley")
+        row["epsilon_seed"] = covariance.get("epsilon_seed")
+        row["projector_covariance_reason"] = covariance.get("reason", "")
+
+        if not bool(row.get("valley_preserving", False)):
+            continue
+        if status != "failed":
+            continue
+
+        row["topology_input_ready"] = False
+        row["topology_ready"] = False
+        row["diagnostic_only"] = True
+        row["reason"] = _append_reason(
+            row.get("reason", ""),
+            "failed seed projector covariance",
+        )
+
+
+def _append_reason(existing: object, new_reason: str) -> str:
+    existing_text = str(existing) if existing not in (None, "") else ""
+    if not existing_text:
+        return new_reason
+    if new_reason in existing_text:
+        return existing_text
+    return f"{existing_text}; {new_reason}"

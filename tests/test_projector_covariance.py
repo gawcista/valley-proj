@@ -5,6 +5,7 @@ import h5py
 
 from valleyscope.analysis.projector_covariance import (
     SEED_COVARIANCE_FAIL_TOL,
+    apply_projector_covariance_gate,
     compute_projector_covariance,
 )
 from valleyscope.subspace.valley_basis import _projector_matrix
@@ -214,6 +215,84 @@ def test_missing_mapping_not_evaluated():
     b_row = next(r for r in gm if r["source_valley"] == "valley_B")
     assert b_row["status"] == "not_evaluated"
     assert "pi_g" in b_row["reason"]
+
+
+def test_missing_raw_representation_not_evaluated():
+    report = compute_projector_covariance(
+        valley_matrices_by_kpoint={
+            "GammaM": {
+                "K_valley": np.eye(2, dtype=np.complex128),
+            }
+        },
+        raw_representations_by_kpoint={
+            "GammaM": {
+                3: {
+                    "D_raw": None,
+                    "sector_mapping": {"K_valley": "K_valley"},
+                    "little_group_passed": True,
+                    "skipped_reason": "plane-wave mapping_miss_count=2",
+                }
+            }
+        },
+        valley_names=["K_valley"],
+    )
+
+    assert report["status"] == "partial"
+    rows = report["by_kpoint"]["GammaM"]["seed_projector_covariance"]
+    assert rows == [
+        {
+            "operation_id": 3,
+            "source_valley": "K_valley",
+            "mapped_valley": "K_valley",
+            "epsilon_seed": None,
+            "little_group_passed": True,
+            "status": "not_evaluated",
+            "reason": "plane-wave mapping_miss_count=2",
+        }
+    ]
+
+
+def test_covariance_failure_demotes_symmetry_rows():
+    report = {
+        "status": "covariance_failures_detected",
+        "by_kpoint": {
+            "GammaM": {
+                "seed_projector_covariance": [
+                    {
+                        "operation_id": 3,
+                        "source_valley": "K_valley",
+                        "mapped_valley": "K_valley",
+                        "epsilon_seed": 0.5,
+                        "status": "failed",
+                        "reason": "",
+                    }
+                ]
+            }
+        },
+    }
+    rows = [
+        {
+            "kpoint": "GammaM",
+            "operation_id": 3,
+            "target_valley": "K_valley",
+            "little_group_passed": True,
+            "valley_preserving": True,
+            "topology_input_ready": True,
+            "topology_ready": True,
+            "diagnostic_only": False,
+            "reason": "",
+        }
+    ]
+
+    apply_projector_covariance_gate(symmetry_rows=rows, covariance_report=report)
+
+    row = rows[0]
+    assert row["projector_covariance_status"] == "failed"
+    assert row["epsilon_seed"] == 0.5
+    assert row["topology_input_ready"] is False
+    assert row["topology_ready"] is False
+    assert row["diagnostic_only"] is True
+    assert row["reason"] == "failed seed projector covariance"
 
 
 # -----------------------------------------------------------------------

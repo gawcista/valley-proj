@@ -4,7 +4,10 @@ from pathlib import Path
 
 import numpy as np
 
-from valleyscope.analysis.projector_covariance import compute_projector_covariance
+from valleyscope.analysis.projector_covariance import (
+    apply_projector_covariance_gate,
+    compute_projector_covariance,
+)
 from valleyscope.analysis.decision_tree import (
     _resolve_concentration_thresholds,
     derive_derived_score,
@@ -259,6 +262,22 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             symmetry_payload, symmetry_rows, kpoint_name,
         )
 
+    # --- Projector covariance diagnostic ---
+    valley_names = list(
+        projectors_by_kpoint[next(iter(projectors_by_kpoint))].sector_names
+    ) if projectors_by_kpoint else []
+    covariance_report: dict[str, object] | None = None
+    if symmetry_payload["status"] == "ok" and symmetry_payload.get("symmetry_eigenvalue_enabled", True):
+        covariance_report = compute_projector_covariance(
+            valley_matrices_by_kpoint=valley_matrices_by_kpoint,
+            raw_representations_by_kpoint=raw_representations_by_kpoint,
+            valley_names=valley_names,
+        )
+        apply_projector_covariance_gate(
+            symmetry_rows=symmetry_rows,
+            covariance_report=covariance_report,
+        )
+
     if symmetry_payload["status"] == "ok":
         build_valley_preserving_subgroup_report(
             symmetry_payload=symmetry_payload,
@@ -269,18 +288,6 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             symmetry_rows=symmetry_rows,
             representation_payload=symmetry_representation_payload,
             tolerance=config.rotation.irrep_weight_tol,
-        )
-
-    # --- Projector covariance diagnostic ---
-    valley_names = list(
-        projectors_by_kpoint[next(iter(projectors_by_kpoint))].sector_names
-    ) if projectors_by_kpoint else []
-    covariance_report: dict[str, object] = {}
-    if valley_matrices_by_kpoint and raw_representations_by_kpoint:
-        covariance_report = compute_projector_covariance(
-            valley_matrices_by_kpoint=valley_matrices_by_kpoint,
-            raw_representations_by_kpoint=raw_representations_by_kpoint,
-            valley_names=valley_names,
         )
 
     sector_names = list(projectors_by_kpoint[next(iter(projectors_by_kpoint))].sector_masks)
@@ -298,7 +305,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         symmetry_representation_payload=symmetry_representation_payload,
         basis_transforms=basis_transforms,
         symmetry_eigenvalue_summary=symmetry_eigenvalue_summary,
-        covariance_report=covariance_report if covariance_report else None,
+        covariance_report=covariance_report,
     )
     return outputs
 

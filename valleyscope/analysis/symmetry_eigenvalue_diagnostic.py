@@ -486,11 +486,11 @@ def build_raw_representations_for_kpoint(
     symmetry_payload: dict[str, object],
     spinor_convention_verified: bool = False,
 ) -> dict[object, dict[str, object]]:
-    """Build D_raw once per (kpoint, operation_id) for all proper
-    little-group operations with sector_mapping.
+    """Build or explain D_raw once per (kpoint, operation_id).
 
     This is independent of the per-valley preservation gate and covers
-    valley-permuting operations such as C3 cycling M1/M2/M3.
+    valley-permuting operations such as C3 cycling M1/M2/M3.  Proper rotations
+    that cannot provide D_raw keep an explicit skipped_reason for audit output.
 
     Returns
     -------
@@ -505,17 +505,31 @@ def build_raw_representations_for_kpoint(
         order = operation.get("order")
         if operation.get("det", 1) != 1 or order not in (2, 3, 4, 6):
             continue
+        operation_id = operation.get("operation_id")
         sector_mapping = operation.get("sector_mapping", {})
-        if not isinstance(sector_mapping, dict) or not sector_mapping:
-            continue
+        if not isinstance(sector_mapping, dict):
+            sector_mapping = {}
 
         little = is_little_group_operation(
             np.asarray(operation["rotation_frac"]), k_frac
         )
         if not little:
+            result[operation_id] = _raw_representation_skip_payload(
+                operation=operation,
+                sector_mapping=sector_mapping,
+                little_group_passed=False,
+                reason="not in little group",
+            )
+            continue
+        if not sector_mapping:
+            result[operation_id] = _raw_representation_skip_payload(
+                operation=operation,
+                sector_mapping=sector_mapping,
+                little_group_passed=True,
+                reason="missing sector_mapping",
+            )
             continue
 
-        operation_id = operation.get("operation_id")
         spin_rotation = None
         n_spinor = coefficients.shape[1]
         if n_spinor == 2:
@@ -524,9 +538,21 @@ def build_raw_representations_for_kpoint(
                     np.asarray(operation["rotation_cart"])
                 )
                 spin_rotation = spin_rotation_matrix(axis, angle)
-            except ValueError:
+            except ValueError as exc:
+                result[operation_id] = _raw_representation_skip_payload(
+                    operation=operation,
+                    sector_mapping=sector_mapping,
+                    little_group_passed=True,
+                    reason=f"spinor rotation skipped: {exc}",
+                )
                 continue
         elif n_spinor != 1:
+            result[operation_id] = _raw_representation_skip_payload(
+                operation=operation,
+                sector_mapping=sector_mapping,
+                little_group_passed=True,
+                reason=f"unsupported nspinor={n_spinor}",
+            )
             continue
 
         representation = build_plane_wave_representation(
@@ -537,6 +563,13 @@ def build_raw_representations_for_kpoint(
             spin_rotation=spin_rotation,
         )
         if representation.mapping_miss_count > 0:
+            result[operation_id] = _raw_representation_skip_payload(
+                operation=operation,
+                sector_mapping=sector_mapping,
+                little_group_passed=True,
+                reason=f"plane-wave mapping_miss_count={representation.mapping_miss_count}",
+                mapping_miss_count=representation.mapping_miss_count,
+            )
             continue
 
         result[operation_id] = {
@@ -548,3 +581,24 @@ def build_raw_representations_for_kpoint(
         }
 
     return result
+
+
+def _raw_representation_skip_payload(
+    *,
+    operation: dict[str, object],
+    sector_mapping: dict[str, object],
+    little_group_passed: bool,
+    reason: str,
+    mapping_miss_count: int | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "D_raw": None,
+        "kind": operation.get("kind", ""),
+        "order": int(operation.get("order", 0)),
+        "sector_mapping": dict(sector_mapping),
+        "little_group_passed": bool(little_group_passed),
+        "skipped_reason": reason,
+    }
+    if mapping_miss_count is not None:
+        payload["mapping_miss_count"] = int(mapping_miss_count)
+    return payload
