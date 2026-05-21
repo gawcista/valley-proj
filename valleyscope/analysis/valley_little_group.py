@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 import numpy as np
 import spglib
@@ -18,44 +19,87 @@ def update_valley_little_group_inventory(
     symmetry_payload: dict[str, Any],
     kpoint_name: str,
     k_frac: np.ndarray,
-) -> list[dict[str, Any]]:
-    """Classify detected operations for valley-preserving little-group analysis."""
-    inventory: list[dict[str, Any]] = []
+    valley_names: list[str] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Classify detected operations per (kpoint, valley) pair.
+
+    Returns a dict mapping valley_name -> list of per-operation inventory rows.
+    The old per-kpoint flat list is still stored at
+    ``valley_little_group_inventory[kpoint_name]`` for backward compatibility,
+    but the per-valley gate uses ``mapped_valley == target_valley``, not the
+    all-valley intersection.
+    """
+    if valley_names is None:
+        valley_names = _infer_valley_names(symmetry_payload)
+
+    per_valley: dict[str, list[dict[str, Any]]] = {}
+    flat_inventory: list[dict[str, Any]] = []
+
     for operation in symmetry_payload.get("detected_operations", []):
         rotation = np.asarray(operation.get("rotation_frac", np.eye(3)), dtype=float)
         little_group_passed = bool(is_little_group_operation(rotation, k_frac))
-        valley_preserving = _preserves_all_valley_subspaces(operation)
-        valley_exchanging = _is_valley_exchanging(operation)
-        allowed = bool(little_group_passed and valley_preserving)
-        reason = _rejection_reason(
-            little_group_passed=little_group_passed,
-            valley_preserving=valley_preserving,
-            valley_exchanging=valley_exchanging,
-        )
+        sector_mapping = operation.get("sector_mapping", {})
 
-        row = {
+        # Per-valley classification
+        for valley_name in valley_names:
+            mapped_valley = sector_mapping.get(valley_name)
+            valley_preserving = bool(
+                mapped_valley is not None and str(mapped_valley) == str(valley_name)
+            )
+            allowed = bool(little_group_passed and valley_preserving)
+            reason = _per_valley_rejection_reason(
+                little_group_passed=little_group_passed,
+                valley_preserving=valley_preserving,
+                mapped_valley=mapped_valley,
+            )
+
+            row = {
+                "operation_id": operation.get("operation_id"),
+                "kind": operation.get("kind", ""),
+                "order": operation.get("order"),
+                "little_group_passed": little_group_passed,
+                "target_valley": valley_name,
+                "mapped_valley": mapped_valley,
+                "valley_preserving": valley_preserving,
+                "allowed_for_single_valley_representation": allowed,
+                "reason": reason,
+            }
+            per_valley.setdefault(valley_name, []).append(row)
+
+        # Legacy flat row (all-valley for backward compat, labelled as intersection)
+        old_preserves_all = _preserves_all_valley_subspaces(operation)
+        old_exchanging = _is_valley_exchanging(operation)
+        old_allowed = bool(little_group_passed and old_preserves_all)
+        old_reason = _rejection_reason(
+            little_group_passed=little_group_passed,
+            valley_preserving=old_preserves_all,
+            valley_exchanging=old_exchanging,
+        )
+        flat_row = {
             "operation_id": operation.get("operation_id"),
             "kind": operation.get("kind", ""),
             "order": operation.get("order"),
             "little_group_passed": little_group_passed,
-            "valley_preserving": valley_preserving,
-            "valley_exchanging": valley_exchanging,
-            "allowed_for_single_valley_representation": allowed,
-            "reason": reason,
+            "valley_preserving": old_preserves_all,
+            "valley_exchanging": old_exchanging,
+            "allowed_for_single_valley_representation": old_allowed,
+            "reason": old_reason,
         }
-        inventory.append(row)
+        flat_inventory.append(flat_row)
 
         operation.setdefault("little_group_by_kpoint", {})[kpoint_name] = little_group_passed
-        operation.setdefault("allowed_for_single_valley_representation_by_kpoint", {})[kpoint_name] = allowed
-        operation["allowed_for_single_valley_representation"] = allowed
-        operation.setdefault("rejection_reason_by_kpoint", {})[kpoint_name] = reason
+        operation.setdefault("allowed_for_single_valley_representation_by_kpoint", {})[kpoint_name] = old_allowed
+        operation["allowed_for_single_valley_representation"] = old_allowed
+        operation.setdefault("rejection_reason_by_kpoint", {})[kpoint_name] = old_reason
 
-    symmetry_payload.setdefault("valley_little_group_inventory", {})[kpoint_name] = inventory
+    # Store both old and new format
+    symmetry_payload.setdefault("valley_little_group_inventory", {})[kpoint_name] = flat_inventory
+    symmetry_payload.setdefault("per_valley_little_group_inventory", {}).setdefault(kpoint_name, {}).update(per_valley)
     symmetry_payload.setdefault("kpoint_frac_by_name", {})[kpoint_name] = np.asarray(
-        k_frac,
-        dtype=float,
+        k_frac, dtype=float,
     ).tolist()
-    return inventory
+    symmetry_payload.setdefault("valley_names", list(valley_names))
+    return per_valley
 
 
 def build_valley_preserving_subgroup_report(
@@ -64,7 +108,16 @@ def build_valley_preserving_subgroup_report(
     target_kpoints: list[str] | tuple[str, ...] | None = None,
     tolerance: float = 1e-8,
 ) -> dict[str, Any]:
+    """Build per-valley stabilizer and orbit report.
+
+    Replaces the old single global "all-valley intersection" report.
+    The all-valley intersection is retained as ``all_valley_intersection``
+    for debugging but is NOT used for single-valley irrep matching.
+    """
+    per_valley_inventories = symmetry_payload.get("per_valley_little_group_inventory", {})
+    valley_names = symmetry_payload.get("valley_names", [])
     inventories = symmetry_payload.get("valley_little_group_inventory", {})
+
     if not isinstance(inventories, dict) or not inventories:
         return {
             "status": "not_available",
@@ -77,16 +130,39 @@ def build_valley_preserving_subgroup_report(
         operation.get("operation_id"): operation
         for operation in symmetry_payload.get("detected_operations", [])
     }
-    global_operation_set = _global_valley_preserving_operation_set_report(
+
+    # All-valley intersection (debug only, NOT used for single-valley irreps)
+    all_valley_intersection = _global_valley_preserving_operation_set_report(
         operation_lookup=operation_lookup,
         tolerance=tolerance,
     )
-    standard_match, standard_match_status = _match_standard_group_from_operations(
-        allowed_ids=global_operation_set["allowed_operation_ids"],
-        operation_lookup=operation_lookup,
-        lattice_direct_cart=symmetry_payload.get("lattice_direct_cart"),
-        symprec=float(symmetry_payload.get("symprec", tolerance)),
+    all_valley_intersection["interpretation"] = (
+        "intersection of operations preserving ALL selected valleys; "
+        "this is NOT the single-valley stabilizer and is provided for debugging only"
     )
+
+    # Per-valley stabilizers
+    valley_stabilizers: dict[str, Any] = {}
+    for valley_name in valley_names:
+        stab_ids = [
+            op_id for op_id, op in operation_lookup.items()
+            if _operation_preserves_valley(op, valley_name)
+        ]
+        closure = _operation_set_closure_report(
+            allowed_ids=stab_ids,
+            operation_lookup=operation_lookup,
+            tolerance=tolerance,
+        )
+        valley_stabilizers[valley_name] = {
+            "operation_ids": stab_ids,
+            "closure_status": closure["closure_status"],
+            "identity_operation_id": closure["identity_operation_id"],
+            "missing_products": closure["missing_products"],
+        }
+
+    # Valley orbits
+    valley_orbits = _compute_valley_orbits(operation_lookup, valley_names)
+
     if target_kpoints is None:
         ordered_kpoints = list(inventories)
     else:
@@ -95,76 +171,109 @@ def build_valley_preserving_subgroup_report(
 
     by_kpoint: dict[str, Any] = {}
     for kpoint in ordered_kpoints:
-        inventory = inventories.get(kpoint, [])
-        if not isinstance(inventory, list):
-            continue
-        allowed_ids = [
-            row.get("operation_id")
-            for row in inventory
-            if bool(row.get("allowed_for_single_valley_representation", False))
-        ]
-        little_ids = [
-            row.get("operation_id")
-            for row in inventory
-            if bool(row.get("little_group_passed", False))
-        ]
-        valley_exchanging_ids = [
-            row.get("operation_id")
-            for row in inventory
-            if bool(row.get("valley_exchanging", False))
-        ]
-        not_valley_preserving_ids = [
-            row.get("operation_id")
-            for row in inventory
-            if bool(row.get("little_group_passed", False))
-            and not bool(row.get("valley_preserving", False))
-        ]
-        outside_little_group_ids = [
-            row.get("operation_id")
-            for row in inventory
-            if not bool(row.get("little_group_passed", False))
-        ]
-        closure = _operation_set_closure_report(
-            allowed_ids=allowed_ids,
+        kp_entry: dict[str, Any] = {}
+        for valley_name in valley_names:
+            # Get per-valley inventory for this (kpoint, valley)
+            pv_inv = (
+                per_valley_inventories.get(kpoint, {}).get(valley_name, [])
+                if per_valley_inventories
+                else []
+            )
+            if not pv_inv:
+                # Fallback: build from flat inventory
+                flat_inv = inventories.get(kpoint, [])
+                if isinstance(flat_inv, list):
+                    pv_inv = _build_per_valley_from_flat(flat_inv, valley_name, operation_lookup)
+
+            allowed_ids = [
+                row.get("operation_id")
+                for row in pv_inv
+                if bool(row.get("allowed_for_single_valley_representation", False))
+            ]
+            little_ids = [
+                row.get("operation_id")
+                for row in pv_inv
+                if bool(row.get("little_group_passed", False))
+            ]
+            valley_changing_ids = [
+                row.get("operation_id")
+                for row in pv_inv
+                if bool(row.get("little_group_passed", False))
+                and not bool(row.get("valley_preserving", False))
+                and row.get("mapped_valley") is not None
+                and str(row.get("mapped_valley", "")) != str(valley_name)
+            ]
+            outside_little_ids = [
+                row.get("operation_id")
+                for row in pv_inv
+                if not bool(row.get("little_group_passed", False))
+            ]
+            closure = _operation_set_closure_report(
+                allowed_ids=allowed_ids,
+                operation_lookup=operation_lookup,
+                tolerance=tolerance,
+            )
+            kp_entry[valley_name] = {
+                "little_group_operation_ids": little_ids,
+                "allowed_operation_ids": allowed_ids,
+                "valley_changing_operation_ids": valley_changing_ids,
+                "outside_little_group_operation_ids": outside_little_ids,
+                "operation_count": len(allowed_ids),
+                "closure_status": closure["closure_status"],
+                "identity_operation_id": closure["identity_operation_id"],
+                "missing_products": closure["missing_products"],
+            }
+
+        # Legacy backward-compat fields at kpoint level
+        flat_inv = inventories.get(kpoint, [])
+        if isinstance(flat_inv, list):
+            lg_ids = [
+                row.get("operation_id")
+                for row in flat_inv
+                if bool(row.get("little_group_passed", False))
+            ]
+            old_allowed = [
+                row.get("operation_id")
+                for row in flat_inv
+                if bool(row.get("allowed_for_single_valley_representation", False))
+            ]
+            kp_entry["_legacy_all_valley_little_group_operation_ids"] = lg_ids
+            kp_entry["_legacy_all_valley_allowed_operation_ids"] = old_allowed
+
+        by_kpoint[kpoint] = kp_entry
+
+    # Standard group match from per-valley stabilizers
+    per_valley_standard_matches: dict[str, Any] = {}
+    for valley_name in valley_names:
+        stab_ids = valley_stabilizers.get(valley_name, {}).get("operation_ids", [])
+        match, match_status = _match_standard_group_from_operations(
+            allowed_ids=stab_ids,
             operation_lookup=operation_lookup,
-            tolerance=tolerance,
+            lattice_direct_cart=symmetry_payload.get("lattice_direct_cart"),
+            symprec=float(symmetry_payload.get("symprec", tolerance)),
         )
-        by_kpoint[kpoint] = {
-            "operation_set_label": f"G_tau,k({kpoint})",
-            "interpretation": "valley-preserving little-group operation set",
-            "standard_group_match": None,
-            "standard_group_match_status": "not_attempted",
-            "little_group_operation_ids": little_ids,
-            "allowed_operation_ids": allowed_ids,
-            "valley_exchanging_operation_ids": valley_exchanging_ids,
-            "not_valley_preserving_operation_ids": not_valley_preserving_ids,
-            "outside_little_group_operation_ids": outside_little_group_ids,
-            "operation_count": len(allowed_ids),
-            "closure_status": closure["closure_status"],
-            "identity_operation_id": closure["identity_operation_id"],
-            "missing_products": closure["missing_products"],
+        per_valley_standard_matches[valley_name] = {
+            "standard_group_match": match,
+            "standard_group_match_status": match_status,
         }
 
-    status = (
-        "standard_group_matched"
-        if standard_match_status == "matched"
-        else "operation_set_only"
-    )
+    status = "per_valley_stabilizers_computed"
     report = {
         "status": status,
         "interpretation": (
-            "G_tau is determined from detected valley-preserving operations; "
-            "G_tau,k entries are valley-preserving little-group operation sets"
+            "Per-valley stabilizers H_v = {g in G | g maps valley v to itself}. "
+            "Single-valley irreps use per-valley stabilizers, NOT the all-valley intersection."
         ),
-        "global_operation_set": global_operation_set,
-        "standard_group_match": standard_match,
-        "standard_group_match_status": standard_match_status,
-        "irrep_matching": _build_irrep_table_matching(
+        "valley_orbits": valley_orbits,
+        "valley_stabilizers": valley_stabilizers,
+        "per_valley_standard_matches": per_valley_standard_matches,
+        "all_valley_intersection": all_valley_intersection,
+        "irrep_matching": _build_per_valley_irrep_table_matching(
             symmetry_payload=symmetry_payload,
             operation_lookup=operation_lookup,
-            global_operation_set=global_operation_set,
-            standard_match=standard_match,
-            standard_match_status=standard_match_status,
+            valley_names=valley_names,
+            valley_stabilizers=valley_stabilizers,
+            per_valley_standard_matches=per_valley_standard_matches,
             by_kpoint=by_kpoint,
             tolerance=tolerance,
         ),
@@ -182,6 +291,10 @@ def add_valley_irrep_results(
     state_diagonal_tol: float = 1e-3,
     tolerance: float = 1e-5,
 ) -> dict[str, Any]:
+    """Match characters to per-valley stabilizer irrep tables.
+
+    Keys irrep matching by (kpoint, valley), not only by kpoint.
+    """
     report = symmetry_payload.get("valley_preserving_subgroup_report", {})
     if not isinstance(report, dict):
         return {}
@@ -192,78 +305,138 @@ def add_valley_irrep_results(
         matching["character_matching_status"] = "not_attempted"
         return matching
 
-    table = load_standard_irrep_table(
-        int(matching["spacegroup_number"]),
-        spinor=bool(matching.get("spinor", False)),
-    )
-    operation_to_table = dict(matching.get("operation_to_table_mapping", {}))
-    table_to_operation = {v: k for k, v in operation_to_table.items()}
+    valley_names = symmetry_payload.get("valley_names", [])
+    per_valley_table_info = matching.get("per_valley", {})
     results_by_kpoint: dict[str, Any] = {}
+    all_matched = True
+
     for kpoint, kpoint_info in matching.get("by_kpoint", {}).items():
-        if not isinstance(kpoint_info, dict) or kpoint_info.get("status") != "table_kpoint_matched":
-            results_by_kpoint[kpoint] = {
-                "status": "table_kpoint_not_ready",
-                "failure_reasons": ["Table k-point mapping is not complete"],
-                "state_irrep_assignment_status": "not_attempted",
-                "state_irrep_results": [],
-            }
+        if not isinstance(kpoint_info, dict):
+            all_matched = False
             continue
-        character_data = _collect_computed_characters(
-            symmetry_rows=symmetry_rows,
-            kpoint=kpoint,
-            operation_to_table=operation_to_table,
-        )
-        computed_characters = dict(character_data["computed_characters"])
-        identity_source = _fill_identity_character_if_needed(
-            computed_characters=computed_characters,
-            table_operation_indices=kpoint_info.get("table_operation_indices", []),
-            ready_row_counts=character_data["ready_row_counts"],
-        )
-        match_result = decompose_characters_into_irreps(
-            table=table,
-            table_kpoint_label=str(kpoint_info["table_kpoint_label"]),
-            computed_characters=computed_characters,
-            tolerance=tolerance,
-        )
+        kp_results: dict[str, Any] = {}
 
-        # State-level: collect from D_valley diagonal, not eigenvalue ordering
-        state_diag = _collect_state_diagonal_characters(
-            representation_payload=representation_payload,
-            kpoint=kpoint,
-            table_to_operation=table_to_operation,
-            table_operation_indices=kpoint_info.get("table_operation_indices", []),
-            symmetry_rows=symmetry_rows,
-            operation_to_table=operation_to_table,
-            state_diagonal_tol=state_diagonal_tol,
-        )
-        state_irrep_result = _match_single_state_irreps(
-            table=table,
-            table_kpoint_label=str(kpoint_info["table_kpoint_label"]),
-            table_operation_indices=kpoint_info.get("table_operation_indices", []),
-            state_characters=state_diag["state_characters"],
-            tolerance=tolerance,
-        )
-        results_by_kpoint[kpoint] = {
-            "status": match_result.status,
-            "table_kpoint_label": match_result.table_kpoint_label,
-            "computed_characters": _format_complex_character_dict(match_result.computed_characters),
-            "identity_character_source": identity_source,
-            "irrep_weights": match_result.irrep_weights,
-            "irrep_multiplicities": match_result.irrep_multiplicities,
-            "missing_table_operation_indices": match_result.missing_table_operation_indices,
-            "failure_reasons": match_result.failure_reasons,
-            "state_irrep_assignment_status": state_irrep_result["status"],
-            "state_irrep_results": state_irrep_result["results"],
-        }
+        for valley_name in valley_names:
+            valley_table_info = per_valley_table_info.get(valley_name, {})
+            if valley_table_info.get("status") != "table_mapping_complete":
+                kp_results[valley_name] = {
+                    "status": "table_mapping_incomplete",
+                    "failure_reasons": ["Per-valley table mapping is not complete"],
+                    "state_irrep_assignment_status": "not_attempted",
+                    "state_irrep_results": [],
+                }
+                all_matched = False
+                continue
 
-    all_matched = bool(results_by_kpoint) and all(
-        result.get("status") == "matched"
-        for result in results_by_kpoint.values()
-    )
+            table = _cached_load_irrep_table(
+                int(valley_table_info["spacegroup_number"]),
+                spinor=bool(valley_table_info.get("spinor", False)),
+            )
+            if table is None:
+                kp_results[valley_name] = {
+                    "status": "table_load_failed",
+                    "failure_reasons": ["Failed to load irrep table"],
+                    "state_irrep_assignment_status": "not_attempted",
+                    "state_irrep_results": [],
+                }
+                all_matched = False
+                continue
+
+            operation_to_table = dict(valley_table_info.get("operation_to_table_mapping", {}))
+            table_to_operation = {v: k for k, v in operation_to_table.items()}
+
+            v_kp_info = valley_table_info.get("by_kpoint", {}).get(kpoint, {})
+            if not isinstance(v_kp_info, dict) or v_kp_info.get("status") != "table_kpoint_matched":
+                kp_results[valley_name] = {
+                    "status": "table_kpoint_not_ready",
+                    "failure_reasons": ["Table k-point mapping is not complete"],
+                    "state_irrep_assignment_status": "not_attempted",
+                    "state_irrep_results": [],
+                }
+                all_matched = False
+                continue
+
+            character_data = _collect_valley_characters(
+                symmetry_rows=symmetry_rows,
+                kpoint=kpoint,
+                target_valley=valley_name,
+                operation_to_table=operation_to_table,
+            )
+            computed_characters = dict(character_data["computed_characters"])
+            identity_source = _fill_identity_character_if_needed(
+                computed_characters=computed_characters,
+                table_operation_indices=v_kp_info.get("table_operation_indices", []),
+                ready_row_counts=character_data["ready_row_counts"],
+            )
+            match_result = decompose_characters_into_irreps(
+                table=table,
+                table_kpoint_label=str(v_kp_info["table_kpoint_label"]),
+                computed_characters=computed_characters,
+                tolerance=tolerance,
+            )
+
+            state_diag = _collect_state_diagonal_characters(
+                representation_payload=representation_payload,
+                kpoint=kpoint,
+                table_to_operation=table_to_operation,
+                table_operation_indices=v_kp_info.get("table_operation_indices", []),
+                symmetry_rows=symmetry_rows,
+                operation_to_table=operation_to_table,
+                target_valley=valley_name,
+                state_diagonal_tol=state_diagonal_tol,
+            )
+            state_irrep_result = _match_single_state_irreps(
+                table=table,
+                table_kpoint_label=str(v_kp_info["table_kpoint_label"]),
+                table_operation_indices=v_kp_info.get("table_operation_indices", []),
+                state_characters=state_diag["state_characters"],
+                tolerance=tolerance,
+            )
+            kp_results[valley_name] = {
+                "status": match_result.status,
+                "table_kpoint_label": match_result.table_kpoint_label,
+                "computed_characters": _format_complex_character_dict(match_result.computed_characters),
+                "identity_character_source": identity_source,
+                "irrep_weights": match_result.irrep_weights,
+                "irrep_multiplicities": match_result.irrep_multiplicities,
+                "missing_table_operation_indices": match_result.missing_table_operation_indices,
+                "failure_reasons": match_result.failure_reasons,
+                "state_irrep_assignment_status": state_irrep_result["status"],
+                "state_irrep_results": state_irrep_result["results"],
+            }
+            if match_result.status != "matched":
+                all_matched = False
+
+        results_by_kpoint[kpoint] = kp_results
+
+    all_matched = bool(results_by_kpoint) and all_matched
     matching["character_matching_status"] = "matched" if all_matched else "incomplete"
     matching["label_matching"] = "matched" if all_matched else "deferred"
     matching["irrep_results_by_kpoint"] = results_by_kpoint
     return matching
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+_IRREP_TABLE_CACHE: dict[tuple[int, bool], Any] = {}
+
+
+def _cached_load_irrep_table(number: int, spinor: bool = False):
+    key = (number, spinor)
+    if key not in _IRREP_TABLE_CACHE:
+        try:
+            _IRREP_TABLE_CACHE[key] = load_standard_irrep_table(number, spinor=spinor)
+        except Exception:
+            _IRREP_TABLE_CACHE[key] = None
+    return _IRREP_TABLE_CACHE[key]
+
+
+def _operation_preserves_valley(operation: dict[str, Any], valley_name: str) -> bool:
+    mapping = operation.get("sector_mapping", {})
+    target = mapping.get(valley_name)
+    return target is not None and str(target) == str(valley_name)
 
 
 def _preserves_all_valley_subspaces(operation: dict[str, Any]) -> bool:
@@ -273,13 +446,147 @@ def _preserves_all_valley_subspaces(operation: dict[str, Any]) -> bool:
     return all(bool(value) for value in preserved.values())
 
 
-def _build_irrep_table_matching(
+def _per_valley_rejection_reason(
+    *,
+    little_group_passed: bool,
+    valley_preserving: bool,
+    mapped_valley: Any,
+) -> str:
+    if not little_group_passed:
+        return "not in little group"
+    if valley_preserving:
+        return ""
+    if mapped_valley is not None:
+        return f"valley-changing (maps to {mapped_valley})"
+    return "not valley preserving"
+
+
+def _infer_valley_names(symmetry_payload: dict[str, Any]) -> list[str]:
+    for op in symmetry_payload.get("detected_operations", []):
+        preserved = op.get("preserved", {})
+        if isinstance(preserved, dict) and preserved:
+            return list(preserved.keys())
+    mapping = op.get("sector_mapping", {}) if symmetry_payload.get("detected_operations") else {}
+    if isinstance(mapping, dict) and mapping:
+        return list(mapping.keys())
+    return []
+
+
+def _build_per_valley_from_flat(
+    flat_inventory: list[dict[str, Any]],
+    valley_name: str,
+    operation_lookup: dict[Any, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Fallback: build per-valley rows from flat inventory and operation data."""
+    rows: list[dict[str, Any]] = []
+    for flat_row in flat_inventory:
+        op_id = flat_row.get("operation_id")
+        op = operation_lookup.get(op_id, {})
+        sector_mapping = op.get("sector_mapping", {})
+        mapped_valley = sector_mapping.get(valley_name)
+        valley_preserving = bool(
+            mapped_valley is not None and str(mapped_valley) == str(valley_name)
+        )
+        little = bool(flat_row.get("little_group_passed", False))
+        allowed = bool(little and valley_preserving)
+        reason = _per_valley_rejection_reason(
+            little_group_passed=little,
+            valley_preserving=valley_preserving,
+            mapped_valley=mapped_valley,
+        )
+        rows.append({
+            "operation_id": op_id,
+            "kind": flat_row.get("kind", ""),
+            "order": flat_row.get("order"),
+            "little_group_passed": little,
+            "target_valley": valley_name,
+            "mapped_valley": mapped_valley,
+            "valley_preserving": valley_preserving,
+            "allowed_for_single_valley_representation": allowed,
+            "reason": reason,
+        })
+    return rows
+
+
+def _compute_valley_orbits(
+    operation_lookup: dict[Any, dict[str, Any]],
+    valley_names: list[str],
+) -> list[dict[str, Any]]:
+    """Compute valley orbits under the detected operations."""
+    if not valley_names:
+        return []
+
+    # Build adjacency: which valleys map to which
+    adjacency: dict[str, set[str]] = {v: {v} for v in valley_names}
+    for op in operation_lookup.values():
+        mapping = op.get("sector_mapping", {})
+        for src, tgt in mapping.items():
+            if tgt is not None and src in adjacency:
+                adjacency[src].add(str(tgt))
+
+    # Find connected components
+    visited: set[str] = set()
+    orbits: list[dict[str, Any]] = []
+
+    for valley_name in valley_names:
+        if valley_name in visited:
+            continue
+        # BFS
+        component: list[str] = []
+        queue = [valley_name]
+        while queue:
+            v = queue.pop(0)
+            if v in visited:
+                continue
+            visited.add(v)
+            component.append(v)
+            for neighbor in adjacency.get(v, set()):
+                if neighbor not in visited:
+                    queue.append(neighbor)
+
+        # Operation mappings for this orbit
+        op_mappings: list[dict[str, Any]] = []
+        coset_reps: list[Any] = []
+        for op_id, op in operation_lookup.items():
+            mapping = op.get("sector_mapping", {})
+            relevant = False
+            for v in component:
+                tgt = mapping.get(v)
+                if tgt is not None and str(tgt) != str(v):
+                    relevant = True
+                    break
+            if relevant:
+                op_mappings.append({
+                    "operation_id": op_id,
+                    "kind": op.get("kind", ""),
+                    "order": op.get("order"),
+                    "mapping": {k: v for k, v in mapping.items() if k in component},
+                })
+            # Check if this operation maps between different valleys in the orbit
+            mapped_set = set()
+            for v in component:
+                tgt = mapping.get(v)
+                if tgt is not None:
+                    mapped_set.add(str(tgt))
+            if len(mapped_set) > 1:
+                coset_reps.append(op_id)
+
+        orbits.append({
+            "valleys": component,
+            "operation_mappings": op_mappings,
+            "coset_representative_operation_ids": coset_reps,
+        })
+
+    return orbits
+
+
+def _build_per_valley_irrep_table_matching(
     *,
     symmetry_payload: dict[str, Any],
     operation_lookup: dict[Any, dict[str, Any]],
-    global_operation_set: dict[str, Any],
-    standard_match: dict[str, Any] | None,
-    standard_match_status: str,
+    valley_names: list[str],
+    valley_stabilizers: dict[str, Any],
+    per_valley_standard_matches: dict[str, Any],
     by_kpoint: dict[str, Any],
     tolerance: float,
 ) -> dict[str, Any]:
@@ -287,66 +594,90 @@ def _build_irrep_table_matching(
         "table_source": "irreptables",
         "label_matching": "deferred",
         "reason": (
-            "automatic irrep labels are not emitted until character-to-table "
-            "matching is explicitly enabled"
+            "automatic irrep labels use per-valley stabilizers; "
+            "not emitted until character-to-table matching succeeds"
         ),
     }
-    if standard_match_status != "matched" or standard_match is None:
-        return {
-            **base,
-            "status": "table_mapping_deferred",
-            "operation_to_table_mapping_status": "not_attempted",
-            "reason": "standard valley-preserving subgroup is not matched",
-            "by_kpoint": {},
-        }
 
     spinor = bool(symmetry_payload.get("spinor_wavefunction", False))
-    try:
-        table = load_standard_irrep_table(int(standard_match["number"]), spinor=spinor)
-    except Exception as exc:
-        return {
-            **base,
-            "status": "table_load_failed",
-            "spacegroup_number": int(standard_match["number"]),
-            "spinor": spinor,
-            "operation_to_table_mapping_status": "not_attempted",
-            "reason": str(exc),
-            "by_kpoint": {},
+    per_valley: dict[str, Any] = {}
+    all_complete = True
+
+    for valley_name in valley_names:
+        match_info = per_valley_standard_matches.get(valley_name, {})
+        standard_match = match_info.get("standard_group_match")
+        match_status = match_info.get("standard_group_match_status", "not_attempted")
+
+        if match_status != "matched" or standard_match is None:
+            per_valley[valley_name] = {
+                "status": "table_mapping_deferred",
+                "reason": f"No standard group match for {valley_name} stabilizer",
+                "by_kpoint": {},
+            }
+            all_complete = False
+            continue
+
+        try:
+            table = load_standard_irrep_table(int(standard_match["number"]), spinor=spinor)
+        except Exception as exc:
+            per_valley[valley_name] = {
+                "status": "table_load_failed",
+                "spacegroup_number": int(standard_match["number"]),
+                "spinor": spinor,
+                "reason": str(exc),
+                "by_kpoint": {},
+            }
+            all_complete = False
+            continue
+
+        stab_ids = valley_stabilizers.get(valley_name, {}).get("operation_ids", [])
+        stab_operations = [
+            operation_lookup[op_id]
+            for op_id in stab_ids
+            if op_id in operation_lookup
+        ]
+        mapping_report = match_table_operations(
+            stab_operations, table, tolerance=tolerance,
+        )
+
+        kpoint_matching = _build_table_kpoint_matching(
+            by_kpoint=by_kpoint,
+            kpoint_frac_by_name=symmetry_payload.get("kpoint_frac_by_name", {}),
+            table=table,
+            operation_mapping=mapping_report.mapping_by_operation_id,
+            tolerance=max(tolerance, 1e-6),
+            valley_name=valley_name,
+        )
+        complete = mapping_report.status == "complete" and all(
+            row.get("status") == "table_kpoint_matched"
+            for row in kpoint_matching.values()
+        )
+        if not complete:
+            all_complete = False
+
+        per_valley[valley_name] = {
+            "status": "table_mapping_complete" if complete else "table_mapping_incomplete",
+            "spacegroup_number": table.number,
+            "table_name": table.name,
+            "spinor": table.spinor,
+            "operation_to_table_mapping_status": mapping_report.status,
+            "operation_to_table_mapping": mapping_report.mapping_by_operation_id,
+            "unmatched_operation_ids": mapping_report.unmatched_operation_ids,
+            "unused_table_operation_indices": mapping_report.unused_table_operation_indices,
+            "by_kpoint": kpoint_matching,
         }
 
-    allowed_operations = [
-        operation_lookup[operation_id]
-        for operation_id in global_operation_set.get("allowed_operation_ids", [])
-        if operation_id in operation_lookup
-    ]
-    mapping_report = match_table_operations(
-        allowed_operations,
-        table,
-        tolerance=tolerance,
-    )
-    kpoint_matching = _build_table_kpoint_matching(
-        by_kpoint=by_kpoint,
-        kpoint_frac_by_name=symmetry_payload.get("kpoint_frac_by_name", {}),
-        table=table,
-        operation_mapping=mapping_report.mapping_by_operation_id,
-        tolerance=max(tolerance, 1e-6),
-    )
-    by_kpoint_complete = all(
-        row.get("status") == "table_kpoint_matched"
-        for row in kpoint_matching.values()
-    )
-    mapping_complete = mapping_report.status == "complete" and by_kpoint_complete
     return {
         **base,
-        "status": "table_mapping_complete" if mapping_complete else "table_mapping_incomplete",
-        "spacegroup_number": table.number,
-        "table_name": table.name,
-        "spinor": table.spinor,
-        "operation_to_table_mapping_status": mapping_report.status,
-        "operation_to_table_mapping": mapping_report.mapping_by_operation_id,
-        "unmatched_operation_ids": mapping_report.unmatched_operation_ids,
-        "unused_table_operation_indices": mapping_report.unused_table_operation_indices,
-        "by_kpoint": kpoint_matching,
+        "status": "table_mapping_complete" if all_complete else "table_mapping_incomplete",
+        "per_valley": per_valley,
+        "by_kpoint": {
+            kpoint: {
+                valley_name: per_valley.get(valley_name, {}).get("by_kpoint", {}).get(kpoint, {})
+                for valley_name in valley_names
+            }
+            for kpoint in by_kpoint
+        },
     }
 
 
@@ -357,6 +688,7 @@ def _build_table_kpoint_matching(
     table,
     operation_mapping: dict[Any, int],
     tolerance: float,
+    valley_name: str | None = None,
 ) -> dict[str, Any]:
     if not isinstance(kpoint_frac_by_name, dict):
         kpoint_frac_by_name = {}
@@ -378,7 +710,14 @@ def _build_table_kpoint_matching(
             }
             continue
         table_indices = table.operation_indices_for_kpoint(table_label)
-        allowed_ids = list(payload.get("allowed_operation_ids", []))
+
+        # Get per-valley allowed ids
+        if valley_name is not None and isinstance(payload, dict):
+            v_payload = payload.get(valley_name, {})
+            allowed_ids = list(v_payload.get("allowed_operation_ids", [])) if isinstance(v_payload, dict) else []
+        else:
+            allowed_ids = list(payload.get("allowed_operation_ids", [])) if isinstance(payload, dict) else []
+
         mapped_indices = sorted(
             operation_mapping[operation_id]
             for operation_id in allowed_ids
@@ -415,21 +754,61 @@ def _build_table_kpoint_matching(
     return matching_by_kpoint
 
 
+def _collect_valley_characters(
+    *,
+    symmetry_rows: list[dict[str, Any]],
+    kpoint: str,
+    target_valley: str,
+    operation_to_table: dict[Any, int],
+) -> dict[str, Any]:
+    """Collect trace-level characters for a specific (kpoint, valley) pair."""
+    computed_characters: dict[int, complex] = {}
+    ready_row_counts: dict[int, int] = {}
+    rows_by_table_operation: dict[int, list[dict[str, Any]]] = {}
+
+    for row in symmetry_rows:
+        if str(row.get("kpoint", "")) != kpoint:
+            continue
+        row_valley = str(row.get("target_valley", ""))
+        if row_valley and row_valley != target_valley:
+            continue
+        if not bool(row.get("little_group_passed", False)):
+            continue
+        if not bool(row.get("valley_preserving", False)):
+            continue
+        operation_id = row.get("operation_id")
+        if operation_id not in operation_to_table:
+            continue
+        table_index = operation_to_table[operation_id]
+        rows_by_table_operation.setdefault(table_index, []).append(row)
+
+    for table_index, rows in rows_by_table_operation.items():
+        if not rows or not all(bool(row.get("topology_input_ready", False)) for row in rows):
+            continue
+        ready_row_counts[table_index] = len(rows)
+        character = next(
+            (row.get("character_valley", "") for row in rows if row.get("character_valley", "")),
+            "",
+        )
+        if character:
+            computed_characters[table_index] = _parse_complex_character(character)
+    return {
+        "computed_characters": computed_characters,
+        "ready_row_counts": ready_row_counts,
+    }
+
+
 def _collect_computed_characters(
     *,
     symmetry_rows: list[dict[str, Any]],
     kpoint: str,
     operation_to_table: dict[Any, int],
 ) -> dict[str, Any]:
-    """Collect aggregate (trace-level) characters from valley-adapted character rows.
-
-    State-level characters are collected separately via
-    ``_collect_state_diagonal_characters`` from the fixed valley-adapted
-    D_valley matrix.
-    """
+    """Legacy: collect characters without valley filtering (backward compat)."""
     computed_characters: dict[int, complex] = {}
     ready_row_counts: dict[int, int] = {}
     rows_by_table_operation: dict[int, list[dict[str, Any]]] = {}
+
     for row in symmetry_rows:
         if str(row.get("kpoint", "")) != kpoint:
             continue
@@ -467,17 +846,13 @@ def _collect_state_diagonal_characters(
     table_operation_indices: Any,
     symmetry_rows: list[dict[str, Any]],
     operation_to_table: dict[Any, int],
-    state_diagonal_tol: float,
+    target_valley: str | None = None,
+    state_diagonal_tol: float = 1e-3,
 ) -> dict[str, Any]:
-    """Collect per-state characters from D_valley diagonal entries.
-
-    Uses the fixed valley-adapted basis D_valley(g)[i,i] rather than
-    eigenvalue ordering, which is not stable across different operations.
-    Only includes entries where ALL rows for a given operation pass
-    readiness gates and the off-diagonal norm is below tolerance.
-    """
+    """Collect per-state characters from D_valley diagonal, filtered by target_valley."""
     state_characters: dict[int, dict[int, complex]] = {}
     offdiag_warnings: list[str] = []
+
     if representation_payload is None:
         return {"state_characters": state_characters, "offdiag_warnings": ["no_representation_payload"]}
 
@@ -485,10 +860,12 @@ def _collect_state_diagonal_characters(
     if not isinstance(kp_representations, dict):
         return {"state_characters": state_characters, "offdiag_warnings": ["no_kpoint_representations"]}
 
-    # Collect rows by table index and check full readiness (mirrors aggregate gate)
     rows_by_table: dict[int, list[dict[str, Any]]] = {}
     for row in symmetry_rows:
         if str(row.get("kpoint", "")) != kpoint:
+            continue
+        row_valley = str(row.get("target_valley", ""))
+        if target_valley is not None and row_valley and row_valley != target_valley:
             continue
         if not bool(row.get("little_group_passed", False)):
             continue
@@ -500,7 +877,6 @@ def _collect_state_diagonal_characters(
         table_index = operation_to_table[operation_id]
         rows_by_table.setdefault(table_index, []).append(row)
 
-    # Only use operations where ALL rows pass topology_input_ready
     ready_table_indices: set[int] = set()
     for table_index, rows in rows_by_table.items():
         if rows and all(bool(r.get("topology_input_ready", False)) for r in rows):
@@ -512,7 +888,21 @@ def _collect_state_diagonal_characters(
         operation_id = table_to_operation.get(table_index)
         if operation_id is None:
             continue
-        op_payload = kp_representations.get(f"operation_{operation_id}")
+        op_payload = kp_representations.get(_representation_payload_key(operation_id, target_valley or ""))
+        if op_payload is None:
+            op_payload = kp_representations.get(f"operation_{operation_id}")
+        if op_payload is None and target_valley is not None:
+            prefix = f"operation_{operation_id}__valley_"
+            op_payload = next(
+                (
+                    payload
+                    for key, payload in kp_representations.items()
+                    if str(key).startswith(prefix)
+                    and isinstance(payload, dict)
+                    and str(payload.get("target_valley", "")) == str(target_valley)
+                ),
+                None,
+            )
         if op_payload is None:
             op_payload = kp_representations.get(str(operation_id), {})
         if not isinstance(op_payload, dict):
@@ -527,7 +917,6 @@ def _collect_state_diagonal_characters(
         if n < 1:
             continue
 
-        # Check off-diagonal norm
         off_diag = d_valley.copy()
         np.fill_diagonal(off_diag, 0.0)
         off_norm = float(np.linalg.norm(off_diag))
@@ -606,7 +995,6 @@ def _fill_identity_character_if_needed(
     return "inferred_from_ready_rows"
 
 
-
 def _parse_complex_character(value: Any) -> complex:
     if isinstance(value, complex):
         return value
@@ -620,6 +1008,10 @@ def _format_complex_character_dict(values: dict[int, complex]) -> dict[str, str]
         str(table_index): f"{value.real:.6f}{value.imag:+.6f}j"
         for table_index, value in sorted(values.items())
     }
+
+
+def _representation_payload_key(operation_id: Any, target_valley: str) -> str:
+    return f"operation_{operation_id}__valley_{quote(str(target_valley), safe='')}"
 
 
 def _global_valley_preserving_operation_set_report(
@@ -648,8 +1040,8 @@ def _global_valley_preserving_operation_set_report(
         tolerance=tolerance,
     )
     return {
-        "operation_set_label": "G_tau",
-        "interpretation": "global valley-preserving operation set",
+        "operation_set_label": "all_valley_intersection",
+        "interpretation": "intersection of operations preserving ALL selected valleys (debug only)",
         "allowed_operation_ids": allowed_ids,
         "valley_exchanging_operation_ids": valley_exchanging_ids,
         "not_valley_preserving_operation_ids": not_valley_preserving_ids,

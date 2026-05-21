@@ -205,11 +205,13 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     for entry in scan.entries
                 ],
             }
+        valley_names = list(projectors.sector_names)
         if symmetry_payload["status"] == "ok":
             update_valley_little_group_inventory(
                 symmetry_payload=symmetry_payload,
                 kpoint_name=kpoint_name,
                 k_frac=kpoint.frac,
+                valley_names=valley_names,
             )
         if symmetry_payload["status"] == "ok" and symmetry_payload.get("symmetry_eigenvalue_enabled", True):
             symmetry_rows.extend(
@@ -227,7 +229,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     unitarity_tol=config.rotation.unitarity_tol,
                     root_deviation_tol=config.rotation.root_deviation_tol,
                     d_valley_offdiag_tol=config.rotation.D_valley_offdiag_tol,
-                    generators_only=False,
+                    valley_names=valley_names,
                 )
             )
         kpoint_subspace["symmetry_status"] = _resolve_symmetry_status(
@@ -308,21 +310,6 @@ def _add_valley_subspace_diagnostic(
         s_eigenvalues = np.linalg.eigvalsh(diagnosed.s_matrix)
         s_min = float(np.min(s_eigenvalues)) if len(s_eigenvalues) else 0.0
         s_max = float(np.max(s_eigenvalues)) if len(s_eigenvalues) else 0.0
-        valid_valley_subspace = bool(diagnosed.stably_separable)
-
-        # Map separability to status string
-        if diagnosed.stably_separable:
-            status = "valley_separable"
-        elif "insufficient_valley_derived" in diagnosed.reason:
-            status = "poor_valley_manifold"
-        elif diagnosed.min_valley_concentration >= concentration_threshold * 0.9:
-            status = "valley_approximately_separable"
-        elif "concentration" in diagnosed.reason:
-            status = "valley_mixed"
-        elif "commut" in diagnosed.reason or "idempotency" in diagnosed.reason:
-            status = "projector_unreliable"
-        else:
-            status = "valley_mixed"
 
         subspace_derived = derive_derived_score(analysis_level="adapted_subspace", s_min=s_min)
         # Use concentration for polarization score in multi-valley, eta for two-valley
@@ -331,6 +318,34 @@ def _add_valley_subspace_diagnostic(
             eta_adapted=diagnosed.eta_adapted,
             purity=diagnosed.min_valley_concentration,
         )
+        subspace_valley_status = derive_valley_status(
+            analysis_level="adapted_subspace",
+            derived_score=subspace_derived,
+            polarization_score=subspace_polarization,
+            w_overlap=max_w_overlap,
+            w_res=max_w_res,
+            thresholds=thresholds,
+            two_sector=(n_valleys == 2),
+        )
+        valid_valley_subspace = subspace_valley_status == "valley_separable_subspace"
+        write_valley_basis = subspace_valley_status in {
+            "valley_separable_subspace",
+            "valley_approximately_separable_subspace",
+        }
+
+        if subspace_valley_status == "valley_separable_subspace":
+            status = "valley_separable"
+        elif subspace_valley_status == "valley_approximately_separable_subspace":
+            status = "valley_approximately_separable"
+        elif subspace_valley_status == "not_valley_derived":
+            status = "poor_valley_manifold"
+        elif subspace_valley_status == "projector_unreliable":
+            status = "projector_unreliable"
+        elif "concentration" in diagnosed.reason:
+            status = "valley_mixed"
+        else:
+            status = "valley_mixed"
+
         diagnostic.update(
             {
                 "status": status,
@@ -365,16 +380,8 @@ def _add_valley_subspace_diagnostic(
             )
         payload["derived_score"] = subspace_derived
         payload["polarization_score"] = subspace_polarization
-        payload["subspace_valley_status"] = derive_valley_status(
-            analysis_level="adapted_subspace",
-            derived_score=subspace_derived,
-            polarization_score=subspace_polarization,
-            w_overlap=max_w_overlap,
-            w_res=max_w_res,
-            thresholds=thresholds,
-            two_sector=(n_valleys == 2),
-        )
-        if valid_valley_subspace:
+        payload["subspace_valley_status"] = subspace_valley_status
+        if write_valley_basis:
             transform_entry: dict[str, object] = {
                 "transform": diagnosed.transform,
                 "s_matrix": diagnosed.s_matrix,
@@ -628,21 +635,21 @@ def _resolve_symmetry_status(
     little_group_passed: bool | None = None
     valley_preserving: bool | None = None
     for op in symmetry_payload.get("detected_operations", []):
-        if not op.get("candidate_rotation", False):
-            continue
         lg = op.get("little_group_by_kpoint", {}).get(kpoint_name)
         if lg is False:
             little_group_passed = False
             continue
         if lg is True:
             little_group_passed = True
-            allowed = op.get("allowed_for_single_valley_representation_by_kpoint", {}).get(kpoint_name, False)
-            if not allowed:
-                preserved = op.get("preserved", {})
-                if any(not bool(v) for v in preserved.values()):
-                    valley_preserving = False
-                else:
-                    valley_preserving = True
+            sector_mapping = op.get("sector_mapping", {})
+            preserves_any = any(
+                v is not None and str(v) == str(src)
+                for src, v in sector_mapping.items()
+            )
+            if preserves_any:
+                valley_preserving = True
+            else:
+                valley_preserving = False
 
     return derive_symmetry_status(
         symmetry_skipped=symmetry_skipped,
@@ -664,11 +671,14 @@ def _build_symmetry_eigenvalue_summary(
         if kp not in by_kpoint:
             by_kpoint[kp] = {"operations": [], "_by_operation": {}}
         by_operation = by_kpoint[kp]["_by_operation"]
-        key = str(row.get("operation_id"))
+        op_id = str(row.get("operation_id"))
+        target_valley = str(row.get("target_valley", ""))
+        key = f"{op_id}_{target_valley}"
         if key not in by_operation:
             accepted = bool(row.get("little_group_passed", False)) and bool(row.get("valley_preserving", False))
             op_info = {
                 "operation_id": row.get("operation_id"),
+                "target_valley": row.get("target_valley"),
                 "kind": row.get("kind"),
                 "order": row.get("order"),
                 "accepted": accepted,
@@ -695,19 +705,24 @@ def _build_symmetry_eigenvalue_summary(
         kp_info.pop("_by_operation", None)
 
     little_count = 0
-    vp_count = 0
+    vp_count = sum(
+        1 for op in ops
+        if any(
+            v is not None and str(v) == str(src)
+            for src, v in op.get("sector_mapping", {}).items()
+            if any(
+                bool(op.get("little_group_by_kpoint", {}).get(kp))
+                for kp in (symmetry_payload.get("kpoint_frac_by_name") or {}).keys()
+            )
+        )
+    ) if ops else 0
     computed = sum(len(kp_info.get("operations", [])) for kp_info in by_kpoint.values())
     for op in ops:
         has_lg = any(
             bool(v) for v in op.get("little_group_by_kpoint", {}).values()
         )
-        has_vp = all(
-            bool(v) for v in op.get("preserved", {}).values()
-        )
         if has_lg:
             little_count += 1
-        if has_lg and has_vp:
-            vp_count += 1
 
     return {
         "total_operations": total,
