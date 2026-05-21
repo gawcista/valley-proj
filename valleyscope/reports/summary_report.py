@@ -21,6 +21,7 @@ def build_summary_payload(
     symmetry_rows: list[dict[str, Any]] | None = None,
     output_paths: dict[str, Path],
     symmetry_eigenvalue_summary: dict[str, Any] | None = None,
+    covariance_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     eigen_rows = [] if symmetry_rows is None else symmetry_rows
     warnings = _collect_warnings(subspace_payload, symmetry_payload, eigen_rows)
@@ -67,10 +68,16 @@ def build_summary_payload(
                 "it does not validate full-mBZ valley-resolved topology"
             ),
             "topology_ready": "backward-compatible alias of topology_input_ready",
+            "epsilon_seed": (
+                "||D_g P_a^0 D_g^dag - P_{pi_g(a)}^0||_F / max(||P_a^0||_F, small); "
+                "seed projector covariance diagnostic"
+            ),
         },
     }
     if symmetry_eigenvalue_summary:
         payload["symmetry_eigenvalue_summary"] = symmetry_eigenvalue_summary
+    if covariance_report:
+        payload["projector_covariance"] = _compact_covariance(covariance_report)
     return payload
 
 
@@ -371,6 +378,42 @@ def render_summary_text(summary: dict[str, Any]) -> str:
         )
     )
     lines.append("")
+
+    # Projector covariance summary
+    cov = summary.get("projector_covariance", {})
+    if cov:
+        _section(lines, "Projector covariance")
+        lines.append(f"status: {cov.get('status', 'no_data')}")
+        lines.append(
+            f"tolerances: warn={cov.get('warn_tol')}, fail={cov.get('fail_tol')}"
+        )
+        for kpoint, kp_data in cov.get("by_kpoint", {}).items():
+            total = kp_data.get("total_checks", 0)
+            failed = kp_data.get("failed_count", 0)
+            warned = kp_data.get("warn_count", 0)
+            lines.append(
+                f"{kpoint}: {total} checks, {failed} failed, {warned} warned"
+            )
+            for item in kp_data.get("failed", []):
+                lines.append(
+                    f"  FAILED op={item.get('operation_id')} "
+                    f"{item.get('source_valley')}->{item.get('mapped_valley')} "
+                    f"epsilon={_fmt(item.get('epsilon_seed'))}"
+                )
+            for item in kp_data.get("warned", []):
+                lines.append(
+                    f"  WARN op={item.get('operation_id')} "
+                    f"{item.get('source_valley')}->{item.get('mapped_valley')} "
+                    f"epsilon={_fmt(item.get('epsilon_seed'))}"
+                )
+        lines.append("")
+        if any(kp_data.get("failed_count", 0) > 0
+               for kp_data in cov.get("by_kpoint", {}).values()):
+            lines.append(
+                "Covariance failures detected: local valley irrep/eigenvalue "
+                "interpretation is diagnostic-only for affected operations."
+            )
+        lines.append("")
 
     _section(lines, "Warnings")
     if summary["warnings"]:
@@ -802,5 +845,51 @@ def _output_file_label(name: str) -> str:
         "symmetry_report_json": "Symmetry analysis",
         "symmetry_eigenvalues_csv": "Symmetry eigenvalues",
         "diagnostics_h5": "Projector, qcut, and symmetry matrices",
+        "projector_covariance_report_json": "Projector covariance report",
     }
     return labels.get(name, name.replace("_", " ").title())
+
+
+def _compact_covariance(report: dict[str, Any]) -> dict[str, Any]:
+    """Extract compact summary from full covariance report."""
+    summary: dict[str, Any] = {
+        "status": report.get("status", "no_data"),
+        "warn_tol": report.get("warn_tol"),
+        "fail_tol": report.get("fail_tol"),
+    }
+    by_kpoint: dict[str, Any] = {}
+    for kpoint, kp_data in report.get("by_kpoint", {}).items():
+        if not isinstance(kp_data, dict):
+            continue
+        rows = kp_data.get("seed_projector_covariance", [])
+        if not isinstance(rows, list):
+            continue
+        failed = []
+        warned = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            status = row.get("status", "")
+            if status == "failed":
+                failed.append({
+                    "operation_id": row.get("operation_id"),
+                    "source_valley": row.get("source_valley"),
+                    "mapped_valley": row.get("mapped_valley"),
+                    "epsilon_seed": row.get("epsilon_seed"),
+                })
+            elif status == "warn":
+                warned.append({
+                    "operation_id": row.get("operation_id"),
+                    "source_valley": row.get("source_valley"),
+                    "mapped_valley": row.get("mapped_valley"),
+                    "epsilon_seed": row.get("epsilon_seed"),
+                })
+        by_kpoint[kpoint] = {
+            "total_checks": len(rows),
+            "failed_count": len(failed),
+            "warn_count": len(warned),
+            "failed": failed,
+            "warned": warned,
+        }
+    summary["by_kpoint"] = by_kpoint
+    return summary
