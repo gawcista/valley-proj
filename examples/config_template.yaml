@@ -73,6 +73,7 @@ rotation:
   unitarity_tol: 1.0e-4
   root_deviation_tol: 1.0e-6
   D_valley_offdiag_tol: 1.0e-6
+  irrep_weight_tol: 1.0e-5
 
 output:
   directory: ./valley_analysis

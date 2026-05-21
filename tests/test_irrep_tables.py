@@ -71,6 +71,25 @@ def test_match_table_operations_reports_unmatched_extra_operation():
     assert report.unused_table_operation_indices == [2, 3]
 
 
+def test_match_table_operations_maps_conjugate_twofold_stabilizer_to_c2_table():
+    table = load_standard_irrep_table(5, spinor=True)
+    detected_operations = [
+        {"operation_id": 0, "rotation_frac": np.eye(3, dtype=int), "translation_frac": np.zeros(3)},
+        {
+            "operation_id": 4,
+            "rotation_frac": np.array([[-1, 1, 0], [0, 1, 0], [0, 0, -1]], dtype=int),
+            "translation_frac": np.zeros(3),
+        },
+    ]
+
+    report = match_table_operations(detected_operations, table)
+
+    assert report.status == "complete"
+    assert report.mapping_by_operation_id == {0: 1, 4: 2}
+    assert report.unmatched_operation_ids == []
+    assert report.unused_table_operation_indices == []
+
+
 def test_decompose_characters_into_sg143_spinor_k_irrep_multiplicities():
     table = load_standard_irrep_table(143, spinor=True)
 

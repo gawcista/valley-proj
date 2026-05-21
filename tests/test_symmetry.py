@@ -1015,6 +1015,101 @@ def test_valley_preserving_subgroup_report_maps_operations_to_irreptables():
     assert {"-K4", "-K5", "-K6"} <= set(km_matching["available_irrep_labels"])
 
 
+def test_three_m_valley_c2_stabilizers_map_operations_but_report_kpoint_ambiguity():
+    c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]], dtype=int)
+    c3_square = c3 @ c3
+    operations = [
+        {
+            "operation_id": 0,
+            "kind": "identity",
+            "order": 1,
+            "rotation_frac": np.eye(3, dtype=int),
+            "translation_frac": np.zeros(3),
+            "preserved": {"M1_valley": True, "M2_valley": True, "M3_valley": True},
+            "sector_mapping": {
+                "M1_valley": "M1_valley",
+                "M2_valley": "M2_valley",
+                "M3_valley": "M3_valley",
+            },
+        },
+        {
+            "operation_id": 1,
+            "kind": "C3",
+            "order": 3,
+            "rotation_frac": c3,
+            "translation_frac": np.zeros(3),
+            "preserved": {"M1_valley": False, "M2_valley": False, "M3_valley": False},
+            "sector_mapping": {
+                "M1_valley": "M3_valley",
+                "M2_valley": "M1_valley",
+                "M3_valley": "M2_valley",
+            },
+        },
+        {
+            "operation_id": 2,
+            "kind": "C3^2",
+            "order": 3,
+            "rotation_frac": c3_square,
+            "translation_frac": np.zeros(3),
+            "preserved": {"M1_valley": False, "M2_valley": False, "M3_valley": False},
+            "sector_mapping": {
+                "M1_valley": "M2_valley",
+                "M2_valley": "M3_valley",
+                "M3_valley": "M1_valley",
+            },
+        },
+        {
+            "operation_id": 4,
+            "kind": "C2",
+            "order": 2,
+            "rotation_frac": np.array([[-1, 1, 0], [0, 1, 0], [0, 0, -1]], dtype=int),
+            "translation_frac": np.zeros(3),
+            "preserved": {"M1_valley": True, "M2_valley": False, "M3_valley": False},
+            "sector_mapping": {
+                "M1_valley": "M1_valley",
+                "M2_valley": "M3_valley",
+                "M3_valley": "M2_valley",
+            },
+        },
+    ]
+    symmetry_payload = {
+        "detected_operations": operations,
+        "lattice_direct_cart": np.array(
+            [
+                [1.0, 0.0, 0.0],
+                [-0.5, np.sqrt(3.0) / 2.0, 0.0],
+                [0.0, 0.0, 20.0],
+            ]
+        ),
+        "spinor_wavefunction": True,
+    }
+    update_valley_little_group_inventory(
+        symmetry_payload=symmetry_payload,
+        kpoint_name="GammaM",
+        k_frac=np.array([0.0, 0.0, 0.0]),
+        valley_names=["M1_valley", "M2_valley", "M3_valley"],
+    )
+    update_valley_little_group_inventory(
+        symmetry_payload=symmetry_payload,
+        kpoint_name="MM",
+        k_frac=np.array([0.0, 0.5, 0.0]),
+        valley_names=["M1_valley", "M2_valley", "M3_valley"],
+    )
+
+    report = build_valley_preserving_subgroup_report(
+        symmetry_payload=symmetry_payload,
+        target_kpoints=["GammaM", "MM"],
+    )
+
+    m1_match = report["irrep_matching"]["per_valley"]["M1_valley"]
+    assert m1_match["operation_to_table_mapping_status"] == "complete"
+    assert m1_match["operation_to_table_mapping"] == {0: 1, 4: 2}
+    assert m1_match["by_kpoint"]["GammaM"]["status"] == "table_kpoint_matched"
+    assert m1_match["by_kpoint"]["GammaM"]["table_kpoint_label"] == "GM"
+    assert m1_match["by_kpoint"]["MM"]["status"] == "table_kpoint_ambiguous"
+    assert set(m1_match["by_kpoint"]["MM"]["candidate_table_kpoint_labels"]) >= {"GM", "Y"}
+
+
 def test_valley_irrep_results_match_characters_to_irrep_multiplicities():
     c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]], dtype=int)
     c3_square = c3 @ c3
@@ -1132,6 +1227,67 @@ def test_valley_irrep_results_match_characters_to_irrep_multiplicities():
     # Kp_valley has table mapping but no character rows -> missing_characters
     kp_result = matching["irrep_results_by_kpoint"]["KM"]["Kp_valley"]
     assert kp_result["status"] == "missing_characters"
+
+
+def test_valley_irrep_results_attempt_matched_kpoints_when_other_kpoints_ambiguous():
+    symmetry_payload = {
+        "valley_names": ["M1_valley"],
+        "valley_preserving_subgroup_report": {
+            "irrep_matching": {
+                "status": "table_mapping_incomplete",
+                "per_valley": {
+                    "M1_valley": {
+                        "status": "table_mapping_incomplete",
+                        "spacegroup_number": 5,
+                        "spinor": True,
+                        "operation_to_table_mapping_status": "complete",
+                        "operation_to_table_mapping": {0: 1, 4: 2},
+                        "by_kpoint": {
+                            "GammaM": {
+                                "status": "table_kpoint_matched",
+                                "table_kpoint_label": "GM",
+                                "table_operation_indices": [1, 2],
+                            },
+                            "MM": {
+                                "status": "table_kpoint_ambiguous",
+                                "table_kpoint_label": None,
+                                "candidate_table_kpoint_labels": ["A", "GM", "M", "Y"],
+                            },
+                        },
+                    }
+                },
+                "by_kpoint": {
+                    "GammaM": {"M1_valley": {"status": "table_kpoint_matched"}},
+                    "MM": {"M1_valley": {"status": "table_kpoint_ambiguous"}},
+                },
+            }
+        },
+    }
+    symmetry_rows = [
+        {
+            "kpoint": "GammaM",
+            "target_valley": "M1_valley",
+            "operation_id": 4,
+            "state_index": 0,
+            "character_valley": "0.000000+1.000000j",
+            "little_group_passed": True,
+            "valley_preserving": True,
+            "topology_input_ready": True,
+        }
+    ]
+
+    matching = add_valley_irrep_results(
+        symmetry_payload=symmetry_payload,
+        symmetry_rows=symmetry_rows,
+        tolerance=1.0e-5,
+    )
+
+    assert matching["character_matching_status"] == "incomplete"
+    gamma_result = matching["irrep_results_by_kpoint"]["GammaM"]["M1_valley"]
+    assert gamma_result["status"] == "matched"
+    assert gamma_result["irrep_multiplicities"] == {"-GM4": 1}
+    mm_result = matching["irrep_results_by_kpoint"]["MM"]["M1_valley"]
+    assert mm_result["status"] == "table_kpoint_not_ready"
 
 
 def test_valley_preserving_subgroup_report_records_missing_products():

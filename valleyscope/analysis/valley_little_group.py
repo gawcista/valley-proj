@@ -301,7 +301,7 @@ def add_valley_irrep_results(
     matching = report.get("irrep_matching", {})
     if not isinstance(matching, dict):
         return {}
-    if matching.get("status") != "table_mapping_complete":
+    if matching.get("status") != "table_mapping_complete" and not matching.get("per_valley"):
         matching["character_matching_status"] = "not_attempted"
         return matching
 
@@ -318,7 +318,7 @@ def add_valley_irrep_results(
 
         for valley_name in valley_names:
             valley_table_info = per_valley_table_info.get(valley_name, {})
-            if valley_table_info.get("status") != "table_mapping_complete":
+            if valley_table_info.get("operation_to_table_mapping_status") != "complete":
                 kp_results[valley_name] = {
                     "status": "table_mapping_incomplete",
                     "failure_reasons": ["Per-valley table mapping is not complete"],
@@ -695,34 +695,42 @@ def _build_table_kpoint_matching(
     matching_by_kpoint: dict[str, Any] = {}
     for kpoint, payload in by_kpoint.items():
         k_frac = kpoint_frac_by_name.get(kpoint)
-        if k_frac is None:
-            matching_by_kpoint[kpoint] = {
-                "status": "missing_kpoint_coordinate",
-                "table_kpoint_label": None,
-            }
-            continue
-        table_label = table.match_kpoint_label(np.asarray(k_frac, dtype=float), tolerance=tolerance)
-        if table_label is None:
-            matching_by_kpoint[kpoint] = {
-                "status": "table_kpoint_not_matched",
-                "input_k_frac": list(np.asarray(k_frac, dtype=float)),
-                "table_kpoint_label": None,
-            }
-            continue
-        table_indices = table.operation_indices_for_kpoint(table_label)
-
         # Get per-valley allowed ids
         if valley_name is not None and isinstance(payload, dict):
             v_payload = payload.get(valley_name, {})
             allowed_ids = list(v_payload.get("allowed_operation_ids", [])) if isinstance(v_payload, dict) else []
         else:
             allowed_ids = list(payload.get("allowed_operation_ids", [])) if isinstance(payload, dict) else []
-
         mapped_indices = sorted(
             operation_mapping[operation_id]
             for operation_id in allowed_ids
             if operation_id in operation_mapping
         )
+
+        if k_frac is None:
+            matching_by_kpoint[kpoint] = {
+                "status": "missing_kpoint_coordinate",
+                "table_kpoint_label": None,
+                "mapped_allowed_table_operation_indices": mapped_indices,
+            }
+            continue
+        table_label = table.match_kpoint_label(np.asarray(k_frac, dtype=float), tolerance=tolerance)
+        match_source = "coordinate"
+        if table_label is None:
+            candidates = _table_labels_with_operation_indices(table, mapped_indices)
+            if len(candidates) == 1:
+                table_label = candidates[0]
+                match_source = "operation_set_fallback"
+            else:
+                matching_by_kpoint[kpoint] = {
+                    "status": "table_kpoint_ambiguous" if candidates else "table_kpoint_not_matched",
+                    "input_k_frac": list(np.asarray(k_frac, dtype=float)),
+                    "table_kpoint_label": None,
+                    "mapped_allowed_table_operation_indices": mapped_indices,
+                    "candidate_table_kpoint_labels": candidates,
+                }
+                continue
+        table_indices = table.operation_indices_for_kpoint(table_label)
         missing_indices = [
             table_index
             for table_index in table_indices
@@ -742,6 +750,7 @@ def _build_table_kpoint_matching(
             "status": status,
             "input_k_frac": list(np.asarray(k_frac, dtype=float)),
             "table_kpoint_label": table_label,
+            "table_kpoint_match_source": match_source,
             "table_k_frac": list(table.irreps_by_kpoint(table_label)[0].k_frac),
             "table_operation_indices": table_indices,
             "mapped_allowed_table_operation_indices": mapped_indices,
@@ -752,6 +761,15 @@ def _build_table_kpoint_matching(
             ],
         }
     return matching_by_kpoint
+
+
+def _table_labels_with_operation_indices(table, operation_indices: list[int]) -> list[str]:
+    target = sorted(operation_indices)
+    labels = sorted({irrep.kpoint_label for irrep in table.irreps})
+    return [
+        label for label in labels
+        if table.operation_indices_for_kpoint(label) == target
+    ]
 
 
 def _collect_valley_characters(

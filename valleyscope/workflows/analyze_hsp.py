@@ -245,6 +245,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             symmetry_payload=symmetry_payload,
             symmetry_rows=symmetry_rows,
             representation_payload=symmetry_representation_payload,
+            tolerance=config.rotation.irrep_weight_tol,
         )
 
     sector_names = list(projectors_by_kpoint[next(iter(projectors_by_kpoint))].sector_masks)

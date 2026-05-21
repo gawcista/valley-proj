@@ -507,7 +507,7 @@ Per-valley stabilizer gate 为：
 
 而非旧的 all-valley intersection。一个保持某个 valley 但交换其他 valley 的操作，对被保持的 valley 是合法的 single-valley 操作。valley-changing operations 作为 valley-orbit 数据报告，不进入源 valley 的 single-valley eigenvalue 行。
 
-`root_deviation_tol` 和 `D_valley_offdiag_tol` 是 numerical readiness thresholds，不是普适物理常数。`root_deviation_tol` 检查计算得到的对称本征值是否足够接近允许的 root of unity。`D_valley_offdiag_tol` 检查当前双谷 benchmark 中 `D_valley` 的非对角范数。`readiness_preset` 支持 `strict`、`normal`、`loose`：默认 `strict` 对 root deviation 和双谷非对角检查都使用 `1.0e-6`；`normal` 使用 `1.0e-5` 与 `1.0e-3`；`loose` 使用 `1.0e-4` 与 `1.0e-2`。显式设置 `root_deviation_tol` 或 `D_valley_offdiag_tol` 会覆盖 preset。解释它们时必须同时看 qcut 稳定性、`W_val`、`P_v`、`S_min`、spinor benchmark、plane-wave mapping 质量和 symmetry tolerance。不要为了得到 `topology_input_ready=True` 而随意放宽。
+`root_deviation_tol`、`D_valley_offdiag_tol` 和 `irrep_weight_tol` 是 numerical readiness thresholds，不是普适物理常数。`root_deviation_tol` 检查计算得到的对称本征值是否足够接近允许的 root of unity。`D_valley_offdiag_tol` 检查当前双谷 benchmark 中 `D_valley` 的非对角范数。`irrep_weight_tol` 检查 character decomposition 权重是否足够接近整数，只有通过时才输出 irrep label。`readiness_preset` 支持 `strict`、`normal`、`loose`：`strict` 分别使用 `1.0e-6`、`1.0e-6`、`1.0e-5`；`normal` 使用 `1.0e-5`、`1.0e-3`、`5.0e-5`；`loose` 使用 `1.0e-4`、`1.0e-2`、`1.0e-4`。显式设置阈值会覆盖 preset。解释它们时必须同时看 qcut 稳定性、`W_val`、`P_v`、`S_min`、spinor benchmark、plane-wave mapping 质量和 symmetry tolerance。不要为了得到 `topology_input_ready=True` 或 irrep label 而随意放宽。
 
 ## 读取输出
 

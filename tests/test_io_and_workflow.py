@@ -198,6 +198,9 @@ def test_config_loader_accepts_simplified_schema_defaults(tmp_path):
             "convention_verified": True,
             "benchmark": "tMoTe2_VBM_C3_literature",
         },
+        "rotation": {
+            "irrep_weight_tol": 1.0e-4,
+        },
         "output": {"directory": str(out_dir)},
     }
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
@@ -218,6 +221,7 @@ def test_config_loader_accepts_simplified_schema_defaults(tmp_path):
     assert config.spinor.convention == "vasp_up_down_saxis_z"
     assert config.spinor.convention_verified is True
     assert config.spinor.benchmark == "tMoTe2_VBM_C3_literature"
+    assert config.rotation.irrep_weight_tol == pytest.approx(1.0e-4)
 
 
 def test_config_loader_rejects_removed_target_bands_vasp_field(tmp_path):
@@ -754,7 +758,7 @@ def test_readme_symmetry_example_uses_parser_schema(tmp_path):
     assert "P3 No.143" not in readme
     assert "Benchmark:" not in readme
     assert "double-valued" in readme
-    assert "`root_deviation_tol` and `D_valley_offdiag_tol` are numerical readiness thresholds" in readme
+    assert "`root_deviation_tol`, `D_valley_offdiag_tol`, and `irrep_weight_tol` are numerical readiness thresholds" in readme
     assert "`strict`, `normal`, and `loose`" in readme
 
     match = re.search(
@@ -820,7 +824,7 @@ def test_chinese_readme_uses_public_valley_vocabulary():
     assert "double-valued" in readme
     assert "valley_weights_adapted" in readme
     assert "assigned_valleys" in readme
-    assert "`root_deviation_tol` 和 `D_valley_offdiag_tol` 是 numerical readiness thresholds" in readme
+    assert "`root_deviation_tol`、`D_valley_offdiag_tol` 和 `irrep_weight_tol` 是 numerical readiness thresholds" in readme
     assert "`strict`、`normal`、`loose`" in readme
     assert "header-only" in readme
 
@@ -1771,8 +1775,47 @@ def test_summary_exposes_rotation_readiness_thresholds(tmp_path):
     assert thresholds["readiness_preset"] == "normal"
     assert thresholds["root_deviation_tol"] == pytest.approx(1.0e-5)
     assert thresholds["D_valley_offdiag_tol"] == pytest.approx(1.0e-3)
+    assert thresholds["irrep_weight_tol"] == pytest.approx(5.0e-5)
     assert "not universal physical constants" in thresholds["interpretation"]
     assert "do not loosen" in thresholds["recommended_action"]
+
+
+def test_workflow_passes_irrep_weight_tol_to_matching(tmp_path, monkeypatch):
+    import importlib
+
+    workflow_module = importlib.import_module("valleyscope.workflows.analyze_hsp")
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["rotation"] = {"irrep_weight_tol": 2.5e-4}
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    symmetry_payload = {
+        "status": "ok",
+        "operation_detection_backend": "spglib",
+        "structure_file": "fake-CONTCAR",
+        "symmetry_eigenvalue_enabled": True,
+        "detected_operations": [],
+        "candidate_rotations": [],
+        "little_group_check": {"required": True, "status": "evaluated_per_kpoint"},
+        "valley_preservation_check": {"required": True, "status": "completed"},
+    }
+    captured: list[float] = []
+
+    def fake_add_valley_irrep_results(**kwargs):
+        captured.append(kwargs["tolerance"])
+        return {}
+
+    monkeypatch.setattr(workflow_module, "_prepare_symmetry_payload", lambda config, monolayer_recip: dict(symmetry_payload))
+    monkeypatch.setattr(workflow_module, "symmetry_eigenvalue_diagnostics_for_kpoint", lambda **kwargs: [])
+    monkeypatch.setattr(workflow_module, "add_valley_irrep_results", fake_add_valley_irrep_results)
+
+    workflow_module.analyze_hsp(config_path)
+
+    assert captured == [pytest.approx(2.5e-4)]
 
 
 def test_single_band_and_not_degenerate_no_subspace_valley_status_mislabel(tmp_path):

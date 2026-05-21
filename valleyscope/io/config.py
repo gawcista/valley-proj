@@ -95,6 +95,7 @@ class RotationConfig:
     unitarity_tol: float = 1.0e-4
     root_deviation_tol: float = 1.0e-6
     D_valley_offdiag_tol: float = 1.0e-6
+    irrep_weight_tol: float = 1.0e-5
 
 
 @dataclass(frozen=True)
@@ -433,16 +434,19 @@ ROTATION_READINESS_PRESETS: dict[str, dict[str, float]] = {
         "unitarity_tol": 1.0e-4,
         "root_deviation_tol": 1.0e-6,
         "D_valley_offdiag_tol": 1.0e-6,
+        "irrep_weight_tol": 1.0e-5,
     },
     "normal": {
         "unitarity_tol": 1.0e-4,
         "root_deviation_tol": 1.0e-5,
         "D_valley_offdiag_tol": 1.0e-3,
+        "irrep_weight_tol": 5.0e-5,
     },
     "loose": {
         "unitarity_tol": 1.0e-4,
         "root_deviation_tol": 1.0e-4,
         "D_valley_offdiag_tol": 1.0e-2,
+        "irrep_weight_tol": 1.0e-4,
     },
 }
 
@@ -458,6 +462,7 @@ def _parse_rotation_config(raw: dict[str, Any]) -> RotationConfig:
         unitarity_tol=float(raw.get("unitarity_tol", values["unitarity_tol"])),
         root_deviation_tol=float(raw.get("root_deviation_tol", values["root_deviation_tol"])),
         D_valley_offdiag_tol=float(raw.get("D_valley_offdiag_tol", values["D_valley_offdiag_tol"])),
+        irrep_weight_tol=float(raw.get("irrep_weight_tol", values["irrep_weight_tol"])),
     )
 
 

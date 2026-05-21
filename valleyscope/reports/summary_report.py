@@ -602,13 +602,14 @@ def _rotation_readiness_thresholds(config: AppConfig) -> dict[str, Any]:
         "unitarity_tol": config.rotation.unitarity_tol,
         "root_deviation_tol": config.rotation.root_deviation_tol,
         "D_valley_offdiag_tol": config.rotation.D_valley_offdiag_tol,
+        "irrep_weight_tol": config.rotation.irrep_weight_tol,
         "interpretation": (
             "These are numerical readiness thresholds, not universal physical constants."
         ),
         "recommended_action": (
             "Check qcut stability, valley purity, spinor benchmark, plane-wave mapping, "
             "and representation quality; do not loosen thresholds only to obtain "
-            "topology_input_ready=True."
+            "topology_input_ready=True or an irrep label."
         ),
     }
 
