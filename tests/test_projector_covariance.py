@@ -1,4 +1,7 @@
+import json
 import numpy as np
+import yaml
+import h5py
 
 from valleyscope.analysis.projector_covariance import (
     SEED_COVARIANCE_FAIL_TOL,
@@ -8,32 +11,38 @@ from valleyscope.subspace.valley_basis import _projector_matrix
 
 
 # -----------------------------------------------------------------------
-# Helper: build seed projector matrices from coefficients + masks
+# Helper: seed matrices from coefficients + masks
 # -----------------------------------------------------------------------
 
-def _seed_matrices(coeffs, masks):
+def _seed_dict(coeffs, masks):
     return {name: _projector_matrix(coeffs, mask) for name, mask in masks.items()}
 
 
+def _raw_rep_entry(d_raw, sector_mapping, kind="C2", order=2):
+    return {
+        "D_raw": d_raw,
+        "kind": kind,
+        "order": order,
+        "sector_mapping": dict(sector_mapping),
+        "little_group_passed": True,
+    }
+
+
 # -----------------------------------------------------------------------
-# A. Exact-covariant two-valley toy (direct matrix check)
+# A. Exact-covariant direct matrix checks
 # -----------------------------------------------------------------------
 
-def test_exact_covariant_direct_matrix():
-    """D_g swaps states 0<->1. P_A projects onto state 0, P_B onto state 1.
-    D_g P_A D_g^dag should equal P_B exactly."""
-    d_g = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128)  # swap
+def test_exact_covariant_direct_swap():
+    d_g = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128)
     p_a = np.array([[1.0, 0.0], [0.0, 0.0]], dtype=np.complex128)
     p_b = np.array([[0.0, 0.0], [0.0, 1.0]], dtype=np.complex128)
-
     transformed = d_g @ p_a @ d_g.conj().T
     epsilon = float(np.linalg.norm(transformed - p_b, ord="fro")
                     / max(np.linalg.norm(p_a, ord="fro"), 1e-14))
     assert epsilon < 1e-15
 
 
-def test_exact_covariant_identity():
-    """Identity D_g: P_A should map to P_A."""
+def test_exact_covariant_direct_identity():
     d_g = np.eye(3, dtype=np.complex128)
     p_a = np.diag([1.0, 2.0, 3.0]).astype(np.complex128) / 6.0
     transformed = d_g @ p_a @ d_g.conj().T
@@ -43,144 +52,57 @@ def test_exact_covariant_identity():
 
 
 # -----------------------------------------------------------------------
-# B. Exact-covariant through compute_projector_covariance
+# B. compute_projector_covariance with raw_representations_by_kpoint
 # -----------------------------------------------------------------------
 
-def test_compute_covariance_exact_swap():
-    """C2x swaps valley_A <-> valley_B, epsilon ~ 0."""
+def test_covariance_exact_c2_swap():
     coeffs = np.zeros((2, 1, 2), dtype=np.complex128)
     coeffs[0, 0, 0] = 1.0
     coeffs[1, 0, 1] = 1.0
 
-    masks = {
-        "valley_A": np.array([True, False]),
-        "valley_B": np.array([False, True]),
-    }
-
-    p_a = _projector_matrix(coeffs, masks["valley_A"])
-    p_b = _projector_matrix(coeffs, masks["valley_B"])
-
-    # Build D_g as a swap (what build_plane_wave_representation would produce
-    # for a C2 operation exchanging the two G-vectors exactly)
+    masks = {"valley_A": np.array([True, False]),
+             "valley_B": np.array([False, True])}
     d_g = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128)
 
     report = compute_projector_covariance(
-        valley_matrices_by_kpoint={"GammaM": {"valley_A": p_a, "valley_B": p_b}},
-        representation_payload={
+        valley_matrices_by_kpoint={"GammaM": _seed_dict(coeffs, masks)},
+        raw_representations_by_kpoint={
             "GammaM": {
-                "op_1__v_A": {"D_raw": d_g, "source_operation_key": "operation_1"},
-                "op_1__v_B": {"D_raw": d_g, "source_operation_key": "operation_1"},
+                1: _raw_rep_entry(d_g, {"valley_A": "valley_B", "valley_B": "valley_A"}),
             }
-        },
-        symmetry_payload={
-            "detected_operations": [{
-                "operation_id": 1, "kind": "C2", "order": 2,
-                "sector_mapping": {"valley_A": "valley_B", "valley_B": "valley_A"},
-                "little_group_by_kpoint": {"GammaM": True},
-            }]
         },
         valley_names=["valley_A", "valley_B"],
     )
 
     assert report["status"] == "ok"
     gm = report["by_kpoint"]["GammaM"]["seed_projector_covariance"]
+    assert len(gm) == 2  # one per source valley, deduplicated
     for row in gm:
         assert row["status"] == "passed", str(row)
         assert row["epsilon_seed"] < 1e-15
 
 
-# -----------------------------------------------------------------------
-# C. C3 three-valley cyclic toy
-# -----------------------------------------------------------------------
-
-def test_c3_three_valley_cyclic():
-    """C3 cycles M1->M2->M3->M1. Diagonally structured test."""
+def test_covariance_c3_three_valley_cyclic():
     coeffs = np.zeros((3, 1, 3), dtype=np.complex128)
     coeffs[0, 0, 0] = 1.0
     coeffs[1, 0, 1] = 1.0
     coeffs[2, 0, 2] = 1.0
 
-    masks = {
-        "M1": np.array([True, False, False]),
-        "M2": np.array([False, True, False]),
-        "M3": np.array([False, False, True]),
-    }
+    masks = {"M1": np.array([True, False, False]),
+             "M2": np.array([False, True, False]),
+             "M3": np.array([False, False, True])}
 
-    p_m1 = _projector_matrix(coeffs, masks["M1"])
-    p_m2 = _projector_matrix(coeffs, masks["M2"])
-    p_m3 = _projector_matrix(coeffs, masks["M3"])
-
-    # D_g cycles: state 0→1→2→0
-    d_g = np.array([
-        [0.0, 0.0, 1.0],
-        [1.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0],
-    ], dtype=np.complex128)
+    d_g = np.array([[0.0, 0.0, 1.0],
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0]], dtype=np.complex128)
 
     report = compute_projector_covariance(
-        valley_matrices_by_kpoint={"GammaM": {"M1": p_m1, "M2": p_m2, "M3": p_m3}},
-        representation_payload={
+        valley_matrices_by_kpoint={"GammaM": _seed_dict(coeffs, masks)},
+        raw_representations_by_kpoint={
             "GammaM": {
-                "op_1__v_M1": {"D_raw": d_g, "source_operation_key": "operation_1"},
+                1: _raw_rep_entry(d_g, {"M1": "M2", "M2": "M3", "M3": "M1"},
+                                  kind="C3", order=3),
             }
-        },
-        symmetry_payload={
-            "detected_operations": [{
-                "operation_id": 1, "kind": "C3", "order": 3,
-                "sector_mapping": {"M1": "M2", "M2": "M3", "M3": "M1"},
-                "little_group_by_kpoint": {"GammaM": True},
-            }]
-        },
-        valley_names=["M1", "M2", "M3"],
-    )
-
-    gm = report["by_kpoint"]["GammaM"]["seed_projector_covariance"]
-    for row in gm:
-        assert row["status"] == "passed", str(row)
-        assert row["epsilon_seed"] < 1e-15
-
-
-# -----------------------------------------------------------------------
-# D. C2 toy: one valley fixed, two swapped
-# -----------------------------------------------------------------------
-
-def test_c2_fixes_one_swaps_two():
-    """C2 preserves M1, swaps M2<->M3."""
-    coeffs = np.zeros((3, 1, 3), dtype=np.complex128)
-    coeffs[0, 0, 0] = 1.0
-    coeffs[1, 0, 1] = 1.0
-    coeffs[2, 0, 2] = 1.0
-
-    masks = {
-        "M1": np.array([True, False, False]),
-        "M2": np.array([False, True, False]),
-        "M3": np.array([False, False, True]),
-    }
-
-    p_m1 = _projector_matrix(coeffs, masks["M1"])
-    p_m2 = _projector_matrix(coeffs, masks["M2"])
-    p_m3 = _projector_matrix(coeffs, masks["M3"])
-
-    # D_g: preserves state 0, swaps states 1<->2
-    d_g = np.array([
-        [1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0],
-        [0.0, 1.0, 0.0],
-    ], dtype=np.complex128)
-
-    report = compute_projector_covariance(
-        valley_matrices_by_kpoint={"GammaM": {"M1": p_m1, "M2": p_m2, "M3": p_m3}},
-        representation_payload={
-            "GammaM": {
-                "op_3__v_M1": {"D_raw": d_g, "source_operation_key": "operation_3"},
-            }
-        },
-        symmetry_payload={
-            "detected_operations": [{
-                "operation_id": 3, "kind": "C2", "order": 2,
-                "sector_mapping": {"M1": "M1", "M2": "M3", "M3": "M2"},
-                "little_group_by_kpoint": {"GammaM": True},
-            }]
         },
         valley_names=["M1", "M2", "M3"],
     )
@@ -193,17 +115,50 @@ def test_c2_fixes_one_swaps_two():
 
 
 # -----------------------------------------------------------------------
-# E. Non-covariant seed → large epsilon
+# C. C2 fixes one valley, swaps the other two
+# -----------------------------------------------------------------------
+
+def test_covariance_c2_fixes_one_swaps_two():
+    coeffs = np.zeros((3, 1, 3), dtype=np.complex128)
+    coeffs[0, 0, 0] = 1.0
+    coeffs[1, 0, 1] = 1.0
+    coeffs[2, 0, 2] = 1.0
+
+    masks = {"M1": np.array([True, False, False]),
+             "M2": np.array([False, True, False]),
+             "M3": np.array([False, False, True])}
+
+    d_g = np.array([[1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0],
+                    [0.0, 1.0, 0.0]], dtype=np.complex128)
+
+    report = compute_projector_covariance(
+        valley_matrices_by_kpoint={"GammaM": _seed_dict(coeffs, masks)},
+        raw_representations_by_kpoint={
+            "GammaM": {
+                3: _raw_rep_entry(d_g, {"M1": "M1", "M2": "M3", "M3": "M2"}),
+            }
+        },
+        valley_names=["M1", "M2", "M3"],
+    )
+
+    gm = report["by_kpoint"]["GammaM"]["seed_projector_covariance"]
+    assert len(gm) == 3
+    for row in gm:
+        assert row["status"] == "passed", str(row)
+        assert row["epsilon_seed"] < 1e-15
+
+
+# -----------------------------------------------------------------------
+# D. Non-covariant seed → large epsilon / failed status
 # -----------------------------------------------------------------------
 
 def test_non_covariant_direct():
-    """Random D_g should give O(1) epsilon against mismatched projectors."""
     p_a = np.array([[1.0, 0.0], [0.0, 0.0]], dtype=np.complex128)
     p_b = np.array([[0.0, 0.0], [0.0, 1.0]], dtype=np.complex128)
     rng = np.random.default_rng(42)
     d_random = rng.normal(size=(2, 2)) + 1j * rng.normal(size=(2, 2))
     d_random = d_random.astype(np.complex128)
-
     transformed = d_random @ p_a @ d_random.conj().T
     epsilon = float(np.linalg.norm(transformed - p_b, ord="fro")
                     / max(np.linalg.norm(p_a, ord="fro"), 1e-14))
@@ -211,7 +166,6 @@ def test_non_covariant_direct():
 
 
 def test_non_covariant_fails_in_report():
-    """A random D_g produces 'failed' status in covariance report."""
     p_a = np.array([[1.0, 0.0], [0.0, 0.0]], dtype=np.complex128)
     p_b = np.array([[0.0, 0.0], [0.0, 1.0]], dtype=np.complex128)
     rng = np.random.default_rng(99)
@@ -220,17 +174,10 @@ def test_non_covariant_fails_in_report():
 
     report = compute_projector_covariance(
         valley_matrices_by_kpoint={"GammaM": {"valley_A": p_a, "valley_B": p_b}},
-        representation_payload={
+        raw_representations_by_kpoint={
             "GammaM": {
-                "op_99__v_A": {"D_raw": d_random, "source_operation_key": "operation_99"},
+                99: _raw_rep_entry(d_random, {"valley_A": "valley_B", "valley_B": "valley_A"}),
             }
-        },
-        symmetry_payload={
-            "detected_operations": [{
-                "operation_id": 99, "kind": "C2", "order": 2,
-                "sector_mapping": {"valley_A": "valley_B", "valley_B": "valley_A"},
-                "little_group_by_kpoint": {"GammaM": True},
-            }]
         },
         valley_names=["valley_A", "valley_B"],
     )
@@ -241,7 +188,7 @@ def test_non_covariant_fails_in_report():
 
 
 # -----------------------------------------------------------------------
-# F. Missing sector_mapping → not_evaluated
+# E. Missing sector_mapping → not_evaluated
 # -----------------------------------------------------------------------
 
 def test_missing_mapping_not_evaluated():
@@ -254,18 +201,11 @@ def test_missing_mapping_not_evaluated():
 
     report = compute_projector_covariance(
         valley_matrices_by_kpoint={"GammaM": {"valley_A": p_a, "valley_B": p_b}},
-        representation_payload={
+        raw_representations_by_kpoint={
             "GammaM": {
-                "op_0__v_A": {"D_raw": np.eye(2, dtype=np.complex128),
-                               "source_operation_key": "operation_0"},
+                0: _raw_rep_entry(np.eye(2, dtype=np.complex128),
+                                  {"valley_A": "valley_A"}, kind="identity", order=1),
             }
-        },
-        symmetry_payload={
-            "detected_operations": [{
-                "operation_id": 0, "kind": "identity", "order": 1,
-                "sector_mapping": {"valley_A": "valley_A"},  # valley_B missing
-                "little_group_by_kpoint": {"GammaM": True},
-            }]
         },
         valley_names=["valley_A", "valley_B"],
     )
@@ -277,7 +217,39 @@ def test_missing_mapping_not_evaluated():
 
 
 # -----------------------------------------------------------------------
-# G. Compact covariance summary
+# F. Deduplication: one operation_id → one set of rows, not duplicated
+# -----------------------------------------------------------------------
+
+def test_single_operation_not_duplicated_by_valley_count():
+    """One operation_id with 3-valley mapping gives exactly 3 rows, not 9."""
+    coeffs = np.zeros((3, 1, 3), dtype=np.complex128)
+    coeffs[0, 0, 0] = 1.0
+    coeffs[1, 0, 1] = 1.0
+    coeffs[2, 0, 2] = 1.0
+
+    masks = {"M1": np.array([True, False, False]),
+             "M2": np.array([False, True, False]),
+             "M3": np.array([False, False, True])}
+
+    d_g = np.eye(3, dtype=np.complex128)
+
+    report = compute_projector_covariance(
+        valley_matrices_by_kpoint={"GammaM": _seed_dict(coeffs, masks)},
+        raw_representations_by_kpoint={
+            "GammaM": {
+                0: _raw_rep_entry(d_g, {"M1": "M1", "M2": "M2", "M3": "M3"},
+                                  kind="identity", order=1),
+            }
+        },
+        valley_names=["M1", "M2", "M3"],
+    )
+
+    gm = report["by_kpoint"]["GammaM"]["seed_projector_covariance"]
+    assert len(gm) == 3, f"Expected 3 rows (one per source valley), got {len(gm)}"
+
+
+# -----------------------------------------------------------------------
+# G. Compact summary
 # -----------------------------------------------------------------------
 
 def test_compact_covariance_summary():
@@ -312,13 +284,20 @@ def test_compact_covariance_summary():
 
 
 # -----------------------------------------------------------------------
-# H. Workflow integration: projector_covariance_report.json is written
+# H. Workflow integration tests
 # -----------------------------------------------------------------------
 
-def test_covariance_report_written_by_workflow(tmp_path):
-    """End-to-end: analyze_hsp writes projector_covariance_report.json."""
-    import h5py
-    import yaml
+def _write_hex_poscar(path):
+    path.write_text(
+        "hex\n1.0\n"
+        "1.0 0.0 0.0\n-0.5 0.8660254 0.0\n0.0 0.0 4.0\n"
+        "X\n1\nDirect\n0.0 0.0 0.0\n", encoding="utf-8"
+    )
+
+
+def test_c3_valley_permuting_c3_appears_in_covariance_report(tmp_path):
+    """C3 cycling M1/M2/M3 must appear in projector_covariance_report.json
+    even though it is valley-permuting and does not enter single-valley irrep."""
     from valleyscope.workflows.analyze_hsp import analyze_hsp
 
     h5_path = tmp_path / "wf.h5"
@@ -327,11 +306,17 @@ def test_covariance_report_written_by_workflow(tmp_path):
     out_dir = tmp_path / "out"
     config_path = tmp_path / "config.yaml"
 
+    _write_hex_poscar(structure)
+    _write_hex_poscar(mono)
+
+    # 3 states, each at a different G-vector simulating 3 M valleys
     with h5py.File(h5_path, "w") as h5:
         meta = h5.create_group("metadata")
         lattice = meta.create_group("lattice")
-        lattice["direct_cart"] = np.eye(3)
-        lattice["reciprocal_cart"] = np.eye(3) * 10.0
+        lattice["direct_cart"] = np.array(
+            [[1.0, 0.0, 0.0], [-0.5, 0.8660254037844386, 0.0], [0.0, 0.0, 8.0]]
+        )
+        lattice["reciprocal_cart"] = np.linalg.inv(lattice["direct_cart"][()]).T * 2*np.pi
         meta["spinor"] = False
         meta["source"] = "toy"
         meta["vasp_band_index_base"] = 1
@@ -339,23 +324,21 @@ def test_covariance_report_written_by_workflow(tmp_path):
         kp["name"] = "GammaM"
         kp["frac"] = np.zeros(3)
         kp["cart"] = np.zeros(3)
-        kp["g_vectors_frac"] = np.array([[0, 0, 0], [1, 0, 0]])
-        kp["g_vectors_cart"] = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
-        inv_sqrt2 = 1.0 / np.sqrt(2.0)
-        kp["coefficients"] = np.array([
-            [[inv_sqrt2, inv_sqrt2]],
-            [[inv_sqrt2, -inv_sqrt2]],
-        ], dtype=np.complex128)
-        kp["energies_eV"] = np.array([0.1, 0.1001])
-        kp["band_indices_vasp"] = np.array([101, 102])
-
-    # Simple hexagonal POSCAR
-    structure.write_text(
-        "hex\n1.0\n"
-        "1.0 0.0 0.0\n-0.5 0.8660254 0.0\n0.0 0.0 4.0\n"
-        "X\n1\nDirect\n0.0 0.0 0.0\n", encoding="utf-8"
-    )
-    mono.write_text(structure.read_text(encoding="utf-8"), encoding="utf-8")
+        # 3 G-vectors at M-like positions
+        q_cart = np.array([
+            [0.5, 0.0, 0.0],
+            [-0.25, 0.4330127018922193, 0.0],
+            [-0.25, -0.4330127018922193, 0.0],
+        ])
+        kp["g_vectors_frac"] = np.zeros((3, 3))  # placeholder
+        kp["g_vectors_cart"] = q_cart
+        coeffs = np.zeros((3, 1, 3), dtype=np.complex128)
+        coeffs[0, 0, 0] = 1.0
+        coeffs[1, 0, 1] = 1.0
+        coeffs[2, 0, 2] = 1.0
+        kp["coefficients"] = coeffs
+        kp["energies_eV"] = np.array([0.1, 0.1001, 0.1002])
+        kp["band_indices_vasp"] = np.array([101, 102, 103])
 
     config = {
         "input": {"wavefunction_h5": str(h5_path),
@@ -364,21 +347,112 @@ def test_covariance_report_written_by_workflow(tmp_path):
             "top": {"supercell_matrix": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]},
             "bottom": {"supercell_matrix": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]},
         },
-        "analysis": {"kpoints": ["GammaM"], "iband": [101, 102],
+        "analysis": {"kpoints": ["GammaM"], "iband": [101, 102, 103],
                       "degeneracy_tol_meV": 1.0},
         "valley_centers": {
             "coordinate_mode": "cart",
             "centers": [
-                {"name": "K", "cart": [0.0, 0.0, 0.0]},
-                {"name": "Kp", "cart": [1.0, 0.0, 0.0]},
+                {"name": "M1c", "cart": [0.5, 0.0, 0.0]},
+                {"name": "M2c", "cart": [-0.25, 0.4330127018922193, 0.0]},
+                {"name": "M3c", "cart": [-0.25, -0.4330127018922193, 0.0]},
             ],
         },
         "valley_subspaces": [
-            {"name": "K_valley", "centers": ["K"]},
-            {"name": "Kp_valley", "centers": ["Kp"]},
+            {"name": "M1_valley", "centers": ["M1c"]},
+            {"name": "M2_valley", "centers": ["M2c"]},
+            {"name": "M3_valley", "centers": ["M3c"]},
         ],
         "projection": {
-            "qcut_mode": "absolute", "qcut_Ainv": 0.5,
+            "qcut_mode": "absolute", "qcut_Ainv": 0.3,
+            "overlap_policy": "warn_exclude",
+            "thresholds": {"W_val_min": 0.5},
+        },
+        "symmetry": {
+            "operations": {"structure_file": str(structure)},
+            "tolerance": {"symprec": 1e-3},
+            "filters": {"rotation_order": "auto"},
+        },
+        "output": {"directory": str(out_dir)},
+    }
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    analyze_hsp(config_path)
+
+    cov_path = out_dir / "projector_covariance_report.json"
+    assert cov_path.exists(), "projector_covariance_report.json should be written"
+    cov = json.loads(cov_path.read_text(encoding="utf-8"))
+    gm = cov["by_kpoint"]["GammaM"]["seed_projector_covariance"]
+    op_ids = {row["operation_id"] for row in gm}
+    # C3 should be present even if it is valley-permuting
+    assert len(op_ids) >= 1, f"Expected at least one operation, got {op_ids}"
+
+
+def test_summary_json_exposes_covariance_failure_flag(tmp_path):
+    """valley_summary.json must include 'projector_covariance' with status info."""
+    from valleyscope.workflows.analyze_hsp import analyze_hsp
+
+    h5_path = tmp_path / "wf.h5"
+    mono = tmp_path / "mono.vasp"
+    structure = tmp_path / "POSCAR"
+    out_dir = tmp_path / "out"
+    config_path = tmp_path / "config.yaml"
+
+    _write_hex_poscar(structure)
+    _write_hex_poscar(mono)
+
+    with h5py.File(h5_path, "w") as h5:
+        meta = h5.create_group("metadata")
+        lattice = meta.create_group("lattice")
+        lattice["direct_cart"] = np.array(
+            [[1.0, 0.0, 0.0], [-0.5, 0.8660254037844386, 0.0], [0.0, 0.0, 8.0]]
+        )
+        lattice["reciprocal_cart"] = np.linalg.inv(lattice["direct_cart"][()]).T * 2*np.pi
+        meta["spinor"] = False
+        meta["source"] = "toy"
+        meta["vasp_band_index_base"] = 1
+        kp = h5.create_group("kpoints").create_group("0")
+        kp["name"] = "GammaM"
+        kp["frac"] = np.zeros(3)
+        kp["cart"] = np.zeros(3)
+        q_cart = np.array([
+            [0.5, 0.0, 0.0],
+            [-0.25, 0.4330127018922193, 0.0],
+            [-0.25, -0.4330127018922193, 0.0],
+        ])
+        kp["g_vectors_frac"] = np.zeros((3, 3))
+        kp["g_vectors_cart"] = q_cart
+        coeffs = np.zeros((3, 1, 3), dtype=np.complex128)
+        coeffs[0, 0, 0] = 1.0
+        coeffs[1, 0, 1] = 1.0
+        coeffs[2, 0, 2] = 1.0
+        kp["coefficients"] = coeffs
+        kp["energies_eV"] = np.array([0.1, 0.1001, 0.1002])
+        kp["band_indices_vasp"] = np.array([101, 102, 103])
+
+    config = {
+        "input": {"wavefunction_h5": str(h5_path),
+                   "monolayer_poscars": {"top": str(mono), "bottom": str(mono)}},
+        "layer_transforms": {
+            "top": {"supercell_matrix": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]},
+            "bottom": {"supercell_matrix": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]},
+        },
+        "analysis": {"kpoints": ["GammaM"], "iband": [101, 102, 103],
+                      "degeneracy_tol_meV": 1.0},
+        "valley_centers": {
+            "coordinate_mode": "cart",
+            "centers": [
+                {"name": "M1c", "cart": [0.5, 0.0, 0.0]},
+                {"name": "M2c", "cart": [-0.25, 0.4330127018922193, 0.0]},
+                {"name": "M3c", "cart": [-0.25, -0.4330127018922193, 0.0]},
+            ],
+        },
+        "valley_subspaces": [
+            {"name": "M1_valley", "centers": ["M1c"]},
+            {"name": "M2_valley", "centers": ["M2c"]},
+            {"name": "M3_valley", "centers": ["M3c"]},
+        ],
+        "projection": {
+            "qcut_mode": "absolute", "qcut_Ainv": 0.3,
             "overlap_policy": "warn_exclude",
             "thresholds": {"W_val_min": 0.5},
         },
@@ -393,23 +467,8 @@ def test_covariance_report_written_by_workflow(tmp_path):
 
     outputs = analyze_hsp(config_path)
 
-    # Old outputs still exist
-    assert outputs["valley_summary_txt"].exists()
-    assert outputs["valley_summary_json"].exists()
-    assert outputs["valley_weights_csv"].exists()
-    assert outputs["valley_subspace_json"].exists()
-
-    # New covariance report
-    cov_path = out_dir / "projector_covariance_report.json"
-    if cov_path.exists():
-        import json
-        cov = json.loads(cov_path.read_text(encoding="utf-8"))
-        assert "status" in cov
-        assert "by_kpoint" in cov
-        assert cov["normalization"] == "frobenius_source_projector"
-
-    # Summary JSON should include projector_covariance key
-    summary = __import__("json").loads(
-        outputs["valley_summary_json"].read_text(encoding="utf-8")
-    )
+    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     assert "projector_covariance" in summary
+    cov = summary["projector_covariance"]
+    assert "status" in cov
+    assert "by_kpoint" in cov

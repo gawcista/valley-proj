@@ -475,3 +475,76 @@ def _readiness_reason(
     if d_valley_offdiag_norm > d_valley_offdiag_tol:
         return "two-valley D_valley offdiag diagnostic too large"
     return "diagnostic-only"
+
+
+def build_raw_representations_for_kpoint(
+    *,
+    kpoint_name: str,
+    k_frac: np.ndarray,
+    q_cart: np.ndarray,
+    coefficients: np.ndarray,
+    symmetry_payload: dict[str, object],
+    spinor_convention_verified: bool = False,
+) -> dict[object, dict[str, object]]:
+    """Build D_raw once per (kpoint, operation_id) for all proper
+    little-group operations with sector_mapping.
+
+    This is independent of the per-valley preservation gate and covers
+    valley-permuting operations such as C3 cycling M1/M2/M3.
+
+    Returns
+    -------
+    dict[operation_id, {"D_raw": ndarray, "kind": str, "order": int,
+                         "sector_mapping": dict, "little_group_passed": bool}]
+    """
+    result: dict[object, dict[str, object]] = {}
+
+    for operation in symmetry_payload.get("detected_operations", []):
+        if not isinstance(operation, dict):
+            continue
+        order = operation.get("order")
+        if operation.get("det", 1) != 1 or order not in (2, 3, 4, 6):
+            continue
+        sector_mapping = operation.get("sector_mapping", {})
+        if not isinstance(sector_mapping, dict) or not sector_mapping:
+            continue
+
+        little = is_little_group_operation(
+            np.asarray(operation["rotation_frac"]), k_frac
+        )
+        if not little:
+            continue
+
+        operation_id = operation.get("operation_id")
+        spin_rotation = None
+        n_spinor = coefficients.shape[1]
+        if n_spinor == 2:
+            try:
+                axis, angle = rotation_axis_angle(
+                    np.asarray(operation["rotation_cart"])
+                )
+                spin_rotation = spin_rotation_matrix(axis, angle)
+            except ValueError:
+                continue
+        elif n_spinor != 1:
+            continue
+
+        representation = build_plane_wave_representation(
+            coefficients,
+            q_cart,
+            np.asarray(operation["rotation_cart"]),
+            np.asarray(operation["translation_cart"]),
+            spin_rotation=spin_rotation,
+        )
+        if representation.mapping_miss_count > 0:
+            continue
+
+        result[operation_id] = {
+            "D_raw": representation.matrix,
+            "kind": operation.get("kind", ""),
+            "order": int(order),
+            "sector_mapping": dict(sector_mapping),
+            "little_group_passed": True,
+        }
+
+    return result

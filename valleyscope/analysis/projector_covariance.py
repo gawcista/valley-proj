@@ -10,8 +10,7 @@ SMALL_NUMBER = 1e-14
 def compute_projector_covariance(
     *,
     valley_matrices_by_kpoint: dict[str, dict[str, np.ndarray]],
-    representation_payload: dict[str, object],
-    symmetry_payload: dict[str, object],
+    raw_representations_by_kpoint: dict[str, dict[object, dict[str, object]]],
     valley_names: list[str],
     warn_tol: float = SEED_COVARIANCE_WARN_TOL,
     fail_tol: float = SEED_COVARIANCE_FAIL_TOL,
@@ -19,20 +18,23 @@ def compute_projector_covariance(
 ) -> dict[str, object]:
     """Compute seed projector covariance under little-group representations.
 
-    For each (kpoint, operation, source_valley) with available D_raw and
+    For each (kpoint, operation_id, source_valley) with available D_raw and
     projected valley matrix P_a^0:
 
         epsilon_seed(g,a) = || D_g P_a^0 D_g^† - P_{pi_g(a)}^0 ||_F
                             / max(||P_a^0||_F, small_number)
 
+    Uses D_raw matrices indexed by (kpoint, operation_id), not by
+    target-valley payload keys.  This deduplicates rows and naturally
+    covers valley-permuting operations such as C3 cycling M1/M2/M3.
+
     Parameters
     ----------
     valley_matrices_by_kpoint : {kpoint: {valley_name: P_a^0 matrix}}
         Seed projected valley matrices in the raw DFT subspace.
-    representation_payload : dict
-        Per-kpoint representation payload containing ``D_raw`` matrices.
-    symmetry_payload : dict
-        Detected operations with ``sector_mapping`` for pi_g(a).
+    raw_representations_by_kpoint : {kpoint: {operation_id: payload}}
+        Per-operation payloads from ``build_raw_representations_for_kpoint``.
+        Each payload contains ``D_raw``, ``sector_mapping``, etc.
     valley_names : list[str]
         Ordered list of valley names.
     warn_tol : float
@@ -52,32 +54,21 @@ def compute_projector_covariance(
     any_warn = False
 
     for kpoint_name, valley_matrices in valley_matrices_by_kpoint.items():
-        kp_representations = representation_payload.get(kpoint_name, {})
-        if not isinstance(kp_representations, dict) or not kp_representations:
+        op_payloads = raw_representations_by_kpoint.get(kpoint_name, {})
+        if not isinstance(op_payloads, dict) or not op_payloads:
             continue
 
         kp_rows: list[dict[str, object]] = []
 
-        for op_key, op_payload in kp_representations.items():
-            if not isinstance(op_payload, dict):
+        for operation_id, op_data in op_payloads.items():
+            if not isinstance(op_data, dict):
                 continue
-            d_raw = op_payload.get("D_raw")
+            d_raw = op_data.get("D_raw")
             if d_raw is None:
                 continue
             d_raw = np.asarray(d_raw, dtype=np.complex128)
-            operation_id = op_payload.get("source_operation_key", str(op_key))
-            if isinstance(operation_id, str) and operation_id.startswith("operation_"):
-                try:
-                    operation_id = int(operation_id[len("operation_"):])
-                except ValueError:
-                    pass
-
-            # Find the operation to get sector_mapping
-            operation = _find_operation(symmetry_payload, operation_id)
-            sector_mapping = operation.get("sector_mapping", {}) if operation else {}
-            little_group_passed = _little_group_passed_for_kpoint(
-                operation, kpoint_name
-            ) if operation else True
+            sector_mapping = op_data.get("sector_mapping", {})
+            little_group_passed = bool(op_data.get("little_group_passed", True))
 
             for source_valley in valley_matrices:
                 p_a = np.asarray(valley_matrices[source_valley], dtype=np.complex128)
@@ -111,9 +102,7 @@ def compute_projector_covariance(
                     continue
                 p_mapped = np.asarray(p_mapped, dtype=np.complex128)
 
-                # D_g P_a^0 D_g^†
                 transformed = d_raw @ p_a @ d_raw.conj().T
-
                 epsilon = float(
                     np.linalg.norm(transformed - p_mapped, ord="fro")
                     / max(np.linalg.norm(p_a, ord="fro"), small_number)
@@ -166,23 +155,3 @@ def compute_projector_covariance(
         ),
         "by_kpoint": by_kpoint,
     }
-
-
-def _find_operation(
-    symmetry_payload: dict[str, object], operation_id: object
-) -> dict[str, object] | None:
-    for op in symmetry_payload.get("detected_operations", []):
-        if not isinstance(op, dict):
-            continue
-        if op.get("operation_id") == operation_id:
-            return op
-    return None
-
-
-def _little_group_passed_for_kpoint(
-    operation: dict[str, object], kpoint_name: str
-) -> bool:
-    lg = operation.get("little_group_by_kpoint", {})
-    if isinstance(lg, dict):
-        return bool(lg.get(kpoint_name, False))
-    return False

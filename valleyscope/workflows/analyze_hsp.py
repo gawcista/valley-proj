@@ -12,7 +12,10 @@ from valleyscope.analysis.decision_tree import (
     derive_symmetry_status,
     derive_valley_status,
 )
-from valleyscope.analysis.symmetry_eigenvalue_diagnostic import symmetry_eigenvalue_diagnostics_for_kpoint
+from valleyscope.analysis.symmetry_eigenvalue_diagnostic import (
+    build_raw_representations_for_kpoint,
+    symmetry_eigenvalue_diagnostics_for_kpoint,
+)
 from valleyscope.analysis.valley_little_group import (
     add_valley_irrep_results,
     build_valley_preserving_subgroup_report,
@@ -97,6 +100,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     qcut_scan_payload: dict[str, object] = {}
     basis_transforms: dict[str, dict[str, np.ndarray]] = {}
     symmetry_representation_payload: dict[str, object] = {}
+    raw_representations_by_kpoint: dict[str, dict[object, dict[str, object]]] = {}
     valley_matrices_by_kpoint: dict[str, dict[str, np.ndarray]] = {}
     symmetry_payload: dict[str, object] = _prepare_symmetry_payload(config, monolayer_recip)
     symmetry_payload["spinor_wavefunction"] = bool(wavefunctions.metadata.spinor)
@@ -219,6 +223,20 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 valley_names=valley_names,
             )
         if symmetry_payload["status"] == "ok" and symmetry_payload.get("symmetry_eigenvalue_enabled", True):
+            # Build D_raw for ALL proper little-group ops before per-valley gate,
+            # so valley-permuting operations (e.g. C3 cycling M1/M2/M3) are included
+            # in the projector covariance diagnostic.
+            if seed_matrices is not None:
+                raw_representations_by_kpoint[kpoint_name] = (
+                    build_raw_representations_for_kpoint(
+                        kpoint_name=kpoint_name,
+                        k_frac=kpoint.frac,
+                        q_cart=q_cart,
+                        coefficients=coefficients,
+                        symmetry_payload=symmetry_payload,
+                        spinor_convention_verified=config.spinor.convention_verified,
+                    )
+                )
             symmetry_rows.extend(
                 symmetry_eigenvalue_diagnostics_for_kpoint(
                     kpoint_name=kpoint_name,
@@ -258,11 +276,10 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         projectors_by_kpoint[next(iter(projectors_by_kpoint))].sector_names
     ) if projectors_by_kpoint else []
     covariance_report: dict[str, object] = {}
-    if valley_matrices_by_kpoint and symmetry_representation_payload:
+    if valley_matrices_by_kpoint and raw_representations_by_kpoint:
         covariance_report = compute_projector_covariance(
             valley_matrices_by_kpoint=valley_matrices_by_kpoint,
-            representation_payload=symmetry_representation_payload,
-            symmetry_payload=symmetry_payload,
+            raw_representations_by_kpoint=raw_representations_by_kpoint,
             valley_names=valley_names,
         )
 
