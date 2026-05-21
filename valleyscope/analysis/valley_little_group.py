@@ -14,21 +14,14 @@ from valleyscope.irreps.tables import load_standard_irrep_table, match_table_ope
 from valleyscope.symmetry.little_group import is_little_group_operation
 
 
-def update_valley_little_group_inventory(
+def update_valley_preserving_operation_inventory(
     *,
     symmetry_payload: dict[str, Any],
     kpoint_name: str,
     k_frac: np.ndarray,
     valley_names: list[str] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
-    """Classify detected operations per (kpoint, valley) pair.
-
-    Returns a dict mapping valley_name -> list of per-operation inventory rows.
-    The old per-kpoint flat list is still stored at
-    ``valley_little_group_inventory[kpoint_name]`` for backward compatibility,
-    but the per-valley gate uses ``mapped_valley == target_valley``, not the
-    all-valley intersection.
-    """
+    """Classify detected operations per (kpoint, valley) pair."""
     if valley_names is None:
         valley_names = _infer_valley_names(symmetry_payload)
 
@@ -40,7 +33,7 @@ def update_valley_little_group_inventory(
         little_group_passed = bool(is_little_group_operation(rotation, k_frac))
         sector_mapping = operation.get("sector_mapping", {})
 
-        # Per-valley classification
+        # Per-valley classification within the HSP little group.
         for valley_name in valley_names:
             mapped_valley = sector_mapping.get(valley_name)
             valley_preserving = bool(
@@ -61,12 +54,12 @@ def update_valley_little_group_inventory(
                 "target_valley": valley_name,
                 "mapped_valley": mapped_valley,
                 "valley_preserving": valley_preserving,
-                "allowed_for_single_valley_representation": allowed,
+                "allowed_for_valley_preserving_representation": allowed,
                 "reason": reason,
             }
             per_valley.setdefault(valley_name, []).append(row)
 
-        # Legacy flat row (all-valley for backward compat, labelled as intersection)
+        # Flat all-valley-intersection row for diagnostics only.
         old_preserves_all = _preserves_all_valley_subspaces(operation)
         old_exchanging = _is_valley_exchanging(operation)
         old_allowed = bool(little_group_passed and old_preserves_all)
@@ -82,19 +75,18 @@ def update_valley_little_group_inventory(
             "little_group_passed": little_group_passed,
             "valley_preserving": old_preserves_all,
             "valley_exchanging": old_exchanging,
-            "allowed_for_single_valley_representation": old_allowed,
+            "allowed_for_valley_preserving_representation": old_allowed,
             "reason": old_reason,
         }
         flat_inventory.append(flat_row)
 
         operation.setdefault("little_group_by_kpoint", {})[kpoint_name] = little_group_passed
-        operation.setdefault("allowed_for_single_valley_representation_by_kpoint", {})[kpoint_name] = old_allowed
-        operation["allowed_for_single_valley_representation"] = old_allowed
+        operation.setdefault("allowed_for_valley_preserving_representation_by_kpoint", {})[kpoint_name] = old_allowed
+        operation["allowed_for_valley_preserving_representation"] = old_allowed
         operation.setdefault("rejection_reason_by_kpoint", {})[kpoint_name] = old_reason
 
-    # Store both old and new format
-    symmetry_payload.setdefault("valley_little_group_inventory", {})[kpoint_name] = flat_inventory
-    symmetry_payload.setdefault("per_valley_little_group_inventory", {}).setdefault(kpoint_name, {}).update(per_valley)
+    symmetry_payload.setdefault("hsp_little_group_inventory", {})[kpoint_name] = flat_inventory
+    symmetry_payload.setdefault("per_valley_preserving_operation_inventory", {}).setdefault(kpoint_name, {}).update(per_valley)
     symmetry_payload.setdefault("kpoint_frac_by_name", {})[kpoint_name] = np.asarray(
         k_frac, dtype=float,
     ).tolist()
@@ -108,15 +100,10 @@ def build_valley_preserving_subgroup_report(
     target_kpoints: list[str] | tuple[str, ...] | None = None,
     tolerance: float = 1e-8,
 ) -> dict[str, Any]:
-    """Build per-valley stabilizer and orbit report.
-
-    Replaces the old single global "all-valley intersection" report.
-    The all-valley intersection is retained as ``all_valley_intersection``
-    for debugging but is NOT used for single-valley irrep matching.
-    """
-    per_valley_inventories = symmetry_payload.get("per_valley_little_group_inventory", {})
+    """Build the valley orbit and valley-preserving subgroup report."""
+    per_valley_inventories = symmetry_payload.get("per_valley_preserving_operation_inventory", {})
     valley_names = symmetry_payload.get("valley_names", [])
-    inventories = symmetry_payload.get("valley_little_group_inventory", {})
+    inventories = symmetry_payload.get("hsp_little_group_inventory", {})
 
     if not isinstance(inventories, dict) or not inventories:
         return {
@@ -131,30 +118,29 @@ def build_valley_preserving_subgroup_report(
         for operation in symmetry_payload.get("detected_operations", [])
     }
 
-    # All-valley intersection (debug only, NOT used for single-valley irreps)
+    # All-valley intersection is debug-only and not used for valley-preserving irreps.
     all_valley_intersection = _global_valley_preserving_operation_set_report(
         operation_lookup=operation_lookup,
         tolerance=tolerance,
     )
     all_valley_intersection["interpretation"] = (
         "intersection of operations preserving ALL selected valleys; "
-        "this is NOT the single-valley stabilizer and is provided for debugging only"
+        "this is NOT a per-valley preserving subgroup and is provided for debugging only"
     )
 
-    # Per-valley stabilizers
-    valley_stabilizers: dict[str, Any] = {}
+    valley_preserving_subgroups: dict[str, Any] = {}
     for valley_name in valley_names:
-        stab_ids = [
+        preserving_ids = [
             op_id for op_id, op in operation_lookup.items()
             if _operation_preserves_valley(op, valley_name)
         ]
         closure = _operation_set_closure_report(
-            allowed_ids=stab_ids,
+            allowed_ids=preserving_ids,
             operation_lookup=operation_lookup,
             tolerance=tolerance,
         )
-        valley_stabilizers[valley_name] = {
-            "operation_ids": stab_ids,
+        valley_preserving_subgroups[valley_name] = {
+            "operation_ids": preserving_ids,
             "closure_status": closure["closure_status"],
             "identity_operation_id": closure["identity_operation_id"],
             "missing_products": closure["missing_products"],
@@ -188,7 +174,7 @@ def build_valley_preserving_subgroup_report(
             allowed_ids = [
                 row.get("operation_id")
                 for row in pv_inv
-                if bool(row.get("allowed_for_single_valley_representation", False))
+                if bool(row.get("allowed_for_valley_preserving_representation", False))
             ]
             little_ids = [
                 row.get("operation_id")
@@ -235,19 +221,19 @@ def build_valley_preserving_subgroup_report(
             old_allowed = [
                 row.get("operation_id")
                 for row in flat_inv
-                if bool(row.get("allowed_for_single_valley_representation", False))
+                if bool(row.get("allowed_for_valley_preserving_representation", False))
             ]
-            kp_entry["_legacy_all_valley_little_group_operation_ids"] = lg_ids
-            kp_entry["_legacy_all_valley_allowed_operation_ids"] = old_allowed
+            kp_entry["hsp_little_group_operation_ids"] = lg_ids
+            kp_entry["all_valley_intersection_operation_ids"] = old_allowed
 
         by_kpoint[kpoint] = kp_entry
 
-    # Standard group match from per-valley stabilizers
+    # Standard group match from per-valley preserving subgroups.
     per_valley_standard_matches: dict[str, Any] = {}
     for valley_name in valley_names:
-        stab_ids = valley_stabilizers.get(valley_name, {}).get("operation_ids", [])
+        preserving_ids = valley_preserving_subgroups.get(valley_name, {}).get("operation_ids", [])
         match, match_status = _match_standard_group_from_operations(
-            allowed_ids=stab_ids,
+            allowed_ids=preserving_ids,
             operation_lookup=operation_lookup,
             lattice_direct_cart=symmetry_payload.get("lattice_direct_cart"),
             symprec=float(symmetry_payload.get("symprec", tolerance)),
@@ -257,22 +243,22 @@ def build_valley_preserving_subgroup_report(
             "standard_group_match_status": match_status,
         }
 
-    status = "per_valley_stabilizers_computed"
+    status = "per_valley_preserving_subgroups_computed"
     report = {
         "status": status,
         "interpretation": (
-            "Per-valley stabilizers H_v = {g in G | g maps valley v to itself}. "
-            "Single-valley irreps use per-valley stabilizers, NOT the all-valley intersection."
+            "For each valley a, G_k^(a) = {g in G_k | pi_g(a) = a}. "
+            "Valley-preserving irreps use these subgroups, NOT the all-valley intersection."
         ),
         "valley_orbits": valley_orbits,
-        "valley_stabilizers": valley_stabilizers,
+        "valley_preserving_subgroups": valley_preserving_subgroups,
         "per_valley_standard_matches": per_valley_standard_matches,
         "all_valley_intersection": all_valley_intersection,
         "irrep_matching": _build_per_valley_irrep_table_matching(
             symmetry_payload=symmetry_payload,
             operation_lookup=operation_lookup,
             valley_names=valley_names,
-            valley_stabilizers=valley_stabilizers,
+            valley_preserving_subgroups=valley_preserving_subgroups,
             per_valley_standard_matches=per_valley_standard_matches,
             by_kpoint=by_kpoint,
             tolerance=tolerance,
@@ -291,7 +277,7 @@ def add_valley_irrep_results(
     state_diagonal_tol: float = 1e-3,
     tolerance: float = 1e-5,
 ) -> dict[str, Any]:
-    """Match characters to per-valley stabilizer irrep tables.
+    """Match characters to valley-preserving irrep tables.
 
     Keys irrep matching by (kpoint, valley), not only by kpoint.
     """
@@ -502,7 +488,7 @@ def _build_per_valley_from_flat(
             "target_valley": valley_name,
             "mapped_valley": mapped_valley,
             "valley_preserving": valley_preserving,
-            "allowed_for_single_valley_representation": allowed,
+            "allowed_for_valley_preserving_representation": allowed,
             "reason": reason,
         })
     return rows
@@ -586,7 +572,7 @@ def _build_per_valley_irrep_table_matching(
     symmetry_payload: dict[str, Any],
     operation_lookup: dict[Any, dict[str, Any]],
     valley_names: list[str],
-    valley_stabilizers: dict[str, Any],
+    valley_preserving_subgroups: dict[str, Any],
     per_valley_standard_matches: dict[str, Any],
     by_kpoint: dict[str, Any],
     tolerance: float,
@@ -595,7 +581,7 @@ def _build_per_valley_irrep_table_matching(
         "table_source": "irreptables",
         "label_matching": "deferred",
         "reason": (
-            "automatic irrep labels use per-valley stabilizers; "
+            "automatic irrep labels use valley-preserving subgroups; "
             "not emitted until character-to-table matching succeeds"
         ),
     }
@@ -612,7 +598,7 @@ def _build_per_valley_irrep_table_matching(
         if match_status != "matched" or standard_match is None:
             per_valley[valley_name] = {
                 "status": "table_mapping_deferred",
-                "reason": f"No standard group match for {valley_name} stabilizer",
+                "reason": f"No standard group match for {valley_name} valley-preserving subgroup",
                 "by_kpoint": {},
             }
             all_complete = False
@@ -631,14 +617,14 @@ def _build_per_valley_irrep_table_matching(
             all_complete = False
             continue
 
-        stab_ids = valley_stabilizers.get(valley_name, {}).get("operation_ids", [])
-        stab_operations = [
+        preserving_ids = valley_preserving_subgroups.get(valley_name, {}).get("operation_ids", [])
+        preserving_operations = [
             operation_lookup[op_id]
-            for op_id in stab_ids
+            for op_id in preserving_ids
             if op_id in operation_lookup
         ]
         mapping_report = match_table_operations(
-            stab_operations, table, tolerance=tolerance,
+            preserving_operations, table, tolerance=tolerance,
         )
 
         kpoint_matching = _build_table_kpoint_matching(

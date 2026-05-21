@@ -173,9 +173,9 @@ def _match_single_generator_table_operation(
     table: StandardIrrepTable,
     tolerance: float,
 ) -> int | None:
-    """Map conjugate one-generator stabilizers to the standard table generator.
+    """Map conjugate one-generator subgroups to the standard table generator.
 
-    A valley stabilizer such as {E, C2} can be embedded in the parent moire
+    A valley subgroup such as {E, C2} can be embedded in the parent moire
     basis along several symmetry-related axes.  The standard subgroup table has
     the same two-element group in its conventional setting, so exact fractional
     matrix equality is too strict but the non-identity generator is unique.

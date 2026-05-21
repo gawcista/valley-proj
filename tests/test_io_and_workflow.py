@@ -749,7 +749,7 @@ def test_readme_symmetry_example_uses_parser_schema(tmp_path):
     assert "qcut mode:" in readme
     assert "`not_derived`" in readme
     assert "`unreliable`" in readme
-    assert "single-valley irrep" in readme
+    assert "valley-preserving irrep" in readme
     assert "valley-preserving subgroup" in readme
     assert "irrep_results_by_kpoint" in readme
     assert "irrep_multiplicities" in readme
@@ -814,7 +814,7 @@ def test_chinese_readme_uses_public_valley_vocabulary():
     assert "assigned_valleys:" in readme
     assert "`not_derived`" in readme
     assert "`unreliable`" in readme
-    assert "single-valley irrep" in readme
+    assert "valley-preserving irrep" in readme
     assert "谷保持子群" in readme
     assert "irrep_results_by_kpoint" in readme
     assert "irrep_multiplicities" in readme
@@ -1108,8 +1108,8 @@ def test_symmetry_eigenvalues_csv_is_header_only_when_no_rows(tmp_path, monkeypa
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     assert "symmetry_eigenvalues_csv" in summary["output_files"]
     subgroup_report = summary["symmetry_analysis"]["valley_preserving_subgroup_report"]
-    assert subgroup_report["status"] in ("per_valley_stabilizers_computed", "operation_set_only")
-    if subgroup_report["status"] == "per_valley_stabilizers_computed":
+    assert subgroup_report["status"] in ("per_valley_preserving_subgroups_computed", "operation_set_only")
+    if subgroup_report["status"] == "per_valley_preserving_subgroups_computed":
         assert subgroup_report["all_valley_intersection"]["operation_count"] == 0
     else:
         assert subgroup_report["standard_group_match_status"] == "not_attempted"
@@ -1465,7 +1465,7 @@ def test_symmetry_summary_orders_hsp_and_labels_valley_exchanging(tmp_path):
     rejected = summary["symmetry_analysis"]["rejected_operations"]
     assert [row["kpoint"] for row in rejected] == ["GammaM", "KM"]
     text = render_summary_text(summary)
-    assert text.index("GammaM: little group") < text.index("KM: little group")
+    assert text.index("GammaM: HSP little group") < text.index("KM: HSP little group")
     assert "valley-exchanging" in text
 
 
@@ -1493,7 +1493,7 @@ def test_summary_rejected_operations_are_per_valley_when_inventory_available(tmp
             }
         ],
         "candidate_rotations": [],
-        "per_valley_little_group_inventory": {
+        "per_valley_preserving_operation_inventory": {
             "GammaM": {
                 "M1_valley": [
                     {
@@ -1504,7 +1504,7 @@ def test_summary_rejected_operations_are_per_valley_when_inventory_available(tmp
                         "target_valley": "M1_valley",
                         "mapped_valley": "M1_valley",
                         "valley_preserving": True,
-                        "allowed_for_single_valley_representation": True,
+                        "allowed_for_valley_preserving_representation": True,
                         "reason": "",
                     }
                 ],
@@ -1517,7 +1517,7 @@ def test_summary_rejected_operations_are_per_valley_when_inventory_available(tmp
                         "target_valley": "M2_valley",
                         "mapped_valley": "M3_valley",
                         "valley_preserving": False,
-                        "allowed_for_single_valley_representation": False,
+                        "allowed_for_valley_preserving_representation": False,
                         "reason": "valley-changing (maps to M3_valley)",
                     }
                 ],
@@ -1552,7 +1552,7 @@ def test_summary_rejected_operations_are_per_valley_when_inventory_available(tmp
     assert "M1_valley" not in text.split("rejected operations:", 1)[1]
 
 
-def test_summary_preserves_valley_little_group_inventory(tmp_path):
+def test_summary_preserves_hsp_little_group_inventory(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "config.yaml"
     out_dir = tmp_path / "out"
@@ -1570,7 +1570,7 @@ def test_summary_preserves_valley_little_group_inventory(tmp_path):
                 "little_group_passed": True,
                 "valley_preserving": True,
                 "valley_exchanging": False,
-                "allowed_for_single_valley_representation": True,
+                "allowed_for_valley_preserving_representation": True,
                 "reason": "",
             }
         ]
@@ -1583,7 +1583,7 @@ def test_summary_preserves_valley_little_group_inventory(tmp_path):
             "status": "ok",
             "detected_operations": [],
             "candidate_rotations": [],
-            "valley_little_group_inventory": inventory,
+            "hsp_little_group_inventory": inventory,
             "little_group_check": {"status": "evaluated_per_kpoint"},
             "valley_preservation_check": {"status": "completed"},
         },
@@ -1591,7 +1591,7 @@ def test_summary_preserves_valley_little_group_inventory(tmp_path):
         output_paths={},
     )
 
-    assert summary["symmetry_analysis"]["valley_little_group_inventory"] == inventory
+    assert summary["symmetry_analysis"]["hsp_little_group_inventory"] == inventory
 
 
 def test_summary_preserves_valley_preserving_subgroup_report(tmp_path):
@@ -1740,7 +1740,7 @@ def test_summary_exposes_symmetry_characters_as_first_class_rows(tmp_path):
             "character_valley": "0.500000+0.866025j",
             "topology_input_ready": True,
             "diagnostic_only": False,
-            "accepted_for_single_valley_representation": True,
+            "accepted_for_valley_preserving_representation": True,
         }
     ]
 
@@ -2259,7 +2259,7 @@ def test_workflow_keeps_irrep_results_incomplete_when_an_operation_has_non_ready
     assert result["state_irrep_assignment_status"] == "incomplete"
 
 
-def test_workflow_keeps_irrep_results_incomplete_when_covariance_fails(tmp_path, monkeypatch):
+def test_workflow_keeps_irrep_results_incomplete_when_symmetry_consistency_fails(tmp_path, monkeypatch):
     import importlib
 
     workflow_module = importlib.import_module("valleyscope.workflows.analyze_hsp")
@@ -2271,13 +2271,13 @@ def test_workflow_keeps_irrep_results_incomplete_when_covariance_fails(tmp_path,
         h5["metadata/spinor"][()] = True
     write_config(config_path, h5_path, out_dir)
 
-    covariance_report = {
-        "status": "covariance_failures_detected",
+    symmetry_consistency_report = {
+        "status": "symmetry_consistency_failures_detected",
         "warn_tol": 0.01,
         "fail_tol": 0.1,
         "by_kpoint": {
             "GammaM": {
-                "seed_projector_covariance": [
+                "seed_projector_symmetry": [
                     {
                         "operation_id": 1,
                         "source_valley": "K_valley",
@@ -2317,8 +2317,8 @@ def test_workflow_keeps_irrep_results_incomplete_when_covariance_fails(tmp_path,
     )
     monkeypatch.setattr(
         workflow_module,
-        "compute_projector_covariance",
-        lambda **kwargs: covariance_report,
+        "build_projector_symmetry_report",
+        lambda **kwargs: symmetry_consistency_report,
     )
 
     outputs = workflow_module.analyze_hsp(config_path)
@@ -2335,10 +2335,10 @@ def test_workflow_keeps_irrep_results_incomplete_when_covariance_fails(tmp_path,
     assert rows
     assert all(row["diagnostic_only"] is True for row in rows)
     assert all(row["topology_input_ready"] is False for row in rows)
-    assert all(row["projector_covariance_status"] == "failed" for row in rows)
+    assert all(row["projector_symmetry_status"] == "failed" for row in rows)
 
 
-def test_workflow_writes_covariance_report_when_no_seed_data(tmp_path, monkeypatch):
+def test_workflow_writes_symmetry_consistency_report_when_no_seed_data(tmp_path, monkeypatch):
     import importlib
 
     workflow_module = importlib.import_module("valleyscope.workflows.analyze_hsp")
@@ -2357,12 +2357,12 @@ def test_workflow_writes_covariance_report_when_no_seed_data(tmp_path, monkeypat
 
     outputs = workflow_module.analyze_hsp(config_path)
 
-    cov_path = outputs["projector_covariance_report_json"]
-    covariance = json.loads(cov_path.read_text(encoding="utf-8"))
-    assert covariance["status"] == "no_data"
+    cov_path = outputs["projector_symmetry_report_json"]
+    symmetry_consistency = json.loads(cov_path.read_text(encoding="utf-8"))
+    assert symmetry_consistency["status"] == "no_data"
 
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
-    assert summary["projector_covariance"]["status"] == "no_data"
+    assert summary["projector_symmetry"]["status"] == "no_data"
 
 
 def test_state_irrep_rejected_when_dvalley_has_offdiagonal_mixing(tmp_path, monkeypatch):

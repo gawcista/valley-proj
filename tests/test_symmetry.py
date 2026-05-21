@@ -14,7 +14,7 @@ from valleyscope.analysis.symmetry_eigenvalue_diagnostic import symmetry_eigenva
 from valleyscope.analysis.valley_little_group import (
     add_valley_irrep_results,
     build_valley_preserving_subgroup_report,
-    update_valley_little_group_inventory,
+    update_valley_preserving_operation_inventory,
 )
 
 
@@ -735,7 +735,7 @@ class TestLittleGroupExtendedDiagnostics:
         assert rows[0]["character_valley"] == "1.000000+0.000000j"
 
 
-def test_valley_little_group_inventory_marks_allowed_and_valley_exchanging_operations():
+def test_valley_preserving_operation_inventory_marks_allowed_and_valley_exchanging_operations():
     operations = [
         {
             "operation_id": 0,
@@ -764,7 +764,7 @@ def test_valley_little_group_inventory_marks_allowed_and_valley_exchanging_opera
     ]
     symmetry_payload = {"detected_operations": operations}
 
-    per_valley = update_valley_little_group_inventory(
+    per_valley = update_valley_preserving_operation_inventory(
         symmetry_payload=symmetry_payload,
         kpoint_name="KM",
         k_frac=np.array([1.0 / 3.0, 0.0, 0.0]),
@@ -774,7 +774,7 @@ def test_valley_little_group_inventory_marks_allowed_and_valley_exchanging_opera
     # Per-valley: K_valley inventory
     kv_rows = per_valley["K_valley"]
     assert [row["operation_id"] for row in kv_rows] == [0, 1, 2]
-    assert kv_rows[0]["allowed_for_single_valley_representation"] is True
+    assert kv_rows[0]["allowed_for_valley_preserving_representation"] is True
     assert kv_rows[1]["little_group_passed"] is True
     assert kv_rows[1]["valley_preserving"] is False
     assert "valley-changing" in kv_rows[1]["reason"]
@@ -783,9 +783,9 @@ def test_valley_little_group_inventory_marks_allowed_and_valley_exchanging_opera
     assert operations[1]["rejection_reason_by_kpoint"]["KM"] == "valley-exchanging"
 
     # Flat inventory still stored for backward compat
-    flat = symmetry_payload["valley_little_group_inventory"]["KM"]
+    flat = symmetry_payload["hsp_little_group_inventory"]["KM"]
     assert [row["operation_id"] for row in flat] == [0, 1, 2]
-    assert flat[0]["allowed_for_single_valley_representation"] is True
+    assert flat[0]["allowed_for_valley_preserving_representation"] is True
     assert flat[1]["valley_exchanging"] is True
     assert flat[1]["reason"] == "valley-exchanging"
 
@@ -832,7 +832,7 @@ def test_valley_preserving_subgroup_report_checks_operation_set_closure():
         },
     ]
     symmetry_payload = {"detected_operations": operations}
-    update_valley_little_group_inventory(
+    update_valley_preserving_operation_inventory(
         symmetry_payload=symmetry_payload,
         kpoint_name="GM",
         k_frac=np.zeros(3),
@@ -844,9 +844,9 @@ def test_valley_preserving_subgroup_report_checks_operation_set_closure():
         target_kpoints=["GM"],
     )
 
-    assert report["status"] == "per_valley_stabilizers_computed"
-    # Per-valley stabilizer for K_valley
-    assert report["valley_stabilizers"]["K_valley"]["operation_ids"] == [0, 1, 2]
+    assert report["status"] == "per_valley_preserving_subgroups_computed"
+    # Per-valley subgroup for K_valley
+    assert report["valley_preserving_subgroups"]["K_valley"]["operation_ids"] == [0, 1, 2]
     # All-valley intersection (debug)
     assert report["all_valley_intersection"]["allowed_operation_ids"] == [0, 1, 2]
     # Per-valley by_kpoint
@@ -910,7 +910,7 @@ def test_valley_preserving_subgroup_report_identifies_standard_global_subgroup()
         "detected_operations": operations,
         "lattice_direct_cart": lattice,
     }
-    update_valley_little_group_inventory(
+    update_valley_preserving_operation_inventory(
         symmetry_payload=symmetry_payload,
         kpoint_name="GM",
         k_frac=np.zeros(3),
@@ -922,13 +922,13 @@ def test_valley_preserving_subgroup_report_identifies_standard_global_subgroup()
         target_kpoints=["GM"],
     )
 
-    assert report["status"] == "per_valley_stabilizers_computed"
+    assert report["status"] == "per_valley_preserving_subgroups_computed"
     # All-valley intersection (debug)
     assert report["all_valley_intersection"]["operation_set_label"] == "all_valley_intersection"
     assert report["all_valley_intersection"]["allowed_operation_ids"] == [0, 1, 2]
     assert report["all_valley_intersection"]["valley_exchanging_operation_ids"] == [3]
     assert report["all_valley_intersection"]["closure_status"] == "closed"
-    # Per-valley stabilizers both match P3 since both valleys are preserved by C3
+    # Per-valley subgroups both match P3 since both valleys are preserved by C3
     k_match = report["per_valley_standard_matches"]["K_valley"]
     assert k_match["standard_group_match_status"] == "matched"
     assert k_match["standard_group_match"]["number"] == 143
@@ -982,7 +982,7 @@ def test_valley_preserving_subgroup_report_maps_operations_to_irreptables():
         "lattice_direct_cart": lattice,
         "spinor_wavefunction": True,
     }
-    update_valley_little_group_inventory(
+    update_valley_preserving_operation_inventory(
         symmetry_payload=symmetry_payload,
         kpoint_name="KM",
         k_frac=np.array([1.0 / 3.0, 1.0 / 3.0, 0.0]),
@@ -1015,7 +1015,7 @@ def test_valley_preserving_subgroup_report_maps_operations_to_irreptables():
     assert {"-K4", "-K5", "-K6"} <= set(km_matching["available_irrep_labels"])
 
 
-def test_three_m_valley_c2_stabilizers_map_operations_but_report_kpoint_ambiguity():
+def test_three_m_valley_c2_subgroups_map_operations_but_report_kpoint_ambiguity():
     c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]], dtype=int)
     c3_square = c3 @ c3
     operations = [
@@ -1083,13 +1083,13 @@ def test_three_m_valley_c2_stabilizers_map_operations_but_report_kpoint_ambiguit
         ),
         "spinor_wavefunction": True,
     }
-    update_valley_little_group_inventory(
+    update_valley_preserving_operation_inventory(
         symmetry_payload=symmetry_payload,
         kpoint_name="GammaM",
         k_frac=np.array([0.0, 0.0, 0.0]),
         valley_names=["M1_valley", "M2_valley", "M3_valley"],
     )
-    update_valley_little_group_inventory(
+    update_valley_preserving_operation_inventory(
         symmetry_payload=symmetry_payload,
         kpoint_name="MM",
         k_frac=np.array([0.0, 0.5, 0.0]),
@@ -1154,7 +1154,7 @@ def test_valley_irrep_results_match_characters_to_irrep_multiplicities():
         "lattice_direct_cart": lattice,
         "spinor_wavefunction": True,
     }
-    update_valley_little_group_inventory(
+    update_valley_preserving_operation_inventory(
         symmetry_payload=symmetry_payload,
         kpoint_name="KM",
         k_frac=np.array([1.0 / 3.0, 1.0 / 3.0, 0.0]),
@@ -1313,7 +1313,7 @@ def test_valley_preserving_subgroup_report_records_missing_products():
         },
     ]
     symmetry_payload = {"detected_operations": operations}
-    update_valley_little_group_inventory(
+    update_valley_preserving_operation_inventory(
         symmetry_payload=symmetry_payload,
         kpoint_name="GM",
         k_frac=np.zeros(3),
@@ -1332,8 +1332,8 @@ def test_valley_preserving_subgroup_report_records_missing_products():
     ]
 
 
-class TestV11PerValleyStabilizer:
-    """V1.1 per-valley stabilizer tests: three-valley orbit, per-valley gates,
+class TestV11PerValleySubgroup:
+    """V1.1 per-valley subgroup tests: three-valley orbit, per-valley gates,
     block-leakage diagnostic, and rotation_order independence."""
 
     @staticmethod
@@ -1461,12 +1461,12 @@ class TestV11PerValleyStabilizer:
             },
         ]
 
-    def test_three_valley_orbit_and_per_valley_stabilizers(self):
+    def test_three_valley_orbit_and_per_valley_preserving_subgroups(self):
         """C3 cycles M1/M2/M3; each C2 fixes one valley and exchanges the other two.
-        Each stabilizer is E + corresponding C2.  All-valley intersection is just E."""
+        Each subgroup is E + corresponding C2.  All-valley intersection is just E."""
         operations = self._three_valley_operations()
         symmetry_payload = {"detected_operations": operations}
-        update_valley_little_group_inventory(
+        update_valley_preserving_operation_inventory(
             symmetry_payload=symmetry_payload,
             kpoint_name="GM",
             k_frac=np.zeros(3),
@@ -1486,15 +1486,15 @@ class TestV11PerValleyStabilizer:
         assert 1 in orbits[0]["valley_permuting_operation_ids"]
         assert 1 in orbits[0]["coset_representative_operation_ids"]  # legacy alias
 
-        # Per-valley stabilizers
-        stabilizers = report["valley_stabilizers"]
-        # M1 stabilizer: E(0) + C2_M1(3)
-        assert stabilizers["M1_valley"]["operation_ids"] == [0, 3]
-        assert stabilizers["M1_valley"]["closure_status"] == "closed"
-        # M2 stabilizer: E(0) + C2_M2(4)
-        assert stabilizers["M2_valley"]["operation_ids"] == [0, 4]
-        # M3 stabilizer: E(0) + C2_M3(5)
-        assert stabilizers["M3_valley"]["operation_ids"] == [0, 5]
+        # Per-valley subgroups
+        subgroups = report["valley_preserving_subgroups"]
+        # M1 subgroup: E(0) + C2_M1(3)
+        assert subgroups["M1_valley"]["operation_ids"] == [0, 3]
+        assert subgroups["M1_valley"]["closure_status"] == "closed"
+        # M2 subgroup: E(0) + C2_M2(4)
+        assert subgroups["M2_valley"]["operation_ids"] == [0, 4]
+        # M3 subgroup: E(0) + C2_M3(5)
+        assert subgroups["M3_valley"]["operation_ids"] == [0, 5]
 
         # All-valley intersection (debug only): just identity
         intersection = report["all_valley_intersection"]
@@ -1510,10 +1510,10 @@ class TestV11PerValleyStabilizer:
 
     def test_operation_preserving_m1_allowed_for_m1_not_for_m2_m3(self):
         """C2_M1 preserves M1 and exchanges M2/M3.
-        It is allowed for M1 single-valley representation but NOT for M2 or M3."""
+        It is allowed for M1 valley-preserving representation but NOT for M2 or M3."""
         operations = self._three_valley_operations()
         symmetry_payload = {"detected_operations": operations}
-        per_valley = update_valley_little_group_inventory(
+        per_valley = update_valley_preserving_operation_inventory(
             symmetry_payload=symmetry_payload,
             kpoint_name="GM",
             k_frac=np.zeros(3),
@@ -1523,19 +1523,19 @@ class TestV11PerValleyStabilizer:
         # C2_M1 (id=3) in M1_valley inventory
         m1_rows = {row["operation_id"]: row for row in per_valley["M1_valley"]}
         assert m1_rows[3]["valley_preserving"] is True
-        assert m1_rows[3]["allowed_for_single_valley_representation"] is True
+        assert m1_rows[3]["allowed_for_valley_preserving_representation"] is True
         assert m1_rows[3]["mapped_valley"] == "M1_valley"
 
         # C2_M1 in M2_valley inventory
         m2_rows = {row["operation_id"]: row for row in per_valley["M2_valley"]}
         assert m2_rows[3]["valley_preserving"] is False
-        assert m2_rows[3]["allowed_for_single_valley_representation"] is False
+        assert m2_rows[3]["allowed_for_valley_preserving_representation"] is False
         assert "valley-changing" in m2_rows[3]["reason"]
 
         # C2_M1 in M3_valley inventory
         m3_rows = {row["operation_id"]: row for row in per_valley["M3_valley"]}
         assert m3_rows[3]["valley_preserving"] is False
-        assert m3_rows[3]["allowed_for_single_valley_representation"] is False
+        assert m3_rows[3]["allowed_for_valley_preserving_representation"] is False
 
     def test_symmetry_rows_contain_target_valley(self):
         """Symmetry eigenvalue rows must include target_valley field."""
@@ -1664,7 +1664,7 @@ class TestV11PerValleyStabilizer:
         assert all(row["reason"] == "valley subspace not clean" for row in rows)
         assert representation_payload["GM"]["operation_0__valley_K_valley"]["D_valley"].shape == (2, 2)
 
-    def test_valley_changing_operation_no_single_valley_eigenvalue(self):
+    def test_valley_changing_operation_no_valley_preserving_eigenvalue(self):
         """C2x exchanges K and Kp. It must NOT produce eigenvalue rows for either valley."""
         c2x = np.array([[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0]])
         operations = [

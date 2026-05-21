@@ -65,7 +65,7 @@ symmetry:
     # Legacy summary/highlight field for the cyclic rotation order.
     # V1.1 does NOT use this to select which operations enter symmetry analysis;
     # all proper little-group operations (order 2,3,4,6) are enumerated and
-    # filtered by per-valley stabilizer.  Accepted values: auto, integer n, none.
+    # filtered by per-valley subgroup.  Accepted values: auto, integer n, none.
     rotation_order: auto
 
 rotation:

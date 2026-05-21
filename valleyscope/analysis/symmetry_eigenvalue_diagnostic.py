@@ -81,8 +81,8 @@ def symmetry_eigenvalue_diagnostics_for_kpoint(
             )
             # Legacy all-valley compat
             old_preserves_all = all(bool(v) for v in preserved.values()) if preserved else False
-            operation["allowed_for_single_valley_representation"] = bool(little and old_preserves_all)
-            operation.setdefault("allowed_for_single_valley_representation_by_kpoint", {})[kpoint_name] = bool(little and old_preserves_all)
+            operation["allowed_for_valley_preserving_representation"] = bool(little and old_preserves_all)
+            operation.setdefault("allowed_for_valley_preserving_representation_by_kpoint", {})[kpoint_name] = bool(little and old_preserves_all)
 
             if rejection_reason:
                 continue

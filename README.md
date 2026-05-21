@@ -92,7 +92,7 @@ It measures whether the assigned valley weight is concentrated in one valley or 
 The concentration score is classified into three public categories:
 - **clean**: concentration above `valley_concentration_clean` (default 0.95, equivalent to `|eta|=0.90` in a two-valley analysis). Legacy alias: `P_v_clean`.
 - **approx**: concentration between `valley_concentration_approx` (default 0.85) and the clean threshold. Legacy alias: `P_v_approx`.
-- **mixed**: concentration below the approximate threshold; single-valley symmetry data should be treated as diagnostic-only.
+- **mixed**: concentration below the approximate threshold; valley-preserving symmetry data should be treated as diagnostic-only.
 
 The public summary status vocabulary also includes gate and availability states:
 
@@ -161,57 +161,65 @@ For three or more valleys, $\eta$ is undefined; use `valley_weights_adapted`, `a
 
 ValleyScope performs symmetry-operation detection from the moire or bilayer structure file. By default, candidate symmetry operations are detected from the moire structure file using spglib, with user-controlled symprec and optional symprec_scan. A symmetry eigenvalue is reported only after two checks:
 
-1. The operation belongs to the little group of the analyzed HSP.
-2. The operation preserves the **specific valley being analyzed** (per-valley stabilizer condition), not all selected valleys.
+1. The operation belongs to the HSP little group $G_k$ of the analyzed HSP.
+2. The operation preserves the **specific valley being analyzed**, not all selected valleys.
 
 The resulting matrix is a little-group representation in the valley-adapted subspace, restricted to the current valley block. Its eigenvalues are symmetry-analysis data. They can constrain topology in symmetry-based formulas, but ValleyScope does not infer a full integer Chern number from high-symmetry-point data alone.
 
-Per-valley stabilizers are reported separately for each valley. Valley orbits and valley-permuting operation mappings are included in the subgroup report. The current V1.1 reports valley orbits and operation mappings; strict minimal coset representatives and induced representation relations are not yet fully automated. The all-valley intersection (operations preserving every selected valley) is retained as a debug field but is not used for single-valley irrep matching.
+Valley-preserving subgroups are reported separately for each valley. Valley orbits and valley mappings are included in the subgroup report. The current V1.1 reports valley orbits and operation mappings; strict minimal coset representatives and induced representation relations are not yet fully automated. The all-valley intersection (operations preserving every selected valley) is retained as a debug field but is not used for valley-preserving irrep matching.
 
 ### Single-Valley Irrep Interpretation
 
-A single-valley irrep should be compared with irreps of the valley-preserving subgroup
+A valley-preserving irrep should be compared with irreps of the valley-preserving subgroup inside the HSP little group:
 
 ```math
-G_\tau=\{\,g\in G\mid gV_\tau=V_\tau\,\},
+G_k^{(a)}=\{\,g\in G_k\mid \pi_g(a)=a\,\},
 ```
 
-where $V_\tau$ is the selected monolayer valley subspace. It should not be interpreted as an irrep of the full moire space group unless the operation preserves that valley subspace.
+where $G_k$ is the HSP little group and $\pi_g(a)$ is the valley mapping induced by operation $g$. It should not be interpreted as an irrep of the full moire space group unless the operation preserves that valley subspace.
 
 With SOC, the comparison must use double-valued irreps. A spinor wavefunction changes sign under a $2\pi$ rotation, so spinful $C_3$ satisfies $C_3^3=-1$ and allows eigenvalues such as $\exp(+i\pi/3)$, $-1$, and $\exp(-i\pi/3)$.
 
-After valley-preservation filtering, ValleyScope reports the stabilizer of each selected valley, not the all-valley intersection. For valley $v_a$, the single-valley group is the stabilizer $H_{v_a}=\{g\in G\mid g v_a=v_a+\mathbf G\}$. Operations that move $v_a$ to another selected valley are reported as valley-changing orbit data and are not used as single-valley eigenvalue rows for $v_a$. When operation-to-table mapping is complete, `irrep_matching.irrep_results_by_kpoint` reports representation-level `irrep_multiplicities` from character decomposition. When every ready state independently selects a unique one-dimensional irrep, `state_irrep_results` records per-state irrep labels. These are valley-stabilizer character matching results, not reduced EBR decompositions or topology conclusions.
+After valley-preservation filtering, ValleyScope reports $G_k^{(a)}$ for each selected valley, not the all-valley intersection. Operations that move valley $a$ to another selected valley are reported as valley-changing orbit data and are not used as valley-preserving eigenvalue rows for $a$. When operation-to-table mapping is complete, `irrep_matching.irrep_results_by_kpoint` reports representation-level `irrep_multiplicities` from character decomposition. When every ready state independently selects a unique one-dimensional irrep, `state_irrep_results` records per-state irrep labels. These are valley-preserving character matching results, not reduced EBR decompositions or topology conclusions.
 
-### M-Star Valley Orbit and Stabilizer Structure
+### M-Star Valley Orbit and Valley-Preserving Subgroups
 
-For a three-valley M-star in a hexagonal moire cell (e.g., $P321$ / $P312$), the three M points form a single orbit under the full space group $G$:
-
-```math
-\text{orbit} = \{M_1, M_2, M_3\}
-```
-
-Each $M_i$ has its own stabilizer:
+For a three-valley M-star in a hexagonal moire cell (e.g., $P321$ / $P312$), the three M points form a valley orbit:
 
 ```math
-H_{M_1} = \{ g \in G \mid g M_1 = M_1 + \mathbf G_{\rm rec} \}
+O_M = \{M_1, M_2, M_3\}
 ```
 
-For a $C_3$-symmetric cell, the three stabilizers are conjugate:
+Typical valley mappings are:
 
 ```math
-H_{M_2} = C_3 H_{M_1} C_3^{-1}, \qquad
-H_{M_3} = C_3^2 H_{M_1} C_3^{-2}
+C_3: M_1 \to M_2 \to M_3 \to M_1,
+\qquad
+C_2^{(M_1)}: M_1 \to M_1,\; M_2 \leftrightarrow M_3 .
 ```
 
-When the orbit size is 3, the full group decomposes as:
+The HSP little group is:
 
 ```math
-G = H_{M_1} \sqcup C_3 H_{M_1} \sqcup C_3^2 H_{M_1}
+G_k = \{ g \in G \mid g k = k + \mathbf G_M \}.
 ```
 
-In practice, each $H_{M_i}$ typically contains the identity and one $C_2$ rotation that fixes $M_i$ while exchanging the other two M points. $C_3$ and $C_3^2$ act as valley-orbit operations, not as single-$M_i$ symmetry operations.
+The valley-preserving subgroup for $M_1$ inside the HSP little group is:
 
-**V1.1 scope:** ValleyScope currently reports per-valley stabilizers, valley orbits, and operation mappings. Strict minimal coset representatives, induced representation decomposition, and reduced EBR decomposition are deferred to later work. Single-valley irreps are irreps of the stabilizer $H_{M_i}$; full-group irreps describe the entire M-star manifold. If both full-group and valley-subgroup irreps are presented, the orbit, mapping, and induction-subduction relations must also be stated, otherwise the information is incomplete.
+```math
+G_k^{(M_1)} = \{ g \in G_k \mid \pi_g(M_1) = M_1 \}.
+```
+
+Similarly, $G_k^{(M_2)}=\{g\in G_k\mid\pi_g(M_2)=M_2\}$ and $G_k^{(M_3)}=\{g\in G_k\mid\pi_g(M_3)=M_3\}$. When the corresponding valley orbit is $C_3$-related, these subgroups are related by conjugation:
+
+```math
+G_k^{(M_2)} = C_3 G_k^{(M_1)} C_3^{-1}, \qquad
+G_k^{(M_3)} = C_3^2 G_k^{(M_1)} C_3^{-2}.
+```
+
+Single-valley irreps should be matched to the corresponding valley-preserving subgroup $G_k^{(M_i)}$, while the full M-star representation also requires valley-changing operations and valley sewing matrices.
+
+**V1.1 scope:** ValleyScope currently reports valley orbits and operation mappings. Strict minimal coset representatives, induced representation decomposition, and reduced EBR decomposition are deferred to later work. Full-group irreps describe the entire M-star manifold; valley-preserving irreps describe $G_k^{(M_i)}$. If both are presented, the orbit, mapping, and induction-subduction relations must also be stated, otherwise the information is incomplete.
 
 ## Workflow
 
@@ -489,7 +497,7 @@ eta_adapted:        signed valley polarization (two-valley compatibility only)
 
 The screen `status` values are `clean`, `approx`, `mixed`, `not_derived`, `unreliable`, and `n/a`.
 
-`Symmetry analysis` first reports the detected space group and symmetry operations, then lists which operations belong to each target HSP little group and which of those preserve each selected valley. Operations that map one selected valley to another are reported as `valley-changing`. The JSON summary also contains `symmetry_analysis.valley_preserving_subgroup_report`: it reports valley orbits, per-valley stabilizers, and the all-valley intersection as a debug-only field. If `irreptables` table mapping and character matching are complete, `irrep_matching.irrep_results_by_kpoint` records HSP irrep multiplicities such as `{"-K5": 1, "-K6": 1}`. When each ready state separately matches a unique one-dimensional irrep, the same result includes `state_irrep_results` with per-state labels. `Symmetry eigenvalues` reports the representation eigenvalues that were actually computed. `symmetry_characters` aggregates $\chi^{v_a}_k(g)=\mathrm{Tr}\,D^{v_a}_k(g)$ for computed operations that pass the little-group and per-valley stabilizer checks; it is the character input layer for irrep matching. `topology_input_ready` only means that the HSP symmetry eigenvalue is suitable as an input to a later symmetry-based topology analysis; it does not validate full-mBZ valley-resolved topology.
+`Symmetry analysis` first reports the detected space group and symmetry operations, then lists which operations belong to each target HSP little group and which of those preserve each selected valley. Operations that map one selected valley to another are reported as `valley-changing`. The JSON summary also contains `symmetry_analysis.valley_preserving_subgroup_report`: it reports valley orbits, valley-preserving subgroups, and the all-valley intersection as a debug-only field. If `irreptables` table mapping and character matching are complete, `irrep_matching.irrep_results_by_kpoint` records HSP irrep multiplicities such as `{"-K5": 1, "-K6": 1}`. When each ready state separately matches a unique one-dimensional irrep, the same result includes `state_irrep_results` with per-state labels. `Symmetry eigenvalues` reports the representation eigenvalues that were actually computed. `symmetry_characters` aggregates $\chi^{a}_k(g)=\mathrm{Tr}\,D^{a}_k(g)$ for computed operations that pass the HSP-little-group and valley-preserving checks; it is the character input layer for irrep matching. `topology_input_ready` only means that the HSP symmetry eigenvalue is suitable as an input to a later symmetry-based topology analysis; it does not validate full-mBZ valley-resolved topology.
 
 For SOC/spinor wavefunctions, ValleyScope applies the SU(2) spin rotation in the plane-wave representation. By default, VASP spinor phase conventions are treated as unverified, so spinful rows are reported with `spinor_rotation_applied=True`, `spinor_convention_verified=False`, and `diagnostic_only=True`. After an explicit spinor-convention check, set `spinor.convention_verified: true` and record the check name in `spinor.benchmark`; this still does not validate full-mBZ valley-resolved topology. `spinor.convention` is optional in YAML because only the default VASP up/down convention is currently supported.
 
@@ -549,19 +557,19 @@ symmetry:
 
 A monolayer POSCAR cannot replace the moire POSCAR for symmetry-operation detection. The moire POSCAR also should not be silently reused as a monolayer reciprocal lattice.
 
-`symmetry.filters.rotation_order` is a legacy summary/highlight field. In V1.1 it does **not** control which operations enter symmetry analysis. All detected proper little-group operations (order `2`, `3`, `4`, `6`) are enumerated and filtered by per-valley stabilizer membership. `rotation_order` records the requested or automatically resolved rotation order for summary compatibility:
+`symmetry.filters.rotation_order` is a legacy summary/highlight field. In V1.1 it does **not** control which operations enter symmetry analysis. All detected proper HSP-little-group operations (order `2`, `3`, `4`, `6`) are enumerated and filtered by valley-preserving subgroup membership. `rotation_order` records the requested or automatically resolved rotation order for summary compatibility:
 
 - `auto`: infer the target order from the detected moire space group (e.g., `P321` / `P312` → `C3`, `P422` → `C4`).
 - integer `n`: select `C_n` as the highlighted cyclic rotation order (`n = 2, 3, 4, 6`).
 - `None` / `none`: detect and report symmetry operations, but skip symmetry-eigenvalue extraction.
 
-The per-valley stabilizer gate is:
+The valley-preserving gate is:
 
 ```math
 \text{little\_group\_passed}(g, k) \land \text{mapped\_valley}[v_a] = v_a
 ```
 
-not the old all-valley intersection. An operation that preserves one valley while exchanging others is a valid single-valley operation for the preserved valley. Valley-changing operations are reported as valley-orbit data but do not enter the source valley's single-valley eigenvalue rows.
+not the old all-valley intersection. An operation that preserves one valley while exchanging others is a valid valley-preserving operation for the preserved valley. Valley-changing operations are reported as valley-orbit data but do not enter the source valley's valley-preserving eigenvalue rows.
 
 `root_deviation_tol`, `D_valley_offdiag_tol`, and `irrep_weight_tol` are numerical readiness thresholds, not universal physical constants. `root_deviation_tol` checks how close a computed symmetry eigenvalue is to the nearest allowed root of unity. `D_valley_offdiag_tol` checks the two-valley `D_valley` off-diagonal norm in the current valley-adapted benchmark. `irrep_weight_tol` checks whether character-decomposition weights are close enough to integers for irrep labeling. `readiness_preset` accepts `strict`, `normal`, and `loose`: `strict` keeps `1.0e-6`, `1.0e-6`, and `1.0e-5`; `normal` uses `1.0e-5`, `1.0e-3`, and `5.0e-5`; `loose` uses `1.0e-4`, `1.0e-2`, and `1.0e-4`. Explicit threshold values override the preset. Interpret all of them together with qcut stability, `W_val`, `P_v`, `S_min`, spinor benchmark status, plane-wave mapping quality, and symmetry tolerance. Do not loosen them only to obtain `topology_input_ready=True` or an irrep label.
 
@@ -648,7 +656,7 @@ The main columns mean:
 
 ### `symmetry_characters` in `valley_summary.json`
 
-The summary JSON contains a first-class `symmetry_characters` list. Each row is grouped by `(kpoint, target_valley, operation_id)` and records `character_raw`, `character_valley`, readiness flags, and whether the operation was accepted for that single-valley representation. Rows are included only after the little-group and per-valley stabilizer checks pass. This is the character input layer for later valley-stabilizer irrep matching; no character table or reduced EBR decomposition is applied here.
+The summary JSON contains a first-class `symmetry_characters` list. Each row is grouped by `(kpoint, target_valley, operation_id)` and records `character_raw`, `character_valley`, readiness flags, and whether the operation was accepted for that valley-preserving representation. Rows are included only after the HSP-little-group and valley-preserving checks pass. This is the character input layer for later valley-preserving irrep matching; no character table or reduced EBR decomposition is applied here.
 
 ### `valley_basis_transform.h5`
 
@@ -673,7 +681,7 @@ For exactly two valleys, `eta` and `v_matrix` are included as compatibility fiel
 
 This records the detected symmetry operations, including operation type, rotation matrix, translation, candidate rotation status, operation-detection backend, and little-group / valley-preservation diagnostics.
 
-The summary JSON additionally exposes `symmetry_analysis.valley_preserving_subgroup_report`. This result lists valley orbits, per-valley stabilizer operation ids, closure status, and any standard subgroup match obtained from the detected stabilizer operations. The all-valley intersection is kept only as a debug field and is not used for irrep matching. `irrep_matching` records table mapping and, when enough ready characters are available, `irrep_results_by_kpoint` with representation-level `irrep_multiplicities` and clean one-dimensional `state_irrep_results`.
+The summary JSON additionally exposes `symmetry_analysis.valley_preserving_subgroup_report`. This result lists valley orbits, valley-preserving operation ids, closure status, and any standard subgroup match obtained from the detected preserving operations. The all-valley intersection is kept only as a debug field and is not used for irrep matching. `irrep_matching` records table mapping and, when enough ready characters are available, `irrep_results_by_kpoint` with representation-level `irrep_multiplicities` and clean one-dimensional `state_irrep_results`.
 
 If the report says:
 

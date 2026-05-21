@@ -21,7 +21,7 @@ def build_summary_payload(
     symmetry_rows: list[dict[str, Any]] | None = None,
     output_paths: dict[str, Path],
     symmetry_eigenvalue_summary: dict[str, Any] | None = None,
-    covariance_report: dict[str, Any] | None = None,
+    projector_symmetry_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     eigen_rows = [] if symmetry_rows is None else symmetry_rows
     warnings = _collect_warnings(subspace_payload, symmetry_payload, eigen_rows)
@@ -70,14 +70,14 @@ def build_summary_payload(
             "topology_ready": "backward-compatible alias of topology_input_ready",
             "epsilon_seed": (
                 "||D_g P_a^0 D_g^dag - P_{pi_g(a)}^0||_F / max(||P_a^0||_F, small); "
-                "seed projector covariance diagnostic"
+                "epsilon_seed is the seed projector symmetry error"
             ),
         },
     }
     if symmetry_eigenvalue_summary:
         payload["symmetry_eigenvalue_summary"] = symmetry_eigenvalue_summary
-    if covariance_report is not None:
-        payload["projector_covariance"] = _compact_covariance(covariance_report)
+    if projector_symmetry_report is not None:
+        payload["projector_symmetry"] = _compact_projector_symmetry(projector_symmetry_report)
     return payload
 
 
@@ -171,13 +171,12 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     lines.append(f"space group: {sym.get('international')} ({sym.get('spacegroup_number')})")
     subgroup_report = sym.get("valley_preserving_subgroup_report", {})
     if isinstance(subgroup_report, dict):
-        # Per-valley stabilizers
-        valley_stabilizers = subgroup_report.get("valley_stabilizers", {})
-        if isinstance(valley_stabilizers, dict) and valley_stabilizers:
-            for vname, stab in valley_stabilizers.items():
-                if isinstance(stab, dict):
-                    ops = ", ".join(str(v) for v in stab.get("operation_ids", [])) or "none"
-                    lines.append(f"stabilizer({vname}): [{ops}]")
+        valley_preserving_subgroups = subgroup_report.get("valley_preserving_subgroups", {})
+        if isinstance(valley_preserving_subgroups, dict) and valley_preserving_subgroups:
+            for vname, subgroup in valley_preserving_subgroups.items():
+                if isinstance(subgroup, dict):
+                    ops = ", ".join(str(v) for v in subgroup.get("operation_ids", [])) or "none"
+                    lines.append(f"valley-preserving subgroup({vname}): [{ops}]")
         # All-valley intersection (debug)
         all_valley = subgroup_report.get("all_valley_intersection", {})
         if isinstance(all_valley, dict) and all_valley.get("allowed_operation_ids"):
@@ -294,7 +293,7 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     )
     if sym.get("by_kpoint"):
         lines.append("")
-        lines.append("Little group and valley preservation:")
+        lines.append("HSP little group and valley preservation:")
         for kpoint, payload in sym["by_kpoint"].items():
             if not isinstance(payload, dict):
                 continue
@@ -307,12 +306,14 @@ def render_summary_text(summary: dict[str, Any]) -> str:
                     if isinstance(vp, dict):
                         allowed = ", ".join(str(v) for v in vp.get("allowed_operation_ids", [])) or "none"
                         changing = ", ".join(str(v) for v in vp.get("valley_changing_operation_ids", [])) or "none"
-                        lines.append(f"{kpoint}/{vname}: stabilizer [{allowed}], valley-changing [{changing}]")
+                        lines.append(
+                            f"{kpoint}/{vname}: valley-preserving [{allowed}], valley-changing [{changing}]"
+                        )
             else:
                 # Legacy flat format
                 little_ops = ", ".join(str(v) for v in payload.get("little_group_operations", [])) or "none"
                 preserving_ops = ", ".join(str(v) for v in payload.get("valley_preserving_operations", [])) or "none"
-                lines.append(f"{kpoint}: little group [{little_ops}], valley-preserving [{preserving_ops}]")
+                lines.append(f"{kpoint}: HSP little group [{little_ops}], valley-preserving [{preserving_ops}]")
     if sym.get("rejected_operations"):
         lines.append("")
         lines.append("rejected operations:")
@@ -379,15 +380,14 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     )
     lines.append("")
 
-    # Projector covariance summary
-    cov = summary.get("projector_covariance", {})
-    if cov:
-        _section(lines, "Projector covariance")
-        lines.append(f"status: {cov.get('status', 'no_data')}")
+    projector_symmetry = summary.get("projector_symmetry", {})
+    if projector_symmetry:
+        _section(lines, "Projector symmetry-consistency")
+        lines.append(f"status: {projector_symmetry.get('status', 'no_data')}")
         lines.append(
-            f"tolerances: warn={cov.get('warn_tol')}, fail={cov.get('fail_tol')}"
+            f"tolerances: warn={projector_symmetry.get('warn_tol')}, fail={projector_symmetry.get('fail_tol')}"
         )
-        for kpoint, kp_data in cov.get("by_kpoint", {}).items():
+        for kpoint, kp_data in projector_symmetry.get("by_kpoint", {}).items():
             total = kp_data.get("total_checks", 0)
             failed = kp_data.get("failed_count", 0)
             warned = kp_data.get("warn_count", 0)
@@ -408,10 +408,11 @@ def render_summary_text(summary: dict[str, Any]) -> str:
                 )
         lines.append("")
         if any(kp_data.get("failed_count", 0) > 0
-               for kp_data in cov.get("by_kpoint", {}).values()):
+               for kp_data in projector_symmetry.get("by_kpoint", {}).values()):
             lines.append(
-                "Covariance failures detected: local valley irrep/eigenvalue "
-                "interpretation is diagnostic-only for affected operations."
+                "Seed projector symmetry-consistency failures detected: "
+                "valley-preserving irrep/eigenvalue labels based on the q-cut "
+                "seed basis are diagnostic-only for affected operations."
             )
         lines.append("")
 
@@ -494,7 +495,7 @@ def _symmetry_analysis(symmetry_payload: dict[str, Any], target_kpoints: list[st
     by_kpoint: dict[str, dict[str, list[int]]] = {}
     subgroup_report = symmetry_payload.get("valley_preserving_subgroup_report", {})
     per_valley_by_kpoint = subgroup_report.get("by_kpoint", {}) if isinstance(subgroup_report, dict) else {}
-    per_valley_inventory = symmetry_payload.get("per_valley_little_group_inventory", {})
+    per_valley_inventory = symmetry_payload.get("per_valley_preserving_operation_inventory", {})
 
     for operation in symmetry_payload.get("detected_operations", []):
         kind = str(operation.get("kind", "unknown"))
@@ -597,7 +598,8 @@ def _symmetry_analysis(symmetry_payload: dict[str, Any], target_kpoints: list[st
         "detected_operation_count": symmetry_payload.get("detected_operation_count", 0),
         "candidate_rotations": symmetry_payload.get("candidate_rotations", []),
         "symprec_scan_summary": symmetry_payload.get("symprec_scan_summary", []),
-        "valley_little_group_inventory": symmetry_payload.get("valley_little_group_inventory", {}),
+        "hsp_little_group_inventory": symmetry_payload.get("hsp_little_group_inventory", {}),
+        "per_valley_preserving_operation_inventory": per_valley_inventory,
         "valley_preserving_subgroup_report": subgroup_report,
         "kind_counts": kind_counts,
         "detected_operations": operations,
@@ -628,7 +630,7 @@ def _symmetry_character_rows(symmetry_rows: list[dict[str, Any]]) -> list[dict[s
                 "character_valley": "",
                 "topology_input_ready": True,
                 "diagnostic_only": False,
-                "accepted_for_single_valley_representation": True,
+                "accepted_for_valley_preserving_representation": True,
             }
         item = grouped[key]
         if row.get("character_raw"):
@@ -699,6 +701,11 @@ def _collect_warnings(
     if any(bool(row.get("diagnostic_only", False)) for row in symmetry_rows):
         warnings.append(
             "Some symmetry eigenvalues are diagnostic-only and are not topology_input_ready"
+        )
+    if any(str(row.get("seed_projector_symmetry_status", "")) == "failed" for row in symmetry_rows):
+        warnings.append(
+            "Valley-preserving irrep labels based on the q-cut seed basis are "
+            "diagnostic-only when the seed projector symmetry-consistency check fails"
         )
     for operation in symmetry_payload.get("detected_operations", []):
         for kpoint, quality in operation.get("representation_quality", {}).items():
@@ -845,13 +852,13 @@ def _output_file_label(name: str) -> str:
         "symmetry_report_json": "Symmetry analysis",
         "symmetry_eigenvalues_csv": "Symmetry eigenvalues",
         "diagnostics_h5": "Projector, qcut, and symmetry matrices",
-        "projector_covariance_report_json": "Projector covariance report",
+        "projector_symmetry_report_json": "Projector symmetry report",
     }
     return labels.get(name, name.replace("_", " ").title())
 
 
-def _compact_covariance(report: dict[str, Any]) -> dict[str, Any]:
-    """Extract compact summary from full covariance report."""
+def _compact_projector_symmetry(report: dict[str, Any]) -> dict[str, Any]:
+    """Extract compact summary from full projector symmetry report."""
     summary: dict[str, Any] = {
         "status": report.get("status", "no_data"),
         "warn_tol": report.get("warn_tol"),
@@ -861,7 +868,7 @@ def _compact_covariance(report: dict[str, Any]) -> dict[str, Any]:
     for kpoint, kp_data in report.get("by_kpoint", {}).items():
         if not isinstance(kp_data, dict):
             continue
-        rows = kp_data.get("seed_projector_covariance", [])
+        rows = kp_data.get("seed_projector_symmetry", [])
         if not isinstance(rows, list):
             continue
         failed = []
@@ -876,6 +883,7 @@ def _compact_covariance(report: dict[str, Any]) -> dict[str, Any]:
                     "source_valley": row.get("source_valley"),
                     "mapped_valley": row.get("mapped_valley"),
                     "epsilon_seed": row.get("epsilon_seed"),
+                    "seed_projector_symmetry_error": row.get("seed_projector_symmetry_error"),
                 })
             elif status == "warn":
                 warned.append({
@@ -883,6 +891,7 @@ def _compact_covariance(report: dict[str, Any]) -> dict[str, Any]:
                     "source_valley": row.get("source_valley"),
                     "mapped_valley": row.get("mapped_valley"),
                     "epsilon_seed": row.get("epsilon_seed"),
+                    "seed_projector_symmetry_error": row.get("seed_projector_symmetry_error"),
                 })
         by_kpoint[kpoint] = {
             "total_checks": len(rows),

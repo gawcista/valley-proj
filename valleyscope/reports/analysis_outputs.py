@@ -33,7 +33,7 @@ def write_analysis_outputs(
     symmetry_representation_payload: dict[str, object],
     basis_transforms: dict[str, dict[str, object]],
     symmetry_eigenvalue_summary: dict[str, object] | None = None,
-    covariance_report: dict[str, object] | None = None,
+    projector_symmetry_report: dict[str, object] | None = None,
 ) -> dict[str, object]:
     output_dir = config.output.directory
     outputs: dict[str, object] = {}
@@ -51,7 +51,7 @@ def write_analysis_outputs(
             qcut_scan_payload=qcut_scan_payload,
             symmetry_representation_payload=symmetry_representation_payload,
             basis_transforms=basis_transforms,
-            covariance_report=covariance_report,
+            projector_symmetry_report=projector_symmetry_report,
         )
     _write_summary_outputs(
         config=config,
@@ -62,7 +62,7 @@ def write_analysis_outputs(
         symmetry_payload=symmetry_payload,
         symmetry_rows=symmetry_rows,
         symmetry_eigenvalue_summary=symmetry_eigenvalue_summary,
-        covariance_report=covariance_report,
+        projector_symmetry_report=projector_symmetry_report,
     )
     return outputs
 
@@ -81,7 +81,7 @@ def _write_detailed_outputs(
     qcut_scan_payload: dict[str, object],
     symmetry_representation_payload: dict[str, object],
     basis_transforms: dict[str, dict[str, object]],
-    covariance_report: dict[str, object] | None = None,
+    projector_symmetry_report: dict[str, object] | None = None,
 ) -> None:
     if config.output.write_csv:
         outputs["valley_weights_csv"] = write_valley_weights_csv(
@@ -97,9 +97,9 @@ def _write_detailed_outputs(
     if config.output.write_json:
         outputs["valley_subspace_json"] = write_json(output_dir / "valley_subspace.json", subspace_payload)
         outputs["symmetry_report_json"] = write_json(output_dir / "symmetry_report.json", symmetry_payload)
-        if covariance_report is not None:
-            outputs["projector_covariance_report_json"] = write_json(
-                output_dir / "projector_covariance_report.json", covariance_report
+        if projector_symmetry_report is not None:
+            outputs["projector_symmetry_report_json"] = write_json(
+                output_dir / "projector_symmetry_report.json", projector_symmetry_report
             )
     outputs["diagnostics_h5"] = write_diagnostics_h5(
         output_dir / "diagnostics.h5",
@@ -125,7 +125,7 @@ def _write_summary_outputs(
     symmetry_payload: dict[str, Any],
     symmetry_rows: list[dict[str, object]],
     symmetry_eigenvalue_summary: dict[str, object] | None = None,
-    covariance_report: dict[str, object] | None = None,
+    projector_symmetry_report: dict[str, object] | None = None,
 ) -> None:
     summary_path_plan: dict[str, Path] = {}
     if config.output.write_summary_txt or not config.output.write_detailed_files:
@@ -145,7 +145,7 @@ def _write_summary_outputs(
         symmetry_rows=symmetry_rows,
         output_paths=output_paths,
         symmetry_eigenvalue_summary=symmetry_eigenvalue_summary,
-        covariance_report=covariance_report,
+        projector_symmetry_report=projector_symmetry_report,
     )
     summary_text = render_summary_text(summary_payload)
     if "valley_summary_txt" in summary_path_plan:

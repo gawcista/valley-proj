@@ -4,9 +4,9 @@ from pathlib import Path
 
 import numpy as np
 
-from valleyscope.analysis.projector_covariance import (
-    apply_projector_covariance_gate,
-    compute_projector_covariance,
+from valleyscope.analysis.projector_symmetry import (
+    apply_projector_symmetry_gate,
+    build_projector_symmetry_report,
 )
 from valleyscope.analysis.decision_tree import (
     _resolve_concentration_thresholds,
@@ -22,7 +22,7 @@ from valleyscope.analysis.symmetry_eigenvalue_diagnostic import (
 from valleyscope.analysis.valley_little_group import (
     add_valley_irrep_results,
     build_valley_preserving_subgroup_report,
-    update_valley_little_group_inventory,
+    update_valley_preserving_operation_inventory,
 )
 from valleyscope.geometry.lattice import (
     cart_rotation_from_fractional,
@@ -219,7 +219,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             }
         valley_names = list(projectors.sector_names)
         if symmetry_payload["status"] == "ok":
-            update_valley_little_group_inventory(
+            update_valley_preserving_operation_inventory(
                 symmetry_payload=symmetry_payload,
                 kpoint_name=kpoint_name,
                 k_frac=kpoint.frac,
@@ -228,7 +228,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         if symmetry_payload["status"] == "ok" and symmetry_payload.get("symmetry_eigenvalue_enabled", True):
             # Build D_raw for ALL proper little-group ops before per-valley gate,
             # so valley-permuting operations (e.g. C3 cycling M1/M2/M3) are included
-            # in the projector covariance diagnostic.
+            # in the projector symmetry-consistency diagnostic.
             if seed_matrices is not None:
                 raw_representations_by_kpoint[kpoint_name] = (
                     build_raw_representations_for_kpoint(
@@ -262,20 +262,20 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             symmetry_payload, symmetry_rows, kpoint_name,
         )
 
-    # --- Projector covariance diagnostic ---
+    # --- Projector symmetry-consistency diagnostic ---
     valley_names = list(
         projectors_by_kpoint[next(iter(projectors_by_kpoint))].sector_names
     ) if projectors_by_kpoint else []
-    covariance_report: dict[str, object] | None = None
+    projector_symmetry_report: dict[str, object] | None = None
     if symmetry_payload["status"] == "ok" and symmetry_payload.get("symmetry_eigenvalue_enabled", True):
-        covariance_report = compute_projector_covariance(
+        projector_symmetry_report = build_projector_symmetry_report(
             valley_matrices_by_kpoint=valley_matrices_by_kpoint,
             raw_representations_by_kpoint=raw_representations_by_kpoint,
             valley_names=valley_names,
         )
-        apply_projector_covariance_gate(
+        apply_projector_symmetry_gate(
             symmetry_rows=symmetry_rows,
-            covariance_report=covariance_report,
+            projector_symmetry_report=projector_symmetry_report,
         )
 
     if symmetry_payload["status"] == "ok":
@@ -305,7 +305,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         symmetry_representation_payload=symmetry_representation_payload,
         basis_transforms=basis_transforms,
         symmetry_eigenvalue_summary=symmetry_eigenvalue_summary,
-        covariance_report=covariance_report,
+        projector_symmetry_report=projector_symmetry_report,
     )
     return outputs
 
