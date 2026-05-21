@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 import numpy as np
 import spglib
@@ -307,12 +308,13 @@ def add_valley_irrep_results(
     valley_names = symmetry_payload.get("valley_names", [])
     per_valley_table_info = matching.get("per_valley", {})
     results_by_kpoint: dict[str, Any] = {}
+    all_matched = True
 
     for kpoint, kpoint_info in matching.get("by_kpoint", {}).items():
         if not isinstance(kpoint_info, dict):
+            all_matched = False
             continue
         kp_results: dict[str, Any] = {}
-        all_valley_matched = True
 
         for valley_name in valley_names:
             valley_table_info = per_valley_table_info.get(valley_name, {})
@@ -323,7 +325,7 @@ def add_valley_irrep_results(
                     "state_irrep_assignment_status": "not_attempted",
                     "state_irrep_results": [],
                 }
-                all_valley_matched = False
+                all_matched = False
                 continue
 
             table = _cached_load_irrep_table(
@@ -337,7 +339,7 @@ def add_valley_irrep_results(
                     "state_irrep_assignment_status": "not_attempted",
                     "state_irrep_results": [],
                 }
-                all_valley_matched = False
+                all_matched = False
                 continue
 
             operation_to_table = dict(valley_table_info.get("operation_to_table_mapping", {}))
@@ -351,7 +353,7 @@ def add_valley_irrep_results(
                     "state_irrep_assignment_status": "not_attempted",
                     "state_irrep_results": [],
                 }
-                all_valley_matched = False
+                all_matched = False
                 continue
 
             character_data = _collect_valley_characters(
@@ -403,11 +405,11 @@ def add_valley_irrep_results(
                 "state_irrep_results": state_irrep_result["results"],
             }
             if match_result.status != "matched":
-                all_valley_matched = False
+                all_matched = False
 
         results_by_kpoint[kpoint] = kp_results
 
-    all_matched = bool(results_by_kpoint) and all_valley_matched
+    all_matched = bool(results_by_kpoint) and all_matched
     matching["character_matching_status"] = "matched" if all_matched else "incomplete"
     matching["label_matching"] = "matched" if all_matched else "deferred"
     matching["irrep_results_by_kpoint"] = results_by_kpoint
@@ -886,7 +888,21 @@ def _collect_state_diagonal_characters(
         operation_id = table_to_operation.get(table_index)
         if operation_id is None:
             continue
-        op_payload = kp_representations.get(f"operation_{operation_id}")
+        op_payload = kp_representations.get(_representation_payload_key(operation_id, target_valley or ""))
+        if op_payload is None:
+            op_payload = kp_representations.get(f"operation_{operation_id}")
+        if op_payload is None and target_valley is not None:
+            prefix = f"operation_{operation_id}__valley_"
+            op_payload = next(
+                (
+                    payload
+                    for key, payload in kp_representations.items()
+                    if str(key).startswith(prefix)
+                    and isinstance(payload, dict)
+                    and str(payload.get("target_valley", "")) == str(target_valley)
+                ),
+                None,
+            )
         if op_payload is None:
             op_payload = kp_representations.get(str(operation_id), {})
         if not isinstance(op_payload, dict):
@@ -992,6 +1008,10 @@ def _format_complex_character_dict(values: dict[int, complex]) -> dict[str, str]
         str(table_index): f"{value.real:.6f}{value.imag:+.6f}j"
         for table_index, value in sorted(values.items())
     }
+
+
+def _representation_payload_key(operation_id: Any, target_valley: str) -> str:
+    return f"operation_{operation_id}__valley_{quote(str(target_valley), safe='')}"
 
 
 def _global_valley_preserving_operation_set_report(

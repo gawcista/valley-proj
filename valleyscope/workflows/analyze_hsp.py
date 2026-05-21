@@ -310,21 +310,6 @@ def _add_valley_subspace_diagnostic(
         s_eigenvalues = np.linalg.eigvalsh(diagnosed.s_matrix)
         s_min = float(np.min(s_eigenvalues)) if len(s_eigenvalues) else 0.0
         s_max = float(np.max(s_eigenvalues)) if len(s_eigenvalues) else 0.0
-        valid_valley_subspace = bool(diagnosed.stably_separable)
-
-        # Map separability to status string
-        if diagnosed.stably_separable:
-            status = "valley_separable"
-        elif "insufficient_valley_derived" in diagnosed.reason:
-            status = "poor_valley_manifold"
-        elif diagnosed.min_valley_concentration >= concentration_threshold * 0.9:
-            status = "valley_approximately_separable"
-        elif "concentration" in diagnosed.reason:
-            status = "valley_mixed"
-        elif "commut" in diagnosed.reason or "idempotency" in diagnosed.reason:
-            status = "projector_unreliable"
-        else:
-            status = "valley_mixed"
 
         subspace_derived = derive_derived_score(analysis_level="adapted_subspace", s_min=s_min)
         # Use concentration for polarization score in multi-valley, eta for two-valley
@@ -333,6 +318,34 @@ def _add_valley_subspace_diagnostic(
             eta_adapted=diagnosed.eta_adapted,
             purity=diagnosed.min_valley_concentration,
         )
+        subspace_valley_status = derive_valley_status(
+            analysis_level="adapted_subspace",
+            derived_score=subspace_derived,
+            polarization_score=subspace_polarization,
+            w_overlap=max_w_overlap,
+            w_res=max_w_res,
+            thresholds=thresholds,
+            two_sector=(n_valleys == 2),
+        )
+        valid_valley_subspace = subspace_valley_status == "valley_separable_subspace"
+        write_valley_basis = subspace_valley_status in {
+            "valley_separable_subspace",
+            "valley_approximately_separable_subspace",
+        }
+
+        if subspace_valley_status == "valley_separable_subspace":
+            status = "valley_separable"
+        elif subspace_valley_status == "valley_approximately_separable_subspace":
+            status = "valley_approximately_separable"
+        elif subspace_valley_status == "not_valley_derived":
+            status = "poor_valley_manifold"
+        elif subspace_valley_status == "projector_unreliable":
+            status = "projector_unreliable"
+        elif "concentration" in diagnosed.reason:
+            status = "valley_mixed"
+        else:
+            status = "valley_mixed"
+
         diagnostic.update(
             {
                 "status": status,
@@ -367,16 +380,8 @@ def _add_valley_subspace_diagnostic(
             )
         payload["derived_score"] = subspace_derived
         payload["polarization_score"] = subspace_polarization
-        payload["subspace_valley_status"] = derive_valley_status(
-            analysis_level="adapted_subspace",
-            derived_score=subspace_derived,
-            polarization_score=subspace_polarization,
-            w_overlap=max_w_overlap,
-            w_res=max_w_res,
-            thresholds=thresholds,
-            two_sector=(n_valleys == 2),
-        )
-        if valid_valley_subspace:
+        payload["subspace_valley_status"] = subspace_valley_status
+        if write_valley_basis:
             transform_entry: dict[str, object] = {
                 "transform": diagnosed.transform,
                 "s_matrix": diagnosed.s_matrix,

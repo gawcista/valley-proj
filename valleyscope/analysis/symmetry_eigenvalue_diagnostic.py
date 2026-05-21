@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import quote
+
 import numpy as np
 
 from valleyscope.symmetry.little_group import is_little_group_operation
@@ -172,9 +174,10 @@ def _append_operation_rows(
     valid_valley_subspace = False
     d_block_leakage_norm = None
 
-    if basis_payload is not None and bool(np.asarray(basis_payload.get("valid_valley_subspace", False))):
+    if basis_payload is not None and "transform" in basis_payload:
         transform = np.asarray(basis_payload["transform"], dtype=np.complex128)
         d_valley = transform.conj().T @ representation.matrix @ transform
+        valid_valley_subspace = bool(np.asarray(basis_payload.get("valid_valley_subspace", False)))
         assigned_valleys = _decode_assigned_valleys(basis_payload.get("assigned_valleys"))
         if assigned_valleys and target_valley:
             d_valley, d_block_leakage_norm = _select_valley_block(
@@ -183,8 +186,7 @@ def _append_operation_rows(
         matrix_for_eigen = d_valley
         basis = "valley_adapted"
         valley_eta = np.asarray(basis_payload.get("eta", []), dtype=float)
-        reason = ""
-        valid_valley_subspace = True
+        reason = "" if valid_valley_subspace else "valley subspace not clean"
 
     eigen = extract_rotation_eigenvalues(matrix_for_eigen, spinor_convention_verified=spinor_verified)
     rotation_ready = bool(
@@ -228,8 +230,10 @@ def _append_operation_rows(
         "basis": basis,
     }
 
-    op_key = f"operation_{operation['operation_id']}"
+    op_key = _representation_payload_key(operation["operation_id"], target_valley)
     op_payload: dict[str, object] = {
+        "target_valley": target_valley,
+        "source_operation_key": f"operation_{operation['operation_id']}",
         "D_raw": representation.matrix,
         "eigenvalues": eigen.eigenvalues,
         "root_deviation": root_deviations,
@@ -346,9 +350,13 @@ def _select_valley_block(
     # Leakage: elements connecting target to other valleys
     leakage_rows = d_valley[np.ix_(target_indices, other_indices)]
     leakage_cols = d_valley[np.ix_(other_indices, target_indices)]
-    leakage_norm = float(np.linalg.norm(leakage_rows) + np.linalg.norm(leakage_cols))
+    leakage_norm = float(np.sqrt(np.linalg.norm(leakage_rows) ** 2 + np.linalg.norm(leakage_cols) ** 2))
 
     return block, leakage_norm
+
+
+def _representation_payload_key(operation_id: object, target_valley: str) -> str:
+    return f"operation_{operation_id}__valley_{quote(str(target_valley), safe='')}"
 
 
 def _decode_assigned_valleys(data: Any) -> list[str]:

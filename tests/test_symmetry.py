@@ -1412,6 +1412,101 @@ class TestV11PerValleyStabilizer:
             assert row["valley_preserving"] is True
             assert row["target_valley"] in ("K_valley", "Kp_valley")
 
+    def test_representation_payload_is_keyed_per_target_valley(self):
+        """A single operation can have different valley blocks for different target valleys.
+
+        The representation payload must therefore be keyed by operation and target valley,
+        otherwise the second valley overwrites the first.
+        """
+        operations = [
+            {
+                "operation_id": 0, "candidate_rotation": True,
+                "order": 2, "kind": "C2",
+                "rotation_frac": np.eye(3, dtype=int),
+                "rotation_cart": np.eye(3),
+                "translation_cart": np.zeros(3),
+                "preserved": {"K_valley": True, "Kp_valley": True},
+                "sector_mapping": {"K_valley": "K_valley", "Kp_valley": "Kp_valley"},
+            },
+        ]
+        coefficients = np.array(
+            [
+                [[1.0 + 0.0j, 0.0 + 0.0j]],
+                [[0.0 + 0.0j, 1.0 + 0.0j]],
+            ],
+            dtype=np.complex128,
+        )
+        basis_payload = {
+            "valid_valley_subspace": True,
+            "transform": np.eye(2, dtype=np.complex128),
+            "assigned_valleys": np.array([b"K_valley", b"Kp_valley"]),
+        }
+        representation_payload: dict[str, object] = {}
+
+        rows = symmetry_eigenvalue_diagnostics_for_kpoint(
+            kpoint_name="GM", k_frac=np.zeros(3),
+            q_cart=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]),
+            coefficients=coefficients,
+            symmetry_payload={"detected_operations": operations},
+            basis_payload=basis_payload,
+            representation_payload=representation_payload,
+            valley_names=["K_valley", "Kp_valley"],
+        )
+
+        assert {row["target_valley"] for row in rows} == {"K_valley", "Kp_valley"}
+        kp_payload = representation_payload["GM"]
+        assert set(kp_payload) == {
+            "operation_0__valley_K_valley",
+            "operation_0__valley_Kp_valley",
+        }
+        assert kp_payload["operation_0__valley_K_valley"]["target_valley"] == "K_valley"
+        assert kp_payload["operation_0__valley_Kp_valley"]["target_valley"] == "Kp_valley"
+        assert kp_payload["operation_0__valley_K_valley"]["D_valley"].shape == (1, 1)
+        assert kp_payload["operation_0__valley_Kp_valley"]["D_valley"].shape == (1, 1)
+
+    def test_non_clean_valley_basis_is_diagnostic_only(self):
+        """Approximate valley bases can be used for diagnostics without becoming ready."""
+        operations = [
+            {
+                "operation_id": 0, "candidate_rotation": True,
+                "order": 2, "kind": "C2",
+                "rotation_frac": np.eye(3, dtype=int),
+                "rotation_cart": np.eye(3),
+                "translation_cart": np.zeros(3),
+                "preserved": {"K_valley": True},
+                "sector_mapping": {"K_valley": "K_valley"},
+            },
+        ]
+        coefficients = np.array(
+            [
+                [[1.0 + 0.0j, 0.0 + 0.0j]],
+                [[0.0 + 0.0j, 1.0 + 0.0j]],
+            ],
+            dtype=np.complex128,
+        )
+        basis_payload = {
+            "valid_valley_subspace": False,
+            "transform": np.eye(2, dtype=np.complex128),
+            "assigned_valleys": np.array([b"K_valley", b"K_valley"]),
+        }
+        representation_payload: dict[str, object] = {}
+
+        rows = symmetry_eigenvalue_diagnostics_for_kpoint(
+            kpoint_name="GM", k_frac=np.zeros(3),
+            q_cart=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]),
+            coefficients=coefficients,
+            symmetry_payload={"detected_operations": operations},
+            basis_payload=basis_payload,
+            representation_payload=representation_payload,
+            valley_names=["K_valley"],
+        )
+
+        assert rows
+        assert all(row["basis"] == "valley_adapted" for row in rows)
+        assert all(row["topology_input_ready"] is False for row in rows)
+        assert all(row["reason"] == "valley subspace not clean" for row in rows)
+        assert representation_payload["GM"]["operation_0__valley_K_valley"]["D_valley"].shape == (2, 2)
+
     def test_valley_changing_operation_no_single_valley_eigenvalue(self):
         """C2x exchanges K and Kp. It must NOT produce eigenvalue rows for either valley."""
         c2x = np.array([[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0]])

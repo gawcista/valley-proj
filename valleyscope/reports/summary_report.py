@@ -310,9 +310,15 @@ def render_summary_text(summary: dict[str, Any]) -> str:
         lines.append("rejected operations:")
         lines.extend(
             _table(
-                ["kpoint", "operation", "order", "reason"],
+                ["kpoint", "valley", "operation", "order", "reason"],
                 [
-                    [row["kpoint"], row["operation_id"], row["order"], row["reason"]]
+                    [
+                        row["kpoint"],
+                        row.get("target_valley", ""),
+                        row["operation_id"],
+                        row["order"],
+                        row["reason"],
+                    ]
                     for row in sym["rejected_operations"]
                 ],
             )
@@ -328,6 +334,7 @@ def render_summary_text(summary: dict[str, Any]) -> str:
         _table(
             [
                 "kpoint",
+                "valley",
                 "operation",
                 "order",
                 "state",
@@ -338,11 +345,13 @@ def render_summary_text(summary: dict[str, Any]) -> str:
                 "input_ready",
                 "diagnostic",
                 "offdiag",
+                "block_leak",
                 "reason",
             ],
             [
                 [
                     row["kpoint"],
+                    row.get("target_valley", ""),
                     row["operation_id"],
                     row["order"],
                     row["state_index"],
@@ -353,6 +362,7 @@ def render_summary_text(summary: dict[str, Any]) -> str:
                     row.get("topology_input_ready", row.get("topology_ready", "")),
                     row.get("diagnostic_only", ""),
                     _fmt(row.get("D_valley_offdiag_norm")),
+                    _fmt(row.get("D_block_leakage_norm")),
                     row.get("reason", ""),
                 ]
                 for row in summary["symmetry_eigenvalues"]
@@ -440,6 +450,7 @@ def _symmetry_analysis(symmetry_payload: dict[str, Any], target_kpoints: list[st
     by_kpoint: dict[str, dict[str, list[int]]] = {}
     subgroup_report = symmetry_payload.get("valley_preserving_subgroup_report", {})
     per_valley_by_kpoint = subgroup_report.get("by_kpoint", {}) if isinstance(subgroup_report, dict) else {}
+    per_valley_inventory = symmetry_payload.get("per_valley_little_group_inventory", {})
 
     for operation in symmetry_payload.get("detected_operations", []):
         kind = str(operation.get("kind", "unknown"))
@@ -464,16 +475,6 @@ def _symmetry_analysis(symmetry_payload: dict[str, Any], target_kpoints: list[st
                 by_kpoint[kpoint]["little_group_operations"].append(operation.get("operation_id"))
                 if not reason:
                     by_kpoint[kpoint]["valley_preserving_operations"].append(operation.get("operation_id"))
-            if reason:
-                rejected.append(
-                    {
-                        "kpoint": kpoint,
-                        "operation_id": operation.get("operation_id"),
-                        "order": operation.get("order"),
-                        "kind": operation.get("kind"),
-                        "reason": reason,
-                    }
-                )
     order = {name: idx for idx, name in enumerate(target_kpoints)}
     ordered_by_kpoint = {
         kpoint: by_kpoint[kpoint]
@@ -483,9 +484,52 @@ def _symmetry_analysis(symmetry_payload: dict[str, Any], target_kpoints: list[st
     for kpoint in by_kpoint:
         if kpoint not in ordered_by_kpoint:
             ordered_by_kpoint[kpoint] = by_kpoint[kpoint]
+    if isinstance(per_valley_inventory, dict) and per_valley_inventory:
+        ordered_inventory_kpoints = [
+            kpoint for kpoint in target_kpoints if kpoint in per_valley_inventory
+        ]
+        ordered_inventory_kpoints.extend(
+            kpoint for kpoint in per_valley_inventory if kpoint not in ordered_inventory_kpoints
+        )
+        for kpoint in ordered_inventory_kpoints:
+            valley_payload = per_valley_inventory.get(kpoint, {})
+            if not isinstance(valley_payload, dict):
+                continue
+            for valley_name, rows in valley_payload.items():
+                if not isinstance(rows, list):
+                    continue
+                for row in rows:
+                    reason = row.get("reason", "")
+                    if not reason:
+                        continue
+                    rejected.append(
+                        {
+                            "kpoint": kpoint,
+                            "target_valley": valley_name,
+                            "operation_id": row.get("operation_id"),
+                            "order": row.get("order"),
+                            "kind": row.get("kind"),
+                            "reason": reason,
+                        }
+                    )
+    else:
+        for operation in symmetry_payload.get("detected_operations", []):
+            for kpoint, reason in operation.get("rejection_reason_by_kpoint", {}).items():
+                if reason:
+                    rejected.append(
+                        {
+                            "kpoint": kpoint,
+                            "target_valley": "",
+                            "operation_id": operation.get("operation_id"),
+                            "order": operation.get("order"),
+                            "kind": operation.get("kind"),
+                            "reason": reason,
+                        }
+                    )
     rejected.sort(
         key=lambda row: (
             order.get(str(row["kpoint"]), len(order)),
+            str(row.get("target_valley", "")),
             int(row["operation_id"]) if row.get("operation_id") is not None else -1,
         )
     )

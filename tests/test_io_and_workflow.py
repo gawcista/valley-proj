@@ -911,6 +911,8 @@ def test_multivalley_subspace_status_uses_pv_thresholds_for_concentration():
 
     assert payload["polarization_score"] == pytest.approx(0.92)
     assert payload["subspace_valley_status"] == "valley_approximately_separable_subspace"
+    assert "GammaM" in basis_transforms
+    assert bool(basis_transforms["GammaM"]["valid_valley_subspace"]) is False
 
 
 def test_symmetry_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp_path):
@@ -1043,7 +1045,7 @@ def test_symmetry_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp
     assert "rejected" in summary_text
     assert (
         "not in little group" in summary_text
-        or "valley-exchanging" in summary_text
+        or "valley-changing" in summary_text
         or "not valley preserving" in summary_text
     )
     assert "topology_input_ready" in summary_text
@@ -1460,6 +1462,89 @@ def test_symmetry_summary_orders_hsp_and_labels_valley_exchanging(tmp_path):
     text = render_summary_text(summary)
     assert text.index("GammaM: little group") < text.index("KM: little group")
     assert "valley-exchanging" in text
+
+
+def test_summary_rejected_operations_are_per_valley_when_inventory_available(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    config = load_config(config_path)
+    from valleyscope.reports.summary_report import build_summary_payload, render_summary_text
+
+    symmetry_payload = {
+        "status": "ok",
+        "detected_operations": [
+            {
+                "operation_id": 3,
+                "kind": "C2",
+                "order": 2,
+                "det": 1,
+                "rotation_frac": np.eye(3),
+                "translation_frac": np.zeros(3),
+                "little_group_by_kpoint": {"GammaM": True},
+                "rejection_reason_by_kpoint": {"GammaM": "valley-exchanging"},
+            }
+        ],
+        "candidate_rotations": [],
+        "per_valley_little_group_inventory": {
+            "GammaM": {
+                "M1_valley": [
+                    {
+                        "operation_id": 3,
+                        "kind": "C2",
+                        "order": 2,
+                        "little_group_passed": True,
+                        "target_valley": "M1_valley",
+                        "mapped_valley": "M1_valley",
+                        "valley_preserving": True,
+                        "allowed_for_single_valley_representation": True,
+                        "reason": "",
+                    }
+                ],
+                "M2_valley": [
+                    {
+                        "operation_id": 3,
+                        "kind": "C2",
+                        "order": 2,
+                        "little_group_passed": True,
+                        "target_valley": "M2_valley",
+                        "mapped_valley": "M3_valley",
+                        "valley_preserving": False,
+                        "allowed_for_single_valley_representation": False,
+                        "reason": "valley-changing (maps to M3_valley)",
+                    }
+                ],
+            }
+        },
+        "little_group_check": {"status": "evaluated_per_kpoint"},
+        "valley_preservation_check": {"status": "completed"},
+    }
+
+    summary = build_summary_payload(
+        config=config,
+        qcut=0.5,
+        subspace_payload={"kpoints": {}},
+        symmetry_payload=symmetry_payload,
+        symmetry_rows=[],
+        output_paths={},
+    )
+
+    rejected = summary["symmetry_analysis"]["rejected_operations"]
+    assert rejected == [
+        {
+            "kpoint": "GammaM",
+            "target_valley": "M2_valley",
+            "operation_id": 3,
+            "order": 2,
+            "kind": "C2",
+            "reason": "valley-changing (maps to M3_valley)",
+        }
+    ]
+    text = render_summary_text(summary)
+    assert "M2_valley" in text
+    assert "M1_valley" not in text.split("rejected operations:", 1)[1]
 
 
 def test_summary_preserves_valley_little_group_inventory(tmp_path):
