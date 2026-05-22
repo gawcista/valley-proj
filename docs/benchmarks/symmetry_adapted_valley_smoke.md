@@ -33,7 +33,8 @@ Temporary experimental configs created at:
 - Valley-preserving ops (K_valley -> K_valley, Kp_valley -> Kp_valley):
   all `passed` with epsilon_seed ~0.000-0.006
 - Valley-changing ops (K_valley -> Kp_valley, Kp_valley -> K_valley):
-  likely `failed` (seed projector symmetry-consistency violation)
+  failed in the inspected report rows (seed projector symmetry-consistency
+  violation)
 
 ### P_a^sym Status — FAILED
 
@@ -48,9 +49,9 @@ Temporary experimental configs created at:
 1. **Ambiguous representative (GammaM, KM):** In P321, operations 3, 4, 5 all map
    K_valley -> Kp_valley at these kpoints. The current toy pipeline requires a
    _unique_ representative operation to generate P_Kp^sym from P_K^sym.
-   Multiple C2 axes and C3 can all map between K and K' in the moire BZ.
-   This is a **genuine multi-representative problem**: P321 has multiple
-   symmetry operations connecting the K/K' valleys.
+   Multiple little-group operations can connect the K/K' valleys. This is a
+   real symmetry case that the current algorithm does not yet resolve because
+   it requires a unique representative operation.
 
 2. **No valley-preserving operation (MM):** At the M point, the HSP little group
    does not contain any operation that preserves the K valley. Physics:
@@ -62,7 +63,7 @@ Temporary experimental configs created at:
 | Metric | Value |
 |--------|-------|
 | selected_rank | 0 (construction failed) |
-| selected_rank | failure |
+| rank_source | failure |
 | seed_overlap | 0.0 (no projectors built) |
 | diagnostic_only | True |
 | local_irrep_ready | False |
@@ -92,7 +93,7 @@ Temporary experimental configs created at:
 | MM      | M1/M2 | failed | no valley-preserving op for M1 |
 | MM      | **M3 only** | **ok** | rank=2, gap, overlap=0.957 |
 
-### MM M3 Valley — SUCCESS Case
+### MM M3 Valley — Successful Projector Diagnostic Case
 
 This is the most significant result. At MM, the M3 valley has a valley-preserving
 operation (C2_M3 in P312), and the symmetry-adapted construction succeeds:
@@ -113,26 +114,26 @@ operation (C2_M3 in P312), and the symmetry-adapted construction succeeds:
 **Interpretation:** At the MM point, C2_M3 preserves M3 and swaps M1/M2.
 The M3 seed projector has rank-2 (two bands assigned to M3). The
 symmetrization works cleanly: orthogonality and idempotency are exact.
-The seed overlap of 0.957 is excellent. However, the character layer
-still reports diagnostic_only because the projector construction result
-is only available for M3, not the full orbit.
+The seed overlap of 0.957 is strong. However, the character layer still reports
+diagnostic_only because the projector construction result is only available for
+M3, not the full orbit. This is therefore a successful projector diagnostic,
+not a trusted valley-preserving irrep assignment.
 
 ## 3. Key Findings
 
 ### Blocking Issues
 
-1. **Representative ambiguity is a real obstruction for P321/P312:**
+1. **Representative ambiguity is a real input case for P321/P312:**
    Multiple symmetry operations map between valleys in the same orbit.
    The current pipeline requires unique representatives and fails otherwise.
-   This is **not a toy limitation** — it reflects genuine multi-valley
-   symmetry structure. A resolution strategy is needed (e.g., choosing the
-   "canonical" generator, or allowing any representative and verifying
-   consistency).
+   The symmetry structure is real; the uniqueness requirement is an algorithmic
+   limitation that needs a resolution strategy, such as constructing all
+   candidates and checking whether they generate the same target projector.
 
 2. **Valley-preserving operations depend on kpoint:**
    At MM, K_valley has no valley-preserving operation (physical).
    At KM, M1 has no valley-preserving operation. The per-kpoint nature
-   of the HSP little group means valley stabilizers vary by kpoint.
+   of the HSP little group means valley-preserving subgroups vary by kpoint.
    This is expected and the code correctly reports it.
 
 3. **Q-cut seed projectors fail symmetry-consistency for M-star:**
@@ -142,7 +143,7 @@ is only available for M3, not the full orbit.
 
 ### Success Case
 
-4. **MM M3 valley succeeds with excellent quality:**
+4. **MM M3 valley has a high-quality projector diagnostic:**
    rank=2, seed_overlap=0.957, orthogonality=0, idempotency=0.
    This demonstrates the pipeline can work when:
    - a valley-preserving operation exists at the HSP
@@ -156,22 +157,28 @@ is only available for M3, not the full orbit.
   diagnostics, not trusted irrep bases.
 - The symmetry-adapted construction improves orthogonality/idempotency
   but is blocked by representative ambiguity for full orbits.
-- The MM M3 success shows the symmetrization works when geometric
-  conditions are met.
-- No spinor-convention issue: tMoTe2 spinor verified, eigenphases clean.
+- The MM M3 projector diagnostic shows the symmetrization can work when
+  geometric conditions are met.
+- No immediate spinor-convention issue is indicated by the successful MM M3
+  spinor C2 eigenphases. tMoTe2 is configured as convention-verified, but its
+  character diagnostics remain blocked by representative failures.
 
 ## 5. Recommendation for Next Task
 
 1. **Resolve representative ambiguity:** Implement a strategy for multiple
-   candidate representative operations. Options:
-   (a) Choose the lowest-order candidate (prefer C3 over C2 for M-star)
-   (b) Compute all candidates and verify they produce the same P_b^sym
-   (c) Let the user specify a preferred generator via config
+   candidate representative operations. Recommended order:
+   (a) Compute all candidates and verify whether they produce the same
+       target projector within tolerance.
+   (b) If they differ, report a diagnostic failure with candidate-wise
+       projector/sewing errors.
+   (c) Only after that, allow an explicit user/config choice of preferred
+       operation for benchmark experiments.
 2. **Handle kpoint-dependent valley-preserving operations:**
    Report per-kpoint VPS status, don't require all kpoints to have VPS
    for all valleys.
-3. **Run the successful MM M3 case through irrep character table matching**
-   (when that layer is implemented) to validate the eigenphases.
+3. **Keep MM M3 as a table-free character benchmark** before table matching:
+   preserve the observed rank, seed overlap, spinor C2 eigenphases, and
+   diagnostic_only reason as a regression target.
 4. **Investigate why MM C3 rows are not_evaluated** in projector_symmetry
    (likely D_raw missing for valley-permuting ops at that specific kpoint).
 
@@ -179,7 +186,7 @@ is only available for M3, not the full orbit.
 
 ```
 $ pytest -q
-283 passed in 3.37s
+285 passed in 4.62s
 0 skipped, 0 xfailed, 0 warnings
 ```
 
