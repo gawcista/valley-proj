@@ -21,9 +21,13 @@ class ProjectorQualityDiagnostics:
     seed_overlap: dict[str, float]
     projector_symmetry_error: dict[str, float]
     orthogonality_error: float
-    completeness_error: float
-    valley_sewing_matrices: dict[tuple[str, str], np.ndarray] | None
-    sewing_unitarity_error: dict[tuple[str, str], float] | None
+    total_projector_idempotency_error: float
+    completeness_error: float | None
+    completeness_source: str
+    projector_overlap_matrices: dict[tuple[str, str], np.ndarray] | None
+    projector_overlap_deviation: dict[tuple[str, str], float] | None
+    valley_sewing_matrices: dict[tuple[str, object], np.ndarray] | None
+    sewing_unitarity_error: dict[tuple[str, object], float] | None
     status: str
     reason: str
 
@@ -31,6 +35,7 @@ class ProjectorQualityDiagnostics:
 @dataclass(frozen=True)
 class SymmetryAdaptedProjectors:
     projectors: dict[str, np.ndarray]
+    eigenvectors: dict[str, np.ndarray]
     reference_valley: str
     diagnostics: ProjectorQualityDiagnostics
 
@@ -45,33 +50,23 @@ def build_symmetry_adapted_projectors_for_orbit(
     rank: int | None = None,
     rank_method: str = "gap",
     rank_tol: float = 0.5,
+    expected_total_projector: np.ndarray | None = None,
 ) -> SymmetryAdaptedProjectors:
     """Build symmetry-adapted valley projectors for a single valley orbit.
 
     Parameters
     ----------
     seed_projectors : {valley_name: P_a^0 matrix}
-        Q-cut valley seed projectors in the target subspace.
     representations : {operation_id: D_g matrix}
-        HSP little-group representation matrices in the target subspace.
-    valley_mappings : {operation_id: {source_valley: mapped_valley}}
-        Valley mapping pi_g(a) for each operation.
+    valley_mappings : {operation_id: {source: mapped}}
     orbit : list[str]
-        Valley names forming one orbit under the HSP little group.
     reference_valley : str
-        Valley name to use as reference a0 for symmetrization.
     rank : int or None
-        Desired projector rank.  If None, auto-selected from eigenvalue
-        spectrum using *rank_method*.
-    rank_method : str
-        Method for automatic rank selection: ``"gap"``, ``"threshold"``,
-        or ``"fixed"``.
+    rank_method : "gap", "threshold", or "fixed"
     rank_tol : float
-        Tolerance / threshold for rank selection.
-
-    Returns
-    -------
-    SymmetryAdaptedProjectors
+    expected_total_projector : ndarray or None
+        Expected total projector I_expected = sum_a P_a^sym.
+        Used for completeness_error.  If None, completeness is not_evaluated.
     """
     if reference_valley not in orbit:
         raise ValueError(f"reference_valley {reference_valley} not in orbit {orbit}")
@@ -111,58 +106,70 @@ def build_symmetry_adapted_projectors_for_orbit(
     eigvecs = eigvecs[:, ::-1]
 
     selected_rank, gap, rank_source = select_projector_rank(
-        eigenvalues=eigvals,
-        rank=rank,
-        method=rank_method,
-        tol=rank_tol,
+        eigenvalues=eigvals, rank=rank, method=rank_method, tol=rank_tol,
     )
 
     if selected_rank < 1:
         return _failure(orbit, reference_valley, n,
-                        f"rank selection failed: selected_rank={selected_rank}")
+                        f"rank selection failed: selected_rank={selected_rank}",
+                        rank_source=rank_source, purification_gap=gap,
+                        eigenvalues=eigvals)
 
-    # Build P_a0^sym from top eigenvectors
+    if rank_source == "gap_insufficient":
+        return _failure(orbit, reference_valley, n,
+                        f"failed_rank_selection: rank gap insufficient (max_gap={gap:.4f} < tol={rank_tol})",
+                        rank_source=rank_source, purification_gap=gap,
+                        eigenvalues=eigvals)
+
+    # Build P_a0^sym and extract eigenvectors U_a0
     top_vecs = eigvecs[:, :selected_rank]
     p_ref_sym = top_vecs @ top_vecs.conj().T
+    eigenvectors: dict[str, np.ndarray] = {reference_valley: top_vecs.copy()}
 
-    # 5. Generate other valley projectors via representative operations
+    # 5. Generate other valley projectors with explicit representative checks
     projectors: dict[str, np.ndarray] = {reference_valley: p_ref_sym}
     rep_ops: dict[str, object] = {}
 
     for valley in orbit:
         if valley == reference_valley:
             continue
-        rep_op_id = _find_representative_operation(
+        result = _resolve_representative_operation(
             reference_valley, valley, valley_mappings, representations
         )
-        if rep_op_id is None:
-            return _failure(
-                orbit, reference_valley, n,
-                f"no representative operation found mapping "
-                f"{reference_valley} -> {valley}"
-            )
+        if result is None:
+            return _failure(orbit, reference_valley, n,
+                            f"no representative operation found mapping "
+                            f"{reference_valley} -> {valley}")
+        if isinstance(result, list):
+            return _failure(orbit, reference_valley, n,
+                            f"ambiguous representative operation for "
+                            f"{reference_valley} -> {valley}: candidates={result}")
+        rep_op_id = result
         rep_ops[valley] = rep_op_id
         d_rep = np.asarray(representations[rep_op_id], dtype=np.complex128)
-        projectors[valley] = d_rep @ p_ref_sym @ d_rep.conj().T
+        u_a = d_rep @ top_vecs
+        projectors[valley] = u_a @ u_a.conj().T
+        eigenvectors[valley] = u_a
 
     # 6. Quality diagnostics
     diag = compute_projector_quality_diagnostics(
         projectors=projectors,
+        eigenvectors=eigenvectors,
         seed_projectors=seed_projectors,
         representations=representations,
         valley_mappings=valley_mappings,
         orbit=orbit,
         reference_valley=reference_valley,
-        preserving_ops=preserving_ops,
         selected_rank=selected_rank,
         eigenvalues=eigvals,
         purification_gap=gap,
         rank_source=rank_source,
-        rep_ops=rep_ops,
+        expected_total_projector=expected_total_projector,
     )
 
     return SymmetryAdaptedProjectors(
         projectors=projectors,
+        eigenvectors=eigenvectors,
         reference_valley=reference_valley,
         diagnostics=diag,
     )
@@ -175,34 +182,17 @@ def select_projector_rank(
     method: str = "gap",
     tol: float = 0.5,
 ) -> tuple[int, float | None, str]:
-    """Select projector rank from eigenvalue spectrum.
-
-    Parameters
-    ----------
-    eigenvalues : 1-d array, sorted descending
-    rank : int or None, user-specified rank
-    method : "gap", "threshold", or "fixed"
-    tol : tolerance for gap or threshold method
-
-    Returns
-    -------
-    selected_rank : int
-    purification_gap : float or None
-    rank_source : str
-    """
+    """Select projector rank from eigenvalue spectrum (sorted descending)."""
     if rank is not None:
         return rank, None, "user_specified"
-
     if method == "fixed":
         return len(eigenvalues), None, "fixed_full_rank"
-
     if method == "threshold":
         count = int(np.sum(eigenvalues > tol))
         if count == 0:
             count = 1
         gap = float(eigenvalues[count - 1] - eigenvalues[count]) if count < len(eigenvalues) else None
         return count, gap, "threshold"
-
     # Default: gap method
     gaps = np.diff(eigenvalues)
     if len(gaps) == 0:
@@ -217,21 +207,21 @@ def select_projector_rank(
 def compute_projector_quality_diagnostics(
     *,
     projectors: dict[str, np.ndarray],
+    eigenvectors: dict[str, np.ndarray],
     seed_projectors: dict[str, np.ndarray],
     representations: dict[object, np.ndarray],
     valley_mappings: dict[object, dict[str, str]],
     orbit: list[str],
     reference_valley: str,
-    preserving_ops: dict[object, np.ndarray],
     selected_rank: int,
     eigenvalues: np.ndarray,
     purification_gap: float | None,
     rank_source: str,
-    rep_ops: dict[str, object] | None = None,
+    expected_total_projector: np.ndarray | None = None,
 ) -> ProjectorQualityDiagnostics:
     """Compute quality diagnostics for symmetry-adapted projectors."""
 
-    # Seed overlap: Tr(P_a^sym P_a^0) / rank
+    # Seed overlap
     seed_overlap: dict[str, float] = {}
     for v in orbit:
         p_sym = np.asarray(projectors[v], dtype=np.complex128)
@@ -239,7 +229,7 @@ def compute_projector_quality_diagnostics(
         overlap = float(np.real(np.trace(p_sym @ p_seed)))
         seed_overlap[v] = overlap / max(selected_rank, 1)
 
-    # Projector symmetry error: ||D_g P_a^sym D_g^dag - P_{pi_g(a)}^sym||_F / selected_rank
+    # Projector symmetry error
     symmetry_errors: dict[str, float] = {}
     for op_id, mapping in valley_mappings.items():
         if op_id not in representations:
@@ -256,7 +246,7 @@ def compute_projector_quality_diagnostics(
             key = f"op_{op_id}_{src}->{tgt}"
             symmetry_errors[key] = err / max(selected_rank, 1)
 
-    # Orthogonality: max |Tr(P_a^sym P_b^sym)| / selected_rank for a != b
+    # Orthogonality
     ortho_err = 0.0
     for i, a in enumerate(orbit):
         for b in orbit[i + 1:]:
@@ -265,37 +255,55 @@ def compute_projector_quality_diagnostics(
             overlap = float(np.abs(np.trace(p_a @ p_b)))
             ortho_err = max(ortho_err, overlap / max(selected_rank, 1))
 
-    # Completeness: idempotency of the total projector sum_a P_a^sym.
-    # ||(sum_a P_a^sym)^2 - (sum_a P_a^sym)||_F / sqrt(selected_rank * |orbit|)
+    # Total projector idempotency: ||(sum P_a^sym)^2 - sum P_a^sym||_F / sqrt(rank*|orbit|)
     total = sum(np.asarray(p, dtype=np.complex128) for p in projectors.values())
     total_sq = total @ total
-    completeness_err = float(np.linalg.norm(total_sq - total, ord="fro"))
+    idempotency_err = float(np.linalg.norm(total_sq - total, ord="fro"))
     n_valleys = len(orbit)
-    denom = np.sqrt(float(selected_rank * n_valleys))
-    completeness_err /= max(denom, 1.0)
+    idempotency_err /= max(np.sqrt(float(selected_rank * n_valleys)), 1.0)
 
-    # Valley sewing matrices
-    sewing, sewing_err = compute_valley_sewing_matrices(
-        projectors=projectors,
+    # Completeness: ||sum P_a^sym - I_expected||_F / sqrt(dim)
+    dim = next(iter(projectors.values())).shape[0]
+    completeness_err: float | None = None
+    completeness_source: str = "not_evaluated"
+    if expected_total_projector is not None:
+        expected = np.asarray(expected_total_projector, dtype=np.complex128)
+        completeness_err = float(np.linalg.norm(total - expected, ord="fro"))
+        completeness_err /= max(np.sqrt(float(dim)), 1.0)
+        completeness_source = "expected_total_projector"
+    else:
+        # Fallback: check trace consistency
+        expected_trace = selected_rank * n_valleys
+        actual_trace = float(np.real(np.trace(total)))
+        if abs(actual_trace - expected_trace) > 1e-3 * expected_trace:
+            completeness_err = abs(actual_trace - expected_trace) / max(float(dim), 1.0)
+            completeness_source = "trace_mismatch"
+
+    # Projector overlap matrices (replaces old "sewing" naming)
+    overlap_matrices, overlap_deviation = _compute_projector_overlap(
+        projectors=projectors, orbit=orbit
+    )
+
+    # True valley sewing matrices: B_{ba}(g) = U_b^dag D_g U_a, b = pi_g(a)
+    sewing, sewing_err = _compute_valley_sewing(
+        eigenvectors=eigenvectors,
+        representations=representations,
+        valley_mappings=valley_mappings,
         orbit=orbit,
     )
 
-    # Decide status
+    # Status
     status = "ok"
     reason = "all diagnostics within tolerance"
-    if ortho_err > 0.1 or completeness_err > 0.2:
+    if ortho_err > 0.1 or idempotency_err > 0.2:
         status = "failed"
-        reason = f"orthogonality_error={ortho_err:.4f}, completeness_error={completeness_err:.4f}"
+        reason = f"orthogonality_error={ortho_err:.4f}, total_projector_idempotency_error={idempotency_err:.4f}"
+    elif completeness_err is not None and completeness_err > 0.2:
+        status = "failed"
+        reason = f"completeness_error={completeness_err:.4f}"
     elif any(e > 0.05 for e in symmetry_errors.values()):
         status = "warn"
         reason = "symmetry error elevated"
-    elif rep_ops:
-        ambiguous = _check_representative_ambiguity(
-            reference_valley, orbit, valley_mappings, rep_ops
-        )
-        if ambiguous:
-            status = "warn"
-            reason = f"representative operation ambiguous for: {ambiguous}"
 
     return ProjectorQualityDiagnostics(
         selected_rank=selected_rank,
@@ -305,7 +313,11 @@ def compute_projector_quality_diagnostics(
         seed_overlap=seed_overlap,
         projector_symmetry_error=symmetry_errors,
         orthogonality_error=ortho_err,
+        total_projector_idempotency_error=idempotency_err,
         completeness_error=completeness_err,
+        completeness_source=completeness_source,
+        projector_overlap_matrices=overlap_matrices if overlap_matrices else None,
+        projector_overlap_deviation=overlap_deviation if overlap_deviation else None,
         valley_sewing_matrices=sewing if sewing else None,
         sewing_unitarity_error=sewing_err if sewing_err else None,
         status=status,
@@ -313,30 +325,64 @@ def compute_projector_quality_diagnostics(
     )
 
 
-def compute_valley_sewing_matrices(
+# ---------------------------------------------------------------------------
+# Internal: sewing and overlap
+# ---------------------------------------------------------------------------
+
+def _compute_projector_overlap(
     *,
     projectors: dict[str, np.ndarray],
     orbit: list[str],
 ) -> tuple[dict[tuple[str, str], np.ndarray], dict[tuple[str, str], float]]:
-    """Compute valley sewing matrices S_ab = P_a^sym P_b^sym.
-
-    For exact idempotent orthogonal projectors, S_ab = delta_ab P_a^sym.
-    Deviation from this measures sewing quality.
-    """
-    sewing: dict[tuple[str, str], np.ndarray] = {}
-    unitarity_err: dict[tuple[str, str], float] = {}
+    """Projector overlap O_ab = P_a^sym P_b^sym and deviation from delta_ab P_a."""
+    matrices: dict[tuple[str, str], np.ndarray] = {}
+    deviation: dict[tuple[str, str], float] = {}
     for a in orbit:
         for b in orbit:
             p_a = np.asarray(projectors[a], dtype=np.complex128)
             p_b = np.asarray(projectors[b], dtype=np.complex128)
-            s = p_a @ p_b
-            sewing[(a, b)] = s
-            # Expected: delta_ab * P_a^sym
-            if a == b:
-                expected = p_a
-            else:
-                expected = np.zeros_like(p_a)
-            unitarity_err[(a, b)] = float(np.linalg.norm(s - expected, ord="fro"))
+            o = p_a @ p_b
+            matrices[(a, b)] = o
+            expected = p_a if a == b else np.zeros_like(p_a)
+            deviation[(a, b)] = float(np.linalg.norm(o - expected, ord="fro"))
+    return matrices, deviation
+
+
+def _compute_valley_sewing(
+    *,
+    eigenvectors: dict[str, np.ndarray],
+    representations: dict[object, np.ndarray],
+    valley_mappings: dict[object, dict[str, str]],
+    orbit: list[str],
+) -> tuple[dict[tuple[str, object], np.ndarray], dict[tuple[str, object], float]]:
+    """Valley sewing matrices B_{ba}(g) = U_b^dag D_g U_a for b = pi_g(a).
+
+    These are r x r matrices where r = selected_rank.  For exact symmetry-
+    adapted projectors, each B_{ba}(g) should be unitary.
+    """
+    sewing: dict[tuple[str, object], np.ndarray] = {}
+    unitarity_err: dict[tuple[str, object], float] = {}
+    orbit_set = set(orbit)
+
+    for op_id, d_g in representations.items():
+        mapping = valley_mappings.get(op_id, {})
+        for src in orbit:
+            tgt = mapping.get(src)
+            if tgt is None or str(tgt) not in orbit_set:
+                continue
+            if src not in eigenvectors or str(tgt) not in eigenvectors:
+                continue
+            u_src = np.asarray(eigenvectors[src], dtype=np.complex128)
+            u_tgt = np.asarray(eigenvectors[str(tgt)], dtype=np.complex128)
+            d_mat = np.asarray(d_g, dtype=np.complex128)
+            b = u_tgt.conj().T @ d_mat @ u_src
+            key = (str(tgt), op_id)
+            sewing[key] = b
+            # Unitarity check: B^dag B should be identity
+            r = b.shape[0]
+            unitarity_err[key] = float(
+                np.linalg.norm(b.conj().T @ b - np.eye(r, dtype=np.complex128), ord="fro")
+            )
     return sewing, unitarity_err
 
 
@@ -348,26 +394,28 @@ def _validate_orbit_closure(
     orbit: list[str],
     valley_mappings: dict[object, dict[str, str]],
 ) -> None:
-    """Check that the orbit is closed under all valley mappings."""
     orbit_set = set(orbit)
     for mapping in valley_mappings.values():
         for src, tgt in mapping.items():
             if src in orbit_set and tgt not in orbit_set:
                 raise ValueError(
-                    f"orbit not closed under valley mapping: "
-                    f"{src} -> {tgt} but {tgt} not in orbit {orbit}"
+                    f"orbit not closed: {src} -> {tgt} but {tgt} not in {orbit}"
                 )
 
 
-def _find_representative_operation(
+def _resolve_representative_operation(
     src: str,
     tgt: str,
     valley_mappings: dict[object, dict[str, str]],
     representations: dict[object, np.ndarray],
-) -> object | None:
-    """Find an operation that maps src -> tgt and has a representation matrix.
+) -> object | list[object] | None:
+    """Find an operation mapping src -> tgt with a representation.
 
-    Raises if multiple distinct candidates exist (representative ambiguity).
+    Returns
+    -------
+    op_id : unique candidate
+    None : no candidate
+    list[op_id] : multiple candidates (ambiguity)
     """
     candidates = []
     for op_id, mapping in valley_mappings.items():
@@ -378,30 +426,9 @@ def _find_representative_operation(
             candidates.append(op_id)
     if not candidates:
         return None
+    if len(candidates) > 1:
+        return candidates
     return candidates[0]
-
-
-def _check_representative_ambiguity(
-    reference_valley: str,
-    orbit: list[str],
-    valley_mappings: dict[object, dict[str, str]],
-    rep_ops: dict[str, object],
-) -> list[str]:
-    """Check whether any valley has multiple distinct candidate representative ops."""
-    ambiguous = []
-    for valley in orbit:
-        if valley == reference_valley:
-            continue
-        candidates = []
-        for op_id, mapping in valley_mappings.items():
-            mapped = mapping.get(reference_valley)
-            if mapped is not None and str(mapped) == str(valley):
-                candidates.append(op_id)
-        if len(candidates) > 1:
-            chosen = rep_ops.get(valley)
-            if chosen not in candidates:
-                ambiguous.append(valley)
-    return ambiguous
 
 
 def _failure(
@@ -409,20 +436,29 @@ def _failure(
     reference_valley: str,
     dim: int,
     reason: str,
+    *,
+    rank_source: str = "failure",
+    purification_gap: float | None = None,
+    eigenvalues: np.ndarray | None = None,
 ) -> SymmetryAdaptedProjectors:
-    n_valleys = len(orbit)
+    eig = eigenvalues if eigenvalues is not None else np.zeros(dim)
     return SymmetryAdaptedProjectors(
         projectors={v: np.zeros((dim, dim), dtype=np.complex128) for v in orbit},
+        eigenvectors={v: np.zeros((dim, 0), dtype=np.complex128) for v in orbit},
         reference_valley=reference_valley,
         diagnostics=ProjectorQualityDiagnostics(
             selected_rank=0,
-            eigenvalues=np.zeros(dim),
-            purification_gap=None,
-            rank_source="failure",
+            eigenvalues=eig,
+            purification_gap=purification_gap,
+            rank_source=rank_source,
             seed_overlap={v: 0.0 for v in orbit},
             projector_symmetry_error={},
             orthogonality_error=float("inf"),
-            completeness_error=float("inf"),
+            total_projector_idempotency_error=float("inf"),
+            completeness_error=None,
+            completeness_source="not_evaluated",
+            projector_overlap_matrices=None,
+            projector_overlap_deviation=None,
             valley_sewing_matrices=None,
             sewing_unitarity_error=None,
             status="failed",
