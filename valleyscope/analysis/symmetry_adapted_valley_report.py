@@ -146,6 +146,8 @@ def build_symmetry_adapted_valley_report(
             if proj_diag.projector_symmetry_error else 0.0
         ),
         "reason": proj_diag.reason,
+        "representative_resolution": proj_diag.representative_resolution,
+        "representative_candidates": list(proj_diag.representative_candidates),
     }
 
     rep_summary_full = summarize_symmetry_adapted_representations(rep_diag)

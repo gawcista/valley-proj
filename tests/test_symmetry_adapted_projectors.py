@@ -409,8 +409,7 @@ def test_ambiguous_representative_operation_fails():
     )
 
     assert result.diagnostics.status == "failed"
-    assert "ambiguous" in result.diagnostics.reason.lower()
-    assert "candidates" in result.diagnostics.reason.lower()
+    assert "inequivalent" in result.diagnostics.reason.lower()
 
 
 # -----------------------------------------------------------------------
@@ -506,3 +505,78 @@ def test_quality_diagnostics_on_perfect_projectors():
     # Projector overlap check
     assert diag.projector_overlap_matrices is not None
     assert diag.projector_overlap_deviation[("V1", "V2")] < 1e-12
+
+
+# -----------------------------------------------------------------------
+# K. Representative ambiguity resolution
+# -----------------------------------------------------------------------
+
+def test_equivalent_candidates_resolved_with_representative_resolution():
+    """Two different operation_ids that produce identical projectors →
+    accepted with representative_resolution='equivalent_candidates'.
+    Orbit has only 2 valleys to avoid needing a 3rd representative."""
+    p_a = np.diag([1.0, 0.0]).astype(np.complex128)
+    p_b = np.diag([0.0, 1.0]).astype(np.complex128)
+    d_e = np.eye(2, dtype=np.complex128)
+    d_swap = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128)
+
+    result = build_symmetry_adapted_projectors_for_orbit(
+        seed_projectors={"VA": p_a, "VB": p_b},
+        representations={0: d_e, 1: d_swap, 99: d_swap.copy()},
+        valley_mappings={
+            0: {"VA": "VA", "VB": "VB"},
+            1: {"VA": "VB", "VB": "VA"},
+            99: {"VA": "VB", "VB": "VA"},
+        },
+        orbit=["VA", "VB"], reference_valley="VA", rank=1,
+    )
+
+    assert result.diagnostics.status == "ok"
+    assert result.diagnostics.representative_resolution == "equivalent_candidates"
+    assert len(result.diagnostics.representative_candidates) == 2
+
+
+def test_equivalent_candidates_preserves_inequivalent_failure():
+    """Verify the old ambiguous test still fails for genuinely inequivalent ops."""
+    p_m1 = np.diag([1.0, 0.0, 0.0]).astype(np.complex128)
+    p_m2 = np.diag([0.0, 1.0, 0.0]).astype(np.complex128)
+    p_m3 = np.diag([0.0, 0.0, 1.0]).astype(np.complex128)
+    d_e = np.eye(3, dtype=np.complex128)
+    d_c3 = np.array([[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.complex128)
+    d_diff = np.array([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]], dtype=np.complex128)
+    d_c3sq = d_c3 @ d_c3
+
+    result = build_symmetry_adapted_projectors_for_orbit(
+        seed_projectors={"M1": p_m1, "M2": p_m2, "M3": p_m3},
+        representations={0: d_e, 1: d_c3, 2: d_c3sq, 99: d_diff},
+        valley_mappings={
+            0: {"M1": "M1", "M2": "M2", "M3": "M3"},
+            1: {"M1": "M2", "M2": "M3", "M3": "M1"},
+            2: {"M1": "M3", "M2": "M1", "M3": "M2"},
+            99: {"M1": "M2", "M2": "M1", "M3": "M3"},
+        },
+        orbit=["M1", "M2", "M3"], reference_valley="M1", rank=1,
+    )
+
+    assert result.diagnostics.status == "failed"
+    assert "inequivalent" in result.diagnostics.reason.lower()
+
+
+def test_representative_resolution_field_in_diagnostics():
+    """Both unique and resolved paths populate the field."""
+    p_m1 = np.diag([1.0, 0.0]).astype(np.complex128)
+    p_m2 = np.diag([0.0, 1.0]).astype(np.complex128)
+    d_swap = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128)
+
+    result = build_symmetry_adapted_projectors_for_orbit(
+        seed_projectors={"VA": p_m1, "VB": p_m2},
+        representations={0: np.eye(2, dtype=np.complex128), 1: d_swap},
+        valley_mappings={
+            0: {"VA": "VA", "VB": "VB"},
+            1: {"VA": "VB", "VB": "VA"},
+        },
+        orbit=["VA", "VB"], reference_valley="VA", rank=1,
+    )
+
+    assert result.diagnostics.status == "ok"
+    assert result.diagnostics.representative_resolution == "unique"

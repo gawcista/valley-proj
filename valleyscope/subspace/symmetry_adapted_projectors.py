@@ -30,6 +30,8 @@ class ProjectorQualityDiagnostics:
     sewing_unitarity_error: dict[tuple[object, str, str], float] | None
     status: str
     reason: str
+    representative_resolution: str = ""
+    representative_candidates: list[object] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -53,6 +55,7 @@ def build_symmetry_adapted_projectors_for_orbit(
     expected_total_projector: np.ndarray | None = None,
     seed_overlap_warn_tol: float = 0.8,
     seed_overlap_fail_tol: float = 0.5,
+    candidate_equivalence_tol: float = 1e-8,
 ) -> SymmetryAdaptedProjectors:
     """Build symmetry-adapted valley projectors for a single valley orbit.
 
@@ -128,9 +131,11 @@ def build_symmetry_adapted_projectors_for_orbit(
     p_ref_sym = top_vecs @ top_vecs.conj().T
     eigenvectors: dict[str, np.ndarray] = {reference_valley: top_vecs.copy()}
 
-    # 5. Generate other valley projectors with explicit representative checks
+    # 5. Generate other valley projectors with candidate resolution
     projectors: dict[str, np.ndarray] = {reference_valley: p_ref_sym}
     rep_ops: dict[str, object] = {}
+    representative_resolution = "unique"
+    representative_candidates: list[object] = []
 
     for valley in orbit:
         if valley == reference_valley:
@@ -143,10 +148,22 @@ def build_symmetry_adapted_projectors_for_orbit(
                             f"no representative operation found mapping "
                             f"{reference_valley} -> {valley}")
         if isinstance(result, list):
-            return _failure(orbit, reference_valley, n,
-                            f"ambiguous representative operation for "
-                            f"{reference_valley} -> {valley}: candidates={result}")
-        rep_op_id = result
+            resolution_status, chosen, candidates_list = _resolve_candidate_equivalence(
+                candidates=result,
+                top_vecs=top_vecs,
+                representations=representations,
+                tol=candidate_equivalence_tol,
+            )
+            representative_resolution = resolution_status
+            representative_candidates = candidates_list
+            if chosen is None:
+                return _failure(orbit, reference_valley, n,
+                                f"ambiguous_inequivalent_candidates for "
+                                f"{reference_valley} -> {valley}: "
+                                f"candidates={result}")
+            rep_op_id = chosen
+        else:
+            rep_op_id = result
         rep_ops[valley] = rep_op_id
         d_rep = np.asarray(representations[rep_op_id], dtype=np.complex128)
         u_a = d_rep @ top_vecs
@@ -169,6 +186,8 @@ def build_symmetry_adapted_projectors_for_orbit(
         expected_total_projector=expected_total_projector,
         seed_overlap_warn_tol=seed_overlap_warn_tol,
         seed_overlap_fail_tol=seed_overlap_fail_tol,
+        representative_resolution=representative_resolution,
+        representative_candidates=representative_candidates,
     )
 
     return SymmetryAdaptedProjectors(
@@ -224,6 +243,8 @@ def compute_projector_quality_diagnostics(
     expected_total_projector: np.ndarray | None = None,
     seed_overlap_warn_tol: float = 0.8,
     seed_overlap_fail_tol: float = 0.5,
+    representative_resolution: str = "",
+    representative_candidates: list[object] | None = None,
 ) -> ProjectorQualityDiagnostics:
     """Compute quality diagnostics for symmetry-adapted projectors."""
 
@@ -344,6 +365,8 @@ def compute_projector_quality_diagnostics(
         projector_overlap_deviation=overlap_deviation if overlap_deviation else None,
         valley_sewing_matrices=sewing if sewing else None,
         sewing_unitarity_error=sewing_err if sewing_err else None,
+        representative_resolution=representative_resolution,
+        representative_candidates=list(representative_candidates) if representative_candidates else [],
         status=status,
         reason=reason,
     )
@@ -455,6 +478,42 @@ def _resolve_representative_operation(
     return candidates[0]
 
 
+def _resolve_candidate_equivalence(
+    *,
+    candidates: list[object],
+    top_vecs: np.ndarray,
+    representations: dict[object, np.ndarray],
+    tol: float = 1e-8,
+) -> tuple[str, object | None, list[object]]:
+    """Resolve multiple representative operation candidates.
+
+    For each candidate c: a0 -> a, constructs P_a^sym(c) = U(c) @ U(c)^dag
+    where U(c) = D_c @ top_vecs.  Compares all pairs by Frobenius norm.
+
+    Returns (resolution_status, chosen_op_id_or_None, candidates_list).
+    """
+    candidate_projectors: list[np.ndarray] = []
+    for op_id in candidates:
+        d_g = np.asarray(representations[op_id], dtype=np.complex128)
+        u = d_g @ top_vecs
+        candidate_projectors.append(u @ u.conj().T)
+
+    # Pairwise comparison
+    max_diff = 0.0
+    for i in range(len(candidate_projectors)):
+        for j in range(i + 1, len(candidate_projectors)):
+            diff = float(
+                np.linalg.norm(
+                    candidate_projectors[i] - candidate_projectors[j], ord="fro"
+                )
+            )
+            max_diff = max(max_diff, diff)
+
+    if max_diff <= tol:
+        return "equivalent_candidates", candidates[0], list(candidates)
+    return "ambiguous_inequivalent_candidates", None, list(candidates)
+
+
 def _failure(
     orbit: list[str],
     reference_valley: str,
@@ -485,6 +544,8 @@ def _failure(
             projector_overlap_deviation=None,
             valley_sewing_matrices=None,
             sewing_unitarity_error=None,
+            representative_resolution="",
+            representative_candidates=[],
             status="failed",
             reason=reason,
         ),
