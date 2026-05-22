@@ -158,6 +158,49 @@ def test_non_unitary_dg_makes_character_diagnostics_diagnostic_only():
     assert diag["irrep_matching_status"] == "failed_unitarity"
 
 
+def test_direct_non_unitary_representation_without_upstream_error_fails():
+    vp = {
+        "status": "ok",
+        "representations": {
+            "V1": {
+                7: np.array(
+                    [[1.0, 1.0], [0.0, 1.0]],
+                    dtype=np.complex128,
+                )
+            }
+        },
+        "unitarity_error": {},
+    }
+
+    diag = build_valley_preserving_character_diagnostics(
+        valley_preserving_representations=vp,
+        orbit=["V1"],
+    )
+
+    assert diag["diagnostic_only"] is True
+    assert diag["local_irrep_ready"] is False
+    assert diag["irrep_matching_status"] == "failed_unitarity"
+    assert diag["max_valley_preserving_unitarity_error"] > 0.1
+
+
+def test_non_square_representation_fails_input_readiness():
+    vp = {
+        "status": "ok",
+        "representations": {"V1": {0: np.ones((2, 1), dtype=np.complex128)}},
+        "unitarity_error": {},
+    }
+
+    diag = build_valley_preserving_character_diagnostics(
+        valley_preserving_representations=vp,
+        orbit=["V1"],
+    )
+
+    assert diag["diagnostic_only"] is True
+    assert diag["local_irrep_ready"] is False
+    assert diag["irrep_matching_status"] == "failed_input_readiness"
+    assert "must be square" in diag["reason"]
+
+
 # -----------------------------------------------------------------------
 # 6. Inherited input diagnostic_only → output diagnostic_only
 # -----------------------------------------------------------------------
@@ -179,6 +222,42 @@ def test_inherited_diagnostic_only_propagates():
     assert diag["irrep_matching_status"] == "failed_input_readiness"
 
 
+def test_inherited_diagnostic_only_without_ready_flag_propagates():
+    u = np.eye(2, 1, dtype=np.complex128)
+    vp = _vp_reps_for_orbit({"V1": u}, {0: np.eye(2, dtype=np.complex128)},
+                             {0: {"V1": "V1"}}, ["V1"])
+
+    diag = build_valley_preserving_character_diagnostics(
+        valley_preserving_representations=vp,
+        orbit=["V1"],
+        input_diagnostic_only=True,
+    )
+
+    assert diag["diagnostic_only"] is True
+    assert diag["local_irrep_ready"] is False
+    assert diag["irrep_matching_status"] == "failed_input_readiness"
+    assert "diagnostic_only=True" in diag["reason"]
+
+
+def test_partial_input_status_propagates_to_readiness():
+    vp = {
+        "status": "partial",
+        "reason": "missing valley mapping",
+        "representations": {"V1": {0: np.eye(1, dtype=np.complex128)}},
+        "unitarity_error": {"V1": {0: 0.0}},
+    }
+
+    diag = build_valley_preserving_character_diagnostics(
+        valley_preserving_representations=vp,
+        orbit=["V1"],
+    )
+
+    assert diag["diagnostic_only"] is True
+    assert diag["local_irrep_ready"] is False
+    assert diag["irrep_matching_status"] == "failed_input_readiness"
+    assert "status=partial" in diag["reason"]
+
+
 # -----------------------------------------------------------------------
 # 7. Summary JSON serializable without default=str
 # -----------------------------------------------------------------------
@@ -198,6 +277,7 @@ def test_summary_json_serializable():
     # must not require default=str
     assert "dtype" not in encoded
     assert "ndarray" not in encoded
+    assert summary["phase_convention"] == "phase_over_2pi_in_interval_minus_half_to_half"
 
 
 # -----------------------------------------------------------------------
@@ -215,8 +295,13 @@ def test_schema_no_forbidden_terms():
     summary = summarize_valley_preserving_character_diagnostics(diag)
 
     encoded = json.dumps(summary)
-    for forbidden in ["covariance", "equivariant", "equivariance",
-                       "valley_little_group"]:
+    for forbidden in [
+        "covariance",
+        "equivariant",
+        "equivariance",
+        "stabilizer",
+        "valley_little_group",
+    ]:
         assert forbidden not in encoded.lower(), f"forbidden: {forbidden}"
 
     # Required fields in summary
