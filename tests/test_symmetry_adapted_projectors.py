@@ -284,9 +284,10 @@ def test_c2_fixes_m1_valley_preserving_subgroup_symmetrizes():
 # E. Non-symmetry-consistent seed → failed diagnostic
 # -----------------------------------------------------------------------
 
-def test_seed_inconsistent_with_mapping_gives_elevated_symmetry_error():
-    """Seed P_a^0 and P_b^0 are not related by D_swap P_a^0 D_swap^dag.
-    This causes elevated projector_symmetry_error in the diagnostics."""
+def test_seed_inconsistent_with_mapping_gives_low_seed_overlap_warning():
+    """Seed P_VB^0 = [[0.5,0.5,0],[0.5,0.5,0],[0,0,0]] is a projector orthogonal
+    to the symmetry-adapted P_VB^sym = D_swap P_VA^sym D_swap^dag = [[0,0,0],[0,1,0],[0,0,0]].
+    Tr(P_VB^sym P_VB^0) / rank = 0.5, triggering low seed overlap."""
     p_a = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]], dtype=np.complex128)
     p_b = np.array([[0.5, 0.5, 0.0], [0.5, 0.5, 0.0], [0.0, 0.0, 0.0]], dtype=np.complex128)
     d_e = np.eye(3, dtype=np.complex128)
@@ -302,10 +303,10 @@ def test_seed_inconsistent_with_mapping_gives_elevated_symmetry_error():
         orbit=["VA", "VB"], reference_valley="VA", rank=1,
     )
 
-    # Seed is inconsistent → P_VA^sym from symmetrized P_VA^0 won't match
-    # D_swap @ P_VA^sym @ D_swap^dag perfectly with P_VB^sym
     diag = result.diagnostics
-    assert diag.status != "ok" or diag.seed_overlap["VB"] < 0.95
+    assert diag.status in {"warn", "failed"}
+    assert "seed overlap" in diag.reason.lower()
+    assert diag.seed_overlap["VB"] == pytest.approx(0.5, abs=0.01)
 
 
 # -----------------------------------------------------------------------
