@@ -449,3 +449,64 @@ def test_enabled_true_writes_symmetry_adapted_valley_analysis(tmp_path):
     encoded = json.dumps(report)
     for forbidden in ["covariance", "equivariant", "stabilizer", "valley_little_group", "p_cov"]:
         assert forbidden not in encoded.lower(), f"forbidden: {forbidden}"
+
+
+def test_enabled_true_without_d_raw_writes_not_evaluated_report(tmp_path):
+    """enabled=true still writes an explicit not_evaluated report if D_raw is absent."""
+    import yaml
+    from valleyscope.workflows.analyze_hsp import analyze_hsp
+
+    h5_path = tmp_path / "wf.h5"; mono = tmp_path / "m.vasp"
+    out_dir = tmp_path / "out"; config_path = tmp_path / "config.yaml"
+    _write_h5_three_valley(h5_path); _write_hex_poscar(mono)
+
+    config = {
+        "input": {"wavefunction_h5": str(h5_path),
+                   "monolayer_poscars": {"top": str(mono), "bottom": str(mono)}},
+        "layer_transforms": {
+            "top": {"supercell_matrix": [[1,0,0],[0,1,0],[0,0,1]]},
+            "bottom": {"supercell_matrix": [[1,0,0],[0,1,0],[0,0,1]]},
+        },
+        "analysis": {"kpoints": ["GammaM"], "iband": [101,102,103],
+                      "degeneracy_tol_meV": 1.0,
+                      "symmetry_adapted_valley": {"enabled": True}},
+        "valley_centers": {"coordinate_mode": "cart", "centers": [
+            {"name":"M1c","cart":[0.5,0,0]},
+            {"name":"M2c","cart":[-0.25,0.4330127018922193,0]},
+            {"name":"M3c","cart":[-0.25,-0.4330127018922193,0]},
+        ]},
+        "valley_subspaces": [
+            {"name":"M1","centers":["M1c"]},
+            {"name":"M2","centers":["M2c"]},
+            {"name":"M3","centers":["M3c"]},
+        ],
+        "projection": {"qcut_mode":"absolute","qcut_Ainv":0.3,"overlap_policy":"warn_exclude",
+                        "thresholds":{"W_val_min":0.5}},
+        "output": {"directory": str(out_dir)},
+    }
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    outputs = analyze_hsp(config_path)
+
+    assert "symmetry_adapted_valley_analysis_json" in outputs
+    report = json.loads(outputs["symmetry_adapted_valley_analysis_json"].read_text(encoding="utf-8"))
+    gm = report["by_kpoint"]["GammaM"]
+    assert gm["status"] == "not_evaluated"
+    assert gm["diagnostic_only"] is True
+    assert gm["local_irrep_ready"] is False
+    assert gm["trusted_irrep_label"] is False
+    assert gm["orbits"] == []
+
+
+def test_partition_valley_orbits_separates_disconnected_components():
+    from valleyscope.workflows.analyze_hsp import _partition_valley_orbits
+
+    orbits = _partition_valley_orbits(
+        valley_names=["K", "Kp", "M1", "M2"],
+        valley_mappings={
+            0: {"K": "K", "Kp": "Kp", "M1": "M1", "M2": "M2"},
+            1: {"K": "Kp", "Kp": "K"},
+            2: {"M1": "M2", "M2": "M1"},
+        },
+    )
+
+    assert orbits == [["K", "Kp"], ["M1", "M2"]]

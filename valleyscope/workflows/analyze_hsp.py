@@ -284,7 +284,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
 
     # --- Experimental: symmetry-adapted valley report (default off) ---
     symmetry_adapted_valley_report: dict[str, object] | None = None
-    if config.symmetry_adapted_valley.enabled and valley_matrices_by_kpoint and raw_representations_by_kpoint:
+    if config.symmetry_adapted_valley.enabled:
         symmetry_adapted_valley_report = _build_symmetry_adapted_valley_report(
             valley_matrices_by_kpoint=valley_matrices_by_kpoint,
             raw_representations_by_kpoint=raw_representations_by_kpoint,
@@ -816,21 +816,23 @@ def _build_symmetry_adapted_valley_report(
     sufficient for the toy pipeline.
     """
     by_kpoint: dict[str, object] = {}
-    valley_names = symmetry_payload.get("valley_names", [])
+    valley_names = list(
+        symmetry_payload.get("valley_names", [])
+        or [sector.name for sector in getattr(config, "valley_subspaces", [])]
+    )
+    target_kpoints = list(getattr(config.analysis, "kpoints", []))
+    if not target_kpoints:
+        target_kpoints = sorted(
+            set(valley_matrices_by_kpoint) | set(raw_representations_by_kpoint)
+        )
 
-    for kpoint_name, valley_matrices in valley_matrices_by_kpoint.items():
+    for kpoint_name in target_kpoints:
+        valley_matrices = valley_matrices_by_kpoint.get(kpoint_name, {})
         raw_reps = raw_representations_by_kpoint.get(kpoint_name, {})
         if not valley_names or not raw_reps or not valley_matrices:
-            by_kpoint[kpoint_name] = {
-                "status": "not_evaluated",
-                "reason": "missing seed projectors, D_raw, or valley_names",
-                "diagnostic_only": True,
-                "local_irrep_ready": False,
-                "experimental": True,
-                "workflow_integration_status": "not_integrated",
-                "trusted_irrep_label": False,
-                "orbits": [],
-            }
+            by_kpoint[kpoint_name] = _not_evaluated_symmetry_adapted_kpoint(
+                "missing seed projectors, D_raw, or valley_names"
+            )
             continue
 
         # Build representations dict from raw_reps
@@ -846,41 +848,130 @@ def _build_symmetry_adapted_valley_report(
                 valley_mappings_dict[op_id] = {str(k): str(v) for k, v in vm.items()}
 
         if not d_g_dict:
-            by_kpoint[kpoint_name] = {
-                "status": "not_evaluated",
-                "reason": "no valid D_raw with valley_mapping",
-                "diagnostic_only": True,
-                "local_irrep_ready": False,
-                "experimental": True,
-                "workflow_integration_status": "not_integrated",
-                "trusted_irrep_label": False,
-                "orbits": [],
-            }
+            by_kpoint[kpoint_name] = _not_evaluated_symmetry_adapted_kpoint(
+                "no valid D_raw with valley_mapping"
+            )
             continue
 
-        # Single orbit = all valley_names (toy simplification)
-        orbit = list(valley_names)
-        ref_valley = orbit[0] if orbit else ""
-
-        report = build_symmetry_adapted_valley_report(
-            seed_projectors=valley_matrices,
-            representations=d_g_dict,
+        orbits = _partition_valley_orbits(
+            valley_names=valley_names,
             valley_mappings=valley_mappings_dict,
-            orbit=orbit,
-            reference_valley=ref_valley,
-            rank=None,
-            rank_method="gap",
         )
-        compact = summarize_symmetry_adapted_valley_report(report)
-        by_kpoint[kpoint_name] = {
-            "status": report.get("status", "not_evaluated"),
-            "reason": report.get("reason", ""),
-            "diagnostic_only": report.get("diagnostic_only", True),
-            "local_irrep_ready": report.get("local_irrep_ready", False),
-            "experimental": True,
-            "workflow_integration_status": "not_integrated",
-            "trusted_irrep_label": False,
-            "orbits": [compact],
-        }
+        orbit_reports: list[dict[str, object]] = []
+        for orbit in orbits:
+            seed_projectors = {
+                valley: valley_matrices[valley]
+                for valley in orbit
+                if valley in valley_matrices
+            }
+            if len(seed_projectors) != len(orbit):
+                missing = [valley for valley in orbit if valley not in seed_projectors]
+                orbit_reports.append(
+                    {
+                        "status": "not_evaluated",
+                        "reason": f"missing seed projectors for orbit valleys: {missing}",
+                        "diagnostic_only": True,
+                        "local_irrep_ready": False,
+                        "experimental": True,
+                        "workflow_integration_status": "not_integrated",
+                        "trusted_irrep_label": False,
+                        "orbit": orbit,
+                        "reference_valley": orbit[0] if orbit else "",
+                    }
+                )
+                continue
+
+            report = build_symmetry_adapted_valley_report(
+                seed_projectors=seed_projectors,
+                representations=d_g_dict,
+                valley_mappings=valley_mappings_dict,
+                orbit=orbit,
+                reference_valley=orbit[0],
+                rank=None,
+                rank_method="gap",
+            )
+            orbit_reports.append(summarize_symmetry_adapted_valley_report(report))
+
+        by_kpoint[kpoint_name] = _aggregate_symmetry_adapted_kpoint(orbit_reports)
 
     return {"by_kpoint": by_kpoint}
+
+
+def _not_evaluated_symmetry_adapted_kpoint(reason: str) -> dict[str, object]:
+    return {
+        "status": "not_evaluated",
+        "reason": reason,
+        "diagnostic_only": True,
+        "local_irrep_ready": False,
+        "experimental": True,
+        "workflow_integration_status": "not_integrated",
+        "trusted_irrep_label": False,
+        "orbits": [],
+    }
+
+
+def _aggregate_symmetry_adapted_kpoint(
+    orbit_reports: list[dict[str, object]],
+) -> dict[str, object]:
+    if not orbit_reports:
+        return _not_evaluated_symmetry_adapted_kpoint("no valley orbits inferred")
+    diagnostic_only = any(bool(report.get("diagnostic_only", True)) for report in orbit_reports)
+    local_irrep_ready = all(bool(report.get("local_irrep_ready", False)) for report in orbit_reports)
+    statuses = {str(report.get("status", "")) for report in orbit_reports}
+    if diagnostic_only:
+        status = "diagnostic_only"
+    elif "warn" in statuses:
+        status = "warn"
+    else:
+        status = "ok"
+    reasons = [
+        str(report.get("reason", ""))
+        for report in orbit_reports
+        if str(report.get("reason", "")) and str(report.get("reason", "")) != "all stages passed"
+    ]
+    return {
+        "status": status,
+        "reason": "; ".join(reasons) if reasons else "all orbits evaluated",
+        "diagnostic_only": diagnostic_only,
+        "local_irrep_ready": local_irrep_ready,
+        "experimental": True,
+        "workflow_integration_status": "not_integrated",
+        "trusted_irrep_label": False,
+        "orbits": orbit_reports,
+    }
+
+
+def _partition_valley_orbits(
+    *,
+    valley_names: list[str],
+    valley_mappings: dict[object, dict[str, str]],
+) -> list[list[str]]:
+    """Infer valley orbit partitions from operation-induced valley mappings."""
+    valley_set = {str(valley) for valley in valley_names}
+    adjacency: dict[str, set[str]] = {str(valley): {str(valley)} for valley in valley_names}
+    for mapping in valley_mappings.values():
+        for src, tgt in mapping.items():
+            src = str(src)
+            tgt = str(tgt)
+            if src in valley_set and tgt in valley_set:
+                adjacency[src].add(tgt)
+                adjacency[tgt].add(src)
+
+    seen: set[str] = set()
+    orbits: list[list[str]] = []
+    for valley in [str(v) for v in valley_names]:
+        if valley in seen:
+            continue
+        stack = [valley]
+        component: list[str] = []
+        seen.add(valley)
+        while stack:
+            current = stack.pop()
+            component.append(current)
+            for neighbor in sorted(adjacency[current], reverse=True):
+                if neighbor not in seen:
+                    seen.add(neighbor)
+                    stack.append(neighbor)
+        ordered = [str(v) for v in valley_names if str(v) in set(component)]
+        orbits.append(ordered)
+    return orbits
