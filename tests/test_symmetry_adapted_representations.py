@@ -230,8 +230,9 @@ def test_missing_mapping_diagnostics_not_ready():
         orbit=["V1", "V2"],
     )
 
-    # Not failed diagnostics, just partial — but sewing has missing mapping
-    assert diag["diagnostic_only"] is False  # sewing partial ≠ shape failure
+    assert diag["local_irrep_ready"] is False
+    assert diag["diagnostic_only"] is True
+    assert "missing_valley_mapping" in diag["reason"]
     assert "partial" in str(diag.get("valley_sewing_matrices", {}).get("status", ""))
 
 
@@ -254,6 +255,52 @@ def test_rank_mismatch_fails_sewing():
 
     assert sewing["status"] == "failed"
     assert any("rank mismatch" in m for m in sewing["shape_mismatch"])
+
+
+def test_rank_mismatch_across_orbit_diagnostics_not_ready():
+    u1 = np.eye(3, 1, dtype=np.complex128)
+    u2 = np.eye(3, 2, dtype=np.complex128)
+    diag = build_symmetry_adapted_representation_diagnostics(
+        valley_bases={"V1": u1, "V2": u2},
+        representations={0: np.eye(3, dtype=np.complex128)},
+        valley_mappings={0: {"V1": "V1", "V2": "V2"}},
+        orbit=["V1", "V2"],
+    )
+
+    assert diag["local_irrep_ready"] is False
+    assert diag["diagnostic_only"] is True
+    assert "rank_mismatch_across_valley_orbit" in diag["reason"]
+
+
+def test_representation_dimension_mismatch_fails_cleanly():
+    u = np.eye(3, 1, dtype=np.complex128)
+    vp = build_valley_preserving_representations(
+        valley_bases={"V1": u},
+        representations={0: np.eye(2, dtype=np.complex128)},
+        valley_mappings={0: {"V1": "V1"}},
+        orbit=["V1"],
+    )
+
+    assert vp["status"] == "failed"
+    assert any("D_g shape" in m for m in vp["shape_mismatch"])
+
+
+def test_non_bijective_valley_mapping_diagnostics_not_ready():
+    bases, reps, mappings, orbit = _c3_setup()
+    bad_mappings = dict(mappings)
+    bad_mappings[1] = {"M1": "M2", "M2": "M2", "M3": "M1"}
+
+    diag = build_symmetry_adapted_representation_diagnostics(
+        valley_bases=bases,
+        representations=reps,
+        valley_mappings=bad_mappings,
+        orbit=orbit,
+    )
+
+    assert diag["local_irrep_ready"] is False
+    assert diag["diagnostic_only"] is True
+    assert "invalid_valley_mapping" in diag["reason"]
+    assert "not one-to-one" in diag["reason"]
 
 
 def test_missing_basis_fails():
@@ -330,7 +377,13 @@ def test_compact_summary_field_names():
     # Forbidden terms in summary and diagnostics
     import json
     encoded = json.dumps(summary, default=str)
-    for forbidden in ["covariance", "equivariant", "equivariance", "valley_little_group"]:
+    for forbidden in [
+        "covariance",
+        "equivariant",
+        "equivariance",
+        "stabilizer",
+        "valley_little_group",
+    ]:
         assert forbidden not in encoded.lower(), f"forbidden term: {forbidden}"
 
     # Valley preserving ops use correct naming
@@ -359,7 +412,7 @@ def test_compact_summary_serializable():
     summary = summarize_symmetry_adapted_representations(diag)
 
     import json
-    encoded = json.dumps(summary, default=str)
+    encoded = json.dumps(summary)
     assert len(encoded) > 0
     # No numpy types in encoded
     assert "dtype" not in encoded
@@ -382,7 +435,7 @@ def test_closure_check_with_explicit_mapping():
     )
 
     assert diag["representation_closure_status"] == "closed"
-    assert diag["representation_closure_missing_products"] == []
+    assert diag["representation_closure_violations"] == []
 
 
 def test_closure_fails_with_wrong_mapping():
@@ -397,7 +450,10 @@ def test_closure_fails_with_wrong_mapping():
     )
 
     assert diag["representation_closure_status"] == "not_closed"
-    assert len(diag["representation_closure_missing_products"]) > 0
+    assert diag["local_irrep_ready"] is False
+    assert diag["diagnostic_only"] is True
+    assert "representation_closure_failed" in diag["reason"]
+    assert len(diag["representation_closure_violations"]) > 0
 
 
 def test_closure_not_evaluated_without_mapping():
