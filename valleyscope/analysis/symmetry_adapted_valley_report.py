@@ -8,7 +8,9 @@ This module chains:
   -> valley sewing matrices B_{ba}(g)
   -> character / eigenphase diagnostics
 
-The result is diagnostic-only and does NOT feed into production irrep matching.
+This module does NOT feed into production irrep matching. Passing readiness
+only means that the experimental staged report is internally consistent; it
+does not promote any production irrep label.
 """
 
 from __future__ import annotations
@@ -46,23 +48,32 @@ def build_symmetry_adapted_valley_report(
 ) -> dict[str, object]:
     """Build a full symmetry-adapted valley analysis report.
 
-    Returns a diagnostic-only dict.  local_irrep_ready is True only when
-    every pipeline stage passes readiness checks.
+    Returns an experimental report. local_irrep_ready is True only when every
+    pipeline stage passes readiness checks, but this helper does not feed into
+    production irrep matching.
     """
     # Stage 1: symmetry-adapted projectors
-    sym_result = build_symmetry_adapted_projectors_for_orbit(
-        seed_projectors=seed_projectors,
-        representations=representations,
-        valley_mappings=valley_mappings,
-        orbit=orbit,
-        reference_valley=reference_valley,
-        rank=rank,
-        rank_method=rank_method,
-        rank_tol=rank_tol,
-        expected_total_projector=expected_total_projector,
-    )
+    try:
+        sym_result = build_symmetry_adapted_projectors_for_orbit(
+            seed_projectors=seed_projectors,
+            representations=representations,
+            valley_mappings=valley_mappings,
+            orbit=orbit,
+            reference_valley=reference_valley,
+            rank=rank,
+            rank_method=rank_method,
+            rank_tol=rank_tol,
+            expected_total_projector=expected_total_projector,
+        )
+    except ValueError as exc:
+        return _failed_report(
+            orbit=orbit,
+            reference_valley=reference_valley,
+            reason=f"projector_input_invalid: {exc}",
+        )
     proj_diag = sym_result.diagnostics
     proj_failed = proj_diag.status == "failed"
+    proj_warn = proj_diag.status == "warn"
 
     # Stage 2: VP representations + sewing
     valley_bases = dict(sym_result.eigenvectors)
@@ -112,6 +123,8 @@ def build_symmetry_adapted_valley_report(
     reasons: list[str] = []
     if proj_failed:
         reasons.append(f"projector_construction_failed: {proj_diag.reason}")
+    elif proj_warn:
+        reasons.append(f"projector_warning: {proj_diag.reason}")
     if rep_diag["diagnostic_only"]:
         reasons.append(f"representation_diagnostics: {rep_diag['reason']}")
     if char_diag["diagnostic_only"]:
@@ -135,19 +148,36 @@ def build_symmetry_adapted_valley_report(
         "reason": proj_diag.reason,
     }
 
-    rep_summary = summarize_symmetry_adapted_representations(rep_diag)
+    rep_summary_full = summarize_symmetry_adapted_representations(rep_diag)
+    sewing_summary = {
+        "status": rep_summary_full.get("status"),
+        "max_sewing_unitarity_error": rep_summary_full.get(
+            "max_sewing_unitarity_error"
+        ),
+        "items": rep_summary_full.get("valley_sewing_matrices_summary", []),
+    }
+    rep_summary = {
+        key: value for key, value in rep_summary_full.items()
+        if key != "valley_sewing_matrices_summary"
+    }
     char_summary = summarize_valley_preserving_character_diagnostics(char_diag)
 
     return {
-        "status": "ok" if local_irrep_ready else "diagnostic_only",
+        "status": (
+            "diagnostic_only"
+            if diagnostic_only else "warn" if proj_warn else "ok"
+        ),
         "reason": "; ".join(reasons) if reasons else "all stages passed",
+        "experimental": True,
+        "workflow_integration_status": "not_integrated",
+        "trusted_irrep_label": False,
         "local_irrep_ready": local_irrep_ready,
         "diagnostic_only": diagnostic_only,
         "orbit": orbit,
         "reference_valley": reference_valley,
         "symmetry_adapted_projectors": projector_summary,
         "valley_preserving_representations": rep_summary,
-        "valley_sewing_matrices": rep_summary.get("valley_sewing_matrices_summary"),
+        "valley_sewing_matrices": sewing_summary,
         "valley_preserving_character_diagnostics": char_summary,
     }
 
@@ -163,6 +193,10 @@ def summarize_symmetry_adapted_valley_report(
     return {
         "status": report.get("status"),
         "reason": report.get("reason"),
+        "experimental": report.get("experimental", True),
+        "workflow_integration_status":
+            report.get("workflow_integration_status", "not_integrated"),
+        "trusted_irrep_label": report.get("trusted_irrep_label", False),
         "local_irrep_ready": report.get("local_irrep_ready"),
         "diagnostic_only": report.get("diagnostic_only"),
         "orbit": report.get("orbit"),
@@ -187,3 +221,65 @@ def _safe_float(v) -> float | None:
         return float(v)
     except (TypeError, ValueError):
         return None
+
+
+def _failed_report(
+    *,
+    orbit: list[str],
+    reference_valley: str,
+    reason: str,
+) -> dict[str, object]:
+    return {
+        "status": "diagnostic_only",
+        "reason": reason,
+        "experimental": True,
+        "workflow_integration_status": "not_integrated",
+        "trusted_irrep_label": False,
+        "local_irrep_ready": False,
+        "diagnostic_only": True,
+        "orbit": orbit,
+        "reference_valley": reference_valley,
+        "symmetry_adapted_projectors": {
+            "status": "failed",
+            "selected_rank": 0,
+            "rank_source": "failure",
+            "purification_gap": None,
+            "seed_overlap": {},
+            "orthogonality_error": None,
+            "total_projector_idempotency_error": None,
+            "completeness_error": None,
+            "completeness_source": "not_evaluated",
+            "max_projector_symmetry_error": None,
+            "reason": reason,
+        },
+        "valley_preserving_representations": {
+            "status": "diagnostic_only",
+            "reason": "not evaluated because projector input is invalid",
+            "local_irrep_ready": False,
+            "diagnostic_only": True,
+            "orbit": orbit,
+            "selected_rank_by_valley": {},
+            "valley_preserving_operations": {},
+            "valley_changing_operations": {},
+            "max_valley_preserving_unitarity_error": None,
+            "max_sewing_unitarity_error": None,
+            "representation_closure_status": "not_evaluated",
+            "representation_closure_violations": [],
+            "valley_preserving_representations": {},
+        },
+        "valley_sewing_matrices": {
+            "status": "diagnostic_only",
+            "max_sewing_unitarity_error": None,
+            "items": [],
+        },
+        "valley_preserving_character_diagnostics": {
+            "status": "diagnostic_only",
+            "reason": "not evaluated because projector input is invalid",
+            "local_irrep_ready": False,
+            "diagnostic_only": True,
+            "irrep_matching_status": "failed_input_readiness",
+            "max_valley_preserving_unitarity_error": None,
+            "max_eigenvalue_modulus_deviation": None,
+            "per_valley": {},
+        },
+    }

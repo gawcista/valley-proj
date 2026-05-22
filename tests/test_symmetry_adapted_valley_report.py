@@ -87,6 +87,7 @@ def test_compact_summary_serializable():
 
     for key in [
         "status", "reason", "local_irrep_ready", "diagnostic_only",
+        "experimental", "workflow_integration_status", "trusted_irrep_label",
         "orbit", "reference_valley",
         "symmetry_adapted_projectors",
         "valley_preserving_representations",
@@ -94,6 +95,17 @@ def test_compact_summary_serializable():
         "valley_preserving_character_diagnostics",
     ]:
         assert key in summary, f"missing: {key}"
+    assert summary["experimental"] is True
+    assert summary["workflow_integration_status"] == "not_integrated"
+    assert summary["trusted_irrep_label"] is False
+    assert "valley_sewing_matrices_summary" not in json.dumps(
+        summary["valley_preserving_representations"]
+    )
+    assert set(summary["valley_sewing_matrices"]) == {
+        "status",
+        "max_sewing_unitarity_error",
+        "items",
+    }
 
 
 # -----------------------------------------------------------------------
@@ -112,9 +124,34 @@ def test_schema_no_forbidden_terms():
 
     for forbidden in [
         "covariance", "equivariant", "equivariance",
-        "valley_little_group", "P_cov",
+        "stabilizer", "valley_little_group", "p_cov",
     ]:
         assert forbidden not in encoded.lower(), f"forbidden: {forbidden}"
+
+
+def test_projector_warning_propagates_without_marking_diagnostic_only():
+    p_a = np.diag([1.0, 0.0, 0.0]).astype(np.complex128)
+    p_b = np.diag([0.0, 0.6, 0.4]).astype(np.complex128)
+    d_swap = np.array([
+        [0.0, 1.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ], dtype=np.complex128)
+
+    report = build_symmetry_adapted_valley_report(
+        seed_projectors={"VA": p_a, "VB": p_b},
+        representations={0: np.eye(3, dtype=np.complex128), 1: d_swap},
+        valley_mappings={
+            0: {"VA": "VA", "VB": "VB"},
+            1: {"VA": "VB", "VB": "VA"},
+        },
+        orbit=["VA", "VB"], reference_valley="VA", rank=1,
+    )
+
+    assert report["status"] == "warn"
+    assert report["diagnostic_only"] is False
+    assert report["local_irrep_ready"] is True
+    assert "projector_warning" in report["reason"]
 
 
 # -----------------------------------------------------------------------
@@ -165,6 +202,26 @@ def test_failure_missing_representative():
     assert report["diagnostic_only"] is True
     assert report["local_irrep_ready"] is False
     assert "no representative operation" in report["reason"]
+
+
+def test_invalid_projector_input_returns_diagnostic_report():
+    p_a = np.diag([1.0, 0.0]).astype(np.complex128)
+
+    report = build_symmetry_adapted_valley_report(
+        seed_projectors={"VA": p_a},
+        representations={0: np.eye(2, dtype=np.complex128)},
+        valley_mappings={0: {"VA": "VA"}},
+        orbit=["VA", "VB"],
+        reference_valley="VA",
+        rank=1,
+    )
+
+    assert report["status"] == "diagnostic_only"
+    assert report["diagnostic_only"] is True
+    assert report["local_irrep_ready"] is False
+    assert report["trusted_irrep_label"] is False
+    assert "projector_input_invalid" in report["reason"]
+    assert report["valley_sewing_matrices"]["items"] == []
 
 
 # -----------------------------------------------------------------------
