@@ -148,6 +148,17 @@ def build_symmetry_adapted_valley_report(
         "reason": proj_diag.reason,
         "representative_resolution": proj_diag.representative_resolution,
         "representative_candidates": list(proj_diag.representative_candidates),
+        "representative_resolution_by_valley": dict(
+            proj_diag.representative_resolution_by_valley
+        ),
+        "representative_candidates_by_valley": {
+            str(k): list(v)
+            for k, v in proj_diag.representative_candidates_by_valley.items()
+        },
+        "representative_projector_difference_by_valley": {
+            str(k): float(v)
+            for k, v in proj_diag.representative_projector_difference_by_valley.items()
+        },
     }
 
     rep_summary_full = summarize_symmetry_adapted_representations(rep_diag)

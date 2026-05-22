@@ -32,6 +32,9 @@ class ProjectorQualityDiagnostics:
     reason: str
     representative_resolution: str = ""
     representative_candidates: list[object] = field(default_factory=list)
+    representative_resolution_by_valley: dict[str, str] = field(default_factory=dict)
+    representative_candidates_by_valley: dict[str, list[object]] = field(default_factory=dict)
+    representative_projector_difference_by_valley: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -136,6 +139,9 @@ def build_symmetry_adapted_projectors_for_orbit(
     rep_ops: dict[str, object] = {}
     representative_resolution = "unique"
     representative_candidates: list[object] = []
+    representative_resolution_by_valley: dict[str, str] = {}
+    representative_candidates_by_valley: dict[str, list[object]] = {}
+    representative_projector_difference_by_valley: dict[str, float] = {}
 
     for valley in orbit:
         if valley == reference_valley:
@@ -148,7 +154,7 @@ def build_symmetry_adapted_projectors_for_orbit(
                             f"no representative operation found mapping "
                             f"{reference_valley} -> {valley}")
         if isinstance(result, list):
-            resolution_status, chosen, candidates_list = _resolve_candidate_equivalence(
+            resolution_status, chosen, candidates_list, max_projector_difference = _resolve_candidate_equivalence(
                 candidates=result,
                 top_vecs=top_vecs,
                 representations=representations,
@@ -156,14 +162,26 @@ def build_symmetry_adapted_projectors_for_orbit(
             )
             representative_resolution = resolution_status
             representative_candidates = candidates_list
+            representative_resolution_by_valley[valley] = resolution_status
+            representative_candidates_by_valley[valley] = candidates_list
+            representative_projector_difference_by_valley[valley] = max_projector_difference
             if chosen is None:
                 return _failure(orbit, reference_valley, n,
                                 f"ambiguous_inequivalent_candidates for "
                                 f"{reference_valley} -> {valley}: "
-                                f"candidates={result}")
+                                f"candidates={result}, "
+                                f"max_projector_difference={max_projector_difference:.4e}",
+                                representative_resolution=resolution_status,
+                                representative_candidates=candidates_list,
+                                representative_resolution_by_valley=representative_resolution_by_valley,
+                                representative_candidates_by_valley=representative_candidates_by_valley,
+                                representative_projector_difference_by_valley=representative_projector_difference_by_valley)
             rep_op_id = chosen
         else:
             rep_op_id = result
+            representative_resolution_by_valley[valley] = "unique"
+            representative_candidates_by_valley[valley] = [rep_op_id]
+            representative_projector_difference_by_valley[valley] = 0.0
         rep_ops[valley] = rep_op_id
         d_rep = np.asarray(representations[rep_op_id], dtype=np.complex128)
         u_a = d_rep @ top_vecs
@@ -188,6 +206,9 @@ def build_symmetry_adapted_projectors_for_orbit(
         seed_overlap_fail_tol=seed_overlap_fail_tol,
         representative_resolution=representative_resolution,
         representative_candidates=representative_candidates,
+        representative_resolution_by_valley=representative_resolution_by_valley,
+        representative_candidates_by_valley=representative_candidates_by_valley,
+        representative_projector_difference_by_valley=representative_projector_difference_by_valley,
     )
 
     return SymmetryAdaptedProjectors(
@@ -245,6 +266,9 @@ def compute_projector_quality_diagnostics(
     seed_overlap_fail_tol: float = 0.5,
     representative_resolution: str = "",
     representative_candidates: list[object] | None = None,
+    representative_resolution_by_valley: dict[str, str] | None = None,
+    representative_candidates_by_valley: dict[str, list[object]] | None = None,
+    representative_projector_difference_by_valley: dict[str, float] | None = None,
 ) -> ProjectorQualityDiagnostics:
     """Compute quality diagnostics for symmetry-adapted projectors."""
 
@@ -367,6 +391,15 @@ def compute_projector_quality_diagnostics(
         sewing_unitarity_error=sewing_err if sewing_err else None,
         representative_resolution=representative_resolution,
         representative_candidates=list(representative_candidates) if representative_candidates else [],
+        representative_resolution_by_valley=dict(representative_resolution_by_valley or {}),
+        representative_candidates_by_valley={
+            str(k): list(v)
+            for k, v in (representative_candidates_by_valley or {}).items()
+        },
+        representative_projector_difference_by_valley={
+            str(k): float(v)
+            for k, v in (representative_projector_difference_by_valley or {}).items()
+        },
         status=status,
         reason=reason,
     )
@@ -484,13 +517,13 @@ def _resolve_candidate_equivalence(
     top_vecs: np.ndarray,
     representations: dict[object, np.ndarray],
     tol: float = 1e-8,
-) -> tuple[str, object | None, list[object]]:
+) -> tuple[str, object | None, list[object], float]:
     """Resolve multiple representative operation candidates.
 
     For each candidate c: a0 -> a, constructs P_a^sym(c) = U(c) @ U(c)^dag
     where U(c) = D_c @ top_vecs.  Compares all pairs by Frobenius norm.
 
-    Returns (resolution_status, chosen_op_id_or_None, candidates_list).
+    Returns (resolution_status, chosen_op_id_or_None, candidates_list, max_diff).
     """
     candidate_projectors: list[np.ndarray] = []
     for op_id in candidates:
@@ -510,8 +543,8 @@ def _resolve_candidate_equivalence(
             max_diff = max(max_diff, diff)
 
     if max_diff <= tol:
-        return "equivalent_candidates", candidates[0], list(candidates)
-    return "ambiguous_inequivalent_candidates", None, list(candidates)
+        return "equivalent_candidates", candidates[0], list(candidates), max_diff
+    return "ambiguous_inequivalent_candidates", None, list(candidates), max_diff
 
 
 def _failure(
@@ -523,6 +556,11 @@ def _failure(
     rank_source: str = "failure",
     purification_gap: float | None = None,
     eigenvalues: np.ndarray | None = None,
+    representative_resolution: str = "",
+    representative_candidates: list[object] | None = None,
+    representative_resolution_by_valley: dict[str, str] | None = None,
+    representative_candidates_by_valley: dict[str, list[object]] | None = None,
+    representative_projector_difference_by_valley: dict[str, float] | None = None,
 ) -> SymmetryAdaptedProjectors:
     eig = eigenvalues if eigenvalues is not None else np.zeros(dim)
     return SymmetryAdaptedProjectors(
@@ -544,8 +582,17 @@ def _failure(
             projector_overlap_deviation=None,
             valley_sewing_matrices=None,
             sewing_unitarity_error=None,
-            representative_resolution="",
-            representative_candidates=[],
+            representative_resolution=representative_resolution,
+            representative_candidates=list(representative_candidates or []),
+            representative_resolution_by_valley=dict(representative_resolution_by_valley or {}),
+            representative_candidates_by_valley={
+                str(k): list(v)
+                for k, v in (representative_candidates_by_valley or {}).items()
+            },
+            representative_projector_difference_by_valley={
+                str(k): float(v)
+                for k, v in (representative_projector_difference_by_valley or {}).items()
+            },
             status="failed",
             reason=reason,
         ),

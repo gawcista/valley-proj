@@ -534,6 +534,9 @@ def test_equivalent_candidates_resolved_with_representative_resolution():
     assert result.diagnostics.status == "ok"
     assert result.diagnostics.representative_resolution == "equivalent_candidates"
     assert len(result.diagnostics.representative_candidates) == 2
+    assert result.diagnostics.representative_resolution_by_valley["VB"] == "equivalent_candidates"
+    assert result.diagnostics.representative_candidates_by_valley["VB"] == [1, 99]
+    assert result.diagnostics.representative_projector_difference_by_valley["VB"] < 1e-12
 
 
 def test_equivalent_candidates_preserves_inequivalent_failure():
@@ -560,6 +563,10 @@ def test_equivalent_candidates_preserves_inequivalent_failure():
 
     assert result.diagnostics.status == "failed"
     assert "inequivalent" in result.diagnostics.reason.lower()
+    assert result.diagnostics.representative_resolution == "ambiguous_inequivalent_candidates"
+    assert result.diagnostics.representative_candidates == [1, 99]
+    assert result.diagnostics.representative_resolution_by_valley["M2"] == "ambiguous_inequivalent_candidates"
+    assert result.diagnostics.representative_projector_difference_by_valley["M2"] > 0.1
 
 
 def test_representative_resolution_field_in_diagnostics():
@@ -580,3 +587,5 @@ def test_representative_resolution_field_in_diagnostics():
 
     assert result.diagnostics.status == "ok"
     assert result.diagnostics.representative_resolution == "unique"
+    assert result.diagnostics.representative_resolution_by_valley["VB"] == "unique"
+    assert result.diagnostics.representative_candidates_by_valley["VB"] == [1]
