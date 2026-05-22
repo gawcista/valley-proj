@@ -26,8 +26,8 @@ class ProjectorQualityDiagnostics:
     completeness_source: str
     projector_overlap_matrices: dict[tuple[str, str], np.ndarray] | None
     projector_overlap_deviation: dict[tuple[str, str], float] | None
-    valley_sewing_matrices: dict[tuple[str, object], np.ndarray] | None
-    sewing_unitarity_error: dict[tuple[str, object], float] | None
+    valley_sewing_matrices: dict[tuple[object, str, str], np.ndarray] | None
+    sewing_unitarity_error: dict[tuple[object, str, str], float] | None
     status: str
     reason: str
 
@@ -378,14 +378,14 @@ def _compute_valley_sewing(
     representations: dict[object, np.ndarray],
     valley_mappings: dict[object, dict[str, str]],
     orbit: list[str],
-) -> tuple[dict[tuple[str, object], np.ndarray], dict[tuple[str, object], float]]:
+) -> tuple[dict[tuple[object, str, str], np.ndarray], dict[tuple[object, str, str], float]]:
     """Valley sewing matrices B_{ba}(g) = U_b^dag D_g U_a for b = pi_g(a).
 
     These are r x r matrices where r = selected_rank.  For exact symmetry-
     adapted projectors, each B_{ba}(g) should be unitary.
     """
-    sewing: dict[tuple[str, object], np.ndarray] = {}
-    unitarity_err: dict[tuple[str, object], float] = {}
+    sewing: dict[tuple[object, str, str], np.ndarray] = {}
+    unitarity_err: dict[tuple[object, str, str], float] = {}
     orbit_set = set(orbit)
 
     for op_id, d_g in representations.items():
@@ -400,7 +400,7 @@ def _compute_valley_sewing(
             u_tgt = np.asarray(eigenvectors[str(tgt)], dtype=np.complex128)
             d_mat = np.asarray(d_g, dtype=np.complex128)
             b = u_tgt.conj().T @ d_mat @ u_src
-            key = (str(tgt), op_id)
+            key = (op_id, str(src), str(tgt))
             sewing[key] = b
             # Unitarity check: B^dag B should be identity
             r = b.shape[0]

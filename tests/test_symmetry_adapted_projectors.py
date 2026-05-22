@@ -145,14 +145,14 @@ def test_c3_valley_sewing_matrices_unitary():
     sewing = result.diagnostics.valley_sewing_matrices
     assert sewing is not None
     # B_{M2,M1}(C3): U_M2^dag D_C3 U_M1
-    b_m2_m1 = sewing.get(("M2", 1))
+    b_m2_m1 = sewing.get((1, "M1", "M2"))
     assert b_m2_m1 is not None
     assert b_m2_m1.shape == (1, 1)
     np.testing.assert_allclose(
         b_m2_m1.conj().T @ b_m2_m1, np.eye(1, dtype=np.complex128), atol=1e-12
     )
     # B_{M3,M1}(C3^2): U_M3^dag D_C3^2 U_M1
-    b_m3_m1 = sewing.get(("M3", 2))
+    b_m3_m1 = sewing.get((2, "M1", "M3"))
     assert b_m3_m1 is not None
 
     for key, err in result.diagnostics.sewing_unitarity_error.items():
@@ -239,7 +239,7 @@ def test_full_mstar_c3_sewing_unitary():
 
     sewing = result.diagnostics.valley_sewing_matrices
     # C3: M1->M2 (op 1)
-    b = sewing.get(("M2", 1))
+    b = sewing.get((1, "M1", "M2"))
     assert b is not None, "B_{M2,M1}(C3) should exist"
     np.testing.assert_allclose(
         b.conj().T @ b, np.eye(1, dtype=np.complex128), atol=1e-12
