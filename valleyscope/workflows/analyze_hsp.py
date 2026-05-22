@@ -8,6 +8,10 @@ from valleyscope.analysis.projector_symmetry import (
     apply_projector_symmetry_gate,
     build_projector_symmetry_report,
 )
+from valleyscope.analysis.symmetry_adapted_valley_report import (
+    build_symmetry_adapted_valley_report,
+    summarize_symmetry_adapted_valley_report,
+)
 from valleyscope.analysis.decision_tree import (
     _resolve_concentration_thresholds,
     derive_derived_score,
@@ -278,6 +282,16 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             projector_symmetry_report=projector_symmetry_report,
         )
 
+    # --- Experimental: symmetry-adapted valley report (default off) ---
+    symmetry_adapted_valley_report: dict[str, object] | None = None
+    if config.symmetry_adapted_valley.enabled and valley_matrices_by_kpoint and raw_representations_by_kpoint:
+        symmetry_adapted_valley_report = _build_symmetry_adapted_valley_report(
+            valley_matrices_by_kpoint=valley_matrices_by_kpoint,
+            raw_representations_by_kpoint=raw_representations_by_kpoint,
+            symmetry_payload=symmetry_payload,
+            config=config,
+        )
+
     if symmetry_payload["status"] == "ok":
         build_valley_preserving_subgroup_report(
             symmetry_payload=symmetry_payload,
@@ -306,6 +320,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         basis_transforms=basis_transforms,
         symmetry_eigenvalue_summary=symmetry_eigenvalue_summary,
         projector_symmetry_report=projector_symmetry_report,
+        symmetry_adapted_valley_report=symmetry_adapted_valley_report,
     )
     return outputs
 
@@ -785,3 +800,87 @@ def _build_symmetry_eigenvalue_summary(
         "irrep_label_matching": "deferred",
         "by_kpoint": by_kpoint,
     }
+
+
+def _build_symmetry_adapted_valley_report(
+    *,
+    valley_matrices_by_kpoint: dict[str, dict[str, np.ndarray]],
+    raw_representations_by_kpoint: dict[str, dict[object, dict[str, object]]],
+    symmetry_payload: dict[str, object],
+    config: object,
+) -> dict[str, object]:
+    """Experimental: build per-kpoint symmetry-adapted valley analysis.
+
+    Returns a ``by_kpoint`` dict keyed by kpoint label. Each entry is a
+    ``not_evaluated`` stub or contains orbit-level reports when inputs are
+    sufficient for the toy pipeline.
+    """
+    by_kpoint: dict[str, object] = {}
+    valley_names = symmetry_payload.get("valley_names", [])
+
+    for kpoint_name, valley_matrices in valley_matrices_by_kpoint.items():
+        raw_reps = raw_representations_by_kpoint.get(kpoint_name, {})
+        if not valley_names or not raw_reps or not valley_matrices:
+            by_kpoint[kpoint_name] = {
+                "status": "not_evaluated",
+                "reason": "missing seed projectors, D_raw, or valley_names",
+                "diagnostic_only": True,
+                "local_irrep_ready": False,
+                "experimental": True,
+                "workflow_integration_status": "not_integrated",
+                "trusted_irrep_label": False,
+                "orbits": [],
+            }
+            continue
+
+        # Build representations dict from raw_reps
+        d_g_dict: dict[object, np.ndarray] = {}
+        valley_mappings_dict: dict[object, dict[str, str]] = {}
+        for op_id, op_data in raw_reps.items():
+            if not isinstance(op_data, dict):
+                continue
+            d_raw = op_data.get("D_raw")
+            vm = op_data.get("sector_mapping", {})
+            if d_raw is not None and vm:
+                d_g_dict[op_id] = np.asarray(d_raw, dtype=np.complex128)
+                valley_mappings_dict[op_id] = {str(k): str(v) for k, v in vm.items()}
+
+        if not d_g_dict:
+            by_kpoint[kpoint_name] = {
+                "status": "not_evaluated",
+                "reason": "no valid D_raw with valley_mapping",
+                "diagnostic_only": True,
+                "local_irrep_ready": False,
+                "experimental": True,
+                "workflow_integration_status": "not_integrated",
+                "trusted_irrep_label": False,
+                "orbits": [],
+            }
+            continue
+
+        # Single orbit = all valley_names (toy simplification)
+        orbit = list(valley_names)
+        ref_valley = orbit[0] if orbit else ""
+
+        report = build_symmetry_adapted_valley_report(
+            seed_projectors=valley_matrices,
+            representations=d_g_dict,
+            valley_mappings=valley_mappings_dict,
+            orbit=orbit,
+            reference_valley=ref_valley,
+            rank=None,
+            rank_method="gap",
+        )
+        compact = summarize_symmetry_adapted_valley_report(report)
+        by_kpoint[kpoint_name] = {
+            "status": report.get("status", "not_evaluated"),
+            "reason": report.get("reason", ""),
+            "diagnostic_only": report.get("diagnostic_only", True),
+            "local_irrep_ready": report.get("local_irrep_ready", False),
+            "experimental": True,
+            "workflow_integration_status": "not_integrated",
+            "trusted_irrep_label": False,
+            "orbits": [compact],
+        }
+
+    return {"by_kpoint": by_kpoint}

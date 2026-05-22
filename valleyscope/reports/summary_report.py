@@ -22,6 +22,7 @@ def build_summary_payload(
     output_paths: dict[str, Path],
     symmetry_eigenvalue_summary: dict[str, Any] | None = None,
     projector_symmetry_report: dict[str, Any] | None = None,
+    symmetry_adapted_valley_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     eigen_rows = [] if symmetry_rows is None else symmetry_rows
     warnings = _collect_warnings(subspace_payload, symmetry_payload, eigen_rows)
@@ -78,6 +79,8 @@ def build_summary_payload(
         payload["symmetry_eigenvalue_summary"] = symmetry_eigenvalue_summary
     if projector_symmetry_report is not None:
         payload["projector_symmetry"] = _compact_projector_symmetry(projector_symmetry_report)
+    if symmetry_adapted_valley_report is not None:
+        payload["symmetry_adapted_valley_analysis"] = symmetry_adapted_valley_report
     return payload
 
 
@@ -853,6 +856,7 @@ def _output_file_label(name: str) -> str:
         "symmetry_eigenvalues_csv": "Symmetry eigenvalues",
         "diagnostics_h5": "Projector, qcut, and symmetry matrices",
         "projector_symmetry_report_json": "Projector symmetry report",
+        "symmetry_adapted_valley_analysis_json": "Symmetry-adapted valley analysis (experimental)",
     }
     return labels.get(name, name.replace("_", " ").title())
 

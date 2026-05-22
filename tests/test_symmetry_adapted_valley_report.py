@@ -306,3 +306,146 @@ def test_report_structure_consistent():
     chars = report["valley_preserving_character_diagnostics"]
     assert isinstance(chars, dict)
     assert "per_valley" in chars or "status" in chars
+
+
+# -----------------------------------------------------------------------
+# 9. Workflow integration: default off, flag=true
+# -----------------------------------------------------------------------
+
+def _write_h5_three_valley(path):
+    import h5py
+    with h5py.File(path, "w") as h5:
+        meta = h5.create_group("metadata")
+        lattice = meta.create_group("lattice")
+        lattice["direct_cart"] = np.eye(3)
+        lattice["reciprocal_cart"] = np.eye(3) * 10.0
+        meta["spinor"] = False
+        meta["source"] = "toy"
+        meta["vasp_band_index_base"] = 1
+        kp = h5.create_group("kpoints").create_group("0")
+        kp["name"] = "GammaM"
+        kp["frac"] = np.zeros(3)
+        kp["cart"] = np.zeros(3)
+        kp["g_vectors_frac"] = np.zeros((3, 3))
+        kp["g_vectors_cart"] = np.array([
+            [0.5, 0.0, 0.0],
+            [-0.25, 0.4330127018922193, 0.0],
+            [-0.25, -0.4330127018922193, 0.0],
+        ])
+        coeffs = np.zeros((3, 1, 3), dtype=np.complex128)
+        coeffs[0, 0, 0] = 1.0
+        coeffs[1, 0, 1] = 1.0
+        coeffs[2, 0, 2] = 1.0
+        kp["coefficients"] = coeffs
+        kp["energies_eV"] = np.array([0.1, 0.1001, 0.1002])
+        kp["band_indices_vasp"] = np.array([101, 102, 103])
+
+
+def _write_hex_poscar(path):
+    path.write_text(
+        "hex\n1.0\n"
+        "1.0 0.0 0.0\n-0.5 0.8660254 0.0\n0.0 0.0 4.0\n"
+        "X\n1\nDirect\n0.0 0.0 0.0\n", encoding="utf-8"
+    )
+
+
+def test_default_off_no_symmetry_adapted_valley_output(tmp_path):
+    """Default enabled=false: no symmetry_adapted_valley_analysis in outputs."""
+    import yaml
+    from valleyscope.workflows.analyze_hsp import analyze_hsp
+
+    h5_path = tmp_path / "wf.h5"; mono = tmp_path / "m.vasp"
+    struct = tmp_path / "POSCAR"; out_dir = tmp_path / "out"
+    config_path = tmp_path / "config.yaml"
+    _write_h5_three_valley(h5_path); _write_hex_poscar(struct); _write_hex_poscar(mono)
+
+    config = {
+        "input": {"wavefunction_h5": str(h5_path),
+                   "monolayer_poscars": {"top": str(mono), "bottom": str(mono)}},
+        "layer_transforms": {
+            "top": {"supercell_matrix": [[1,0,0],[0,1,0],[0,0,1]]},
+            "bottom": {"supercell_matrix": [[1,0,0],[0,1,0],[0,0,1]]},
+        },
+        "analysis": {"kpoints": ["GammaM"], "iband": [101,102,103],
+                      "degeneracy_tol_meV": 1.0},
+        "valley_centers": {"coordinate_mode": "cart", "centers": [
+            {"name":"M1c","cart":[0.5,0,0]},
+            {"name":"M2c","cart":[-0.25,0.4330127018922193,0]},
+            {"name":"M3c","cart":[-0.25,-0.4330127018922193,0]},
+        ]},
+        "valley_subspaces": [
+            {"name":"M1","centers":["M1c"]},
+            {"name":"M2","centers":["M2c"]},
+            {"name":"M3","centers":["M3c"]},
+        ],
+        "projection": {"qcut_mode":"absolute","qcut_Ainv":0.3,"overlap_policy":"warn_exclude",
+                        "thresholds":{"W_val_min":0.5}},
+        "symmetry": {"operations":{"structure_file":str(struct)},"tolerance":{"symprec":1e-3},
+                      "filters":{"rotation_order":"auto"}},
+        "output": {"directory": str(out_dir)},
+    }
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    outputs = analyze_hsp(config_path)
+
+    # Default: no symmetry_adapted_valley_analysis
+    assert "symmetry_adapted_valley_analysis_json" not in outputs
+    assert not (out_dir / "symmetry_adapted_valley_analysis.json").exists()
+
+    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    assert "symmetry_adapted_valley_analysis" not in summary
+
+
+def test_enabled_true_writes_symmetry_adapted_valley_analysis(tmp_path):
+    """enabled=true writes symmetry_adapted_valley_analysis.json."""
+    import yaml
+    from valleyscope.workflows.analyze_hsp import analyze_hsp
+
+    h5_path = tmp_path / "wf.h5"; mono = tmp_path / "m.vasp"
+    struct = tmp_path / "POSCAR"; out_dir = tmp_path / "out"
+    config_path = tmp_path / "config.yaml"
+    _write_h5_three_valley(h5_path); _write_hex_poscar(struct); _write_hex_poscar(mono)
+
+    config = {
+        "input": {"wavefunction_h5": str(h5_path),
+                   "monolayer_poscars": {"top": str(mono), "bottom": str(mono)}},
+        "layer_transforms": {
+            "top": {"supercell_matrix": [[1,0,0],[0,1,0],[0,0,1]]},
+            "bottom": {"supercell_matrix": [[1,0,0],[0,1,0],[0,0,1]]},
+        },
+        "analysis": {"kpoints": ["GammaM"], "iband": [101,102,103],
+                      "degeneracy_tol_meV": 1.0,
+                      "symmetry_adapted_valley": {"enabled": True}},
+        "valley_centers": {"coordinate_mode": "cart", "centers": [
+            {"name":"M1c","cart":[0.5,0,0]},
+            {"name":"M2c","cart":[-0.25,0.4330127018922193,0]},
+            {"name":"M3c","cart":[-0.25,-0.4330127018922193,0]},
+        ]},
+        "valley_subspaces": [
+            {"name":"M1","centers":["M1c"]},
+            {"name":"M2","centers":["M2c"]},
+            {"name":"M3","centers":["M3c"]},
+        ],
+        "projection": {"qcut_mode":"absolute","qcut_Ainv":0.3,"overlap_policy":"warn_exclude",
+                        "thresholds":{"W_val_min":0.5}},
+        "symmetry": {"operations":{"structure_file":str(struct)},"tolerance":{"symprec":1e-3},
+                      "filters":{"rotation_order":"auto"}},
+        "output": {"directory": str(out_dir)},
+    }
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    outputs = analyze_hsp(config_path)
+
+    assert "symmetry_adapted_valley_analysis_json" in outputs
+    report_path = outputs["symmetry_adapted_valley_analysis_json"]
+    assert report_path.exists()
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert "by_kpoint" in report
+    gm = report["by_kpoint"].get("GammaM", {})
+    assert "orbits" in gm
+    assert gm["experimental"] is True
+    assert gm["trusted_irrep_label"] is False
+
+    # Forbidden terms check
+    encoded = json.dumps(report)
+    for forbidden in ["covariance", "equivariant", "stabilizer", "valley_little_group", "p_cov"]:
+        assert forbidden not in encoded.lower(), f"forbidden: {forbidden}"
