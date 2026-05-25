@@ -159,6 +159,29 @@ def build_symmetry_adapted_valley_report(
             str(k): float(v)
             for k, v in proj_diag.representative_projector_difference_by_valley.items()
         },
+        "representative_selection_policy_by_valley": dict(
+            proj_diag.representative_selection_policy_by_valley
+        ),
+        "selected_representative_by_valley": dict(
+            proj_diag.selected_representative_by_valley
+        ),
+        "representative_auto_selected_by_valley": {
+            str(k): bool(v)
+            for k, v in proj_diag.representative_auto_selected_by_valley.items()
+        },
+        "representative_candidate_projector_differences_by_valley": {
+            str(k): [
+                {
+                    "candidate_a": item.get("candidate_a"),
+                    "candidate_b": item.get("candidate_b"),
+                    "projector_difference": float(item.get("projector_difference", 0.0)),
+                }
+                for item in values
+            ]
+            for k, values in (
+                proj_diag.representative_candidate_projector_differences_by_valley.items()
+            )
+        },
     }
 
     rep_summary_full = summarize_symmetry_adapted_representations(rep_diag)
@@ -264,6 +287,15 @@ def _failed_report(
             "completeness_source": "not_evaluated",
             "max_projector_symmetry_error": None,
             "reason": reason,
+            "representative_resolution": "",
+            "representative_candidates": [],
+            "representative_resolution_by_valley": {},
+            "representative_candidates_by_valley": {},
+            "representative_projector_difference_by_valley": {},
+            "representative_selection_policy_by_valley": {},
+            "selected_representative_by_valley": {},
+            "representative_auto_selected_by_valley": {},
+            "representative_candidate_projector_differences_by_valley": {},
         },
         "valley_preserving_representations": {
             "status": "diagnostic_only",

@@ -154,6 +154,46 @@ def test_projector_warning_propagates_without_marking_diagnostic_only():
     assert "projector_warning" in report["reason"]
 
 
+def test_ambiguous_representatives_expose_candidate_wise_summary():
+    p_m1 = np.diag([1.0, 0.0, 0.0]).astype(np.complex128)
+    p_m2 = np.diag([0.0, 1.0, 0.0]).astype(np.complex128)
+    p_m3 = np.diag([0.0, 0.0, 1.0]).astype(np.complex128)
+    d_e = np.eye(3, dtype=np.complex128)
+    d_c3 = np.array([[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.complex128)
+    d_c3sq = d_c3 @ d_c3
+    d_diff = np.array([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]], dtype=np.complex128)
+
+    report = build_symmetry_adapted_valley_report(
+        seed_projectors={"M1": p_m1, "M2": p_m2, "M3": p_m3},
+        representations={0: d_e, 1: d_c3, 2: d_c3sq, 5: d_diff},
+        valley_mappings={
+            0: {"M1": "M1", "M2": "M2", "M3": "M3"},
+            1: {"M1": "M2", "M2": "M3", "M3": "M1"},
+            2: {"M1": "M3", "M2": "M1", "M3": "M2"},
+            5: {"M1": "M2", "M2": "M1", "M3": "M3"},
+        },
+        orbit=["M1", "M2", "M3"],
+        reference_valley="M1",
+        rank=1,
+    )
+    summary = summarize_symmetry_adapted_valley_report(report)
+    projectors = summary["symmetry_adapted_projectors"]
+
+    assert summary["diagnostic_only"] is True
+    assert summary["local_irrep_ready"] is False
+    assert projectors["representative_resolution_by_valley"]["M2"] == (
+        "ambiguous_inequivalent_candidates"
+    )
+    assert projectors["representative_selection_policy_by_valley"]["M2"] == "none"
+    assert projectors["selected_representative_by_valley"]["M2"] is None
+    assert projectors["representative_auto_selected_by_valley"]["M2"] is False
+    pairwise = projectors["representative_candidate_projector_differences_by_valley"]["M2"]
+    assert pairwise[0]["candidate_a"] == 1
+    assert pairwise[0]["candidate_b"] == 5
+    assert pairwise[0]["projector_difference"] > 0.1
+    json.dumps(summary)
+
+
 # -----------------------------------------------------------------------
 # 4. Failure: rank ambiguity
 # -----------------------------------------------------------------------

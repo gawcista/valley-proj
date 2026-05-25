@@ -537,6 +537,13 @@ def test_equivalent_candidates_resolved_with_representative_resolution():
     assert result.diagnostics.representative_resolution_by_valley["VB"] == "equivalent_candidates"
     assert result.diagnostics.representative_candidates_by_valley["VB"] == [1, 99]
     assert result.diagnostics.representative_projector_difference_by_valley["VB"] < 1e-12
+    assert result.diagnostics.representative_selection_policy_by_valley["VB"] == "equivalent_candidates"
+    assert result.diagnostics.selected_representative_by_valley["VB"] == 1
+    assert result.diagnostics.representative_auto_selected_by_valley["VB"] is False
+    pairwise = result.diagnostics.representative_candidate_projector_differences_by_valley["VB"]
+    assert pairwise == [
+        {"candidate_a": 1, "candidate_b": 99, "projector_difference": pytest.approx(0.0)}
+    ]
 
 
 def test_equivalent_candidates_preserves_inequivalent_failure():
@@ -567,6 +574,13 @@ def test_equivalent_candidates_preserves_inequivalent_failure():
     assert result.diagnostics.representative_candidates == [1, 99]
     assert result.diagnostics.representative_resolution_by_valley["M2"] == "ambiguous_inequivalent_candidates"
     assert result.diagnostics.representative_projector_difference_by_valley["M2"] > 0.1
+    assert result.diagnostics.representative_selection_policy_by_valley["M2"] == "none"
+    assert result.diagnostics.selected_representative_by_valley["M2"] is None
+    assert result.diagnostics.representative_auto_selected_by_valley["M2"] is False
+    pairwise = result.diagnostics.representative_candidate_projector_differences_by_valley["M2"]
+    assert pairwise[0]["candidate_a"] == 1
+    assert pairwise[0]["candidate_b"] == 99
+    assert pairwise[0]["projector_difference"] > 0.1
 
 
 def test_representative_resolution_field_in_diagnostics():
@@ -589,3 +603,7 @@ def test_representative_resolution_field_in_diagnostics():
     assert result.diagnostics.representative_resolution == "unique"
     assert result.diagnostics.representative_resolution_by_valley["VB"] == "unique"
     assert result.diagnostics.representative_candidates_by_valley["VB"] == [1]
+    assert result.diagnostics.representative_selection_policy_by_valley["VB"] == "unique"
+    assert result.diagnostics.selected_representative_by_valley["VB"] == 1
+    assert result.diagnostics.representative_auto_selected_by_valley["VB"] is False
+    assert result.diagnostics.representative_candidate_projector_differences_by_valley["VB"] == []
