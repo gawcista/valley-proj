@@ -550,3 +550,47 @@ def test_partition_valley_orbits_separates_disconnected_components():
     )
 
     assert orbits == [["K", "Kp"], ["M1", "M2"]]
+
+
+def test_add_identity_representation_if_missing_uses_detected_identity():
+    from valleyscope.workflows.analyze_hsp import _add_identity_representation_if_missing
+
+    d_g_dict = {5: np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128)}
+    valley_mappings = {5: {"K": "Kp", "Kp": "K"}}
+    added = _add_identity_representation_if_missing(
+        d_g_dict=d_g_dict,
+        valley_mappings_dict=valley_mappings,
+        valley_names=["K", "Kp"],
+        symmetry_payload={
+            "detected_operations": [
+                {
+                    "operation_id": 0,
+                    "order": 1,
+                    "sector_mapping": {"K": "K", "Kp": "Kp"},
+                }
+            ]
+        },
+        fallback_dim=2,
+    )
+
+    assert added is True
+    assert 0 in d_g_dict
+    np.testing.assert_allclose(d_g_dict[0], np.eye(2, dtype=np.complex128))
+    assert valley_mappings[0] == {"K": "K", "Kp": "Kp"}
+
+
+def test_add_identity_representation_if_missing_does_not_replace_existing_identity():
+    from valleyscope.workflows.analyze_hsp import _add_identity_representation_if_missing
+
+    d_g_dict = {0: np.eye(2, dtype=np.complex128)}
+    valley_mappings = {0: {"K": "K", "Kp": "Kp"}}
+    added = _add_identity_representation_if_missing(
+        d_g_dict=d_g_dict,
+        valley_mappings_dict=valley_mappings,
+        valley_names=["K", "Kp"],
+        symmetry_payload={"detected_operations": []},
+        fallback_dim=2,
+    )
+
+    assert added is False
+    assert sorted(d_g_dict) == [0]

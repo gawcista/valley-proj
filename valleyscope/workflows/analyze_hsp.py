@@ -846,6 +846,17 @@ def _build_symmetry_adapted_valley_report(
             if d_raw is not None and vm:
                 d_g_dict[op_id] = np.asarray(d_raw, dtype=np.complex128)
                 valley_mappings_dict[op_id] = {str(k): str(v) for k, v in vm.items()}
+        fallback_dim = None
+        if valley_matrices:
+            first_matrix = next(iter(valley_matrices.values()))
+            fallback_dim = int(np.asarray(first_matrix).shape[0])
+        _add_identity_representation_if_missing(
+            d_g_dict=d_g_dict,
+            valley_mappings_dict=valley_mappings_dict,
+            valley_names=valley_names,
+            symmetry_payload=symmetry_payload,
+            fallback_dim=fallback_dim,
+        )
 
         if not d_g_dict:
             by_kpoint[kpoint_name] = _not_evaluated_symmetry_adapted_kpoint(
@@ -975,3 +986,58 @@ def _partition_valley_orbits(
         ordered = [str(v) for v in valley_names if str(v) in set(component)]
         orbits.append(ordered)
     return orbits
+
+
+def _add_identity_representation_if_missing(
+    *,
+    d_g_dict: dict[object, np.ndarray],
+    valley_mappings_dict: dict[object, dict[str, str]],
+    valley_names: list[str],
+    symmetry_payload: dict[str, object],
+    fallback_dim: int | None,
+) -> bool:
+    """Add identity D_g for experimental projector analysis when D_raw omits it.
+
+    `build_raw_representations_for_kpoint` is tuned for rotation-eigenvalue
+    diagnostics and may skip order-1 operations.  Symmetry-adapted projector
+    construction still needs the identity element because every
+    valley-preserving subgroup contains it.
+    """
+    if not valley_names or fallback_dim is None:
+        return False
+    identity_mapping = {str(valley): str(valley) for valley in valley_names}
+    for op_id, mapping in valley_mappings_dict.items():
+        if all(str(mapping.get(valley)) == str(valley) for valley in valley_names):
+            d_g = np.asarray(d_g_dict.get(op_id))
+            if d_g.shape == (fallback_dim, fallback_dim) and np.allclose(
+                d_g, np.eye(fallback_dim, dtype=np.complex128), atol=1e-10,
+            ):
+                return False
+
+    op_id = _detected_identity_operation_id(symmetry_payload, valley_names)
+    if op_id in d_g_dict:
+        return False
+    d_g_dict[op_id] = np.eye(fallback_dim, dtype=np.complex128)
+    valley_mappings_dict[op_id] = identity_mapping
+    return True
+
+
+def _detected_identity_operation_id(
+    symmetry_payload: dict[str, object],
+    valley_names: list[str],
+) -> object:
+    identity_mapping = {str(valley): str(valley) for valley in valley_names}
+    for operation in symmetry_payload.get("detected_operations", []):
+        if not isinstance(operation, dict):
+            continue
+        try:
+            order = int(operation.get("order", -1))
+        except (TypeError, ValueError):
+            continue
+        mapping = {
+            str(k): str(v)
+            for k, v in dict(operation.get("sector_mapping", {})).items()
+        }
+        if order == 1 and all(mapping.get(valley) == target for valley, target in identity_mapping.items()):
+            return operation.get("operation_id", "__identity__")
+    return "__identity__"
