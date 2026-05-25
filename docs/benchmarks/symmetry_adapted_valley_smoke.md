@@ -19,7 +19,10 @@ experimental report more audit-ready:
   omits the order-1 operation, because every valley-preserving subgroup contains
   identity;
 - downstream representation / character diagnostics are skipped when projector
-  construction has already failed.
+  construction has already failed;
+- `irrep_matching_input_ready`, `irrep_matching_input_status`, and
+  `irrep_matching_input_reason` define the gate that future table matching must
+  use.
 
 No automatic representative selection policy is implemented.
 
@@ -205,30 +208,40 @@ trusted valley irrep bases.
 
 ## 5. Readiness for Irrep Matching
 
-The project is not ready to start production irrep matching yet, but it is close
-to the design point where matching can be implemented behind a strict gate.
+The experimental workflow is now ready for the next implementation step:
+table-based valley-preserving irrep matching can be added behind the strict
+`irrep_matching_input_ready` gate.
 
-Required before irrep matching:
+The real smoke cases remain blocked:
+
+| Material | Kpoint/orbit | `irrep_matching_input_status` | Reason |
+|---|---|---|---|
+| tMoTe2 | all K/K' orbits | blocked | projector construction failed |
+| tZrSe2 | GammaM M-star | blocked | projector construction failed |
+| tZrSe2 | KM M-star | blocked | projector construction failed |
+| tZrSe2 | MM M1/M2 | blocked | projector construction failed |
+| tZrSe2 | MM M3 | blocked | local_irrep_ready=false or diagnostic_only=true |
+
+Matching implementation requirements:
 
 1. Keep `ambiguous_inequivalent_candidates` diagnostic-only with no
    auto-selection.
 2. Keep projector failures as hard gates: downstream representations and
    characters are not evaluated from zero or invalid bases.
-3. Decide whether real-data representation unitarity tolerances for the
-   symmetry-adapted experimental path should stay strict (`1e-8`) or use a
-   documented real-data tolerance. Do not silently loosen this.
-4. Define the table-matching input contract:
-   - only use `local_irrep_ready=true`;
-   - require projector status `ok`;
-   - require representation and sewing unitarity within reviewed tolerance;
-   - require spinor convention verified for spinful labels;
-   - record `irrep_matching_status` separately from projector construction.
+3. Only match orbit reports with `irrep_matching_input_ready=true`.
+4. Require projector status `ok`.
+5. Require representation and sewing unitarity within reviewed tolerance.
+6. Require spinor convention verified for spinful labels.
+7. Record `irrep_matching_status` separately from projector construction.
+
+Do not loosen real-data representation tolerances silently to make the smoke
+cases pass.
 
 ## 6. pytest Result
 
 ```bash
 pytest -q
-# 292 passed
+# 293 passed
 ```
 
 ## 7. Public Terminology Check
