@@ -2,6 +2,8 @@ from io import StringIO
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 import h5py
 import numpy as np
 import yaml
@@ -254,26 +256,7 @@ def test_ecut_adjust_undergenerate_positive_delta(tmp_path):
 # F. ecut_adjust_tol insufficient → ValueError
 # -----------------------------------------------------------------------
 
-def test_ecut_adjust_tol_insufficient_raises_error(tmp_path):
-    wavecar = tmp_path / "WAVECAR"
-    output_h5 = tmp_path / "wf.h5"
-    config_path = tmp_path / "extract.yaml"
-
-    write_synthetic_wavecar(wavecar, header_nplane=5, encut=0.5,
-                            coeffs=np.array([1.0]*5, dtype=np.complex64))
-    config = {
-        "input": {"wavecar": str(wavecar)},
-        "extract": {
-            "kpoints": [{"name": "GammaM", "vasp_index": 1}],
-            "bands_vasp": [1],
-            "ecut_adjust_tol": 1e-9,
-        },
-        "output": {"wavefunction_h5": str(output_h5)},
-    }
-    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
-
-    with np.testing.assert_raises(ValueError):
-        extract_wavecar_to_h5(config_path)
+# (merged into I: test_ecut_adjust_tol_insufficient_raises_error)
 
 
 # -----------------------------------------------------------------------
@@ -318,44 +301,55 @@ def test_hdf5_metadata_records_ecut_adjustment_fields(tmp_path):
 # H. stdout reports delta_Ecut and final G count when adjustment occurs
 # -----------------------------------------------------------------------
 
-def test_stdout_reports_ecut_adjustment(tmp_path, capsys):
+@pytest.mark.parametrize("header_nplane, encut_adjust_tol, present, absent", [
+    pytest.param(1, 1.0, ["original ENCUT:", "adjusted ENCUT:", "delta_Ecut:", "final G count:"], None, id="reports_adjustment"),
+    pytest.param(7, None, None, ["ENCUT adjustment"], id="no_adjustment_for_exact_match"),
+])
+def test_stdout_ecut_adjustment(tmp_path, capsys, header_nplane, encut_adjust_tol, present, absent):
     wavecar = tmp_path / "WAVECAR"
     output_h5 = tmp_path / "wf.h5"
     config_path = tmp_path / "extract.yaml"
 
-    write_synthetic_wavecar(wavecar, header_nplane=1, encut=0.5,
-                            coeffs=np.array([1.0], dtype=np.complex64))
+    write_synthetic_wavecar(wavecar, header_nplane=header_nplane, encut=0.5,
+                            coeffs=np.array([1.0]*header_nplane, dtype=np.complex64))
     config = {
         "input": {"wavecar": str(wavecar)},
         "extract": {
             "kpoints": [{"name": "GammaM", "vasp_index": 1}],
             "bands_vasp": [1],
-            "ecut_adjust_tol": 1.0,
         },
         "output": {"wavefunction_h5": str(output_h5)},
     }
+    if encut_adjust_tol is not None:
+        config["extract"]["ecut_adjust_tol"] = encut_adjust_tol
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
     extract_wavecar_to_h5(config_path)
 
     captured = capsys.readouterr().out
-    assert "original ENCUT:" in captured
-    assert "adjusted ENCUT:" in captured
-    assert "delta_Ecut:" in captured
-    assert "final G count:" in captured
+    if present:
+        for substring in present:
+            assert substring in captured
+    if absent:
+        for substring in absent:
+            assert substring not in captured
 
 
 # -----------------------------------------------------------------------
-# I. Strict mode (tol=0.0) raises ValueError on mismatch
+# I. Strict mode / insufficient tol raises ValueError
 # -----------------------------------------------------------------------
 
-def test_default_tol_zero_raises_on_mismatch(tmp_path):
+@pytest.mark.parametrize("header_nplane, encut_adjust_tol", [
+    pytest.param(5, 1e-9, id="insufficient_tol"),
+    pytest.param(5, None, id="default_tol_zero"),
+])
+def test_ecut_adjust_tol_insufficient_raises_error(tmp_path, header_nplane, encut_adjust_tol):
     wavecar = tmp_path / "WAVECAR"
     output_h5 = tmp_path / "wf.h5"
     config_path = tmp_path / "extract.yaml"
 
-    write_synthetic_wavecar(wavecar, header_nplane=5, encut=0.5,
-                            coeffs=np.array([1.0]*5, dtype=np.complex64))
+    write_synthetic_wavecar(wavecar, header_nplane=header_nplane, encut=0.5,
+                            coeffs=np.array([1.0]*header_nplane, dtype=np.complex64))
     config = {
         "input": {"wavecar": str(wavecar)},
         "extract": {
@@ -364,6 +358,8 @@ def test_default_tol_zero_raises_on_mismatch(tmp_path):
         },
         "output": {"wavefunction_h5": str(output_h5)},
     }
+    if encut_adjust_tol is not None:
+        config["extract"]["ecut_adjust_tol"] = encut_adjust_tol
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
     with np.testing.assert_raises(ValueError):
@@ -402,24 +398,4 @@ def test_spinor_target_candidates_exclude_generated_count_and_choose_half_count(
 # K. No adjustment stdout for exact match
 # -----------------------------------------------------------------------
 
-def test_no_stdout_adjustment_for_exact_match(tmp_path, capsys):
-    wavecar = tmp_path / "WAVECAR"
-    output_h5 = tmp_path / "wf.h5"
-    config_path = tmp_path / "extract.yaml"
-
-    write_synthetic_wavecar(wavecar, header_nplane=7, encut=0.5,
-                            coeffs=np.array([1.0]*7, dtype=np.complex64))
-    config = {
-        "input": {"wavecar": str(wavecar)},
-        "extract": {
-            "kpoints": [{"name": "GammaM", "vasp_index": 1}],
-            "bands_vasp": [1],
-        },
-        "output": {"wavefunction_h5": str(output_h5)},
-    }
-    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
-
-    extract_wavecar_to_h5(config_path)
-
-    captured = capsys.readouterr().out
-    assert "ENCUT adjustment" not in captured
+# (merged into H: test_stdout_ecut_adjustment)

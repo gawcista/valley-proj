@@ -99,7 +99,12 @@ def test_c3_three_valley_symmetry_adapted_exact():
     np.testing.assert_allclose(result.projectors["M3"], expected_m3, atol=1e-12)
 
 
-def test_c3_symmetry_consistency_condition_holds():
+@pytest.mark.parametrize("check", [
+    "consistency",
+    "orthogonality_and_idempotency",
+    "sewing_unitarity",
+])
+def test_c3_three_valley_checks(check):
     seeds, reps, mappings, orbit = _c3_three_valley_setup()
 
     result = build_symmetry_adapted_projectors_for_orbit(
@@ -107,56 +112,34 @@ def test_c3_symmetry_consistency_condition_holds():
         valley_mappings=mappings, orbit=orbit, reference_valley="M1", rank=1,
     )
 
-    for op_id, d_g in reps.items():
-        mapping = mappings[op_id]
-        for src in orbit:
-            tgt = mapping[src]
-            transformed = d_g @ result.projectors[src] @ d_g.conj().T
-            np.testing.assert_allclose(transformed, result.projectors[tgt], atol=1e-12)
-
-    for err in result.diagnostics.projector_symmetry_error.values():
-        assert err < 1e-12
-
-
-def test_c3_orthogonality_and_idempotency():
-    seeds, reps, mappings, orbit = _c3_three_valley_setup()
-
-    result = build_symmetry_adapted_projectors_for_orbit(
-        seed_projectors=seeds, representations=reps,
-        valley_mappings=mappings, orbit=orbit, reference_valley="M1", rank=1,
-    )
-
-    assert result.diagnostics.orthogonality_error < 1e-12
-    assert result.diagnostics.total_projector_idempotency_error < 1e-12
-    total = sum(result.projectors.values())
-    np.testing.assert_allclose(total @ total, total, atol=1e-12)
-    np.testing.assert_allclose(total, np.eye(3, dtype=np.complex128), atol=1e-12)
-
-
-def test_c3_valley_sewing_matrices_unitary():
-    """B_{ba}(g) = U_b^dag D_g U_a should be unitary in the exact case."""
-    seeds, reps, mappings, orbit = _c3_three_valley_setup()
-
-    result = build_symmetry_adapted_projectors_for_orbit(
-        seed_projectors=seeds, representations=reps,
-        valley_mappings=mappings, orbit=orbit, reference_valley="M1", rank=1,
-    )
-
-    sewing = result.diagnostics.valley_sewing_matrices
-    assert sewing is not None
-    # B_{M2,M1}(C3): U_M2^dag D_C3 U_M1
-    b_m2_m1 = sewing.get((1, "M1", "M2"))
-    assert b_m2_m1 is not None
-    assert b_m2_m1.shape == (1, 1)
-    np.testing.assert_allclose(
-        b_m2_m1.conj().T @ b_m2_m1, np.eye(1, dtype=np.complex128), atol=1e-12
-    )
-    # B_{M3,M1}(C3^2): U_M3^dag D_C3^2 U_M1
-    b_m3_m1 = sewing.get((2, "M1", "M3"))
-    assert b_m3_m1 is not None
-
-    for key, err in result.diagnostics.sewing_unitarity_error.items():
-        assert err < 1e-12, f"sewing unitarity error for {key}: {err}"
+    if check == "consistency":
+        for op_id, d_g in reps.items():
+            mapping = mappings[op_id]
+            for src in orbit:
+                tgt = mapping[src]
+                transformed = d_g @ result.projectors[src] @ d_g.conj().T
+                np.testing.assert_allclose(transformed, result.projectors[tgt], atol=1e-12)
+        for err in result.diagnostics.projector_symmetry_error.values():
+            assert err < 1e-12
+    elif check == "orthogonality_and_idempotency":
+        assert result.diagnostics.orthogonality_error < 1e-12
+        assert result.diagnostics.total_projector_idempotency_error < 1e-12
+        total = sum(result.projectors.values())
+        np.testing.assert_allclose(total @ total, total, atol=1e-12)
+        np.testing.assert_allclose(total, np.eye(3, dtype=np.complex128), atol=1e-12)
+    elif check == "sewing_unitarity":
+        sewing = result.diagnostics.valley_sewing_matrices
+        assert sewing is not None
+        b_m2_m1 = sewing.get((1, "M1", "M2"))
+        assert b_m2_m1 is not None
+        assert b_m2_m1.shape == (1, 1)
+        np.testing.assert_allclose(
+            b_m2_m1.conj().T @ b_m2_m1, np.eye(1, dtype=np.complex128), atol=1e-12
+        )
+        b_m3_m1 = sewing.get((2, "M1", "M3"))
+        assert b_m3_m1 is not None
+        for key, err in result.diagnostics.sewing_unitarity_error.items():
+            assert err < 1e-12, f"sewing unitarity error for {key}: {err}"
 
 
 # -----------------------------------------------------------------------

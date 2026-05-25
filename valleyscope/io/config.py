@@ -101,6 +101,14 @@ class RotationConfig:
 @dataclass(frozen=True)
 class SymmetryAdaptedValleyConfig:
     enabled: bool = False
+    seed_overlap_warn_tol: float = 0.8
+    seed_overlap_fail_tol: float = 0.5
+    projector_symmetry_warn_tol: float = 1e-2
+    projector_symmetry_fail_tol: float = 1e-1
+    representation_unitarity_warn_tol: float = 1e-3
+    representation_unitarity_fail_tol: float = 1e-2
+    ebr_seed_overlap_min: float = 0.8
+    ebr_unitarity_max: float = 1e-3
 
 
 @dataclass(frozen=True)
@@ -477,6 +485,14 @@ def _parse_symmetry_adapted_valley_config(raw: dict[str, Any]) -> SymmetryAdapte
         return SymmetryAdaptedValleyConfig()
     return SymmetryAdaptedValleyConfig(
         enabled=bool(raw.get("enabled", False)),
+        seed_overlap_warn_tol=float(raw.get("seed_overlap_warn_tol", 0.8)),
+        seed_overlap_fail_tol=float(raw.get("seed_overlap_fail_tol", 0.5)),
+        projector_symmetry_warn_tol=float(raw.get("projector_symmetry_warn_tol", 1e-2)),
+        projector_symmetry_fail_tol=float(raw.get("projector_symmetry_fail_tol", 1e-1)),
+        representation_unitarity_warn_tol=float(raw.get("representation_unitarity_warn_tol", 1e-3)),
+        representation_unitarity_fail_tol=float(raw.get("representation_unitarity_fail_tol", 1e-2)),
+        ebr_seed_overlap_min=float(raw.get("ebr_seed_overlap_min", 0.8)),
+        ebr_unitarity_max=float(raw.get("ebr_unitarity_max", 1e-3)),
     )
 
 

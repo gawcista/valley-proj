@@ -205,6 +205,19 @@ def build_symmetry_adapted_valley_report(
         "valley_preserving_representations": rep_summary,
         "valley_sewing_matrices": sewing_summary,
         "valley_preserving_character_diagnostics": char_summary,
+        "subspace_group": _build_subspace_group(
+            rep_diag=rep_diag,
+            char_diag=char_diag,
+            proj_status=proj_diag.status,
+            spinor_convention_verified=spinor_convention_verified,
+        ),
+        "ebr_mapping_input": _build_ebr_mapping_input(
+            local_irrep_ready=local_irrep_ready,
+            diagnostic_only=diagnostic_only,
+            spinor_convention_verified=spinor_convention_verified,
+            proj_diag=proj_diag,
+            char_diag=char_diag,
+        ),
     }
 
 
@@ -236,6 +249,8 @@ def summarize_symmetry_adapted_valley_report(
         "valley_sewing_matrices": report.get("valley_sewing_matrices"),
         "valley_preserving_character_diagnostics":
             report.get("valley_preserving_character_diagnostics"),
+        "subspace_group": report.get("subspace_group"),
+        "ebr_mapping_input": report.get("ebr_mapping_input"),
     }
 
 
@@ -435,4 +450,114 @@ def _failed_report(
             "max_eigenvalue_modulus_deviation": None,
             "per_valley": {},
         },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Subspace group / EBR readiness helpers
+# ---------------------------------------------------------------------------
+
+def _build_subspace_group(
+    *,
+    rep_diag: dict[str, object],
+    char_diag: dict[str, object],
+    proj_status: str,
+    spinor_convention_verified: bool,
+) -> dict[str, object]:
+    vp_ops = rep_diag.get("valley_preserving_operations", {})
+    vc_ops = rep_diag.get("valley_changing_operations", {})
+    # Flatten across valleys for the orbit-level report
+    all_vp = sorted(set(op for ops in vp_ops.values() if isinstance(ops, list) for op in ops))
+    all_vc = sorted(set(op for ops in vc_ops.values() if isinstance(ops, list) for op in ops))
+
+    # Effective point group: max order among VP ops
+    vp_orders = set()
+    vp_reps = rep_diag.get("valley_preserving_representations", {}).get("representations", {})
+    for valley_reps in vp_reps.values():
+        if isinstance(valley_reps, dict):
+            vp_orders.update(int(r.shape[0]) if hasattr(r, 'shape') else 0 for r in valley_reps.values())
+    effective_order = max(vp_orders) if vp_orders else 0
+    epg = f"C{effective_order}" if effective_order > 1 else "C1"
+
+    # Subspace group candidate
+    if effective_order == 2:
+        candidate = "C2_like"
+    elif effective_order >= 3:
+        candidate = f"C{effective_order}_like"
+    else:
+        candidate = None
+
+    # Readiness: blocked if projector failed or char not ready
+    blocked = proj_status == "failed" or char_diag.get("diagnostic_only", True)
+    if not spinor_convention_verified:
+        blocked = True
+    ready_for_ebr = not blocked and candidate is not None
+
+    reason_parts = []
+    if proj_status == "failed":
+        reason_parts.append("projector_construction_failed")
+    if char_diag.get("diagnostic_only", True):
+        reason_parts.append("character_diagnostics_not_ready")
+    if not spinor_convention_verified:
+        reason_parts.append("spinor_convention_unverified")
+    if candidate is None:
+        reason_parts.append("no_subgroup_candidate")
+    reason = "; ".join(reason_parts) if reason_parts else "ready"
+
+    return {
+        "status": "candidate" if ready_for_ebr else "blocked",
+        "hsp_little_group_operation_ids": all_vp + all_vc,
+        "valley_preserving_operation_ids": all_vp,
+        "valley_changing_operation_ids": all_vc,
+        "effective_point_group": epg,
+        "subspace_group_candidate": candidate,
+        "spinor_convention_verified": spinor_convention_verified,
+        "ready_for_ebr_mapping": ready_for_ebr,
+        "reason": reason,
+    }
+
+
+def _build_ebr_mapping_input(
+    *,
+    local_irrep_ready: bool,
+    diagnostic_only: bool,
+    spinor_convention_verified: bool,
+    proj_diag,
+    char_diag: dict[str, object],
+) -> dict[str, object]:
+    blocked_by: list[str] = []
+    ready = True
+
+    if not local_irrep_ready:
+        ready = False
+        blocked_by.append("local_irrep_not_ready")
+    if diagnostic_only:
+        ready = False
+        blocked_by.append("diagnostic_only")
+    if not spinor_convention_verified:
+        ready = False
+        blocked_by.append("spinor_convention_unverified")
+    min_overlap = min(proj_diag.seed_overlap.values()) if proj_diag.seed_overlap else 0.0
+    if min_overlap < 0.8:
+        ready = False
+        blocked_by.append(f"low_seed_overlap_min={min_overlap:.3f}")
+    max_unitarity = char_diag.get("max_valley_preserving_unitarity_error", 0.0) or 0.0
+    if max_unitarity > 1e-3:
+        ready = False
+        blocked_by.append(f"representation_unitarity={max_unitarity:.1e}")
+    chars_available = bool(
+        char_diag.get("per_valley") and not char_diag.get("diagnostic_only", True)
+    )
+
+    return {
+        "ready": ready,
+        "blocked_by": blocked_by,
+        "required_tables": ["unknown — character table matching not yet implemented"],
+        "subspace_group_candidate": None,
+        "valley_preserving_characters_available": chars_available,
+        "spinor_convention_verified": spinor_convention_verified,
+        "notes": (
+            "EBR mapping requires character table matching for valley-preserving "
+            "subgroup irreps.  Not implemented in current V1.1 experimental pipeline."
+        ),
     }

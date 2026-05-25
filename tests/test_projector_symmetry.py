@@ -1,5 +1,6 @@
 import json
 import numpy as np
+import pytest
 import yaml
 import h5py
 
@@ -33,21 +34,25 @@ def _raw_rep_entry(d_raw, sector_mapping, kind="C2", order=2):
 # A. Exact-symmetry_consistent direct matrix checks
 # -----------------------------------------------------------------------
 
-def test_exact_symmetry_consistent_direct_swap():
-    d_g = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128)
-    p_a = np.array([[1.0, 0.0], [0.0, 0.0]], dtype=np.complex128)
-    p_b = np.array([[0.0, 0.0], [0.0, 1.0]], dtype=np.complex128)
+@pytest.mark.parametrize("d_g, p_a, p_target", [
+    pytest.param(
+        np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128),
+        np.array([[1.0, 0.0], [0.0, 0.0]], dtype=np.complex128),
+        np.array([[0.0, 0.0], [0.0, 1.0]], dtype=np.complex128),
+        id="swap",
+    ),
+    pytest.param(
+        np.eye(3, dtype=np.complex128),
+        np.diag([1.0, 2.0, 3.0]).astype(np.complex128) / 6.0,
+        None,
+        id="identity",
+    ),
+])
+def test_exact_symmetry_consistent_direct(d_g, p_a, p_target):
+    if p_target is None:
+        p_target = p_a
     transformed = d_g @ p_a @ d_g.conj().T
-    epsilon = float(np.linalg.norm(transformed - p_b, ord="fro")
-                    / max(np.linalg.norm(p_a, ord="fro"), 1e-14))
-    assert epsilon < 1e-15
-
-
-def test_exact_symmetry_consistent_direct_identity():
-    d_g = np.eye(3, dtype=np.complex128)
-    p_a = np.diag([1.0, 2.0, 3.0]).astype(np.complex128) / 6.0
-    transformed = d_g @ p_a @ d_g.conj().T
-    epsilon = float(np.linalg.norm(transformed - p_a, ord="fro")
+    epsilon = float(np.linalg.norm(transformed - p_target, ord="fro")
                     / max(np.linalg.norm(p_a, ord="fro"), 1e-14))
     assert epsilon < 1e-15
 
