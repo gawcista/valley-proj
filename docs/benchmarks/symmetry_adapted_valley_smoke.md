@@ -39,9 +39,9 @@ Config paths relative to repo root:
 
 At GammaM and KM, operations 3, 4, 5 all map K_valley -> Kp_valley.
 Candidate equivalence check: max projector difference = 1.00 (O(1) — genuinely different).
-These are inequivalent C2 axes in P321 (three C2 axes at 60° apart).
-The different C2 operations produce orthogonal target projectors (difference ~1),
-confirming they represent physically distinct valley mappings.
+These are distinct C2 axes in P321.
+The different C2 operations produce substantially different target projectors
+(difference ~1), confirming they represent physically distinct valley mappings.
 
 Machine-readable diagnostics:
 - representative_resolution: ambiguous_inequivalent_candidates
@@ -150,18 +150,22 @@ This is expected physics, not a code bug.
    orthogonality exact). The spinor C2 eigenphases of ±0.25 are physically
    correct.
 
-3. **K-point-dependent valley stabilizers are expected:** Different HSPs have
-   different little groups, so valley-preserving operations vary by kpoint.
+3. **K-point-dependent valley-preserving subgroups are expected:** Different
+   HSP little groups give different valley-preserving operations at each kpoint.
 
 ## 6. Recommendation
 
-Implement an explicit representative selection policy. Options:
-(a) Choose the lowest-order cyclic generator (C3 for M-star, not C2)
-(b) Allow user to specify preferred generator via config
-(c) Report all candidates in output and mark diagnostic_only without
+Do not auto-select among inequivalent representatives yet. The next task should
+keep the run diagnostic-only and expose enough candidate-wise data to design an
+auditable policy. Candidate policies to evaluate later:
+(a) prefer an orbit-transport generator specified by valley-star convention
+    (for example, C3 for a C3-related M-star, not an unrelated C2)
+(b) allow the user to specify a preferred generator via config
+(c) continue reporting all candidates and mark diagnostic_only without
     auto-selecting
 
-Option (a) or (c) is recommended for the next task.
+Option (c) is the safest default until option (a) has a reviewed group-theory
+definition for each valley-star type.
 
 ## 7. pytest Result
 
@@ -171,7 +175,8 @@ $ pytest -q
 0 skipped, 0 xfailed
 ```
 
-## 8. Forbidden Terms Check
+## 8. Public Terminology Check
 
-Verified in both `projector_symmetry_report.json` and `symmetry_adapted_valley_analysis.json`:
-no `covariance`, `equivariance`, `stabilizer`, `valley_little_group`, `p_cov`.
+Verified in both `projector_symmetry_report.json` and
+`symmetry_adapted_valley_analysis.json`: generated JSON uses the current
+projector symmetry-consistency and valley-preserving-subgroup terminology.
