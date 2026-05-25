@@ -296,26 +296,30 @@ def test_seed_inconsistent_with_mapping_gives_low_seed_overlap_warning():
 # F. Rank selection
 # -----------------------------------------------------------------------
 
-def test_rank_selection_gap_method():
-    eigvals = np.array([0.99, 0.98, 0.12, 0.11, 0.01])
-    rank, gap, source = select_projector_rank(eigenvalues=eigvals, method="gap", tol=0.1)
-    assert rank == 2
-    assert gap == pytest.approx(0.86)
-    assert source == "gap"
-
-
-def test_rank_selection_threshold_method():
-    eigvals = np.array([0.95, 0.92, 0.08, 0.03, 0.01])
-    rank, gap, source = select_projector_rank(eigenvalues=eigvals, method="threshold", tol=0.5)
-    assert rank == 2
-    assert source == "threshold"
-
-
-def test_rank_selection_gap_insufficient():
-    eigvals = np.array([0.52, 0.48, 0.45, 0.42, 0.40])
-    rank, gap, source = select_projector_rank(eigenvalues=eigvals, method="gap", tol=0.5)
-    assert rank == 5
-    assert source == "gap_insufficient"
+@pytest.mark.parametrize("eigvals, kwargs, expected_rank, expected_source, expected_gap", [
+    pytest.param(
+        np.array([0.99, 0.98, 0.12, 0.11, 0.01]),
+        {"method": "gap", "tol": 0.1}, 2, "gap", 0.86, id="gap_method",
+    ),
+    pytest.param(
+        np.array([0.95, 0.92, 0.08, 0.03, 0.01]),
+        {"method": "threshold", "tol": 0.5}, 2, "threshold", None, id="threshold_method",
+    ),
+    pytest.param(
+        np.array([0.52, 0.48, 0.45, 0.42, 0.40]),
+        {"method": "gap", "tol": 0.5}, 5, "gap_insufficient", None, id="gap_insufficient",
+    ),
+    pytest.param(
+        np.array([0.99, 0.12, 0.11]),
+        {"rank": 2}, 2, "user_specified", None, id="user_specified",
+    ),
+])
+def test_rank_selection(eigvals, kwargs, expected_rank, expected_source, expected_gap):
+    rank, gap, source = select_projector_rank(eigenvalues=eigvals, **kwargs)
+    assert rank == expected_rank
+    assert source == expected_source
+    if expected_gap is not None:
+        assert gap == pytest.approx(expected_gap)
 
 
 def test_rank_ambiguity_reported_as_failed_in_orbit():
@@ -342,13 +346,6 @@ def test_rank_ambiguity_reported_as_failed_in_orbit():
     assert result.diagnostics.status == "failed"
     assert "rank gap insufficient" in result.diagnostics.reason
     assert result.diagnostics.rank_source == "gap_insufficient"
-
-
-def test_user_specified_rank_overrides_auto():
-    eigvals = np.array([0.99, 0.12, 0.11])
-    rank, gap, source = select_projector_rank(eigenvalues=eigvals, rank=2)
-    assert rank == 2
-    assert source == "user_specified"
 
 
 # -----------------------------------------------------------------------
@@ -494,99 +491,92 @@ def test_quality_diagnostics_on_perfect_projectors():
 # K. Representative ambiguity resolution
 # -----------------------------------------------------------------------
 
-def test_equivalent_candidates_resolved_with_representative_resolution():
-    """Two different operation_ids that produce identical projectors →
-    accepted with representative_resolution='equivalent_candidates'.
-    Orbit has only 2 valleys to avoid needing a 3rd representative."""
-    p_a = np.diag([1.0, 0.0]).astype(np.complex128)
-    p_b = np.diag([0.0, 1.0]).astype(np.complex128)
-    d_e = np.eye(2, dtype=np.complex128)
-    d_swap = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128)
+@pytest.mark.parametrize("case", [
+    "unique",
+    "equivalent_candidates",
+    "inequivalent_candidates",
+])
+def test_representative_resolution(case):
+    if case == "unique":
+        p_m1 = np.diag([1.0, 0.0]).astype(np.complex128)
+        p_m2 = np.diag([0.0, 1.0]).astype(np.complex128)
+        d_swap = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128)
+        result = build_symmetry_adapted_projectors_for_orbit(
+            seed_projectors={"VA": p_m1, "VB": p_m2},
+            representations={0: np.eye(2, dtype=np.complex128), 1: d_swap},
+            valley_mappings={
+                0: {"VA": "VA", "VB": "VB"},
+                1: {"VA": "VB", "VB": "VA"},
+            },
+            orbit=["VA", "VB"], reference_valley="VA", rank=1,
+        )
+        assert result.diagnostics.status == "ok"
+        assert result.diagnostics.representative_resolution == "unique"
+        assert result.diagnostics.representative_resolution_by_valley["VB"] == "unique"
+        assert result.diagnostics.representative_candidates_by_valley["VB"] == [1]
+        assert result.diagnostics.representative_selection_policy_by_valley["VB"] == "unique"
+        assert result.diagnostics.selected_representative_by_valley["VB"] == 1
+        assert result.diagnostics.representative_auto_selected_by_valley["VB"] is False
+        assert result.diagnostics.representative_candidate_projector_differences_by_valley["VB"] == []
 
-    result = build_symmetry_adapted_projectors_for_orbit(
-        seed_projectors={"VA": p_a, "VB": p_b},
-        representations={0: d_e, 1: d_swap, 99: d_swap.copy()},
-        valley_mappings={
-            0: {"VA": "VA", "VB": "VB"},
-            1: {"VA": "VB", "VB": "VA"},
-            99: {"VA": "VB", "VB": "VA"},
-        },
-        orbit=["VA", "VB"], reference_valley="VA", rank=1,
-    )
+    elif case == "equivalent_candidates":
+        p_a = np.diag([1.0, 0.0]).astype(np.complex128)
+        p_b = np.diag([0.0, 1.0]).astype(np.complex128)
+        d_e = np.eye(2, dtype=np.complex128)
+        d_swap = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128)
+        result = build_symmetry_adapted_projectors_for_orbit(
+            seed_projectors={"VA": p_a, "VB": p_b},
+            representations={0: d_e, 1: d_swap, 99: d_swap.copy()},
+            valley_mappings={
+                0: {"VA": "VA", "VB": "VB"},
+                1: {"VA": "VB", "VB": "VA"},
+                99: {"VA": "VB", "VB": "VA"},
+            },
+            orbit=["VA", "VB"], reference_valley="VA", rank=1,
+        )
+        assert result.diagnostics.status == "ok"
+        assert result.diagnostics.representative_resolution == "equivalent_candidates"
+        assert len(result.diagnostics.representative_candidates) == 2
+        assert result.diagnostics.representative_resolution_by_valley["VB"] == "equivalent_candidates"
+        assert result.diagnostics.representative_candidates_by_valley["VB"] == [1, 99]
+        assert result.diagnostics.representative_projector_difference_by_valley["VB"] < 1e-12
+        assert result.diagnostics.representative_selection_policy_by_valley["VB"] == "equivalent_candidates"
+        assert result.diagnostics.selected_representative_by_valley["VB"] == 1
+        assert result.diagnostics.representative_auto_selected_by_valley["VB"] is False
+        pairwise = result.diagnostics.representative_candidate_projector_differences_by_valley["VB"]
+        assert pairwise == [
+            {"candidate_a": 1, "candidate_b": 99, "projector_difference": pytest.approx(0.0)}
+        ]
 
-    assert result.diagnostics.status == "ok"
-    assert result.diagnostics.representative_resolution == "equivalent_candidates"
-    assert len(result.diagnostics.representative_candidates) == 2
-    assert result.diagnostics.representative_resolution_by_valley["VB"] == "equivalent_candidates"
-    assert result.diagnostics.representative_candidates_by_valley["VB"] == [1, 99]
-    assert result.diagnostics.representative_projector_difference_by_valley["VB"] < 1e-12
-    assert result.diagnostics.representative_selection_policy_by_valley["VB"] == "equivalent_candidates"
-    assert result.diagnostics.selected_representative_by_valley["VB"] == 1
-    assert result.diagnostics.representative_auto_selected_by_valley["VB"] is False
-    pairwise = result.diagnostics.representative_candidate_projector_differences_by_valley["VB"]
-    assert pairwise == [
-        {"candidate_a": 1, "candidate_b": 99, "projector_difference": pytest.approx(0.0)}
-    ]
-
-
-def test_equivalent_candidates_preserves_inequivalent_failure():
-    """Verify the old ambiguous test still fails for genuinely inequivalent ops."""
-    p_m1 = np.diag([1.0, 0.0, 0.0]).astype(np.complex128)
-    p_m2 = np.diag([0.0, 1.0, 0.0]).astype(np.complex128)
-    p_m3 = np.diag([0.0, 0.0, 1.0]).astype(np.complex128)
-    d_e = np.eye(3, dtype=np.complex128)
-    d_c3 = np.array([[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.complex128)
-    d_diff = np.array([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]], dtype=np.complex128)
-    d_c3sq = d_c3 @ d_c3
-
-    result = build_symmetry_adapted_projectors_for_orbit(
-        seed_projectors={"M1": p_m1, "M2": p_m2, "M3": p_m3},
-        representations={0: d_e, 1: d_c3, 2: d_c3sq, 99: d_diff},
-        valley_mappings={
-            0: {"M1": "M1", "M2": "M2", "M3": "M3"},
-            1: {"M1": "M2", "M2": "M3", "M3": "M1"},
-            2: {"M1": "M3", "M2": "M1", "M3": "M2"},
-            99: {"M1": "M2", "M2": "M1", "M3": "M3"},
-        },
-        orbit=["M1", "M2", "M3"], reference_valley="M1", rank=1,
-    )
-
-    assert result.diagnostics.status == "failed"
-    assert "inequivalent" in result.diagnostics.reason.lower()
-    assert result.diagnostics.representative_resolution == "ambiguous_inequivalent_candidates"
-    assert result.diagnostics.representative_candidates == [1, 99]
-    assert result.diagnostics.representative_resolution_by_valley["M2"] == "ambiguous_inequivalent_candidates"
-    assert result.diagnostics.representative_projector_difference_by_valley["M2"] > 0.1
-    assert result.diagnostics.representative_selection_policy_by_valley["M2"] == "none"
-    assert result.diagnostics.selected_representative_by_valley["M2"] is None
-    assert result.diagnostics.representative_auto_selected_by_valley["M2"] is False
-    pairwise = result.diagnostics.representative_candidate_projector_differences_by_valley["M2"]
-    assert pairwise[0]["candidate_a"] == 1
-    assert pairwise[0]["candidate_b"] == 99
-    assert pairwise[0]["projector_difference"] > 0.1
-
-
-def test_representative_resolution_field_in_diagnostics():
-    """Both unique and resolved paths populate the field."""
-    p_m1 = np.diag([1.0, 0.0]).astype(np.complex128)
-    p_m2 = np.diag([0.0, 1.0]).astype(np.complex128)
-    d_swap = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128)
-
-    result = build_symmetry_adapted_projectors_for_orbit(
-        seed_projectors={"VA": p_m1, "VB": p_m2},
-        representations={0: np.eye(2, dtype=np.complex128), 1: d_swap},
-        valley_mappings={
-            0: {"VA": "VA", "VB": "VB"},
-            1: {"VA": "VB", "VB": "VA"},
-        },
-        orbit=["VA", "VB"], reference_valley="VA", rank=1,
-    )
-
-    assert result.diagnostics.status == "ok"
-    assert result.diagnostics.representative_resolution == "unique"
-    assert result.diagnostics.representative_resolution_by_valley["VB"] == "unique"
-    assert result.diagnostics.representative_candidates_by_valley["VB"] == [1]
-    assert result.diagnostics.representative_selection_policy_by_valley["VB"] == "unique"
-    assert result.diagnostics.selected_representative_by_valley["VB"] == 1
-    assert result.diagnostics.representative_auto_selected_by_valley["VB"] is False
-    assert result.diagnostics.representative_candidate_projector_differences_by_valley["VB"] == []
+    elif case == "inequivalent_candidates":
+        p_m1 = np.diag([1.0, 0.0, 0.0]).astype(np.complex128)
+        p_m2 = np.diag([0.0, 1.0, 0.0]).astype(np.complex128)
+        p_m3 = np.diag([0.0, 0.0, 1.0]).astype(np.complex128)
+        d_e = np.eye(3, dtype=np.complex128)
+        d_c3 = np.array([[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.complex128)
+        d_diff = np.array([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]], dtype=np.complex128)
+        d_c3sq = d_c3 @ d_c3
+        result = build_symmetry_adapted_projectors_for_orbit(
+            seed_projectors={"M1": p_m1, "M2": p_m2, "M3": p_m3},
+            representations={0: d_e, 1: d_c3, 2: d_c3sq, 99: d_diff},
+            valley_mappings={
+                0: {"M1": "M1", "M2": "M2", "M3": "M3"},
+                1: {"M1": "M2", "M2": "M3", "M3": "M1"},
+                2: {"M1": "M3", "M2": "M1", "M3": "M2"},
+                99: {"M1": "M2", "M2": "M1", "M3": "M3"},
+            },
+            orbit=["M1", "M2", "M3"], reference_valley="M1", rank=1,
+        )
+        assert result.diagnostics.status == "failed"
+        assert "inequivalent" in result.diagnostics.reason.lower()
+        assert result.diagnostics.representative_resolution == "ambiguous_inequivalent_candidates"
+        assert result.diagnostics.representative_candidates == [1, 99]
+        assert result.diagnostics.representative_resolution_by_valley["M2"] == "ambiguous_inequivalent_candidates"
+        assert result.diagnostics.representative_projector_difference_by_valley["M2"] > 0.1
+        assert result.diagnostics.representative_selection_policy_by_valley["M2"] == "none"
+        assert result.diagnostics.selected_representative_by_valley["M2"] is None
+        assert result.diagnostics.representative_auto_selected_by_valley["M2"] is False
+        pairwise = result.diagnostics.representative_candidate_projector_differences_by_valley["M2"]
+        assert pairwise[0]["candidate_a"] == 1
+        assert pairwise[0]["candidate_b"] == 99
+        assert pairwise[0]["projector_difference"] > 0.1

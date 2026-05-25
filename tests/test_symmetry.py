@@ -175,19 +175,17 @@ def test_rotation_axis_angle_recovers_c2_and_c3_about_z():
     assert angle == pytest.approx(c3_angle)
 
 
-def test_spinful_c2_rotation_matches_su2_generator():
-    rot = spin_rotation_matrix(axis=np.array([0.0, 0.0, 1.0]), angle=np.pi)
-    np.testing.assert_allclose(rot, np.diag([-1.0j, 1.0j]), atol=1e-12)
-
-
-def test_spinful_two_pi_rotation_returns_minus_identity():
-    rot = spin_rotation_matrix(axis=np.array([0.0, 0.0, 1.0]), angle=2.0 * np.pi)
-    assert np.allclose(rot, -np.eye(2), atol=1e-12)
-
-
-def test_spinful_c3_rotation_has_unitary_matrix():
-    rot = spin_rotation_matrix(axis=np.array([0.0, 0.0, 1.0]), angle=2.0 * np.pi / 3.0)
-    assert np.allclose(rot.conj().T @ rot, np.eye(2), atol=1e-12)
+@pytest.mark.parametrize("angle, expected, check_unitary", [
+    pytest.param(np.pi, np.diag([-1.0j, 1.0j]), False, id="c2_matches_su2"),
+    pytest.param(2.0 * np.pi, -np.eye(2), False, id="two_pi_minus_identity"),
+    pytest.param(2.0 * np.pi / 3.0, None, True, id="c3_unitary"),
+])
+def test_spin_rotation_matrix(angle, expected, check_unitary):
+    rot = spin_rotation_matrix(axis=np.array([0.0, 0.0, 1.0]), angle=angle)
+    if check_unitary:
+        assert np.allclose(rot.conj().T @ rot, np.eye(2), atol=1e-12)
+    else:
+        np.testing.assert_allclose(rot, expected, atol=1e-12)
 
 
 def test_plane_wave_action_recovers_known_c2_eigenvalues():
