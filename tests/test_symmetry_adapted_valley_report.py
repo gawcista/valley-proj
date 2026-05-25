@@ -53,6 +53,8 @@ def test_full_pipeline_c3_mstar_success():
     assert report["local_irrep_ready"] is True
     assert report["diagnostic_only"] is False
     assert report["status"] == "ok"
+    assert report["irrep_matching_input_ready"] is True
+    assert report["irrep_matching_input_status"] == "ready"
 
     # All sub-reports present
     for key in [
@@ -88,6 +90,8 @@ def test_compact_summary_serializable():
     for key in [
         "status", "reason", "local_irrep_ready", "diagnostic_only",
         "experimental", "workflow_integration_status", "trusted_irrep_label",
+        "irrep_matching_input_ready", "irrep_matching_input_status",
+        "irrep_matching_input_reason",
         "orbit", "reference_valley",
         "symmetry_adapted_projectors",
         "valley_preserving_representations",
@@ -98,6 +102,8 @@ def test_compact_summary_serializable():
     assert summary["experimental"] is True
     assert summary["workflow_integration_status"] == "not_integrated"
     assert summary["trusted_irrep_label"] is False
+    assert summary["irrep_matching_input_ready"] is True
+    assert summary["irrep_matching_input_status"] == "ready"
     assert "valley_sewing_matrices_summary" not in json.dumps(
         summary["valley_preserving_representations"]
     )
@@ -152,6 +158,27 @@ def test_projector_warning_propagates_without_marking_diagnostic_only():
     assert report["diagnostic_only"] is False
     assert report["local_irrep_ready"] is True
     assert "projector_warning" in report["reason"]
+
+
+def test_spinor_unverified_blocks_irrep_matching_input():
+    seeds, reps, mappings, orbit = _c3_mstar_setup()
+
+    report = build_symmetry_adapted_valley_report(
+        seed_projectors=seeds,
+        representations=reps,
+        valley_mappings=mappings,
+        orbit=orbit,
+        reference_valley="M1",
+        rank=1,
+        spinor_wavefunction=True,
+        spinor_convention_verified=False,
+    )
+
+    assert report["local_irrep_ready"] is True
+    assert report["diagnostic_only"] is False
+    assert report["irrep_matching_input_ready"] is False
+    assert report["irrep_matching_input_status"] == "blocked"
+    assert "spinor convention unverified" in report["irrep_matching_input_reason"]
 
 
 def test_ambiguous_representatives_expose_candidate_wise_summary():
@@ -259,6 +286,7 @@ def test_projector_failure_skips_downstream_diagnostics():
 
     assert report["diagnostic_only"] is True
     assert report["local_irrep_ready"] is False
+    assert report["irrep_matching_input_ready"] is False
     assert "projector_construction_failed" in report["reason"]
     assert "representation_diagnostics" not in report["reason"]
     assert report["valley_preserving_representations"]["reason"] == (

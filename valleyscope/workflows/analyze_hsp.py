@@ -886,6 +886,11 @@ def _build_symmetry_adapted_valley_report(
                         "experimental": True,
                         "workflow_integration_status": "not_integrated",
                         "trusted_irrep_label": False,
+                        "irrep_matching_input_ready": False,
+                        "irrep_matching_input_status": "not_evaluated",
+                        "irrep_matching_input_reason": (
+                            f"missing seed projectors for orbit valleys: {missing}"
+                        ),
                         "orbit": orbit,
                         "reference_valley": orbit[0] if orbit else "",
                     }
@@ -900,6 +905,8 @@ def _build_symmetry_adapted_valley_report(
                 reference_valley=orbit[0],
                 rank=None,
                 rank_method="gap",
+                spinor_wavefunction=bool(symmetry_payload.get("spinor_wavefunction", False)),
+                spinor_convention_verified=bool(config.spinor.convention_verified),
             )
             orbit_reports.append(summarize_symmetry_adapted_valley_report(report))
 
@@ -917,6 +924,9 @@ def _not_evaluated_symmetry_adapted_kpoint(reason: str) -> dict[str, object]:
         "experimental": True,
         "workflow_integration_status": "not_integrated",
         "trusted_irrep_label": False,
+        "irrep_matching_input_ready": False,
+        "irrep_matching_input_status": "not_evaluated",
+        "irrep_matching_input_reason": reason,
         "orbits": [],
     }
 
@@ -928,6 +938,10 @@ def _aggregate_symmetry_adapted_kpoint(
         return _not_evaluated_symmetry_adapted_kpoint("no valley orbits inferred")
     diagnostic_only = any(bool(report.get("diagnostic_only", True)) for report in orbit_reports)
     local_irrep_ready = all(bool(report.get("local_irrep_ready", False)) for report in orbit_reports)
+    irrep_matching_input_ready = all(
+        bool(report.get("irrep_matching_input_ready", False))
+        for report in orbit_reports
+    )
     statuses = {str(report.get("status", "")) for report in orbit_reports}
     if diagnostic_only:
         status = "diagnostic_only"
@@ -940,6 +954,12 @@ def _aggregate_symmetry_adapted_kpoint(
         for report in orbit_reports
         if str(report.get("reason", "")) and str(report.get("reason", "")) != "all stages passed"
     ]
+    irrep_reasons = [
+        str(report.get("irrep_matching_input_reason", ""))
+        for report in orbit_reports
+        if not bool(report.get("irrep_matching_input_ready", False))
+        and str(report.get("irrep_matching_input_reason", ""))
+    ]
     return {
         "status": status,
         "reason": "; ".join(reasons) if reasons else "all orbits evaluated",
@@ -948,6 +968,12 @@ def _aggregate_symmetry_adapted_kpoint(
         "experimental": True,
         "workflow_integration_status": "not_integrated",
         "trusted_irrep_label": False,
+        "irrep_matching_input_ready": irrep_matching_input_ready,
+        "irrep_matching_input_status": "ready" if irrep_matching_input_ready else "blocked",
+        "irrep_matching_input_reason": (
+            "all orbit reports are ready for irrep matching input"
+            if irrep_matching_input_ready else "; ".join(irrep_reasons)
+        ),
         "orbits": orbit_reports,
     }
 

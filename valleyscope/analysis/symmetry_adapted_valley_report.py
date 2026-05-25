@@ -45,6 +45,8 @@ def build_symmetry_adapted_valley_report(
     unitarity_tol: float = 1e-8,
     modulus_tol: float = 1e-8,
     closure_mapping: dict[tuple[object, object], object] | None = None,
+    spinor_wavefunction: bool = False,
+    spinor_convention_verified: bool | None = None,
 ) -> dict[str, object]:
     """Build a full symmetry-adapted valley analysis report.
 
@@ -86,6 +88,9 @@ def build_symmetry_adapted_valley_report(
             "trusted_irrep_label": False,
             "local_irrep_ready": False,
             "diagnostic_only": True,
+            "irrep_matching_input_ready": False,
+            "irrep_matching_input_status": "blocked",
+            "irrep_matching_input_reason": "projector construction failed",
             "orbit": orbit,
             "reference_valley": reference_valley,
             "symmetry_adapted_projectors": projector_summary,
@@ -145,6 +150,16 @@ def build_symmetry_adapted_valley_report(
         not diagnostic_only
         and char_diag["local_irrep_ready"]
     )
+    (
+        irrep_matching_input_ready,
+        irrep_matching_input_status,
+        irrep_matching_input_reason,
+    ) = _resolve_irrep_matching_input_gate(
+        local_irrep_ready=local_irrep_ready,
+        diagnostic_only=diagnostic_only,
+        spinor_wavefunction=spinor_wavefunction,
+        spinor_convention_verified=spinor_convention_verified,
+    )
 
     reasons: list[str] = []
     if proj_failed:
@@ -181,6 +196,9 @@ def build_symmetry_adapted_valley_report(
         "trusted_irrep_label": False,
         "local_irrep_ready": local_irrep_ready,
         "diagnostic_only": diagnostic_only,
+        "irrep_matching_input_ready": irrep_matching_input_ready,
+        "irrep_matching_input_status": irrep_matching_input_status,
+        "irrep_matching_input_reason": irrep_matching_input_reason,
         "orbit": orbit,
         "reference_valley": reference_valley,
         "symmetry_adapted_projectors": projector_summary,
@@ -207,6 +225,9 @@ def summarize_symmetry_adapted_valley_report(
         "trusted_irrep_label": report.get("trusted_irrep_label", False),
         "local_irrep_ready": report.get("local_irrep_ready"),
         "diagnostic_only": report.get("diagnostic_only"),
+        "irrep_matching_input_ready": report.get("irrep_matching_input_ready"),
+        "irrep_matching_input_status": report.get("irrep_matching_input_status"),
+        "irrep_matching_input_reason": report.get("irrep_matching_input_reason"),
         "orbit": report.get("orbit"),
         "reference_valley": report.get("reference_valley"),
         "symmetry_adapted_projectors": report.get("symmetry_adapted_projectors"),
@@ -329,6 +350,20 @@ def _not_evaluated_character_summary(reason: str) -> dict[str, object]:
     }
 
 
+def _resolve_irrep_matching_input_gate(
+    *,
+    local_irrep_ready: bool,
+    diagnostic_only: bool,
+    spinor_wavefunction: bool,
+    spinor_convention_verified: bool | None,
+) -> tuple[bool, str, str]:
+    if diagnostic_only or not local_irrep_ready:
+        return False, "blocked", "local_irrep_ready=false or diagnostic_only=true"
+    if spinor_wavefunction and spinor_convention_verified is not True:
+        return False, "blocked", "spinor convention unverified"
+    return True, "ready", "all irrep matching input gates passed"
+
+
 def _failed_report(
     *,
     orbit: list[str],
@@ -343,6 +378,9 @@ def _failed_report(
         "trusted_irrep_label": False,
         "local_irrep_ready": False,
         "diagnostic_only": True,
+        "irrep_matching_input_ready": False,
+        "irrep_matching_input_status": "blocked",
+        "irrep_matching_input_reason": reason,
         "orbit": orbit,
         "reference_valley": reference_valley,
         "symmetry_adapted_projectors": {
