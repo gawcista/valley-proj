@@ -1189,6 +1189,92 @@ def test_summary_warns_about_skipped_rotation_representation(tmp_path):
     assert "unsupported nspinor=3" in render_summary_text(summary)
 
 
+def test_summary_text_renders_symmetry_adapted_valley_subspaces(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    config = load_config(config_path)
+    from valleyscope.reports.summary_report import build_summary_payload, render_summary_text
+
+    summary = build_summary_payload(
+        config=config,
+        qcut=0.5,
+        subspace_payload={
+            "kpoints": {
+                "GammaM": {
+                    "weights": [],
+                    "warnings": [],
+                    "valley_adapted_subspace": {"status": "single_band"},
+                }
+            }
+        },
+        symmetry_payload={
+            "status": "ok",
+            "operation_detection_backend": "spglib",
+            "structure_file": "CONTCAR",
+            "detected_operation_count": 0,
+            "candidate_rotations": [],
+            "symprec_scan_summary": [],
+            "little_group_check": {"required": True, "status": "evaluated_per_kpoint"},
+            "valley_preservation_check": {"required": True, "status": "completed"},
+            "detected_operations": [],
+        },
+        symmetry_rows=[],
+        output_paths={},
+        symmetry_adapted_valley_report={
+            "by_kpoint": {
+                "GammaM": {
+                    "status": "warn",
+                    "reason": "projector warning",
+                    "local_irrep_ready": True,
+                    "diagnostic_only": False,
+                    "irrep_matching_input_ready": False,
+                    "irrep_matching_input_reason": "spinor convention unverified",
+                    "orbits": [],
+                    "valley_preserving_subspaces": [
+                        {
+                            "orbit": ["M1_valley"],
+                            "analysis_scope": "valley_preserving_subspace",
+                            "hsp_preserving_operation_ids": [0, 4],
+                            "status": "warn",
+                            "local_irrep_ready": True,
+                            "irrep_matching_input_ready": False,
+                            "irrep_matching_input_reason": "spinor convention unverified",
+                            "symmetry_adapted_projectors": {
+                                "selected_rank": 2,
+                                "rank_source": "user_specified",
+                                "seed_overlap": {"M1_valley": 0.7385595},
+                                "max_projector_symmetry_error": 1.1e-5,
+                                "status": "warn",
+                            },
+                            "valley_preserving_character_diagnostics": {
+                                "per_valley": {
+                                    "M1_valley": [
+                                        {"operation_id": 0, "eigenphases": [0.0, 0.0]},
+                                        {"operation_id": 4, "eigenphases": [-0.25, 0.25]},
+                                    ]
+                                }
+                            },
+                        }
+                    ],
+                }
+            }
+        },
+    )
+
+    text = render_summary_text(summary)
+
+    assert "Symmetry-adapted valley analysis (experimental)" in text
+    assert "valley-preserving subspaces" in text
+    assert "GammaM" in text
+    assert "M1_valley" in text
+    assert "[0, 4]" in text
+    assert "-0.25, 0.25" in text
+    assert "spinor convention unverified" in text
+
+
 def test_summary_marks_spinor_rotation_as_diagnostic_only(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "config.yaml"

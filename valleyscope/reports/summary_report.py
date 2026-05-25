@@ -419,6 +419,10 @@ def render_summary_text(summary: dict[str, Any]) -> str:
             )
         lines.append("")
 
+    symmetry_adapted = summary.get("symmetry_adapted_valley_analysis")
+    if isinstance(symmetry_adapted, dict):
+        _render_symmetry_adapted_valley_analysis(lines, symmetry_adapted)
+
     _section(lines, "Warnings")
     if summary["warnings"]:
         lines.extend(f"- {item}" for item in summary["warnings"])
@@ -720,6 +724,155 @@ def _collect_warnings(
 def _section(lines: list[str], title: str) -> None:
     lines.append(title)
     lines.append("-" * len(title))
+
+
+def _render_symmetry_adapted_valley_analysis(
+    lines: list[str],
+    report: dict[str, Any],
+) -> None:
+    _section(lines, "Symmetry-adapted valley analysis (experimental)")
+    lines.append("trusted_irrep_label: false")
+    lines.append(
+        "local_irrep_ready reports internal consistency of this experimental layer; "
+        "irrep_matching_input_ready remains the gate for future table matching."
+    )
+    by_kpoint = report.get("by_kpoint", {})
+    if not isinstance(by_kpoint, dict) or not by_kpoint:
+        lines.append("(none)")
+        lines.append("")
+        return
+
+    kpoint_rows: list[list[Any]] = []
+    orbit_rows: list[list[Any]] = []
+    subspace_rows: list[list[Any]] = []
+    for kpoint, kp_data in by_kpoint.items():
+        if not isinstance(kp_data, dict):
+            continue
+        kpoint_rows.append([
+            kpoint,
+            kp_data.get("status", ""),
+            kp_data.get("local_irrep_ready", ""),
+            kp_data.get("irrep_matching_input_ready", ""),
+            kp_data.get("reason", ""),
+        ])
+        for item in kp_data.get("orbits", []):
+            if isinstance(item, dict):
+                orbit_rows.append(_symmetry_adapted_orbit_row(kpoint, item))
+        for item in kp_data.get("valley_preserving_subspaces", []):
+            if isinstance(item, dict):
+                subspace_rows.append(_symmetry_adapted_subspace_row(kpoint, item))
+
+    lines.append("kpoint summary:")
+    lines.extend(
+        _table(
+            ["kpoint", "status", "local_ready", "irrep_input", "reason"],
+            kpoint_rows,
+        )
+    )
+    lines.append("")
+    if orbit_rows:
+        lines.append("full valley-orbit reports:")
+        lines.extend(
+            _table(
+                ["kpoint", "orbit", "status", "rank", "proj", "max_sym", "local_ready", "irrep_input", "reason"],
+                orbit_rows,
+            )
+        )
+        lines.append("")
+    if subspace_rows:
+        lines.append("valley-preserving subspaces:")
+        lines.extend(
+            _table(
+                ["kpoint", "valley", "ops", "rank", "proj", "seed_overlap", "phases", "local_ready", "irrep_input", "reason"],
+                subspace_rows,
+            )
+        )
+        lines.append("")
+
+
+def _symmetry_adapted_orbit_row(kpoint: Any, item: dict[str, Any]) -> list[Any]:
+    projectors = item.get("symmetry_adapted_projectors", {})
+    if not isinstance(projectors, dict):
+        projectors = {}
+    reason = _symmetry_adapted_reason(item)
+    return [
+        kpoint,
+        _format_orbit(item.get("orbit")),
+        item.get("status", ""),
+        projectors.get("selected_rank", ""),
+        projectors.get("status", ""),
+        _fmt(projectors.get("max_projector_symmetry_error")),
+        item.get("local_irrep_ready", ""),
+        item.get("irrep_matching_input_ready", ""),
+        reason,
+    ]
+
+
+def _symmetry_adapted_subspace_row(kpoint: Any, item: dict[str, Any]) -> list[Any]:
+    projectors = item.get("symmetry_adapted_projectors", {})
+    if not isinstance(projectors, dict):
+        projectors = {}
+    reason = _symmetry_adapted_reason(item)
+    return [
+        kpoint,
+        _format_orbit(item.get("orbit")),
+        _short_list(item.get("hsp_preserving_operation_ids")),
+        projectors.get("selected_rank", ""),
+        projectors.get("status", ""),
+        _format_seed_overlap(projectors.get("seed_overlap")),
+        _format_character_phases(item.get("valley_preserving_character_diagnostics")),
+        item.get("local_irrep_ready", ""),
+        item.get("irrep_matching_input_ready", ""),
+        reason,
+    ]
+
+
+def _symmetry_adapted_reason(item: dict[str, Any]) -> str:
+    reason = str(item.get("reason", "") or "")
+    irrep_ready = bool(item.get("irrep_matching_input_ready", False))
+    irrep_reason = str(item.get("irrep_matching_input_reason", "") or "")
+    if not reason or reason == "all stages passed":
+        return irrep_reason or reason
+    if not irrep_ready and irrep_reason and irrep_reason not in reason:
+        return f"{reason}; irrep_input: {irrep_reason}"
+    return reason
+
+
+def _format_orbit(value: Any) -> str:
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(str(item) for item in value) + "]"
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _format_seed_overlap(value: Any) -> str:
+    if not isinstance(value, dict):
+        return _fmt(value)
+    return ", ".join(f"{key}={_fmt(val)}" for key, val in value.items())
+
+
+def _format_character_phases(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    per_valley = value.get("per_valley", {})
+    if not isinstance(per_valley, dict):
+        return ""
+    terms: list[str] = []
+    for rows in per_valley.values():
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            op_id = row.get("operation_id")
+            if str(op_id) == "0":
+                continue
+            phases = row.get("eigenphases")
+            if phases is None:
+                continue
+            terms.append(f"op {op_id}: {_short_list(phases)}")
+    return "; ".join(terms)
 
 
 def _table(headers: list[str], rows: list[list[Any]]) -> list[str]:
