@@ -691,6 +691,24 @@ If the report says:
 
 the usual cause is that `symmetry.operations.structure_file` is missing or points to the wrong file. This path must be the moire or bilayer POSCAR/CONTCAR.
 
+### `symmetry_adapted_valley_analysis.json` (experimental)
+
+This file is written only when `analysis.symmetry_adapted_valley.enabled: true`.
+It contains two complementary views:
+
+- `orbits`: full valley-orbit projector reports, including valley-changing
+  operations and sewing diagnostics when representative operations are
+  unambiguous.
+- `valley_preserving_subspaces`: singleton per-valley reports that restrict
+  the analysis to the HSP-little-group operations preserving that valley.  For
+  a three-M-valley star, this exposes the three local P2-like subspaces
+  separately, e.g. `[M1]`, `[M2]`, and `[M3]` with their corresponding C2
+  operations when those operations belong to the HSP little group.
+
+These reports are still experimental and do not promote trusted irrep labels.
+For spinor wavefunctions, `irrep_matching_input_ready` remains false until the
+spinor convention is explicitly benchmark-verified.
+
 ### `diagnostics.h5`
 
 This file stores projector masks, q-cut scan data, and symmetry representation matrices:

@@ -905,14 +905,165 @@ def _build_symmetry_adapted_valley_report(
                 reference_valley=orbit[0],
                 rank=None,
                 rank_method="gap",
+                unitarity_tol=float(config.rotation.unitarity_tol),
+                modulus_tol=float(config.rotation.root_deviation_tol),
                 spinor_wavefunction=bool(symmetry_payload.get("spinor_wavefunction", False)),
                 spinor_convention_verified=bool(config.spinor.convention_verified),
             )
             orbit_reports.append(summarize_symmetry_adapted_valley_report(report))
 
-        by_kpoint[kpoint_name] = _aggregate_symmetry_adapted_kpoint(orbit_reports)
+        valley_preserving_subspaces = _build_valley_preserving_subspace_reports(
+            valley_matrices=valley_matrices,
+            d_g_dict=d_g_dict,
+            valley_mappings_dict=valley_mappings_dict,
+            valley_names=valley_names,
+            unitarity_tol=float(config.rotation.unitarity_tol),
+            modulus_tol=float(config.rotation.root_deviation_tol),
+            spinor_wavefunction=bool(symmetry_payload.get("spinor_wavefunction", False)),
+            spinor_convention_verified=bool(config.spinor.convention_verified),
+        )
+
+        by_kpoint[kpoint_name] = _aggregate_symmetry_adapted_kpoint(
+            orbit_reports,
+            valley_preserving_subspaces=valley_preserving_subspaces,
+        )
 
     return {"by_kpoint": by_kpoint}
+
+
+def _build_valley_preserving_subspace_reports(
+    *,
+    valley_matrices: dict[str, np.ndarray],
+    d_g_dict: dict[object, np.ndarray],
+    valley_mappings_dict: dict[object, dict[str, str]],
+    valley_names: list[str],
+    unitarity_tol: float,
+    modulus_tol: float,
+    spinor_wavefunction: bool,
+    spinor_convention_verified: bool,
+) -> list[dict[str, object]]:
+    """Build singleton reports for per-valley preserving-subgroup analysis.
+
+    These reports answer the local question: for each valley a, what does the
+    subgroup G_k^(a) do inside one symmetry-adapted valley subspace?  They are
+    intentionally separate from the full valley-orbit report, which also tracks
+    valley-changing operations and sewing data.
+    """
+    inferred_rank, rank_source = _infer_uniform_local_valley_rank(
+        valley_matrices=valley_matrices,
+        valley_names=valley_names,
+    )
+    reports: list[dict[str, object]] = []
+    for valley in valley_names:
+        if valley not in valley_matrices:
+            reports.append(
+                _not_evaluated_valley_preserving_subspace(
+                    valley=valley,
+                    reason=f"missing seed projector for valley: {valley}",
+                    rank_source=rank_source,
+                )
+            )
+            continue
+
+        preserving_ops = [
+            op_id for op_id, mapping in valley_mappings_dict.items()
+            if op_id in d_g_dict and str(mapping.get(valley)) == str(valley)
+        ]
+        preserving_ops = sorted(preserving_ops, key=_operation_sort_key)
+        if not preserving_ops:
+            reports.append(
+                _not_evaluated_valley_preserving_subspace(
+                    valley=valley,
+                    reason=f"no valley-preserving operation found for {valley}",
+                    rank_source=rank_source,
+                )
+            )
+            continue
+
+        local_representations = {
+            op_id: np.asarray(d_g_dict[op_id], dtype=np.complex128)
+            for op_id in preserving_ops
+        }
+        local_mappings = {
+            op_id: {str(valley): str(valley)}
+            for op_id in preserving_ops
+        }
+        report = build_symmetry_adapted_valley_report(
+            seed_projectors={str(valley): valley_matrices[valley]},
+            representations=local_representations,
+            valley_mappings=local_mappings,
+            orbit=[str(valley)],
+            reference_valley=str(valley),
+            rank=inferred_rank,
+            rank_method="gap",
+            unitarity_tol=unitarity_tol,
+            modulus_tol=modulus_tol,
+            spinor_wavefunction=spinor_wavefunction,
+            spinor_convention_verified=spinor_convention_verified,
+        )
+        summary = summarize_symmetry_adapted_valley_report(report)
+        summary["analysis_scope"] = "valley_preserving_subspace"
+        summary["local_rank_source"] = rank_source
+        summary["hsp_preserving_operation_ids"] = list(preserving_ops)
+        reports.append(summary)
+    return reports
+
+
+def _infer_uniform_local_valley_rank(
+    *,
+    valley_matrices: dict[str, np.ndarray],
+    valley_names: list[str],
+) -> tuple[int | None, str]:
+    """Infer per-valley rank from target-subspace dimension when unambiguous."""
+    if not valley_names or not valley_matrices:
+        return None, "not_available"
+    available = [str(v) for v in valley_names if str(v) in valley_matrices]
+    if not available:
+        return None, "not_available"
+    first = np.asarray(valley_matrices[available[0]])
+    if first.ndim != 2 or first.shape[0] != first.shape[1]:
+        return None, "not_available"
+    dim = int(first.shape[0])
+    n_valleys = len(valley_names)
+    if n_valleys > 0 and dim % n_valleys == 0:
+        rank = dim // n_valleys
+        if rank > 0:
+            return rank, "target_dim_div_valley_count"
+    return None, "auto_gap"
+
+
+def _not_evaluated_valley_preserving_subspace(
+    *,
+    valley: str,
+    reason: str,
+    rank_source: str,
+) -> dict[str, object]:
+    return {
+        "status": "not_evaluated",
+        "reason": reason,
+        "experimental": True,
+        "workflow_integration_status": "not_integrated",
+        "trusted_irrep_label": False,
+        "local_irrep_ready": False,
+        "diagnostic_only": True,
+        "irrep_matching_input_ready": False,
+        "irrep_matching_input_status": "not_evaluated",
+        "irrep_matching_input_reason": reason,
+        "orbit": [str(valley)],
+        "reference_valley": str(valley),
+        "analysis_scope": "valley_preserving_subspace",
+        "local_rank_source": rank_source,
+        "hsp_preserving_operation_ids": [],
+    }
+
+
+def _operation_sort_key(op_id: object) -> tuple[int, object]:
+    if isinstance(op_id, int):
+        return (0, op_id)
+    try:
+        return (0, int(op_id))
+    except (TypeError, ValueError):
+        return (1, str(op_id))
 
 
 def _not_evaluated_symmetry_adapted_kpoint(reason: str) -> dict[str, object]:
@@ -928,14 +1079,20 @@ def _not_evaluated_symmetry_adapted_kpoint(reason: str) -> dict[str, object]:
         "irrep_matching_input_status": "not_evaluated",
         "irrep_matching_input_reason": reason,
         "orbits": [],
+        "valley_preserving_subspaces": [],
     }
 
 
 def _aggregate_symmetry_adapted_kpoint(
     orbit_reports: list[dict[str, object]],
+    *,
+    valley_preserving_subspaces: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
+    valley_preserving_subspaces = list(valley_preserving_subspaces or [])
     if not orbit_reports:
-        return _not_evaluated_symmetry_adapted_kpoint("no valley orbits inferred")
+        result = _not_evaluated_symmetry_adapted_kpoint("no valley orbits inferred")
+        result["valley_preserving_subspaces"] = valley_preserving_subspaces
+        return result
     diagnostic_only = any(bool(report.get("diagnostic_only", True)) for report in orbit_reports)
     local_irrep_ready = all(bool(report.get("local_irrep_ready", False)) for report in orbit_reports)
     irrep_matching_input_ready = all(
@@ -975,6 +1132,7 @@ def _aggregate_symmetry_adapted_kpoint(
             if irrep_matching_input_ready else "; ".join(irrep_reasons)
         ),
         "orbits": orbit_reports,
+        "valley_preserving_subspaces": valley_preserving_subspaces,
     }
 
 

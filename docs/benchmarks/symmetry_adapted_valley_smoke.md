@@ -1,8 +1,8 @@
 # Symmetry-Adapted Valley Pipeline — Real-Data Smoke Benchmark
 
 Date: 2026-05-25
-Branch: `codex/symmetry-adapted-audit-schema`
-Base: local `main` at `4a21317`
+Branch: `fix/zrse2-local-p2-subspaces`
+Base: local `main` at `93d39f3`
 Previous run: `cc/real-smoke-representative-diagnostics` at `c57e63b`
 
 ## Changes Since Previous Run
@@ -22,7 +22,13 @@ experimental report more audit-ready:
   construction has already failed;
 - `irrep_matching_input_ready`, `irrep_matching_input_status`, and
   `irrep_matching_input_reason` define the gate that future table matching must
-  use.
+  use;
+- the experimental report now also includes
+  `valley_preserving_subspaces`, a singleton per-valley view that restricts
+  each report to operations preserving that valley inside the HSP little group;
+- the workflow passes configured `rotation.unitarity_tol` and
+  `rotation.root_deviation_tol` into the experimental representation and
+  character diagnostics.
 
 No automatic representative selection policy is implemented.
 
@@ -50,9 +56,11 @@ pytest -q
 
 | Kpoint | Status | Main reason |
 |---|---|---|
-| GammaM | diagnostic_only | ambiguous inequivalent K_valley -> Kp_valley representatives |
-| KM | diagnostic_only | ambiguous inequivalent K_valley -> Kp_valley representatives |
-| MM | diagnostic_only | unique representative exists, but completeness fails |
+| GammaM full K/K' orbit | diagnostic_only | ambiguous inequivalent K_valley -> Kp_valley representatives |
+| KM full K/K' orbit | diagnostic_only | ambiguous inequivalent K_valley -> Kp_valley representatives |
+| MM full K/K' orbit | diagnostic_only | unique representative exists, but completeness fails |
+| GammaM/KM singleton K and K' preserving subspaces | ok | C3-preserving local reports ready |
+| MM singleton K and K' preserving subspaces | ok | identity-only local reports ready |
 
 ### GammaM / KM Representative Diagnostics
 
@@ -105,10 +113,11 @@ the q-cut K' seed in the target subspace. The result remains diagnostic-only.
 
 | Kpoint | Orbit | Status | Main reason |
 |---|---|---|---|
-| GammaM | M1/M2/M3 | diagnostic_only | rank gap insufficient after identity + C2_M1 symmetrization |
+| GammaM | M1/M2/M3 full orbit | diagnostic_only | rank gap insufficient after identity + C2_M1 symmetrization |
+| GammaM | M1, M2, M3 singleton preserving subspaces | warn | three local rank-2 P2-like subspaces found |
 | KM | M1/M2/M3 | diagnostic_only | unique representatives, but propagated projectors fail quality checks |
 | MM | M1/M2 | diagnostic_only | unique representative, but orthogonality/idempotency fail |
-| MM | M3 | diagnostic_only | projector OK; representation/character layer fails readiness |
+| MM | M3 full orbit | ok | singleton projector and C2 character diagnostics pass configured tolerances |
 
 ### GammaM
 
@@ -121,9 +130,23 @@ fails before representative selection:
 | max rank gap | 0.3244 |
 | rank_tol | 0.5 |
 
-This is a better failure than the older representative-ambiguity result: the
-reference projector purification itself is not robust enough under the
-valley-preserving subgroup used at GammaM.
+This remains the correct result for the full M-star orbit construction: the
+reference projector purification itself is not robust enough under automatic
+gap rank selection.
+
+The new singleton preserving-subspace view separately reports the three local
+P2-like subspaces expected from the three C2 operations:
+
+| Valley | preserving ops | selected_rank | status | C2 eigenphases | seed overlap |
+|---|---:|---:|---|---|---:|
+| M1 | [0, 4] | 2 | warn | -0.25, +0.25 | 0.739 |
+| M2 | [0, 3] | 2 | warn | -0.25, +0.25 | 0.659 |
+| M3 | [0, 5] | 2 | warn | +0.25, +0.25 | 0.711 |
+
+The warnings are physical diagnostics: the q-cut seed projectors are not
+already symmetry-consistent, so the C2-preserving projected subspaces deviate
+from the raw q-cut seed subspaces. They are still local symmetry-adapted
+subspaces under the configured real-data tolerances.
 
 ### KM
 
@@ -163,7 +186,7 @@ It still fails projector quality:
 | orthogonality_error | 0.0831 |
 | total_projector_idempotency_error | 0.3064 |
 
-The singleton M3 orbit remains the cleanest projector diagnostic:
+The singleton M3 orbit remains the cleanest nontrivial MM projector diagnostic:
 
 | Quantity | Value |
 |---|---:|
@@ -175,10 +198,9 @@ The singleton M3 orbit remains the cleanest projector diagnostic:
 | max valley-preserving unitarity error | 1.82e-2 |
 | max eigenvalue modulus deviation | 6.46e-3 |
 
-The spinor C2 phases are physically plausible, but the representation and
-character layers remain diagnostic-only because the current real-data
-representation is not unitary enough under the strict experimental tolerance
-and the spinor convention is not benchmark-verified.
+The representation and character layers pass the configured real-data
+tolerances. `irrep_matching_input_ready` remains false because the spinor
+convention is not benchmark-verified.
 
 ## 3. Projector Symmetry-Consistency Context
 
@@ -200,11 +222,11 @@ trusted valley irrep bases.
 | equivalent representatives accepted | none | none |
 | ambiguous inequivalent candidates | GammaM, KM | none in current gated run |
 | missing representative operation | none | none |
-| failed rank selection | none | GammaM |
+| failed rank selection | none | GammaM full orbit |
 | failed completeness | MM | none |
 | failed orthogonality/idempotency | none | KM, MM M1/M2 |
-| representation / character readiness failure | none after projector-failure gate | MM M3 |
-| successful projector diagnostic | none | MM M3 |
+| representation / character readiness failure | none after projector-failure gate | none under configured tolerances |
+| successful local preserving-subspace diagnostic | GammaM/KM K/K' C3, MM K/K' identity-only | GammaM M1/M2/M3 C2, KM identity-only, MM M1/M2 identity-only, MM M3 C2 |
 
 ## 5. Readiness for Irrep Matching
 
@@ -216,11 +238,13 @@ The real smoke cases remain blocked:
 
 | Material | Kpoint/orbit | `irrep_matching_input_status` | Reason |
 |---|---|---|---|
-| tMoTe2 | all K/K' orbits | blocked | projector construction failed |
-| tZrSe2 | GammaM M-star | blocked | projector construction failed |
+| tMoTe2 | full K/K' orbits | blocked | projector construction failed |
+| tMoTe2 | singleton K/K' preserving subspaces | ready | spinor convention verified; local preserving reports pass |
+| tZrSe2 | GammaM full M-star orbit | blocked | projector construction failed |
+| tZrSe2 | GammaM local M1/M2/M3 P2 subspaces | blocked | spinor convention unverified |
 | tZrSe2 | KM M-star | blocked | projector construction failed |
 | tZrSe2 | MM M1/M2 | blocked | projector construction failed |
-| tZrSe2 | MM M3 | blocked | local_irrep_ready=false or diagnostic_only=true |
+| tZrSe2 | MM M3 | blocked | spinor convention unverified |
 
 Matching implementation requirements:
 
@@ -241,7 +265,7 @@ cases pass.
 
 ```bash
 pytest -q
-# 293 passed
+# 295 passed
 ```
 
 ## 7. Public Terminology Check

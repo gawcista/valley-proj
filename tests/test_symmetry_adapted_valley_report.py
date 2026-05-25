@@ -535,6 +535,10 @@ def test_enabled_true_writes_symmetry_adapted_valley_analysis(tmp_path):
     assert "by_kpoint" in report
     gm = report["by_kpoint"].get("GammaM", {})
     assert "orbits" in gm
+    assert "valley_preserving_subspaces" in gm
+    assert [item["orbit"] for item in gm["valley_preserving_subspaces"]] == [
+        ["M1"], ["M2"], ["M3"],
+    ]
     assert gm["experimental"] is True
     assert gm["trusted_irrep_label"] is False
 
@@ -603,6 +607,75 @@ def test_partition_valley_orbits_separates_disconnected_components():
     )
 
     assert orbits == [["K", "Kp"], ["M1", "M2"]]
+
+
+def test_valley_preserving_subspace_reports_keep_three_mstar_p2_subspaces():
+    from valleyscope.workflows.analyze_hsp import _build_valley_preserving_subspace_reports
+
+    seeds = {
+        "M1": np.diag([1, 1, 0, 0, 0, 0]).astype(np.complex128),
+        "M2": np.diag([0, 0, 1, 1, 0, 0]).astype(np.complex128),
+        "M3": np.diag([0, 0, 0, 0, 1, 1]).astype(np.complex128),
+    }
+    identity = np.eye(6, dtype=np.complex128)
+    c2_m1 = np.diag([1, -1, 0, 0, 0, 0]).astype(np.complex128)
+    c2_m1[2, 4] = c2_m1[3, 5] = c2_m1[4, 2] = c2_m1[5, 3] = 1
+    c2_m2 = np.diag([0, 0, 1, -1, 0, 0]).astype(np.complex128)
+    c2_m2[0, 4] = c2_m2[1, 5] = c2_m2[4, 0] = c2_m2[5, 1] = 1
+    c2_m3 = np.diag([0, 0, 0, 0, 1, -1]).astype(np.complex128)
+    c2_m3[0, 2] = c2_m3[1, 3] = c2_m3[2, 0] = c2_m3[3, 1] = 1
+
+    reports = _build_valley_preserving_subspace_reports(
+        valley_matrices=seeds,
+        d_g_dict={0: identity, 3: c2_m2, 4: c2_m1, 5: c2_m3},
+        valley_mappings_dict={
+            0: {"M1": "M1", "M2": "M2", "M3": "M3"},
+            3: {"M1": "M3", "M2": "M2", "M3": "M1"},
+            4: {"M1": "M1", "M2": "M3", "M3": "M2"},
+            5: {"M1": "M2", "M2": "M1", "M3": "M3"},
+        },
+        valley_names=["M1", "M2", "M3"],
+        unitarity_tol=1e-8,
+        modulus_tol=1e-8,
+        spinor_wavefunction=False,
+        spinor_convention_verified=True,
+    )
+
+    assert [report["orbit"] for report in reports] == [["M1"], ["M2"], ["M3"]]
+    assert [report["local_rank_source"] for report in reports] == [
+        "target_dim_div_valley_count",
+        "target_dim_div_valley_count",
+        "target_dim_div_valley_count",
+    ]
+    assert [report["symmetry_adapted_projectors"]["selected_rank"] for report in reports] == [2, 2, 2]
+    assert reports[0]["valley_preserving_representations"]["valley_preserving_operations"]["M1"] == [0, 4]
+    assert reports[1]["valley_preserving_representations"]["valley_preserving_operations"]["M2"] == [0, 3]
+    assert reports[2]["valley_preserving_representations"]["valley_preserving_operations"]["M3"] == [0, 5]
+    assert all(report["local_irrep_ready"] is True for report in reports)
+
+
+def test_valley_preserving_subspace_reports_use_modulus_tolerance():
+    from valleyscope.workflows.analyze_hsp import _build_valley_preserving_subspace_reports
+
+    seed = np.eye(2, dtype=np.complex128)
+    nearly_unitary_c2 = 0.99999 * np.diag([1.0j, -1.0j]).astype(np.complex128)
+
+    reports = _build_valley_preserving_subspace_reports(
+        valley_matrices={"M": seed},
+        d_g_dict={0: np.eye(2, dtype=np.complex128), 1: nearly_unitary_c2},
+        valley_mappings_dict={
+            0: {"M": "M"},
+            1: {"M": "M"},
+        },
+        valley_names=["M"],
+        unitarity_tol=1e-3,
+        modulus_tol=1e-3,
+        spinor_wavefunction=False,
+        spinor_convention_verified=True,
+    )
+
+    assert reports[0]["local_irrep_ready"] is True
+    assert reports[0]["diagnostic_only"] is False
 
 
 def test_add_identity_representation_if_missing_uses_detected_identity():
