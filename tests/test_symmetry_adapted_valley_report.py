@@ -244,6 +244,31 @@ def test_failure_missing_representative():
     assert "no representative operation" in report["reason"]
 
 
+def test_projector_failure_skips_downstream_diagnostics():
+    p_a = np.diag([1.0, 0.0]).astype(np.complex128)
+    p_b = np.diag([0.0, 1.0]).astype(np.complex128)
+
+    report = build_symmetry_adapted_valley_report(
+        seed_projectors={"VA": p_a, "VB": p_b},
+        representations={0: np.eye(2, dtype=np.complex128)},
+        valley_mappings={0: {"VA": "VA", "VB": "VB"}},
+        orbit=["VA", "VB"],
+        reference_valley="VA",
+        rank=1,
+    )
+
+    assert report["diagnostic_only"] is True
+    assert report["local_irrep_ready"] is False
+    assert "projector_construction_failed" in report["reason"]
+    assert "representation_diagnostics" not in report["reason"]
+    assert report["valley_preserving_representations"]["reason"] == (
+        "not evaluated because projector construction failed"
+    )
+    assert report["valley_preserving_character_diagnostics"]["reason"] == (
+        "not evaluated because projector construction failed"
+    )
+
+
 def test_invalid_projector_input_returns_diagnostic_report():
     p_a = np.diag([1.0, 0.0]).astype(np.complex128)
 

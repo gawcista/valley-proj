@@ -74,6 +74,32 @@ def build_symmetry_adapted_valley_report(
     proj_diag = sym_result.diagnostics
     proj_failed = proj_diag.status == "failed"
     proj_warn = proj_diag.status == "warn"
+    projector_summary = _projector_summary_from_diagnostics(proj_diag)
+
+    if proj_failed:
+        reason = f"projector_construction_failed: {proj_diag.reason}"
+        return {
+            "status": "diagnostic_only",
+            "reason": reason,
+            "experimental": True,
+            "workflow_integration_status": "not_integrated",
+            "trusted_irrep_label": False,
+            "local_irrep_ready": False,
+            "diagnostic_only": True,
+            "orbit": orbit,
+            "reference_valley": reference_valley,
+            "symmetry_adapted_projectors": projector_summary,
+            "valley_preserving_representations": _not_evaluated_representation_summary(
+                orbit,
+                "not evaluated because projector construction failed",
+            ),
+            "valley_sewing_matrices": _not_evaluated_sewing_summary(
+                "not evaluated because projector construction failed"
+            ),
+            "valley_preserving_character_diagnostics": _not_evaluated_character_summary(
+                "not evaluated because projector construction failed"
+            ),
+        }
 
     # Stage 2: VP representations + sewing
     valley_bases = dict(sym_result.eigenvectors)
@@ -129,60 +155,6 @@ def build_symmetry_adapted_valley_report(
         reasons.append(f"representation_diagnostics: {rep_diag['reason']}")
     if char_diag["diagnostic_only"]:
         reasons.append(f"character_diagnostics: {char_diag['reason']}")
-
-    # Compact projector summary
-    projector_summary = {
-        "status": proj_diag.status,
-        "selected_rank": proj_diag.selected_rank,
-        "rank_source": proj_diag.rank_source,
-        "purification_gap": _safe_float(proj_diag.purification_gap),
-        "seed_overlap": {str(k): float(v) for k, v in proj_diag.seed_overlap.items()},
-        "orthogonality_error": float(proj_diag.orthogonality_error),
-        "total_projector_idempotency_error": float(proj_diag.total_projector_idempotency_error),
-        "completeness_error": _safe_float(proj_diag.completeness_error),
-        "completeness_source": proj_diag.completeness_source,
-        "max_projector_symmetry_error": (
-            max(proj_diag.projector_symmetry_error.values())
-            if proj_diag.projector_symmetry_error else 0.0
-        ),
-        "reason": proj_diag.reason,
-        "representative_resolution": proj_diag.representative_resolution,
-        "representative_candidates": list(proj_diag.representative_candidates),
-        "representative_resolution_by_valley": dict(
-            proj_diag.representative_resolution_by_valley
-        ),
-        "representative_candidates_by_valley": {
-            str(k): list(v)
-            for k, v in proj_diag.representative_candidates_by_valley.items()
-        },
-        "representative_projector_difference_by_valley": {
-            str(k): float(v)
-            for k, v in proj_diag.representative_projector_difference_by_valley.items()
-        },
-        "representative_selection_policy_by_valley": dict(
-            proj_diag.representative_selection_policy_by_valley
-        ),
-        "selected_representative_by_valley": dict(
-            proj_diag.selected_representative_by_valley
-        ),
-        "representative_auto_selected_by_valley": {
-            str(k): bool(v)
-            for k, v in proj_diag.representative_auto_selected_by_valley.items()
-        },
-        "representative_candidate_projector_differences_by_valley": {
-            str(k): [
-                {
-                    "candidate_a": item.get("candidate_a"),
-                    "candidate_b": item.get("candidate_b"),
-                    "projector_difference": float(item.get("projector_difference", 0.0)),
-                }
-                for item in values
-            ]
-            for k, values in (
-                proj_diag.representative_candidate_projector_differences_by_valley.items()
-            )
-        },
-    }
 
     rep_summary_full = summarize_symmetry_adapted_representations(rep_diag)
     sewing_summary = {
@@ -257,6 +229,104 @@ def _safe_float(v) -> float | None:
         return float(v)
     except (TypeError, ValueError):
         return None
+
+
+def _projector_summary_from_diagnostics(proj_diag) -> dict[str, object]:
+    return {
+        "status": proj_diag.status,
+        "selected_rank": proj_diag.selected_rank,
+        "rank_source": proj_diag.rank_source,
+        "purification_gap": _safe_float(proj_diag.purification_gap),
+        "seed_overlap": {str(k): float(v) for k, v in proj_diag.seed_overlap.items()},
+        "orthogonality_error": float(proj_diag.orthogonality_error),
+        "total_projector_idempotency_error": float(proj_diag.total_projector_idempotency_error),
+        "completeness_error": _safe_float(proj_diag.completeness_error),
+        "completeness_source": proj_diag.completeness_source,
+        "max_projector_symmetry_error": (
+            max(proj_diag.projector_symmetry_error.values())
+            if proj_diag.projector_symmetry_error else 0.0
+        ),
+        "reason": proj_diag.reason,
+        "representative_resolution": proj_diag.representative_resolution,
+        "representative_candidates": list(proj_diag.representative_candidates),
+        "representative_resolution_by_valley": dict(
+            proj_diag.representative_resolution_by_valley
+        ),
+        "representative_candidates_by_valley": {
+            str(k): list(v)
+            for k, v in proj_diag.representative_candidates_by_valley.items()
+        },
+        "representative_projector_difference_by_valley": {
+            str(k): float(v)
+            for k, v in proj_diag.representative_projector_difference_by_valley.items()
+        },
+        "representative_selection_policy_by_valley": dict(
+            proj_diag.representative_selection_policy_by_valley
+        ),
+        "selected_representative_by_valley": dict(
+            proj_diag.selected_representative_by_valley
+        ),
+        "representative_auto_selected_by_valley": {
+            str(k): bool(v)
+            for k, v in proj_diag.representative_auto_selected_by_valley.items()
+        },
+        "representative_candidate_projector_differences_by_valley": {
+            str(k): [
+                {
+                    "candidate_a": item.get("candidate_a"),
+                    "candidate_b": item.get("candidate_b"),
+                    "projector_difference": float(item.get("projector_difference", 0.0)),
+                }
+                for item in values
+            ]
+            for k, values in (
+                proj_diag.representative_candidate_projector_differences_by_valley.items()
+            )
+        },
+    }
+
+
+def _not_evaluated_representation_summary(
+    orbit: list[str],
+    reason: str,
+) -> dict[str, object]:
+    return {
+        "status": "diagnostic_only",
+        "reason": reason,
+        "local_irrep_ready": False,
+        "diagnostic_only": True,
+        "orbit": orbit,
+        "selected_rank_by_valley": {},
+        "valley_preserving_operations": {},
+        "valley_changing_operations": {},
+        "max_valley_preserving_unitarity_error": None,
+        "max_sewing_unitarity_error": None,
+        "representation_closure_status": "not_evaluated",
+        "representation_closure_violations": [],
+        "valley_preserving_representations": {},
+    }
+
+
+def _not_evaluated_sewing_summary(reason: str) -> dict[str, object]:
+    return {
+        "status": "diagnostic_only",
+        "reason": reason,
+        "max_sewing_unitarity_error": None,
+        "items": [],
+    }
+
+
+def _not_evaluated_character_summary(reason: str) -> dict[str, object]:
+    return {
+        "status": "diagnostic_only",
+        "reason": reason,
+        "local_irrep_ready": False,
+        "diagnostic_only": True,
+        "irrep_matching_status": "failed_input_readiness",
+        "max_valley_preserving_unitarity_error": None,
+        "max_eigenvalue_modulus_deviation": None,
+        "per_valley": {},
+    }
 
 
 def _failed_report(
