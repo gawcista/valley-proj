@@ -730,10 +730,10 @@ def _render_symmetry_adapted_valley_analysis(
     lines: list[str],
     report: dict[str, Any],
 ) -> None:
-    _section(lines, "Symmetry-adapted valley analysis (experimental)")
+    _section(lines, "Symmetry-adapted valley analysis")
     lines.append("trusted_irrep_label: false")
     lines.append(
-        "local_irrep_ready reports internal consistency of this experimental layer; "
+        "local_irrep_ready reports internal consistency of this analysis layer; "
         "irrep_matching_input_ready remains the gate for future table matching."
     )
     by_kpoint = report.get("by_kpoint", {})
@@ -784,8 +784,9 @@ def _render_symmetry_adapted_valley_analysis(
         lines.extend(
             _table(
                 [
-                    "kpoint", "valley", "ops", "rank", "proj", "seed_overlap",
-                    "phases", "group", "ebr_ready", "ebr_blockers",
+                    "kpoint", "valley", "space_group", "sg_ops", "hsp_ops",
+                    "rank", "proj", "seed_overlap", "phases", "local_group",
+                    "ebr_ready", "ebr_blockers",
                     "local_ready", "irrep_input", "reason",
                 ],
                 subspace_rows,
@@ -823,9 +824,14 @@ def _symmetry_adapted_subspace_row(kpoint: Any, item: dict[str, Any]) -> list[An
     ebr_input = item.get("ebr_mapping_input", {})
     if not isinstance(ebr_input, dict):
         ebr_input = {}
+    subspace_space_group = item.get("subspace_space_group", {})
+    if not isinstance(subspace_space_group, dict):
+        subspace_space_group = {}
     return [
         kpoint,
         _format_orbit(item.get("orbit")),
+        subspace_space_group.get("candidate_space_group_symbol", ""),
+        _short_list(subspace_space_group.get("valley_preserving_operation_ids")),
         _short_list(item.get("hsp_preserving_operation_ids")),
         projectors.get("selected_rank", ""),
         projectors.get("status", ""),
@@ -1022,7 +1028,7 @@ def _output_file_label(name: str) -> str:
         "symmetry_eigenvalues_csv": "Symmetry eigenvalues",
         "diagnostics_h5": "Projector, qcut, and symmetry matrices",
         "projector_symmetry_report_json": "Projector symmetry report",
-        "symmetry_adapted_valley_analysis_json": "Symmetry-adapted valley analysis (experimental)",
+        "symmetry_adapted_valley_analysis_json": "Symmetry-adapted valley analysis",
     }
     return labels.get(name, name.replace("_", " ").title())
 

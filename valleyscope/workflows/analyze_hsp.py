@@ -809,7 +809,7 @@ def _build_symmetry_adapted_valley_report(
     symmetry_payload: dict[str, object],
     config: object,
 ) -> dict[str, object]:
-    """Experimental: build per-kpoint symmetry-adapted valley analysis.
+    """Build per-kpoint symmetry-adapted valley analysis.
 
     Returns a ``by_kpoint`` dict keyed by kpoint label. Each entry is a
     ``not_evaluated`` stub or contains orbit-level reports when inputs are
@@ -825,6 +825,13 @@ def _build_symmetry_adapted_valley_report(
         target_kpoints = sorted(
             set(valley_matrices_by_kpoint) | set(raw_representations_by_kpoint)
         )
+    (
+        space_group_valley_mappings,
+        space_group_operation_orders,
+    ) = _space_group_valley_mapping_payload(
+        symmetry_payload=symmetry_payload,
+        valley_names=valley_names,
+    )
 
     for kpoint_name in target_kpoints:
         valley_matrices = valley_matrices_by_kpoint.get(kpoint_name, {})
@@ -897,8 +904,8 @@ def _build_symmetry_adapted_valley_report(
                         "reason": f"missing seed projectors for orbit valleys: {missing}",
                         "diagnostic_only": True,
                         "local_irrep_ready": False,
-                        "experimental": True,
-                        "workflow_integration_status": "not_integrated",
+                        "feature_status": "formal",
+                        "workflow_integration_status": "integrated",
                         "trusted_irrep_label": False,
                         "irrep_matching_input_ready": False,
                         "irrep_matching_input_status": "not_evaluated",
@@ -949,6 +956,8 @@ def _build_symmetry_adapted_valley_report(
             projector_symmetry_fail_tol=float(config.symmetry_adapted_valley.projector_symmetry_fail_tol),
             ebr_seed_overlap_min=float(config.symmetry_adapted_valley.ebr_seed_overlap_min),
             ebr_unitarity_max=float(config.symmetry_adapted_valley.ebr_unitarity_max),
+            space_group_valley_mappings=space_group_valley_mappings,
+            space_group_operation_orders=space_group_operation_orders,
         )
 
         by_kpoint[kpoint_name] = _aggregate_symmetry_adapted_kpoint(
@@ -976,6 +985,8 @@ def _build_valley_preserving_subspace_reports(
     projector_symmetry_fail_tol: float = 1e-1,
     ebr_seed_overlap_min: float = 0.8,
     ebr_unitarity_max: float = 1e-3,
+    space_group_valley_mappings: dict[object, dict[str, str]] | None = None,
+    space_group_operation_orders: dict[object, int] | None = None,
 ) -> list[dict[str, object]]:
     """Build singleton reports for per-valley preserving-subgroup analysis.
 
@@ -1047,6 +1058,17 @@ def _build_valley_preserving_subspace_reports(
         summary["analysis_scope"] = "valley_preserving_subspace"
         summary["local_rank_source"] = rank_source
         summary["hsp_preserving_operation_ids"] = list(preserving_ops)
+        summary["subspace_space_group"] = _build_subspace_space_group_for_valley(
+            valley=str(valley),
+            valley_mappings=space_group_valley_mappings or valley_mappings_dict,
+            operation_orders=space_group_operation_orders or operation_orders_by_id or {},
+        )
+        ebr_mapping = summary.get("ebr_mapping_input")
+        if isinstance(ebr_mapping, dict):
+            _refine_ebr_mapping_with_subspace_space_group(
+                ebr_mapping=ebr_mapping,
+                subspace_space_group=summary["subspace_space_group"],
+            )
         reports.append(summary)
     return reports
 
@@ -1083,8 +1105,8 @@ def _not_evaluated_valley_preserving_subspace(
     return {
         "status": "not_evaluated",
         "reason": reason,
-        "experimental": True,
-        "workflow_integration_status": "not_integrated",
+        "feature_status": "formal",
+        "workflow_integration_status": "integrated",
         "trusted_irrep_label": False,
         "local_irrep_ready": False,
         "diagnostic_only": True,
@@ -1096,6 +1118,7 @@ def _not_evaluated_valley_preserving_subspace(
         "analysis_scope": "valley_preserving_subspace",
         "local_rank_source": rank_source,
         "hsp_preserving_operation_ids": [],
+        "subspace_space_group": _empty_subspace_space_group(reason),
     }
 
 
@@ -1108,14 +1131,150 @@ def _operation_sort_key(op_id: object) -> tuple[int, object]:
         return (1, str(op_id))
 
 
+def _space_group_valley_mapping_payload(
+    *,
+    symmetry_payload: dict[str, object],
+    valley_names: list[str],
+) -> tuple[dict[object, dict[str, str]], dict[object, int]]:
+    """Collect full-space-group valley mappings, not restricted to one HSP.
+
+    This drives the subspace space-group candidate.  It deliberately differs
+    from the HSP little-group operation set: a C2 can preserve a monolayer
+    valley label while mapping one moire HSP to another point in the HSP star.
+    """
+    valley_set = {str(valley) for valley in valley_names}
+    mappings: dict[object, dict[str, str]] = {}
+    orders: dict[object, int] = {}
+    for operation in symmetry_payload.get("detected_operations", []):
+        if not isinstance(operation, dict):
+            continue
+        op_id = operation.get("operation_id")
+        if op_id is None:
+            continue
+        raw_mapping = operation.get("sector_mapping", {})
+        if not isinstance(raw_mapping, dict):
+            continue
+        mapping: dict[str, str] = {}
+        for valley in valley_set:
+            mapped = raw_mapping.get(valley)
+            if mapped is not None:
+                mapping[valley] = str(mapped)
+        if not mapping:
+            continue
+        mappings[op_id] = mapping
+        try:
+            orders[op_id] = int(operation.get("order", 0))
+        except (TypeError, ValueError):
+            pass
+    return mappings, orders
+
+
+def _build_subspace_space_group_for_valley(
+    *,
+    valley: str,
+    valley_mappings: dict[object, dict[str, str]],
+    operation_orders: dict[object, int],
+) -> dict[str, object]:
+    """Build the valley subspace space-group candidate from full operations."""
+    preserving_ops = sorted(
+        [
+            op_id for op_id, mapping in valley_mappings.items()
+            if str(mapping.get(valley)) == str(valley)
+        ],
+        key=_operation_sort_key,
+    )
+    changing_ops = sorted(
+        [
+            op_id for op_id, mapping in valley_mappings.items()
+            if mapping.get(valley) is not None and str(mapping.get(valley)) != str(valley)
+        ],
+        key=_operation_sort_key,
+    )
+    non_identity_orders = [
+        int(operation_orders[op_id])
+        for op_id in preserving_ops
+        if op_id in operation_orders and int(operation_orders[op_id]) > 1
+    ]
+    effective_order = max(non_identity_orders) if non_identity_orders else 1
+    point_group = f"C{effective_order}" if effective_order > 1 else "C1"
+    space_group = f"P{effective_order}" if effective_order > 1 else "P1"
+    status = "candidate" if effective_order > 1 else "trivial"
+    reason = (
+        f"{space_group} candidate from valley-preserving operation order {effective_order}"
+        if effective_order > 1 else
+        "only identity preserves this valley in the detected space group"
+    )
+    return {
+        "status": status,
+        "candidate_space_group_symbol": space_group,
+        "candidate_point_group": point_group,
+        "valley_preserving_operation_ids": preserving_ops,
+        "valley_changing_operation_ids": changing_ops,
+        "operation_orders": {
+            str(op_id): int(operation_orders[op_id])
+            for op_id in preserving_ops + changing_ops
+            if op_id in operation_orders
+        },
+        "source": "full_space_group_valley_mapping",
+        "reason": reason,
+    }
+
+
+def _refine_ebr_mapping_with_subspace_space_group(
+    *,
+    ebr_mapping: dict[str, object],
+    subspace_space_group: dict[str, object],
+) -> None:
+    """Attach full-space-group candidate without pretending local characters exist."""
+    candidate = subspace_space_group.get("candidate_space_group_symbol")
+    ebr_mapping["subspace_space_group_candidate"] = candidate
+    blockers = ebr_mapping.get("blocked_by")
+    if not isinstance(blockers, list):
+        return
+    if candidate in (None, "", "P1"):
+        return
+    refined_blockers = [
+        (
+            "hsp_local_preserving_character_missing"
+            if blocker == "subspace_group_candidate_missing"
+            else blocker
+        )
+        for blocker in blockers
+    ]
+    ebr_mapping["blocked_by"] = refined_blockers
+    if "hsp_local_preserving_character_missing" in refined_blockers:
+        notes = str(ebr_mapping.get("notes", "") or "")
+        addition = (
+            " Subspace space-group candidate is present, but this HSP does not "
+            "contain a non-identity valley-preserving operation for this valley; "
+            "use the corresponding HSP-star member before assigning local "
+            "valley-preserving irreps."
+        )
+        if addition.strip() not in notes:
+            ebr_mapping["notes"] = notes + addition
+
+
+def _empty_subspace_space_group(reason: str) -> dict[str, object]:
+    return {
+        "status": "not_evaluated",
+        "candidate_space_group_symbol": None,
+        "candidate_point_group": None,
+        "valley_preserving_operation_ids": [],
+        "valley_changing_operation_ids": [],
+        "operation_orders": {},
+        "source": "full_space_group_valley_mapping",
+        "reason": reason,
+    }
+
+
 def _not_evaluated_symmetry_adapted_kpoint(reason: str) -> dict[str, object]:
     return {
         "status": "not_evaluated",
         "reason": reason,
         "diagnostic_only": True,
         "local_irrep_ready": False,
-        "experimental": True,
-        "workflow_integration_status": "not_integrated",
+        "feature_status": "formal",
+        "workflow_integration_status": "integrated",
         "trusted_irrep_label": False,
         "irrep_matching_input_ready": False,
         "irrep_matching_input_status": "not_evaluated",
@@ -1164,8 +1323,8 @@ def _aggregate_symmetry_adapted_kpoint(
         "reason": "; ".join(reasons) if reasons else "all orbits evaluated",
         "diagnostic_only": diagnostic_only,
         "local_irrep_ready": local_irrep_ready,
-        "experimental": True,
-        "workflow_integration_status": "not_integrated",
+        "feature_status": "formal",
+        "workflow_integration_status": "integrated",
         "trusted_irrep_label": False,
         "irrep_matching_input_ready": irrep_matching_input_ready,
         "irrep_matching_input_status": "ready" if irrep_matching_input_ready else "blocked",
@@ -1222,7 +1381,7 @@ def _add_identity_representation_if_missing(
     symmetry_payload: dict[str, object],
     fallback_dim: int | None,
 ) -> bool:
-    """Add identity D_g for experimental projector analysis when D_raw omits it.
+    """Add identity D_g for symmetry-adapted projector analysis when D_raw omits it.
 
     `build_raw_representations_for_kpoint` is tuned for rotation-eigenvalue
     diagnostics and may skip order-1 operations.  Symmetry-adapted projector

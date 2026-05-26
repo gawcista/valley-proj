@@ -1228,6 +1228,8 @@ def test_summary_text_renders_symmetry_adapted_valley_subspaces(tmp_path):
                 "GammaM": {
                     "status": "warn",
                     "reason": "projector warning",
+                    "feature_status": "formal",
+                    "workflow_integration_status": "integrated",
                     "local_irrep_ready": True,
                     "diagnostic_only": False,
                     "irrep_matching_input_ready": False,
@@ -1242,6 +1244,13 @@ def test_summary_text_renders_symmetry_adapted_valley_subspaces(tmp_path):
                             "local_irrep_ready": True,
                             "irrep_matching_input_ready": False,
                             "irrep_matching_input_reason": "spinor convention unverified",
+                            "subspace_space_group": {
+                                "candidate_space_group_symbol": "P2",
+                                "valley_preserving_operation_ids": [0, 4],
+                            },
+                            "subspace_group": {
+                                "subspace_group_candidate": "C2_like",
+                            },
                             "symmetry_adapted_projectors": {
                                 "selected_rank": 2,
                                 "rank_source": "user_specified",
@@ -1266,10 +1275,12 @@ def test_summary_text_renders_symmetry_adapted_valley_subspaces(tmp_path):
 
     text = render_summary_text(summary)
 
-    assert "Symmetry-adapted valley analysis (experimental)" in text
+    assert "Symmetry-adapted valley analysis" in text
+    assert "Symmetry-adapted valley analysis (experimental)" not in text
     assert "valley-preserving subspaces" in text
     assert "GammaM" in text
     assert "M1_valley" in text
+    assert "P2" in text
     assert "[0, 4]" in text
     assert "-0.25, 0.25" in text
     assert "spinor convention unverified" in text

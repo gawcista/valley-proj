@@ -100,7 +100,7 @@ class RotationConfig:
 
 @dataclass(frozen=True)
 class SymmetryAdaptedValleyConfig:
-    enabled: bool = False
+    enabled: bool = True
     seed_overlap_warn_tol: float = 0.8
     seed_overlap_fail_tol: float = 0.5
     projector_symmetry_warn_tol: float = 1e-2
@@ -484,7 +484,7 @@ def _parse_symmetry_adapted_valley_config(raw: dict[str, Any]) -> SymmetryAdapte
     if not isinstance(raw, dict):
         return SymmetryAdaptedValleyConfig()
     return SymmetryAdaptedValleyConfig(
-        enabled=bool(raw.get("enabled", False)),
+        enabled=bool(raw.get("enabled", True)),
         seed_overlap_warn_tol=float(raw.get("seed_overlap_warn_tol", 0.8)),
         seed_overlap_fail_tol=float(raw.get("seed_overlap_fail_tol", 0.5)),
         projector_symmetry_warn_tol=float(raw.get("projector_symmetry_warn_tol", 1e-2)),

@@ -691,21 +691,28 @@ If the report says:
 
 the usual cause is that `symmetry.operations.structure_file` is missing or points to the wrong file. This path must be the moire or bilayer POSCAR/CONTCAR.
 
-### `symmetry_adapted_valley_analysis.json` (experimental)
+### `symmetry_adapted_valley_analysis.json`
 
-This file is written only when `analysis.symmetry_adapted_valley.enabled: true`.
+This formal analysis file is written by default. It can be disabled with
+`analysis.symmetry_adapted_valley.enabled: false` for legacy comparison runs.
 It contains two complementary views:
 
 - `orbits`: full valley-orbit projector reports, including valley-changing
   operations and sewing diagnostics when representative operations are
   unambiguous.
 - `valley_preserving_subspaces`: singleton per-valley reports that restrict
-  the analysis to the HSP-little-group operations preserving that valley.  For
-  a three-M-valley star, this exposes the three local P2-like subspaces
-  separately, e.g. `[M1]`, `[M2]`, and `[M3]` with their corresponding C2
-  operations when those operations belong to the HSP little group.
+  the representation analysis to the HSP-little-group operations preserving
+  that valley.
 
-These reports are still experimental and do not promote trusted irrep labels.
+Each singleton report also includes `subspace_space_group`, which is built from
+the detected full-space-group valley mapping rather than from one HSP little
+group. For a three-M-valley star, this lets the output distinguish the
+full-space-group subspace candidate `P2` from the HSP-local operation content:
+at a given moire M point, a C2 for another valley may map the HSP to another
+member of the HSP star and therefore be absent from `hsp_preserving_operation_ids`
+while still appearing in `subspace_space_group.valley_preserving_operation_ids`.
+
+These reports do not promote trusted irrep labels by themselves.
 For spinor wavefunctions, `irrep_matching_input_ready` remains false until the
 spinor convention is explicitly benchmark-verified.
 

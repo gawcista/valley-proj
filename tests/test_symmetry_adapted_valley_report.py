@@ -89,7 +89,7 @@ def test_compact_summary_serializable():
 
     for key in [
         "status", "reason", "local_irrep_ready", "diagnostic_only",
-        "experimental", "workflow_integration_status", "trusted_irrep_label",
+        "feature_status", "workflow_integration_status", "trusted_irrep_label",
         "irrep_matching_input_ready", "irrep_matching_input_status",
         "irrep_matching_input_reason",
         "orbit", "reference_valley",
@@ -98,11 +98,12 @@ def test_compact_summary_serializable():
         "valley_sewing_matrices",
         "valley_preserving_character_diagnostics",
         "subspace_group",
+        "subspace_space_group",
         "ebr_mapping_input",
     ]:
         assert key in summary, f"missing: {key}"
-    assert summary["experimental"] is True
-    assert summary["workflow_integration_status"] == "not_integrated"
+    assert summary["feature_status"] == "formal"
+    assert summary["workflow_integration_status"] == "integrated"
     assert summary["trusted_irrep_label"] is False
     assert summary["irrep_matching_input_ready"] is True
     assert summary["irrep_matching_input_status"] == "ready"
@@ -491,8 +492,54 @@ def _write_hex_poscar(path):
     )
 
 
-def test_default_off_no_symmetry_adapted_valley_output(tmp_path):
-    """Default enabled=false: no symmetry_adapted_valley_analysis in outputs."""
+def test_disabled_no_symmetry_adapted_valley_output(tmp_path):
+    """enabled=false: no symmetry_adapted_valley_analysis in outputs."""
+    import yaml
+    from valleyscope.workflows.analyze_hsp import analyze_hsp
+
+    h5_path = tmp_path / "wf.h5"; mono = tmp_path / "m.vasp"
+    struct = tmp_path / "POSCAR"; out_dir = tmp_path / "out"
+    config_path = tmp_path / "config.yaml"
+    _write_h5_three_valley(h5_path); _write_hex_poscar(struct); _write_hex_poscar(mono)
+
+    config = {
+        "input": {"wavefunction_h5": str(h5_path),
+                   "monolayer_poscars": {"top": str(mono), "bottom": str(mono)}},
+        "layer_transforms": {
+            "top": {"supercell_matrix": [[1,0,0],[0,1,0],[0,0,1]]},
+            "bottom": {"supercell_matrix": [[1,0,0],[0,1,0],[0,0,1]]},
+        },
+        "analysis": {"kpoints": ["GammaM"], "iband": [101,102,103],
+                      "degeneracy_tol_meV": 1.0,
+                      "symmetry_adapted_valley": {"enabled": False}},
+        "valley_centers": {"coordinate_mode": "cart", "centers": [
+            {"name":"M1c","cart":[0.5,0,0]},
+            {"name":"M2c","cart":[-0.25,0.4330127018922193,0]},
+            {"name":"M3c","cart":[-0.25,-0.4330127018922193,0]},
+        ]},
+        "valley_subspaces": [
+            {"name":"M1","centers":["M1c"]},
+            {"name":"M2","centers":["M2c"]},
+            {"name":"M3","centers":["M3c"]},
+        ],
+        "projection": {"qcut_mode":"absolute","qcut_Ainv":0.3,"overlap_policy":"warn_exclude",
+                        "thresholds":{"W_val_min":0.5}},
+        "symmetry": {"operations":{"structure_file":str(struct)},"tolerance":{"symprec":1e-3},
+                      "filters":{"rotation_order":"auto"}},
+        "output": {"directory": str(out_dir)},
+    }
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    outputs = analyze_hsp(config_path)
+
+    assert "symmetry_adapted_valley_analysis_json" not in outputs
+    assert not (out_dir / "symmetry_adapted_valley_analysis.json").exists()
+
+    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    assert "symmetry_adapted_valley_analysis" not in summary
+
+
+def test_default_writes_symmetry_adapted_valley_analysis(tmp_path):
+    """The formal symmetry-adapted valley analysis is enabled by default."""
     import yaml
     from valleyscope.workflows.analyze_hsp import analyze_hsp
 
@@ -529,53 +576,6 @@ def test_default_off_no_symmetry_adapted_valley_output(tmp_path):
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
     outputs = analyze_hsp(config_path)
 
-    # Default: no symmetry_adapted_valley_analysis
-    assert "symmetry_adapted_valley_analysis_json" not in outputs
-    assert not (out_dir / "symmetry_adapted_valley_analysis.json").exists()
-
-    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
-    assert "symmetry_adapted_valley_analysis" not in summary
-
-
-def test_enabled_true_writes_symmetry_adapted_valley_analysis(tmp_path):
-    """enabled=true writes symmetry_adapted_valley_analysis.json."""
-    import yaml
-    from valleyscope.workflows.analyze_hsp import analyze_hsp
-
-    h5_path = tmp_path / "wf.h5"; mono = tmp_path / "m.vasp"
-    struct = tmp_path / "POSCAR"; out_dir = tmp_path / "out"
-    config_path = tmp_path / "config.yaml"
-    _write_h5_three_valley(h5_path); _write_hex_poscar(struct); _write_hex_poscar(mono)
-
-    config = {
-        "input": {"wavefunction_h5": str(h5_path),
-                   "monolayer_poscars": {"top": str(mono), "bottom": str(mono)}},
-        "layer_transforms": {
-            "top": {"supercell_matrix": [[1,0,0],[0,1,0],[0,0,1]]},
-            "bottom": {"supercell_matrix": [[1,0,0],[0,1,0],[0,0,1]]},
-        },
-        "analysis": {"kpoints": ["GammaM"], "iband": [101,102,103],
-                      "degeneracy_tol_meV": 1.0,
-                      "symmetry_adapted_valley": {"enabled": True}},
-        "valley_centers": {"coordinate_mode": "cart", "centers": [
-            {"name":"M1c","cart":[0.5,0,0]},
-            {"name":"M2c","cart":[-0.25,0.4330127018922193,0]},
-            {"name":"M3c","cart":[-0.25,-0.4330127018922193,0]},
-        ]},
-        "valley_subspaces": [
-            {"name":"M1","centers":["M1c"]},
-            {"name":"M2","centers":["M2c"]},
-            {"name":"M3","centers":["M3c"]},
-        ],
-        "projection": {"qcut_mode":"absolute","qcut_Ainv":0.3,"overlap_policy":"warn_exclude",
-                        "thresholds":{"W_val_min":0.5}},
-        "symmetry": {"operations":{"structure_file":str(struct)},"tolerance":{"symprec":1e-3},
-                      "filters":{"rotation_order":"auto"}},
-        "output": {"directory": str(out_dir)},
-    }
-    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
-    outputs = analyze_hsp(config_path)
-
     assert "symmetry_adapted_valley_analysis_json" in outputs
     report_path = outputs["symmetry_adapted_valley_analysis_json"]
     assert report_path.exists()
@@ -588,17 +588,21 @@ def test_enabled_true_writes_symmetry_adapted_valley_analysis(tmp_path):
     assert [item["orbit"] for item in gm["valley_preserving_subspaces"]] == [
         ["M1"], ["M2"], ["M3"],
     ]
-    assert gm["experimental"] is True
+    assert gm["feature_status"] == "formal"
+    assert gm["workflow_integration_status"] == "integrated"
     assert gm["trusted_irrep_label"] is False
 
     # Forbidden terms check
     encoded = json.dumps(report)
-    for forbidden in ["covariance", "equivariant", "stabilizer", "valley_little_group", "p_cov"]:
+    for forbidden in [
+        "covariance", "equivariant", "stabilizer", "valley_little_group",
+        "p_cov", "experimental",
+    ]:
         assert forbidden not in encoded.lower(), f"forbidden: {forbidden}"
 
 
 def test_enabled_true_without_d_raw_writes_not_evaluated_report(tmp_path):
-    """enabled=true still writes an explicit not_evaluated report if D_raw is absent."""
+    """The formal analysis writes an explicit not_evaluated report if D_raw is absent."""
     import yaml
     from valleyscope.workflows.analyze_hsp import analyze_hsp
 
@@ -614,8 +618,7 @@ def test_enabled_true_without_d_raw_writes_not_evaluated_report(tmp_path):
             "bottom": {"supercell_matrix": [[1,0,0],[0,1,0],[0,0,1]]},
         },
         "analysis": {"kpoints": ["GammaM"], "iband": [101,102,103],
-                      "degeneracy_tol_meV": 1.0,
-                      "symmetry_adapted_valley": {"enabled": True}},
+                      "degeneracy_tol_meV": 1.0},
         "valley_centers": {"coordinate_mode": "cart", "centers": [
             {"name":"M1c","cart":[0.5,0,0]},
             {"name":"M2c","cart":[-0.25,0.4330127018922193,0]},
@@ -706,7 +709,70 @@ def test_valley_preserving_subspace_reports_keep_three_mstar_p2_subspaces():
         "C2_like",
         "C2_like",
     ]
+    assert [report["subspace_space_group"]["candidate_space_group_symbol"] for report in reports] == [
+        "P2",
+        "P2",
+        "P2",
+    ]
     assert all(report["local_irrep_ready"] is True for report in reports)
+
+
+def test_subspace_space_group_uses_full_valley_mapping_beyond_current_hsp():
+    from valleyscope.workflows.analyze_hsp import _build_valley_preserving_subspace_reports
+
+    seeds = {
+        "M1": np.diag([1, 1, 0, 0, 0, 0]).astype(np.complex128),
+        "M2": np.diag([0, 0, 1, 1, 0, 0]).astype(np.complex128),
+        "M3": np.diag([0, 0, 0, 0, 1, 1]).astype(np.complex128),
+    }
+    identity = np.eye(6, dtype=np.complex128)
+    c2_m3 = np.diag([0, 0, 0, 0, 1, -1]).astype(np.complex128)
+    c2_m3[0, 2] = c2_m3[1, 3] = c2_m3[2, 0] = c2_m3[3, 1] = 1
+
+    reports = _build_valley_preserving_subspace_reports(
+        valley_matrices=seeds,
+        d_g_dict={0: identity, 5: c2_m3},
+        valley_mappings_dict={
+            0: {"M1": "M1", "M2": "M2", "M3": "M3"},
+            5: {"M1": "M2", "M2": "M1", "M3": "M3"},
+        },
+        valley_names=["M1", "M2", "M3"],
+        unitarity_tol=1e-8,
+        modulus_tol=1e-8,
+        spinor_wavefunction=False,
+        spinor_convention_verified=True,
+        operation_orders_by_id={0: 1, 5: 2},
+        space_group_valley_mappings={
+            0: {"M1": "M1", "M2": "M2", "M3": "M3"},
+            3: {"M1": "M3", "M2": "M2", "M3": "M1"},
+            4: {"M1": "M1", "M2": "M3", "M3": "M2"},
+            5: {"M1": "M2", "M2": "M1", "M3": "M3"},
+        },
+        space_group_operation_orders={0: 1, 3: 2, 4: 2, 5: 2},
+    )
+
+    assert [report["hsp_preserving_operation_ids"] for report in reports] == [
+        [0],
+        [0],
+        [0, 5],
+    ]
+    assert [report["subspace_space_group"]["valley_preserving_operation_ids"] for report in reports] == [
+        [0, 4],
+        [0, 3],
+        [0, 5],
+    ]
+    assert [report["subspace_space_group"]["candidate_space_group_symbol"] for report in reports] == [
+        "P2",
+        "P2",
+        "P2",
+    ]
+    assert reports[0]["ebr_mapping_input"]["blocked_by"] == [
+        "hsp_local_preserving_character_missing"
+    ]
+    assert reports[1]["ebr_mapping_input"]["blocked_by"] == [
+        "hsp_local_preserving_character_missing"
+    ]
+    assert reports[2]["ebr_mapping_input"]["blocked_by"] == []
 
 
 def test_valley_preserving_subspace_reports_use_modulus_tolerance():

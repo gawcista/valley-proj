@@ -1,5 +1,4 @@
-"""Experimental scaffold: serialize symmetry-adapted valley analysis pipeline
-into a compact JSON-safe report.
+"""Serialize symmetry-adapted valley analysis into a compact JSON-safe report.
 
 This module chains:
   q-cut valley seed projectors P_a^0
@@ -8,9 +7,9 @@ This module chains:
   -> valley sewing matrices B_{ba}(g)
   -> character / eigenphase diagnostics
 
-This module does NOT feed into production irrep matching. Passing readiness
-only means that the experimental staged report is internally consistent; it
-does not promote any production irrep label.
+This module provides the formal symmetry-adapted valley analysis layer. Passing
+readiness means the staged report is internally consistent and suitable as
+input to later table matching; it does not by itself assign final EBR labels.
 """
 
 from __future__ import annotations
@@ -57,9 +56,9 @@ def build_symmetry_adapted_valley_report(
 ) -> dict[str, object]:
     """Build a full symmetry-adapted valley analysis report.
 
-    Returns an experimental report. local_irrep_ready is True only when every
-    pipeline stage passes readiness checks, but this helper does not feed into
-    production irrep matching.
+    local_irrep_ready is True only when every pipeline stage passes readiness
+    checks.  The separate irrep_matching_input_ready gate controls whether the
+    result may be passed to future table matching.
     """
     # Stage 1: symmetry-adapted projectors
     try:
@@ -94,8 +93,8 @@ def build_symmetry_adapted_valley_report(
         return {
             "status": "diagnostic_only",
             "reason": reason,
-            "experimental": True,
-            "workflow_integration_status": "not_integrated",
+            "feature_status": "formal",
+            "workflow_integration_status": "integrated",
             "trusted_irrep_label": False,
             "local_irrep_ready": False,
             "diagnostic_only": True,
@@ -118,6 +117,9 @@ def build_symmetry_adapted_valley_report(
             "subspace_group": _blocked_subspace_group(
                 reason="projector_construction_failed",
                 spinor_convention_verified=spinor_convention_verified,
+            ),
+            "subspace_space_group": _not_evaluated_subspace_space_group(
+                "not evaluated in orbit-level report"
             ),
             "ebr_mapping_input": _blocked_ebr_mapping_input(
                 blocked_by=["projector_construction_failed"],
@@ -211,8 +213,8 @@ def build_symmetry_adapted_valley_report(
             if diagnostic_only else "warn" if proj_warn else "ok"
         ),
         "reason": "; ".join(reasons) if reasons else "all stages passed",
-        "experimental": True,
-        "workflow_integration_status": "not_integrated",
+        "feature_status": "formal",
+        "workflow_integration_status": "integrated",
         "trusted_irrep_label": False,
         "local_irrep_ready": local_irrep_ready,
         "diagnostic_only": diagnostic_only,
@@ -231,6 +233,9 @@ def build_symmetry_adapted_valley_report(
             proj_status=proj_diag.status,
             spinor_convention_verified=spinor_convention_verified,
             operation_orders=operation_orders,
+        ),
+        "subspace_space_group": _not_evaluated_subspace_space_group(
+            "not evaluated in orbit-level report"
         ),
         "ebr_mapping_input": _build_ebr_mapping_input(
             local_irrep_ready=local_irrep_ready,
@@ -259,9 +264,9 @@ def summarize_symmetry_adapted_valley_report(
     return {
         "status": report.get("status"),
         "reason": report.get("reason"),
-        "experimental": report.get("experimental", True),
+        "feature_status": report.get("feature_status", "formal"),
         "workflow_integration_status":
-            report.get("workflow_integration_status", "not_integrated"),
+            report.get("workflow_integration_status", "integrated"),
         "trusted_irrep_label": report.get("trusted_irrep_label", False),
         "local_irrep_ready": report.get("local_irrep_ready"),
         "diagnostic_only": report.get("diagnostic_only"),
@@ -277,6 +282,7 @@ def summarize_symmetry_adapted_valley_report(
         "valley_preserving_character_diagnostics":
             report.get("valley_preserving_character_diagnostics"),
         "subspace_group": report.get("subspace_group"),
+        "subspace_space_group": report.get("subspace_space_group"),
         "ebr_mapping_input": report.get("ebr_mapping_input"),
     }
 
@@ -415,8 +421,8 @@ def _failed_report(
     return {
         "status": "diagnostic_only",
         "reason": reason,
-        "experimental": True,
-        "workflow_integration_status": "not_integrated",
+        "feature_status": "formal",
+        "workflow_integration_status": "integrated",
         "trusted_irrep_label": False,
         "local_irrep_ready": False,
         "diagnostic_only": True,
@@ -480,6 +486,9 @@ def _failed_report(
         "subspace_group": _blocked_subspace_group(
             reason=reason,
             spinor_convention_verified=False,
+        ),
+        "subspace_space_group": _not_evaluated_subspace_space_group(
+            "not evaluated in orbit-level report"
         ),
         "ebr_mapping_input": _blocked_ebr_mapping_input(
             blocked_by=["projector_input_invalid"],
@@ -605,7 +614,7 @@ def _build_ebr_mapping_input(
         "spinor_convention_verified": spinor_convention_verified,
         "notes": (
             "EBR mapping requires character table matching for valley-preserving "
-            "subgroup irreps.  Not implemented in current V1.1 experimental pipeline."
+            "subgroup irreps. Not implemented in the current formal analysis layer."
         ),
     }
 
@@ -646,6 +655,19 @@ def _blocked_subspace_group(
         "subspace_group_candidate": None,
         "spinor_convention_verified": bool(spinor_convention_verified),
         "ready_for_ebr_mapping": False,
+        "reason": reason,
+    }
+
+
+def _not_evaluated_subspace_space_group(reason: str) -> dict[str, object]:
+    return {
+        "status": "not_evaluated",
+        "candidate_space_group_symbol": None,
+        "candidate_point_group": None,
+        "valley_preserving_operation_ids": [],
+        "valley_changing_operation_ids": [],
+        "operation_orders": {},
+        "source": "full_space_group_valley_mapping",
         "reason": reason,
     }
 
