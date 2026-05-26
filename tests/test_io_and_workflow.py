@@ -1352,6 +1352,68 @@ def test_summary_text_renders_projected_seed_projector_quality(tmp_path):
     assert "M1_valley=0.97" in text
 
 
+def test_summary_text_renders_hsp_star_coverage(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    config = load_config(config_path)
+    from valleyscope.reports.summary_report import build_summary_payload, render_summary_text
+
+    summary = build_summary_payload(
+        config=config,
+        qcut=0.5,
+        subspace_payload={
+            "kpoints": {
+                "MM": {
+                    "weights": [],
+                    "warnings": [],
+                    "valley_adapted_subspace": {"status": "single_band"},
+                }
+            }
+        },
+        symmetry_payload={
+            "status": "ok",
+            "operation_detection_backend": "spglib",
+            "structure_file": "CONTCAR",
+            "detected_operation_count": 0,
+            "candidate_rotations": [],
+            "symprec_scan_summary": [],
+            "little_group_check": {"required": True, "status": "evaluated_per_kpoint"},
+            "valley_preservation_check": {"required": True, "status": "completed"},
+            "detected_operations": [],
+            "hsp_star_report": {
+                "status": "symmetry_derivable",
+                "by_kpoint": {
+                    "MM": {
+                        "status": "symmetry_derivable",
+                        "star_size": 3,
+                        "explicit_count": 1,
+                        "symmetry_derivable_count": 2,
+                        "requires_additional_dft": False,
+                        "symmetry_derivable_representatives": [
+                            {
+                                "canonical_frac": [0.0, 0.5, 0.0],
+                                "generated_by_operation_ids": [2],
+                            }
+                        ],
+                    }
+                },
+            },
+        },
+        symmetry_rows=[],
+        output_paths={},
+    )
+
+    text = render_summary_text(summary)
+
+    assert "HSP-star coverage" in text
+    assert "symmetry_derivable" in text
+    assert "False" in text
+    assert "[0, 0.5, 0] via ops [2]" in text
+
+
 def test_summary_marks_spinor_rotation_as_diagnostic_only(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "config.yaml"

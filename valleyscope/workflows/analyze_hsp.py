@@ -8,6 +8,7 @@ from valleyscope.analysis.projector_symmetry import (
     apply_projector_symmetry_gate,
     build_projector_symmetry_report,
 )
+from valleyscope.analysis.hsp_star import build_hsp_star_report
 from valleyscope.analysis.symmetry_adapted_valley_report import (
     build_symmetry_adapted_valley_report,
     summarize_symmetry_adapted_valley_report,
@@ -283,7 +284,13 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             projector_symmetry_report=projector_symmetry_report,
         )
 
-    # --- Experimental: symmetry-adapted valley report (default off) ---
+    if symmetry_payload["status"] == "ok":
+        symmetry_payload["hsp_star_report"] = build_hsp_star_report(
+            kpoint_frac_by_name=symmetry_payload.get("kpoint_frac_by_name", {}),
+            operations=symmetry_payload.get("detected_operations", []),
+        )
+
+    # --- Formal symmetry-adapted valley report ---
     symmetry_adapted_valley_report: dict[str, object] | None = None
     if config.symmetry_adapted_valley.enabled:
         symmetry_adapted_valley_report = _build_symmetry_adapted_valley_report(

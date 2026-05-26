@@ -126,13 +126,14 @@ HSP-star member before subspace EBR matching.
 
 ```bash
 pytest -q
-# 302 passed
+# 312 passed
 ```
 
 ## 5. Next Steps
 
-1. Add or map the missing HSP-star members so each ZrSe2 M-valley `P2`
-   subspace has its C2 character at the correct HSP.
+1. Construct symmetry-derived HSP-star members so each ZrSe2 M-valley `P2`
+   subspace has its C2 character at the correct HSP without requiring
+   additional DFT.
 2. Verify the ZrSe2 spinor convention against a known benchmark.
 3. Start character-table matching for the ready tMoTe2 `P3` singleton
    subspaces, then extend to ZrSe2 `P2` after spinor and HSP-star issues are

@@ -347,6 +347,36 @@ def render_summary_text(summary: dict[str, Any]) -> str:
                 little_ops = ", ".join(str(v) for v in payload.get("little_group_operations", [])) or "none"
                 preserving_ops = ", ".join(str(v) for v in payload.get("valley_preserving_operations", [])) or "none"
                 lines.append(f"{kpoint}: HSP little group [{little_ops}], valley-preserving [{preserving_ops}]")
+    hsp_star_report = sym.get("hsp_star_report", {})
+    if isinstance(hsp_star_report, dict) and hsp_star_report.get("by_kpoint"):
+        lines.append("")
+        lines.append("HSP-star coverage:")
+        rows = []
+        for kpoint, payload in hsp_star_report.get("by_kpoint", {}).items():
+            if not isinstance(payload, dict):
+                continue
+            rows.append(
+                [
+                    kpoint,
+                    payload.get("status", ""),
+                    payload.get("star_size", ""),
+                    payload.get("explicit_count", ""),
+                    payload.get("symmetry_derivable_count", 0),
+                    payload.get("requires_additional_dft", ""),
+                    _format_hsp_star_representatives(
+                        payload.get("symmetry_derivable_representatives", [])
+                    ),
+                ]
+            )
+        lines.extend(
+            _table(
+                [
+                    "kpoint", "status", "star", "explicit",
+                    "derived", "extra_dft", "symmetry-derived reps",
+                ],
+                rows,
+            )
+        )
     if sym.get("rejected_operations"):
         lines.append("")
         lines.append("rejected operations:")
@@ -676,6 +706,7 @@ def _symmetry_analysis(symmetry_payload: dict[str, Any], target_kpoints: list[st
         "candidate_rotations": symmetry_payload.get("candidate_rotations", []),
         "symprec_scan_summary": symmetry_payload.get("symprec_scan_summary", []),
         "hsp_little_group_inventory": symmetry_payload.get("hsp_little_group_inventory", {}),
+        "hsp_star_report": symmetry_payload.get("hsp_star_report", {}),
         "per_valley_preserving_operation_inventory": per_valley_inventory,
         "valley_preserving_subgroup_report": subgroup_report,
         "kind_counts": kind_counts,
@@ -939,6 +970,19 @@ def _format_seed_overlap(value: Any) -> str:
     if not isinstance(value, dict):
         return _fmt(value)
     return ", ".join(f"{key}={_fmt(val)}" for key, val in value.items())
+
+
+def _format_hsp_star_representatives(value: Any) -> str:
+    if not isinstance(value, list):
+        return ""
+    terms: list[str] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        frac = item.get("canonical_frac")
+        ops = item.get("generated_by_operation_ids", [])
+        terms.append(f"{_short_list(frac)} via ops {_short_list(ops)}")
+    return "; ".join(terms)
 
 
 def _format_character_phases(value: Any) -> str:
