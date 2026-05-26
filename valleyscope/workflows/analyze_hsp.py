@@ -838,6 +838,7 @@ def _build_symmetry_adapted_valley_report(
         # Build representations dict from raw_reps
         d_g_dict: dict[object, np.ndarray] = {}
         valley_mappings_dict: dict[object, dict[str, str]] = {}
+        operation_orders_by_id: dict[object, int] = {}
         for op_id, op_data in raw_reps.items():
             if not isinstance(op_data, dict):
                 continue
@@ -846,6 +847,10 @@ def _build_symmetry_adapted_valley_report(
             if d_raw is not None and vm:
                 d_g_dict[op_id] = np.asarray(d_raw, dtype=np.complex128)
                 valley_mappings_dict[op_id] = {str(k): str(v) for k, v in vm.items()}
+                try:
+                    operation_orders_by_id[op_id] = int(op_data.get("order", 0))
+                except (TypeError, ValueError):
+                    pass
         fallback_dim = None
         if valley_matrices:
             first_matrix = next(iter(valley_matrices.values()))
@@ -857,6 +862,15 @@ def _build_symmetry_adapted_valley_report(
             symmetry_payload=symmetry_payload,
             fallback_dim=fallback_dim,
         )
+        for op_id, mapping in valley_mappings_dict.items():
+            if op_id not in operation_orders_by_id and all(
+                str(mapping.get(valley)) == str(valley) for valley in valley_names
+            ):
+                d_g = np.asarray(d_g_dict.get(op_id))
+                if d_g.shape == (fallback_dim, fallback_dim) and np.allclose(
+                    d_g, np.eye(fallback_dim, dtype=np.complex128), atol=1e-10,
+                ):
+                    operation_orders_by_id[op_id] = 1
 
         if not d_g_dict:
             by_kpoint[kpoint_name] = _not_evaluated_symmetry_adapted_kpoint(
@@ -905,10 +919,17 @@ def _build_symmetry_adapted_valley_report(
                 reference_valley=orbit[0],
                 rank=None,
                 rank_method="gap",
-                unitarity_tol=float(config.rotation.unitarity_tol),
+                unitarity_tol=float(config.symmetry_adapted_valley.representation_unitarity_fail_tol),
                 modulus_tol=float(config.rotation.root_deviation_tol),
                 spinor_wavefunction=bool(symmetry_payload.get("spinor_wavefunction", False)),
                 spinor_convention_verified=bool(config.spinor.convention_verified),
+                operation_orders=operation_orders_by_id,
+                seed_overlap_warn_tol=float(config.symmetry_adapted_valley.seed_overlap_warn_tol),
+                seed_overlap_fail_tol=float(config.symmetry_adapted_valley.seed_overlap_fail_tol),
+                projector_symmetry_warn_tol=float(config.symmetry_adapted_valley.projector_symmetry_warn_tol),
+                projector_symmetry_fail_tol=float(config.symmetry_adapted_valley.projector_symmetry_fail_tol),
+                ebr_seed_overlap_min=float(config.symmetry_adapted_valley.ebr_seed_overlap_min),
+                ebr_unitarity_max=float(config.symmetry_adapted_valley.ebr_unitarity_max),
             )
             orbit_reports.append(summarize_symmetry_adapted_valley_report(report))
 
@@ -917,10 +938,17 @@ def _build_symmetry_adapted_valley_report(
             d_g_dict=d_g_dict,
             valley_mappings_dict=valley_mappings_dict,
             valley_names=valley_names,
-            unitarity_tol=float(config.rotation.unitarity_tol),
+            unitarity_tol=float(config.symmetry_adapted_valley.representation_unitarity_fail_tol),
             modulus_tol=float(config.rotation.root_deviation_tol),
             spinor_wavefunction=bool(symmetry_payload.get("spinor_wavefunction", False)),
             spinor_convention_verified=bool(config.spinor.convention_verified),
+            operation_orders_by_id=operation_orders_by_id,
+            seed_overlap_warn_tol=float(config.symmetry_adapted_valley.seed_overlap_warn_tol),
+            seed_overlap_fail_tol=float(config.symmetry_adapted_valley.seed_overlap_fail_tol),
+            projector_symmetry_warn_tol=float(config.symmetry_adapted_valley.projector_symmetry_warn_tol),
+            projector_symmetry_fail_tol=float(config.symmetry_adapted_valley.projector_symmetry_fail_tol),
+            ebr_seed_overlap_min=float(config.symmetry_adapted_valley.ebr_seed_overlap_min),
+            ebr_unitarity_max=float(config.symmetry_adapted_valley.ebr_unitarity_max),
         )
 
         by_kpoint[kpoint_name] = _aggregate_symmetry_adapted_kpoint(
@@ -941,6 +969,13 @@ def _build_valley_preserving_subspace_reports(
     modulus_tol: float,
     spinor_wavefunction: bool,
     spinor_convention_verified: bool,
+    operation_orders_by_id: dict[object, int] | None = None,
+    seed_overlap_warn_tol: float = 0.8,
+    seed_overlap_fail_tol: float = 0.5,
+    projector_symmetry_warn_tol: float = 1e-2,
+    projector_symmetry_fail_tol: float = 1e-1,
+    ebr_seed_overlap_min: float = 0.8,
+    ebr_unitarity_max: float = 1e-3,
 ) -> list[dict[str, object]]:
     """Build singleton reports for per-valley preserving-subgroup analysis.
 
@@ -1000,6 +1035,13 @@ def _build_valley_preserving_subspace_reports(
             modulus_tol=modulus_tol,
             spinor_wavefunction=spinor_wavefunction,
             spinor_convention_verified=spinor_convention_verified,
+            operation_orders=operation_orders_by_id,
+            seed_overlap_warn_tol=seed_overlap_warn_tol,
+            seed_overlap_fail_tol=seed_overlap_fail_tol,
+            projector_symmetry_warn_tol=projector_symmetry_warn_tol,
+            projector_symmetry_fail_tol=projector_symmetry_fail_tol,
+            ebr_seed_overlap_min=ebr_seed_overlap_min,
+            ebr_unitarity_max=ebr_unitarity_max,
         )
         summary = summarize_symmetry_adapted_valley_report(report)
         summary["analysis_scope"] = "valley_preserving_subspace"

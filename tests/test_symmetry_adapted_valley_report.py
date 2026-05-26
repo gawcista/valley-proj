@@ -97,6 +97,8 @@ def test_compact_summary_serializable():
         "valley_preserving_representations",
         "valley_sewing_matrices",
         "valley_preserving_character_diagnostics",
+        "subspace_group",
+        "ebr_mapping_input",
     ]:
         assert key in summary, f"missing: {key}"
     assert summary["experimental"] is True
@@ -112,6 +114,53 @@ def test_compact_summary_serializable():
         "max_sewing_unitarity_error",
         "items",
     }
+
+
+def test_subspace_group_uses_operation_order_not_matrix_rank():
+    seed = np.array([[1.0]], dtype=np.complex128)
+    c2 = np.array([[-1.0]], dtype=np.complex128)
+
+    report = build_symmetry_adapted_valley_report(
+        seed_projectors={"M": seed},
+        representations={0: np.eye(1, dtype=np.complex128), 7: c2},
+        valley_mappings={0: {"M": "M"}, 7: {"M": "M"}},
+        orbit=["M"],
+        reference_valley="M",
+        rank=1,
+        operation_orders={0: 1, 7: 2},
+        spinor_wavefunction=False,
+        spinor_convention_verified=True,
+    )
+
+    assert report["subspace_group"]["effective_point_group"] == "C2"
+    assert report["subspace_group"]["subspace_group_candidate"] == "C2_like"
+    assert report["ebr_mapping_input"]["subspace_group_candidate"] == "C2_like"
+
+
+def test_ebr_mapping_uses_configurable_seed_overlap_threshold():
+    p_seed = np.diag([0.75, 0.25]).astype(np.complex128)
+
+    report = build_symmetry_adapted_valley_report(
+        seed_projectors={"M": p_seed},
+        representations={0: np.eye(2, dtype=np.complex128)},
+        valley_mappings={0: {"M": "M"}},
+        orbit=["M"],
+        reference_valley="M",
+        rank=1,
+        operation_orders={0: 1},
+        spinor_wavefunction=False,
+        spinor_convention_verified=True,
+        seed_overlap_fail_tol=0.1,
+        seed_overlap_warn_tol=0.1,
+        ebr_seed_overlap_min=0.9,
+    )
+
+    assert report["symmetry_adapted_projectors"]["status"] == "ok"
+    assert report["ebr_mapping_input"]["ready"] is False
+    assert any(
+        str(item).startswith("low_seed_overlap_min=")
+        for item in report["ebr_mapping_input"]["blocked_by"]
+    )
 
 
 # -----------------------------------------------------------------------
@@ -639,6 +688,7 @@ def test_valley_preserving_subspace_reports_keep_three_mstar_p2_subspaces():
         modulus_tol=1e-8,
         spinor_wavefunction=False,
         spinor_convention_verified=True,
+        operation_orders_by_id={0: 1, 3: 2, 4: 2, 5: 2},
     )
 
     assert [report["orbit"] for report in reports] == [["M1"], ["M2"], ["M3"]]
@@ -651,6 +701,11 @@ def test_valley_preserving_subspace_reports_keep_three_mstar_p2_subspaces():
     assert reports[0]["valley_preserving_representations"]["valley_preserving_operations"]["M1"] == [0, 4]
     assert reports[1]["valley_preserving_representations"]["valley_preserving_operations"]["M2"] == [0, 3]
     assert reports[2]["valley_preserving_representations"]["valley_preserving_operations"]["M3"] == [0, 5]
+    assert [report["subspace_group"]["subspace_group_candidate"] for report in reports] == [
+        "C2_like",
+        "C2_like",
+        "C2_like",
+    ]
     assert all(report["local_irrep_ready"] is True for report in reports)
 
 

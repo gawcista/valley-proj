@@ -47,6 +47,13 @@ def build_symmetry_adapted_valley_report(
     closure_mapping: dict[tuple[object, object], object] | None = None,
     spinor_wavefunction: bool = False,
     spinor_convention_verified: bool | None = None,
+    operation_orders: dict[object, int] | None = None,
+    seed_overlap_warn_tol: float = 0.8,
+    seed_overlap_fail_tol: float = 0.5,
+    projector_symmetry_warn_tol: float = 1e-2,
+    projector_symmetry_fail_tol: float = 1e-1,
+    ebr_seed_overlap_min: float = 0.8,
+    ebr_unitarity_max: float = 1e-3,
 ) -> dict[str, object]:
     """Build a full symmetry-adapted valley analysis report.
 
@@ -66,6 +73,10 @@ def build_symmetry_adapted_valley_report(
             rank_method=rank_method,
             rank_tol=rank_tol,
             expected_total_projector=expected_total_projector,
+            seed_overlap_warn_tol=seed_overlap_warn_tol,
+            seed_overlap_fail_tol=seed_overlap_fail_tol,
+            projector_symmetry_warn_tol=projector_symmetry_warn_tol,
+            projector_symmetry_fail_tol=projector_symmetry_fail_tol,
         )
     except ValueError as exc:
         return _failed_report(
@@ -103,6 +114,15 @@ def build_symmetry_adapted_valley_report(
             ),
             "valley_preserving_character_diagnostics": _not_evaluated_character_summary(
                 "not evaluated because projector construction failed"
+            ),
+            "subspace_group": _blocked_subspace_group(
+                reason="projector_construction_failed",
+                spinor_convention_verified=spinor_convention_verified,
+            ),
+            "ebr_mapping_input": _blocked_ebr_mapping_input(
+                blocked_by=["projector_construction_failed"],
+                spinor_convention_verified=spinor_convention_verified,
+                notes="Projector construction failed before EBR input could be assembled.",
             ),
         }
 
@@ -210,6 +230,7 @@ def build_symmetry_adapted_valley_report(
             char_diag=char_diag,
             proj_status=proj_diag.status,
             spinor_convention_verified=spinor_convention_verified,
+            operation_orders=operation_orders,
         ),
         "ebr_mapping_input": _build_ebr_mapping_input(
             local_irrep_ready=local_irrep_ready,
@@ -217,6 +238,12 @@ def build_symmetry_adapted_valley_report(
             spinor_convention_verified=spinor_convention_verified,
             proj_diag=proj_diag,
             char_diag=char_diag,
+            subspace_group_candidate=_subspace_group_candidate_from_orders(
+                rep_diag=rep_diag,
+                operation_orders=operation_orders,
+            ),
+            ebr_seed_overlap_min=ebr_seed_overlap_min,
+            ebr_unitarity_max=ebr_unitarity_max,
         ),
     }
 
@@ -450,6 +477,15 @@ def _failed_report(
             "max_eigenvalue_modulus_deviation": None,
             "per_valley": {},
         },
+        "subspace_group": _blocked_subspace_group(
+            reason=reason,
+            spinor_convention_verified=False,
+        ),
+        "ebr_mapping_input": _blocked_ebr_mapping_input(
+            blocked_by=["projector_input_invalid"],
+            spinor_convention_verified=False,
+            notes="Projector input is invalid; EBR input was not assembled.",
+        ),
     }
 
 
@@ -463,6 +499,7 @@ def _build_subspace_group(
     char_diag: dict[str, object],
     proj_status: str,
     spinor_convention_verified: bool,
+    operation_orders: dict[object, int] | None = None,
 ) -> dict[str, object]:
     vp_ops = rep_diag.get("valley_preserving_operations", {})
     vc_ops = rep_diag.get("valley_changing_operations", {})
@@ -470,13 +507,16 @@ def _build_subspace_group(
     all_vp = sorted(set(op for ops in vp_ops.values() if isinstance(ops, list) for op in ops))
     all_vc = sorted(set(op for ops in vc_ops.values() if isinstance(ops, list) for op in ops))
 
-    # Effective point group: max order among VP ops
-    vp_orders = set()
-    vp_reps = rep_diag.get("valley_preserving_representations", {}).get("representations", {})
-    for valley_reps in vp_reps.values():
-        if isinstance(valley_reps, dict):
-            vp_orders.update(int(r.shape[0]) if hasattr(r, 'shape') else 0 for r in valley_reps.values())
-    effective_order = max(vp_orders) if vp_orders else 0
+    operation_orders = operation_orders or {}
+    # Effective point group is determined from the symmetry operation order,
+    # not from the matrix dimension. A rank-1 spinless C2 and a rank-2 spinful
+    # C2 must both report C2-like.
+    vp_orders = [
+        int(operation_orders[op_id])
+        for op_id in all_vp
+        if op_id in operation_orders and int(operation_orders[op_id]) > 1
+    ]
+    effective_order = max(vp_orders) if vp_orders else 1
     epg = f"C{effective_order}" if effective_order > 1 else "C1"
 
     # Subspace group candidate
@@ -509,6 +549,7 @@ def _build_subspace_group(
         "hsp_little_group_operation_ids": all_vp + all_vc,
         "valley_preserving_operation_ids": all_vp,
         "valley_changing_operation_ids": all_vc,
+        "operation_orders": {str(k): int(v) for k, v in operation_orders.items()},
         "effective_point_group": epg,
         "subspace_group_candidate": candidate,
         "spinor_convention_verified": spinor_convention_verified,
@@ -524,6 +565,9 @@ def _build_ebr_mapping_input(
     spinor_convention_verified: bool,
     proj_diag,
     char_diag: dict[str, object],
+    subspace_group_candidate: str | None,
+    ebr_seed_overlap_min: float,
+    ebr_unitarity_max: float,
 ) -> dict[str, object]:
     blocked_by: list[str] = []
     ready = True
@@ -538,13 +582,16 @@ def _build_ebr_mapping_input(
         ready = False
         blocked_by.append("spinor_convention_unverified")
     min_overlap = min(proj_diag.seed_overlap.values()) if proj_diag.seed_overlap else 0.0
-    if min_overlap < 0.8:
+    if min_overlap < ebr_seed_overlap_min:
         ready = False
         blocked_by.append(f"low_seed_overlap_min={min_overlap:.3f}")
     max_unitarity = char_diag.get("max_valley_preserving_unitarity_error", 0.0) or 0.0
-    if max_unitarity > 1e-3:
+    if max_unitarity > ebr_unitarity_max:
         ready = False
         blocked_by.append(f"representation_unitarity={max_unitarity:.1e}")
+    if subspace_group_candidate is None:
+        ready = False
+        blocked_by.append("subspace_group_candidate_missing")
     chars_available = bool(
         char_diag.get("per_valley") and not char_diag.get("diagnostic_only", True)
     )
@@ -553,11 +600,68 @@ def _build_ebr_mapping_input(
         "ready": ready,
         "blocked_by": blocked_by,
         "required_tables": ["unknown — character table matching not yet implemented"],
-        "subspace_group_candidate": None,
+        "subspace_group_candidate": subspace_group_candidate,
         "valley_preserving_characters_available": chars_available,
         "spinor_convention_verified": spinor_convention_verified,
         "notes": (
             "EBR mapping requires character table matching for valley-preserving "
             "subgroup irreps.  Not implemented in current V1.1 experimental pipeline."
         ),
+    }
+
+
+def _subspace_group_candidate_from_orders(
+    *,
+    rep_diag: dict[str, object],
+    operation_orders: dict[object, int] | None,
+) -> str | None:
+    if not operation_orders:
+        return None
+    vp_ops = rep_diag.get("valley_preserving_operations", {})
+    if not isinstance(vp_ops, dict):
+        return None
+    all_vp = sorted(set(op for ops in vp_ops.values() if isinstance(ops, list) for op in ops))
+    non_identity_orders = [
+        int(operation_orders[op_id])
+        for op_id in all_vp
+        if op_id in operation_orders and int(operation_orders[op_id]) > 1
+    ]
+    if not non_identity_orders:
+        return None
+    return f"C{max(non_identity_orders)}_like"
+
+
+def _blocked_subspace_group(
+    *,
+    reason: str,
+    spinor_convention_verified: bool | None,
+) -> dict[str, object]:
+    return {
+        "status": "blocked",
+        "hsp_little_group_operation_ids": [],
+        "valley_preserving_operation_ids": [],
+        "valley_changing_operation_ids": [],
+        "operation_orders": {},
+        "effective_point_group": "C1",
+        "subspace_group_candidate": None,
+        "spinor_convention_verified": bool(spinor_convention_verified),
+        "ready_for_ebr_mapping": False,
+        "reason": reason,
+    }
+
+
+def _blocked_ebr_mapping_input(
+    *,
+    blocked_by: list[str],
+    spinor_convention_verified: bool | None,
+    notes: str,
+) -> dict[str, object]:
+    return {
+        "ready": False,
+        "blocked_by": blocked_by,
+        "required_tables": ["unknown — character table matching not yet implemented"],
+        "subspace_group_candidate": None,
+        "valley_preserving_characters_available": False,
+        "spinor_convention_verified": bool(spinor_convention_verified),
+        "notes": notes,
     }

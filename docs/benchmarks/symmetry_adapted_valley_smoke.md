@@ -1,6 +1,6 @@
 # Symmetry-Adapted Valley Pipeline — Real-Data Smoke Benchmark
 
-Date: 2026-05-25
+Date: 2026-05-26
 Branch: `cc/subspace-group-ebr-readiness`
 Base: `fix/zrse2-local-p2-subspaces` at `74cc238`
 
@@ -31,13 +31,19 @@ analysis:
 
 ### Subspace Group / EBR Readiness
 
-| Kpoint | Orbit/Valley | Candidate | EBR Ready | Blockers |
-|--------|-------------|-----------|-----------|----------|
-| GammaM | full K/K' | — | false | projector failed (inequivalent candidates) |
-| KM | full K/K' | — | false | projector failed (inequivalent candidates) |
-| MM | full K/K' | — | false | completeness_error=0.5 |
+| Kpoint | Scope | Candidate | EBR Ready | Blockers |
+|--------|-------|-----------|-----------|----------|
+| GammaM | full K/K' orbit | — | false | projector failed (inequivalent candidates) |
+| KM | full K/K' orbit | — | false | projector failed (inequivalent candidates) |
+| MM | full K/K' orbit | — | false | completeness_error=0.5 |
+| GammaM | local K / K' | C3_like | true | none |
+| KM | local K / K' | C3_like | true | none |
+| MM | local K / K' | C1 | false | subspace_group_candidate_missing |
 
 Representative ambiguity NOT resolved: C2 ops 3,4,5 all map K→Kp with O(1) projector differences.
+The local valley-preserving K/K' subspaces at GammaM and KM are now valid
+inputs for the next character-table matching step; the full K/K' orbit remains
+diagnostic-only because valley-changing C2 representatives are inequivalent.
 
 ## 2. tZrSe2 — M-Star Valley Benchmark (P312)
 
@@ -69,8 +75,8 @@ MM little group (it belongs to the M point at (0, 0.5, 0)).
 
 | Valley | VP Ops | Rank | Seed Overlap | Subspace Group | EBR Ready | Blockers |
 |--------|--------|------|-------------|----------------|-----------|----------|
-| M1 | [0] | 2 | 0.917 | C2_like (blocked) | false | spinor_unverified, representation_unitarity |
-| M2 | [0] | 2 | 0.838 | C2_like (blocked) | false | spinor_unverified |
+| M1 | [0] | 2 | 0.917 | C1 (blocked) | false | spinor_unverified, subspace_group_candidate_missing |
+| M2 | [0] | 2 | 0.917 | C1 (blocked) | false | spinor_unverified, subspace_group_candidate_missing |
 | M3 | [0, 5] | 2 | 0.957 | C2_like (blocked) | false | spinor_unverified, representation_unitarity=1.8e-2 |
 
 Note: M1's C2 (op 4) is NOT in the current MM little group — it belongs to
@@ -79,8 +85,10 @@ operations, three separate moire M points are needed.
 
 ### Subspace Group Summary
 
-All successful valley-preserving subspaces identify as **C2_like** candidates
-(P2-like local symmetry). However, all are **blocked** from EBR mapping:
+All three GammaM valley-preserving subspaces identify as **C2_like** candidates
+(P2-like local symmetry). At the single current MM kpoint, only M3 has a
+nontrivial C2-like preserving subgroup; M1 and M2 are C1 at this HSP.
+The ZrSe2 subspaces are **blocked** from EBR mapping:
 - `spinor_convention_unverified` (primary blocker for all)
 - `low_seed_overlap_min` (GammaM: 0.659-0.739)
 - `representation_unitarity` (M3 at GammaM: 2.2e-2; M3 at MM: 1.8e-2)
@@ -94,15 +102,15 @@ The `ebr_mapping_input` schema requires ALL of:
 4. seed_overlap >= ebr_seed_overlap_min (0.8)
 5. representation unitarity <= ebr_unitarity_max (1e-3)
 
-None of the current real-data cases pass all gates simultaneously.
-This is the correct conservative behavior.
+tMoTe2 local K/K' C3-like subspaces at GammaM and KM pass these gates and are
+ready as inputs to the next character-table matching step. ZrSe2 remains
+blocked by spinor convention, low GammaM seed overlap, and M3 unitarity issues.
 
 ## 4. pytest Result
 
 ```
 $ pytest -q
-296 passed
-0 skipped, 0 xfailed
+301 passed
 ```
 
 ## 5. Recommendation

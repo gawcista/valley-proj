@@ -64,6 +64,8 @@ def build_symmetry_adapted_projectors_for_orbit(
     expected_total_projector: np.ndarray | None = None,
     seed_overlap_warn_tol: float = 0.8,
     seed_overlap_fail_tol: float = 0.5,
+    projector_symmetry_warn_tol: float = 5e-2,
+    projector_symmetry_fail_tol: float = 1e-1,
     candidate_equivalence_tol: float = 1e-8,
 ) -> SymmetryAdaptedProjectors:
     """Build symmetry-adapted valley projectors for a single valley orbit.
@@ -238,6 +240,8 @@ def build_symmetry_adapted_projectors_for_orbit(
         expected_total_projector=expected_total_projector,
         seed_overlap_warn_tol=seed_overlap_warn_tol,
         seed_overlap_fail_tol=seed_overlap_fail_tol,
+        projector_symmetry_warn_tol=projector_symmetry_warn_tol,
+        projector_symmetry_fail_tol=projector_symmetry_fail_tol,
         representative_resolution=representative_resolution,
         representative_candidates=representative_candidates,
         representative_resolution_by_valley=representative_resolution_by_valley,
@@ -304,6 +308,8 @@ def compute_projector_quality_diagnostics(
     expected_total_projector: np.ndarray | None = None,
     seed_overlap_warn_tol: float = 0.8,
     seed_overlap_fail_tol: float = 0.5,
+    projector_symmetry_warn_tol: float = 5e-2,
+    projector_symmetry_fail_tol: float = 1e-1,
     representative_resolution: str = "",
     representative_candidates: list[object] | None = None,
     representative_resolution_by_valley: dict[str, str] | None = None,
@@ -393,6 +399,7 @@ def compute_projector_quality_diagnostics(
 
     min_seed_overlap = min(seed_overlap.values()) if seed_overlap else 0.0
     worst_valley = min(seed_overlap, key=lambda v: seed_overlap[v]) if seed_overlap else "?"
+    max_symmetry_error = max(symmetry_errors.values()) if symmetry_errors else 0.0
 
     # 1. Hard failures: orthogonality / idempotency / completeness
     if ortho_err > 0.1 or idempotency_err > 0.2:
@@ -407,10 +414,19 @@ def compute_projector_quality_diagnostics(
             f"low seed overlap: {worst_valley}={min_seed_overlap:.4f} "
             f"<= fail_tol={seed_overlap_fail_tol:.4f}"
         )
+    elif max_symmetry_error > projector_symmetry_fail_tol:
+        status = "failed"
+        reason = (
+            f"projector symmetry error={max_symmetry_error:.4f} "
+            f"> fail_tol={projector_symmetry_fail_tol:.4f}"
+        )
     # 2. Warnings
-    elif any(e > 0.05 for e in symmetry_errors.values()):
+    elif max_symmetry_error > projector_symmetry_warn_tol:
         status = "warn"
-        reason = "symmetry error elevated"
+        reason = (
+            f"projector symmetry error={max_symmetry_error:.4f} "
+            f"> warn_tol={projector_symmetry_warn_tol:.4f}"
+        )
     elif min_seed_overlap < seed_overlap_warn_tol:
         status = "warn"
         reason = (

@@ -783,7 +783,11 @@ def _render_symmetry_adapted_valley_analysis(
         lines.append("valley-preserving subspaces:")
         lines.extend(
             _table(
-                ["kpoint", "valley", "ops", "rank", "proj", "seed_overlap", "phases", "local_ready", "irrep_input", "reason"],
+                [
+                    "kpoint", "valley", "ops", "rank", "proj", "seed_overlap",
+                    "phases", "group", "ebr_ready", "ebr_blockers",
+                    "local_ready", "irrep_input", "reason",
+                ],
                 subspace_rows,
             )
         )
@@ -813,6 +817,12 @@ def _symmetry_adapted_subspace_row(kpoint: Any, item: dict[str, Any]) -> list[An
     if not isinstance(projectors, dict):
         projectors = {}
     reason = _symmetry_adapted_reason(item)
+    subspace_group = item.get("subspace_group", {})
+    if not isinstance(subspace_group, dict):
+        subspace_group = {}
+    ebr_input = item.get("ebr_mapping_input", {})
+    if not isinstance(ebr_input, dict):
+        ebr_input = {}
     return [
         kpoint,
         _format_orbit(item.get("orbit")),
@@ -821,6 +831,9 @@ def _symmetry_adapted_subspace_row(kpoint: Any, item: dict[str, Any]) -> list[An
         projectors.get("status", ""),
         _format_seed_overlap(projectors.get("seed_overlap")),
         _format_character_phases(item.get("valley_preserving_character_diagnostics")),
+        subspace_group.get("subspace_group_candidate", "") or subspace_group.get("effective_point_group", ""),
+        ebr_input.get("ready", ""),
+        _short_list(ebr_input.get("blocked_by")),
         item.get("local_irrep_ready", ""),
         item.get("irrep_matching_input_ready", ""),
         reason,
