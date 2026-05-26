@@ -877,6 +877,11 @@ def test_analyze_hsp_writes_valley_subspace_analysis_transform_for_degenerate_pa
     assert diagnostic["valid_valley_subspace"] is True
     assert diagnostic["s_min"] == pytest.approx(1.0)
     assert diagnostic["s_max"] == pytest.approx(1.0)
+    projector_quality = diagnostic["projector_quality"]
+    assert projector_quality["expected_rank"] == 1
+    assert projector_quality["per_valley"]["K_valley"]["rank_estimate"] == 1
+    assert projector_quality["per_valley"]["Kp_valley"]["rank_estimate"] == 1
+    assert projector_quality["sum_projector"]["identity_deviation_fro"] == pytest.approx(0.0)
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     assert summary["valley_subspace_analysis"][0]["status"] == "clean"
 
@@ -1284,6 +1289,67 @@ def test_summary_text_renders_symmetry_adapted_valley_subspaces(tmp_path):
     assert "[0, 4]" in text
     assert "-0.25, 0.25" in text
     assert "spinor convention unverified" in text
+
+
+def test_summary_text_renders_projected_seed_projector_quality(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    config = load_config(config_path)
+    from valleyscope.reports.summary_report import build_summary_payload, render_summary_text
+
+    summary = build_summary_payload(
+        config=config,
+        qcut=0.5,
+        subspace_payload={
+            "kpoints": {
+                "GammaM": {
+                    "weights": [],
+                    "warnings": [],
+                    "valley_adapted_subspace": {
+                        "status": "valley_separable",
+                        "s_min": 0.98,
+                        "s_max": 0.99,
+                        "assigned_valleys": ["M1_valley", "M1_valley"],
+                        "min_valley_concentration": 0.999,
+                        "projector_quality": {
+                            "expected_rank": 2,
+                            "rank_threshold": 0.5,
+                            "per_valley": {
+                                "M1_valley": {
+                                    "rank_estimate": 2,
+                                    "rank_gap": 0.97,
+                                }
+                            },
+                            "sum_projector": {
+                                "identity_deviation_fro": 0.04,
+                                "idempotency_deviation_fro": 0.02,
+                            },
+                            "max_idempotency_deviation": 0.02,
+                            "max_trace_overlap": 1.0e-4,
+                            "max_commutator_norm": 2.0e-4,
+                        },
+                    },
+                }
+            }
+        },
+        symmetry_payload={
+            "status": "skipped",
+            "reason": "test",
+            "detected_operations": [],
+        },
+        symmetry_rows=[],
+        output_paths={},
+    )
+
+    text = render_summary_text(summary)
+
+    assert "Projected q-cut seed projector quality" in text
+    assert "rank_estimates" in text
+    assert "M1_valley=2" in text
+    assert "M1_valley=0.97" in text
 
 
 def test_summary_marks_spinor_rotation_as_diagnostic_only(tmp_path):

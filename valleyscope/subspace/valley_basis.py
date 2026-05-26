@@ -130,6 +130,111 @@ def build_valley_subspace_matrices(
     )
 
 
+def summarize_valley_projector_quality(
+    valley_matrices: dict[str, np.ndarray],
+    *,
+    expected_rank: int | None = None,
+    rank_threshold: float = 0.5,
+) -> dict[str, object]:
+    """Return JSON-safe diagnostics for projected q-cut seed matrices.
+
+    These matrices are P_a^sub = <psi_i|P_a^0|psi_j> inside the target DFT
+    subspace. They need not be exact projectors, so all values here are
+    diagnostics rather than readiness gates.
+    """
+    if not valley_matrices:
+        return {
+            "expected_rank": expected_rank,
+            "rank_threshold": float(rank_threshold),
+            "per_valley": {},
+            "pairwise": {},
+            "sum_projector": {
+                "eigenvalues": [],
+                "trace": 0.0,
+                "identity_deviation_fro": None,
+                "idempotency_deviation_fro": 0.0,
+            },
+            "max_trace_overlap": 0.0,
+            "max_commutator_norm": 0.0,
+            "max_idempotency_deviation": 0.0,
+        }
+
+    names = list(valley_matrices)
+    matrices = {
+        name: np.asarray(matrix, dtype=np.complex128)
+        for name, matrix in valley_matrices.items()
+    }
+    first_shape = matrices[names[0]].shape
+    if len(first_shape) != 2 or first_shape[0] != first_shape[1]:
+        raise ValueError("valley matrices must be square")
+    dim = first_shape[0]
+    for name, matrix in matrices.items():
+        if matrix.shape != first_shape:
+            raise ValueError(f"valley matrix {name} has inconsistent shape")
+
+    per_valley: dict[str, object] = {}
+    max_idempotency = 0.0
+    for name in names:
+        matrix = (matrices[name] + matrices[name].conj().T) / 2.0
+        eigvals = np.linalg.eigvalsh(matrix)
+        eig_desc = np.sort(np.real(eigvals))[::-1]
+        rank_estimate = int(np.sum(eig_desc > rank_threshold))
+        rank_gap = None
+        if expected_rank is not None and 0 < expected_rank < len(eig_desc):
+            rank_gap = float(eig_desc[expected_rank - 1] - eig_desc[expected_rank])
+        idempotency = float(np.linalg.norm(matrix @ matrix - matrix, ord="fro"))
+        max_idempotency = max(max_idempotency, idempotency)
+        per_valley[name] = {
+            "trace": float(np.real(np.trace(matrix))),
+            "eigenvalues": [float(value) for value in eig_desc],
+            "rank_estimate": rank_estimate,
+            "rank_threshold": float(rank_threshold),
+            "rank_gap": rank_gap,
+            "idempotency_deviation_fro": idempotency,
+        }
+
+    pairwise: dict[str, object] = {}
+    max_trace_overlap = 0.0
+    max_commutator = 0.0
+    for i, a_name in enumerate(names):
+        for b_name in names[i + 1:]:
+            a = matrices[a_name]
+            b = matrices[b_name]
+            trace_overlap = float(np.real(np.trace(a @ b)))
+            commutator = float(np.linalg.norm(a @ b - b @ a, ord="fro"))
+            max_trace_overlap = max(max_trace_overlap, abs(trace_overlap))
+            max_commutator = max(max_commutator, commutator)
+            pairwise[f"{a_name}__{b_name}"] = {
+                "trace_overlap": trace_overlap,
+                "commutator_norm": commutator,
+            }
+
+    s_matrix = sum(matrices.values())  # type: ignore[arg-type]
+    s_hermitian = (s_matrix + s_matrix.conj().T) / 2.0
+    s_eigs = np.sort(np.real(np.linalg.eigvalsh(s_hermitian)))[::-1]
+    sum_projector = {
+        "trace": float(np.real(np.trace(s_matrix))),
+        "eigenvalues": [float(value) for value in s_eigs],
+        "identity_deviation_fro": float(
+            np.linalg.norm(s_matrix - np.eye(dim, dtype=np.complex128), ord="fro")
+        ),
+        "idempotency_deviation_fro": float(
+            np.linalg.norm(s_matrix @ s_matrix - s_matrix, ord="fro")
+        ),
+    }
+
+    return {
+        "expected_rank": expected_rank,
+        "rank_threshold": float(rank_threshold),
+        "per_valley": per_valley,
+        "pairwise": pairwise,
+        "sum_projector": sum_projector,
+        "max_trace_overlap": float(max_trace_overlap),
+        "max_commutator_norm": float(max_commutator),
+        "max_idempotency_deviation": float(max_idempotency),
+    }
+
+
 def build_valley_adapted_basis(
     coefficients: np.ndarray,
     valley_masks: dict[str, np.ndarray],

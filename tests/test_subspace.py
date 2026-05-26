@@ -7,6 +7,7 @@ from valleyscope.subspace.valley_basis import (
     build_valley_subspace_matrices,
     build_valley_adapted_basis,
     diagnose_valley_separability,
+    summarize_valley_projector_quality,
 )
 
 
@@ -162,6 +163,55 @@ def test_valley_subspace_matrices_sums_to_s():
     assert np.allclose(result.s_matrix, result.valley_matrices["A"] + result.valley_matrices["B"])
     assert result.s_min >= 0.0
     assert result.s_max <= 2.0
+
+
+def test_valley_projector_quality_reports_rank_gap_and_pair_overlap():
+    matrices = {
+        "M1": np.diag([0.99, 0.97, 0.02, 0.01]).astype(np.complex128),
+        "M2": np.diag([0.01, 0.02, 0.95, 0.92]).astype(np.complex128),
+    }
+
+    quality = summarize_valley_projector_quality(
+        matrices,
+        expected_rank=2,
+    )
+
+    assert quality["expected_rank"] == 2
+    assert quality["sum_projector"]["eigenvalues"] == pytest.approx(
+        [1.0, 0.99, 0.97, 0.93]
+    )
+    assert quality["sum_projector"]["identity_deviation_fro"] == pytest.approx(
+        np.linalg.norm(
+            matrices["M1"] + matrices["M2"] - np.eye(4, dtype=np.complex128),
+            ord="fro",
+        )
+    )
+    assert quality["per_valley"]["M1"]["rank_estimate"] == 2
+    assert quality["per_valley"]["M1"]["rank_gap"] == pytest.approx(0.95)
+    assert quality["per_valley"]["M2"]["rank_estimate"] == 2
+    assert quality["pairwise"]["M1__M2"]["trace_overlap"] == pytest.approx(
+        float(np.real(np.trace(matrices["M1"] @ matrices["M2"])))
+    )
+    assert quality["max_trace_overlap"] == pytest.approx(
+        quality["pairwise"]["M1__M2"]["trace_overlap"]
+    )
+
+
+def test_valley_projector_quality_flags_rank_ambiguous_seed():
+    matrices = {
+        "M1": np.diag([0.7, 0.55, 0.45, 0.3]).astype(np.complex128),
+    }
+
+    quality = summarize_valley_projector_quality(
+        matrices,
+        expected_rank=2,
+    )
+
+    assert quality["per_valley"]["M1"]["rank_estimate"] == 2
+    assert quality["per_valley"]["M1"]["rank_gap"] == pytest.approx(0.10)
+    assert quality["per_valley"]["M1"]["eigenvalues"] == pytest.approx(
+        [0.7, 0.55, 0.45, 0.3]
+    )
 
 
 def test_valley_subspace_matrices_rejects_empty_masks():

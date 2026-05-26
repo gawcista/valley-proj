@@ -613,7 +613,15 @@ This is the primary summary for near-degenerate states. It records the projected
 - `valley_concentration` / `min_valley_concentration`: concentration scores
 - `eta_adapted`: signed polarization (only for exactly two valleys)
 - `commutator_norm_max` / `idempotency_deviation_max`: numerical diagnostics
+- `projector_quality`: rank, eigenvalue-gap, pair-overlap, and
+  $||\sum_a P_a^{\rm sub}-I||_F$ diagnostics for the q-cut seed projectors
 - `stably_separable` / `reason`: stability verdict
+
+The human-readable summary also includes a `Projected q-cut seed projector
+quality` section. This section is diagnostic: a clean rank estimate shows that
+the q-cut windows form plausible valley seeds, but trusted valley-preserving
+irreps still require projector symmetry-consistency and later
+symmetry-adapted analysis.
 
 Note: `valley_weights` and `sector_weights` hold the same data in `valley_subspace.json`. The `sector_weights` key is retained as a legacy alias. New code should prefer `valley_weights`. Similarly, `diagnostics.h5` stores masks under both `valley_masks` (preferred) and `sector_masks` (legacy). Internal class names such as `SectorProjectors` may still use "sector" for historical reasons.
 

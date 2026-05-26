@@ -48,6 +48,7 @@ from valleyscope.subspace.valley_basis import (
     build_two_valley_adapted_basis,
     build_valley_adapted_basis,
     diagnose_valley_separability,
+    summarize_valley_projector_quality,
 )
 from valleyscope.symmetry.operation_classifier import classify_operation
 from valleyscope.symmetry.rotation_selection import mark_rotation_generators, resolve_rotation_order
@@ -430,6 +431,14 @@ def _add_valley_subspace_diagnostic(
             "reason": diagnosed.reason,
             "commutator_norm_max": diagnosed.commutator_norm_max,
             "idempotency_deviation_max": diagnosed.idempotency_deviation_max,
+            "projector_quality": summarize_valley_projector_quality(
+                diagnosed.valley_matrices,
+                expected_rank=(
+                    coefficients.shape[0] // n_valleys
+                    if n_valleys > 0 and coefficients.shape[0] % n_valleys == 0
+                    else None
+                ),
+            ),
             "transform_h5_group": kpoint_name,
         }
     )

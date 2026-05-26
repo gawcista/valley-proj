@@ -579,6 +579,13 @@ kpoint, band_vasp, energy_eV, K_valley, Kp_valley, W_val, P_v, eta, W_overlap, W
 
 近简并态的主要摘要文件。记录投影谷算符、谷适配基诊断，以及目标子空间落在所选谷子空间中的程度。
 
+关键字段包括 `s_eigenvalues`、`assigned_valleys`、`valley_concentration`
+以及 `projector_quality`。其中 `projector_quality` 报告
+$P_a^{\rm sub}$ 的 rank estimate、本征值 gap、pair overlap、
+commutator norm 和 $||\sum_a P_a^{\rm sub}-I||_F$。这些量只说明
+q-cut windows 是否形成合理的 valley seed；可信的 valley-preserving irrep
+还需要 projector symmetry-consistency 和后续 symmetry-adapted analysis。
+
 注意：`valley_weights` 和 `sector_weights` 在 `valley_subspace.json` 中保存相同数据。`sector_weights` 作为 legacy alias 保留；新代码应优先使用 `valley_weights`。类似地，`diagnostics.h5` 在 `valley_masks`（推荐）和 `sector_masks`（legacy）下各存一份 mask。内部类名如 `SectorProjectors` 可能仍使用 "sector" 出于历史原因。
 
 ### symmetry_eigenvalues.csv

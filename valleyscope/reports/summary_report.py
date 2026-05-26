@@ -50,6 +50,7 @@ def build_summary_payload(
         },
         "valley_projection_summary": _projection_rows(subspace_payload),
         "valley_subspace_analysis": _subspace_rows(subspace_payload),
+        "valley_projector_quality": _projector_quality_rows(subspace_payload),
         "symmetry_analysis": _symmetry_analysis(symmetry_payload, config.analysis.kpoints),
         "symmetry_eigenvalues": eigen_rows,
         "symmetry_characters": _symmetry_character_rows(eigen_rows),
@@ -167,6 +168,35 @@ def render_summary_text(summary: dict[str, Any]) -> str:
         )
     )
     lines.append("")
+
+    quality_rows = summary.get("valley_projector_quality", [])
+    if quality_rows:
+        _section(lines, "Projected q-cut seed projector quality")
+        lines.append("rank_estimates: estimated ranks of P_a^sub above the report threshold")
+        lines.append("rank_gaps:      lambda_r - lambda_{r+1} using expected rank r")
+        lines.append("S-I:            Frobenius norm ||sum_a P_a^sub - I||")
+        lines.extend(
+            _table(
+                [
+                    "kpoint", "expected_rank", "rank_estimates", "rank_gaps",
+                    "S-I", "max_idemp", "max_overlap", "max_comm",
+                ],
+                [
+                    [
+                        row.get("kpoint", ""),
+                        row.get("expected_rank", ""),
+                        row.get("rank_estimates", ""),
+                        row.get("rank_gaps", ""),
+                        _fmt(row.get("sum_identity_deviation_fro")),
+                        _fmt(row.get("max_idempotency_deviation")),
+                        _fmt(row.get("max_trace_overlap")),
+                        _fmt(row.get("max_commutator_norm")),
+                    ]
+                    for row in quality_rows
+                ],
+            )
+        )
+        lines.append("")
 
     _section(lines, "Symmetry analysis")
     sym = summary["symmetry_analysis"]
@@ -490,6 +520,46 @@ def _subspace_rows(subspace_payload: dict[str, Any]) -> list[dict[str, Any]]:
                 "valid_valley_subspace": diagnostic.get("valid_valley_subspace"),
                 "stably_separable": diagnostic.get("stably_separable"),
                 "status": _short_valley_status(payload.get("subspace_valley_status", "")),
+            }
+        )
+    return rows
+
+
+def _projector_quality_rows(subspace_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for kpoint, payload in subspace_payload.get("kpoints", {}).items():
+        diagnostic = payload.get("valley_adapted_subspace", {})
+        if not isinstance(diagnostic, dict):
+            continue
+        quality = diagnostic.get("projector_quality", {})
+        if not isinstance(quality, dict) or not quality.get("per_valley"):
+            continue
+        per_valley = quality.get("per_valley", {})
+        rank_estimates: list[str] = []
+        rank_gaps: list[str] = []
+        if isinstance(per_valley, dict):
+            for valley, item in per_valley.items():
+                if not isinstance(item, dict):
+                    continue
+                rank_estimates.append(f"{valley}={item.get('rank_estimate', '')}")
+                rank_gap = item.get("rank_gap")
+                if rank_gap is not None:
+                    rank_gaps.append(f"{valley}={_fmt(rank_gap)}")
+        sum_projector = quality.get("sum_projector", {})
+        if not isinstance(sum_projector, dict):
+            sum_projector = {}
+        rows.append(
+            {
+                "kpoint": kpoint,
+                "expected_rank": quality.get("expected_rank"),
+                "rank_threshold": quality.get("rank_threshold"),
+                "rank_estimates": ", ".join(rank_estimates),
+                "rank_gaps": ", ".join(rank_gaps),
+                "sum_identity_deviation_fro": sum_projector.get("identity_deviation_fro"),
+                "sum_idempotency_deviation_fro": sum_projector.get("idempotency_deviation_fro"),
+                "max_idempotency_deviation": quality.get("max_idempotency_deviation"),
+                "max_trace_overlap": quality.get("max_trace_overlap"),
+                "max_commutator_norm": quality.get("max_commutator_norm"),
             }
         )
     return rows
