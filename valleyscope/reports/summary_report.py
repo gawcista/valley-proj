@@ -843,6 +843,13 @@ def _render_symmetry_adapted_valley_analysis(
         lines.append("")
         return
 
+    space_group_orbits = report.get("space_group_valley_orbits", [])
+    if space_group_orbits:
+        lines.append(
+            "space-group valley orbits: "
+            + "; ".join(_format_orbit(orbit) for orbit in space_group_orbits)
+        )
+
     kpoint_rows: list[list[Any]] = []
     orbit_rows: list[list[Any]] = []
     subspace_rows: list[list[Any]] = []
@@ -872,7 +879,7 @@ def _render_symmetry_adapted_valley_analysis(
     )
     lines.append("")
     if orbit_rows:
-        lines.append("full valley-orbit reports:")
+        lines.append("HSP-local valley-orbit reports:")
         lines.extend(
             _table(
                 ["kpoint", "orbit", "status", "rank", "proj", "max_sym", "local_ready", "irrep_input", "reason"],

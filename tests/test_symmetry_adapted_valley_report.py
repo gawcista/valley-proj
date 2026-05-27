@@ -582,6 +582,7 @@ def test_default_writes_symmetry_adapted_valley_analysis(tmp_path):
 
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert "by_kpoint" in report
+    assert report["space_group_valley_orbits"] == [["M1", "M2", "M3"]]
     gm = report["by_kpoint"].get("GammaM", {})
     assert "orbits" in gm
     assert "valley_preserving_subspaces" in gm

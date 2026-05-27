@@ -848,6 +848,10 @@ def _build_symmetry_adapted_valley_report(
         symmetry_payload=symmetry_payload,
         valley_names=valley_names,
     )
+    space_group_valley_orbits = _partition_valley_orbits(
+        valley_names=valley_names,
+        valley_mappings=space_group_valley_mappings,
+    )
 
     for kpoint_name in target_kpoints:
         valley_matrices = valley_matrices_by_kpoint.get(kpoint_name, {})
@@ -981,7 +985,10 @@ def _build_symmetry_adapted_valley_report(
             valley_preserving_subspaces=valley_preserving_subspaces,
         )
 
-    return {"by_kpoint": by_kpoint}
+    return {
+        "space_group_valley_orbits": space_group_valley_orbits,
+        "by_kpoint": by_kpoint,
+    }
 
 
 def _build_valley_preserving_subspace_reports(

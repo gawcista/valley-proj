@@ -1229,6 +1229,7 @@ def test_summary_text_renders_symmetry_adapted_valley_subspaces(tmp_path):
         symmetry_rows=[],
         output_paths={},
         symmetry_adapted_valley_report={
+            "space_group_valley_orbits": [["M1_valley", "M2_valley", "M3_valley"]],
             "by_kpoint": {
                 "GammaM": {
                     "status": "warn",
@@ -1239,7 +1240,20 @@ def test_summary_text_renders_symmetry_adapted_valley_subspaces(tmp_path):
                     "diagnostic_only": False,
                     "irrep_matching_input_ready": False,
                     "irrep_matching_input_reason": "spinor convention unverified",
-                    "orbits": [],
+                    "orbits": [
+                        {
+                            "orbit": ["M1_valley", "M2_valley", "M3_valley"],
+                            "status": "diagnostic_only",
+                            "local_irrep_ready": False,
+                            "irrep_matching_input_ready": False,
+                            "reason": "HSP-local orbit diagnostic",
+                            "symmetry_adapted_projectors": {
+                                "selected_rank": 0,
+                                "status": "failed",
+                                "max_projector_symmetry_error": 0.0,
+                            },
+                        }
+                    ],
                     "valley_preserving_subspaces": [
                         {
                             "orbit": ["M1_valley"],
@@ -1282,6 +1296,9 @@ def test_summary_text_renders_symmetry_adapted_valley_subspaces(tmp_path):
 
     assert "Symmetry-adapted valley analysis" in text
     assert "Symmetry-adapted valley analysis (experimental)" not in text
+    assert "space-group valley orbits: [M1_valley, M2_valley, M3_valley]" in text
+    assert "HSP-local valley-orbit reports" in text
+    assert "full valley-orbit reports" not in text
     assert "valley-preserving subspaces" in text
     assert "GammaM" in text
     assert "M1_valley" in text
