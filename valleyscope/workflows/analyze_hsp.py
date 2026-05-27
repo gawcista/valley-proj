@@ -336,7 +336,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             _build_hsp_star_derived_character_layer(
                 symmetry_payload=symmetry_payload,
                 symmetry_adapted_valley_report=symmetry_adapted_valley_report,
-                target_subspace_closure_blockers=target_subspace_closure_blockers,
+                target_subspace_closure_report=target_subspace_closure_report,
                 valley_names=valley_names,
             )
         )
@@ -345,6 +345,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             _apply_derived_characters_to_report(
                 symmetry_adapted_valley_report=symmetry_adapted_valley_report,
                 hsp_star_derived_characters=hsp_star_derived_characters,
+                kpoint_frac_by_name=symmetry_payload.get("kpoint_frac_by_name", {}),
             )
 
     if symmetry_payload["status"] == "ok":
@@ -1018,6 +1019,7 @@ def _build_symmetry_adapted_valley_report(
             orbit_reports.append(summarize_symmetry_adapted_valley_report(report))
 
         valley_preserving_subspaces = _build_valley_preserving_subspace_reports(
+            kpoint_name=kpoint_name,
             valley_matrices=valley_matrices,
             d_g_dict=d_g_dict,
             valley_mappings_dict=valley_mappings_dict,
@@ -1052,6 +1054,7 @@ def _build_symmetry_adapted_valley_report(
 
 def _build_valley_preserving_subspace_reports(
     *,
+    kpoint_name: str = "",
     valley_matrices: dict[str, np.ndarray],
     d_g_dict: dict[object, np.ndarray],
     valley_mappings_dict: dict[object, dict[str, str]],
@@ -1157,7 +1160,7 @@ def _build_valley_preserving_subspace_reports(
                 ebr_mapping=ebr_mapping,
                 closure_blockers=target_subspace_closure_blockers,
                 target_subspace_closure_report=target_subspace_closure_report,
-                kpoint_name="",
+                kpoint_name=kpoint_name,
                 valley_preserving_ops=summary.get("hsp_preserving_operation_ids", []),
             )
         reports.append(summary)
@@ -1168,12 +1171,18 @@ def _apply_derived_characters_to_report(
     *,
     symmetry_adapted_valley_report: dict[str, object],
     hsp_star_derived_characters: dict[str, object],
+    kpoint_frac_by_name: dict[str, list[float]],
 ) -> None:
-    """Post-process: apply HSP-star derived characters to EBR readiness in report."""
+    """Post-process: apply HSP-star derived characters to EBR readiness in report.
+
+    Matches derived characters to subspaces by target_kpoint_key (which may be
+    a symmetry-derivable key), target_valley, and required preserving
+    operation IDs from the full-space-group subspace candidate.
+    """
     by_kpoint = symmetry_adapted_valley_report.get("by_kpoint", {})
     if not isinstance(by_kpoint, dict):
         return
-    for kpoint_data in by_kpoint.values():
+    for kpoint_name, kpoint_data in by_kpoint.items():
         if not isinstance(kpoint_data, dict):
             continue
         for subspace in kpoint_data.get("valley_preserving_subspaces", []):
@@ -1183,10 +1192,15 @@ def _apply_derived_characters_to_report(
             if not isinstance(ebr_mapping, dict):
                 continue
             valley = str(subspace.get("orbit", [""])[0] if subspace.get("orbit") else "")
+            subspace_sg = subspace.get("subspace_space_group", {})
+            if not isinstance(subspace_sg, dict):
+                subspace_sg = {}
+            full_preserving_ops = subspace_sg.get("valley_preserving_operation_ids", [])
             _apply_hsp_star_derived_character_gate(
                 ebr_mapping=ebr_mapping,
                 valley=valley,
                 hsp_star_derived_characters=hsp_star_derived_characters,
+                full_preserving_ops=full_preserving_ops,
             )
 
 
@@ -1194,7 +1208,7 @@ def _build_hsp_star_derived_character_layer(
     *,
     symmetry_payload: dict[str, object],
     symmetry_adapted_valley_report: dict[str, object] | None,
-    target_subspace_closure_blockers: list[str],
+    target_subspace_closure_report: dict[str, object] | None,
     valley_names: list[str],
 ) -> tuple[dict[str, object] | None, dict[str, object] | None]:
     """Build HSP-star conjugation and derived character reports.
@@ -1214,24 +1228,49 @@ def _build_hsp_star_derived_character_layer(
         valley_names=valley_names,
     )
 
+    # Merge ALL singleton subspace character diagnostics for each kpoint.
     source_char_diagnostics: dict[str, dict[str, object]] = {}
     by_kpoint = symmetry_adapted_valley_report.get("by_kpoint", {})
     if isinstance(by_kpoint, dict):
         for kpoint_name, kp_data in by_kpoint.items():
             if not isinstance(kp_data, dict):
                 continue
+            merged_per_valley: dict[str, list[dict[str, object]]] = {}
+            merged_status = "ok"
+            merged_diagnostic_only = False
+            merged_local_irrep_ready = True
             for subspace in kp_data.get("valley_preserving_subspaces", []):
                 if not isinstance(subspace, dict):
                     continue
                 char_diag = subspace.get("valley_preserving_character_diagnostics")
-                if isinstance(char_diag, dict):
-                    source_char_diagnostics[kpoint_name] = char_diag
-                    break
+                if not isinstance(char_diag, dict):
+                    continue
+                per_valley = char_diag.get("per_valley", {})
+                if not isinstance(per_valley, dict):
+                    continue
+                for valley, items in per_valley.items():
+                    if not isinstance(items, list):
+                        continue
+                    merged_per_valley.setdefault(str(valley), []).extend(items)
+                if char_diag.get("diagnostic_only", True):
+                    merged_diagnostic_only = True
+                if not char_diag.get("local_irrep_ready", False):
+                    merged_local_irrep_ready = False
+                sub_status = str(char_diag.get("status", "ok"))
+                if sub_status != "ok":
+                    merged_status = sub_status
+            if merged_per_valley:
+                source_char_diagnostics[kpoint_name] = {
+                    "status": merged_status,
+                    "local_irrep_ready": merged_local_irrep_ready,
+                    "diagnostic_only": merged_diagnostic_only,
+                    "per_valley": merged_per_valley,
+                }
 
     derived_chars = build_hsp_star_derived_characters(
         conjugation_report=conjugation_report,
         source_character_diagnostics=source_char_diagnostics,
-        target_subspace_closure_blockers=target_subspace_closure_blockers,
+        target_subspace_closure_report=target_subspace_closure_report,
     )
 
     return conjugation_report, derived_chars
@@ -1415,38 +1454,71 @@ def _apply_hsp_star_derived_character_gate(
     ebr_mapping: dict[str, object],
     valley: str,
     hsp_star_derived_characters: dict[str, object] | None,
+    full_preserving_ops: list[object] | None = None,
 ) -> None:
-    """Replace hsp_local_preserving_character_missing with derived status when available."""
+    """Apply HSP-star derived character status to EBR readiness.
+
+    Checks whether a trusted derived character exists for this valley with a
+    preserving operation_id matching the full-space-group valley-preserving set.
+    Success is recorded in resolved_by and character_source, not blocked_by.
+    """
     if hsp_star_derived_characters is None:
         return
     blockers: list[str] = list(ebr_mapping.get("blocked_by", []) or [])
-    if "hsp_local_preserving_character_missing" not in blockers:
+
+    relevant_blockers = {"hsp_local_preserving_character_missing",
+                         "hsp_star_derivation_not_available"}
+    if not any(b in blockers for b in relevant_blockers):
         return
 
+    preserving_ops = list(full_preserving_ops or [])
     derived_by_target = collect_derived_characters_by_target(hsp_star_derived_characters)
-    has_derived = any(
-        valley in kp_data
-        for kp_data in derived_by_target.values()
-    )
 
-    if has_derived:
-        new_blockers = [
-            "hsp_star_character_derived" if b == "hsp_local_preserving_character_missing" else b
-            for b in blockers
-        ]
+    # Check if any trusted derived character exists for this valley with a
+    # NON-IDENTITY operation_id matching one of the full preserving operations.
+    # Identity is always available locally and should not count.
+    has_derived_for_this_valley = False
+    for kp_data in derived_by_target.values():
+        valley_data = kp_data.get(valley, {})
+        if not valley_data:
+            continue
+        for op_id in preserving_ops:
+            if op_id == 0 or op_id == "__identity__":
+                continue
+            if op_id in valley_data:
+                has_derived_for_this_valley = True
+                break
+        if has_derived_for_this_valley:
+            break
+
+    resolved_by: list[str] = list(ebr_mapping.get("resolved_by", []) or [])
+
+    if has_derived_for_this_valley:
+        new_blockers = [b for b in blockers if b not in relevant_blockers]
         ebr_mapping["blocked_by"] = new_blockers
+        ebr_mapping["character_source"] = "hsp_star_derived"
+        if "hsp_star_character_derived" not in resolved_by:
+            resolved_by.append("hsp_star_character_derived")
+        ebr_mapping["resolved_by"] = resolved_by
         notes = str(ebr_mapping.get("notes", "") or "")
         if "HSP-star derived character available" not in notes:
             ebr_mapping["notes"] = notes + (
                 " HSP-star derived character available; "
                 "local character was sourced from symmetry conjugation."
             )
+        if not new_blockers:
+            ebr_mapping["ready"] = True
     else:
         new_blockers = [
-            "hsp_star_derivation_not_available" if b == "hsp_local_preserving_character_missing" else b
+            "hsp_star_derivation_not_available"
+            if b in relevant_blockers else b
             for b in blockers
         ]
-        ebr_mapping["blocked_by"] = new_blockers
+        deduped: list[str] = []
+        for b in new_blockers:
+            if b not in deduped:
+                deduped.append(b)
+        ebr_mapping["blocked_by"] = deduped
 
 
 def _apply_target_subspace_closure_gate(

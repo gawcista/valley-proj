@@ -26,9 +26,9 @@ def build_hsp_star_conjugation_report(
     """Build the HSP-star conjugation graph.
 
     For each source k-point, examines each space-group operation r that maps it
-    to another HSP representative.  For each valley-preserving g at the source,
-    computes h = r g r^{-1} and checks whether h is already in the detected
-    operation set.
+    to another HSP representative.  Target representatives that are not in the
+    explicit HDF5 set are still included with a stable generated key and
+    target_kpoint_label=None.
 
     Returns a report with per-source-kpoint conjugation entries.
     """
@@ -46,13 +46,18 @@ def build_hsp_star_conjugation_report(
             if r_rotation is None or r_op_id is None:
                 continue
             r_rot = np.asarray(r_rotation, dtype=float)
-            target_frac = reciprocal_transform(r_rot, source_frac)
+            target_frac_raw = reciprocal_transform(r_rot, source_frac)
+            target_frac = _canonical_frac(target_frac_raw)
             target_label = _match_kpoint(target_frac, kpoints, tolerance=tolerance)
 
-            if target_label is None:
+            # Always proceed — even if target is not in the explicit kpoint set.
+            if target_label is not None and target_label == source_label:
                 continue
-            if target_label == source_label:
-                continue
+
+            target_key = _make_target_key(
+                explicit_label=target_label,
+                canonical_frac=target_frac,
+            )
 
             r_valley_mapping = op_r.get("sector_mapping", {})
             if not isinstance(r_valley_mapping, dict):
@@ -78,18 +83,23 @@ def build_hsp_star_conjugation_report(
                     if g_mapped is None or str(g_mapped) != str(source_valley):
                         continue
 
-                    is_antiunitary = bool(op_g.get("det", 1) != 1 or op_r.get("det", 1) != 1)
-                    if is_antiunitary:
+                    # Det != 1 means improper unitary (not TRS).  We do not
+                    # support improper unitary conjugations yet.
+                    r_det = int(op_r.get("det", 1))
+                    g_det = int(op_g.get("det", 1))
+                    if r_det != 1 or g_det != 1:
                         entries.append(_conjugation_entry(
                             source_kpoint=source_label,
-                            target_kpoint=target_label,
+                            source_frac=source_frac,
+                            target_kpoint_label=target_label,
+                            target_kpoint_key=target_key,
                             target_frac=target_frac,
                             mapping_operation_id=r_op_id,
                             source_valley=source_valley,
                             target_valley=target_valley,
                             source_operation_id=g_op_id,
-                            conjugation_status="antiunitary_not_implemented",
-                            reason="TRS/antiunitary conjugation not yet implemented",
+                            conjugation_status="improper_unitary_not_supported",
+                            reason="improper unitary conjugation not yet supported (det != 1)",
                         ))
                         continue
 
@@ -111,7 +121,9 @@ def build_hsp_star_conjugation_report(
                     if h_match is None:
                         entries.append(_conjugation_entry(
                             source_kpoint=source_label,
-                            target_kpoint=target_label,
+                            source_frac=source_frac,
+                            target_kpoint_label=target_label,
+                            target_kpoint_key=target_key,
                             target_frac=target_frac,
                             mapping_operation_id=r_op_id,
                             source_valley=source_valley,
@@ -128,7 +140,9 @@ def build_hsp_star_conjugation_report(
                     if isinstance(h_match, list):
                         entries.append(_conjugation_entry(
                             source_kpoint=source_label,
-                            target_kpoint=target_label,
+                            source_frac=source_frac,
+                            target_kpoint_label=target_label,
+                            target_kpoint_key=target_key,
                             target_frac=target_frac,
                             mapping_operation_id=r_op_id,
                             source_valley=source_valley,
@@ -147,7 +161,9 @@ def build_hsp_star_conjugation_report(
                     if h_mapped is None or str(h_mapped) != str(target_valley):
                         entries.append(_conjugation_entry(
                             source_kpoint=source_label,
-                            target_kpoint=target_label,
+                            source_frac=source_frac,
+                            target_kpoint_label=target_label,
+                            target_kpoint_key=target_key,
                             target_frac=target_frac,
                             mapping_operation_id=r_op_id,
                             source_valley=source_valley,
@@ -164,7 +180,9 @@ def build_hsp_star_conjugation_report(
 
                     entries.append(_conjugation_entry(
                         source_kpoint=source_label,
-                        target_kpoint=target_label,
+                        source_frac=source_frac,
+                        target_kpoint_label=target_label,
+                        target_kpoint_key=target_key,
                         target_frac=target_frac,
                         mapping_operation_id=r_op_id,
                         source_valley=source_valley,
@@ -187,8 +205,10 @@ def build_hsp_star_conjugation_report(
             "valley-preserving operations g to target operations h = r g r^-1. "
             "matched: h found and preserves mapped valley. "
             "missing_operation_product: h not in detected operations. "
-            "antiunitary_not_implemented: TRS conjugation not yet supported. "
-            "diagnostic_only: ambiguous match (multiple candidates)."
+            "improper_unitary_not_supported: det != 1 operations not yet handled. "
+            "diagnostic_only: ambiguous match (multiple candidates). "
+            "target_kpoint_label is None for symmetry-derivable targets that are "
+            "not in the explicit HDF5 k-point set."
         ),
         "by_source_kpoint": by_source,
     }
@@ -201,7 +221,9 @@ def build_hsp_star_conjugation_report(
 def _conjugation_entry(
     *,
     source_kpoint: str,
-    target_kpoint: str,
+    source_frac: np.ndarray,
+    target_kpoint_label: str | None,
+    target_kpoint_key: str,
     target_frac: np.ndarray,
     mapping_operation_id: object,
     source_valley: str,
@@ -214,7 +236,9 @@ def _conjugation_entry(
 ) -> dict[str, object]:
     entry: dict[str, object] = {
         "source_kpoint": source_kpoint,
-        "target_kpoint_label": target_kpoint,
+        "source_frac": [float(v) for v in np.asarray(source_frac, dtype=float).tolist()],
+        "target_kpoint_label": target_kpoint_label,
+        "target_kpoint_key": target_kpoint_key,
         "target_frac": [float(v) for v in np.asarray(target_frac, dtype=float).tolist()],
         "mapping_operation_id": mapping_operation_id,
         "source_valley": source_valley,
@@ -230,16 +254,33 @@ def _conjugation_entry(
     return entry
 
 
+def _canonical_frac(frac: np.ndarray) -> np.ndarray:
+    arr = np.asarray(frac, dtype=float)
+    canonical = arr - np.floor(arr)
+    canonical[np.isclose(canonical, 1.0, atol=1e-10)] = 0.0
+    canonical[np.isclose(canonical, 0.0, atol=1e-10)] = 0.0
+    return canonical
+
+
+def _make_target_key(
+    *,
+    explicit_label: str | None,
+    canonical_frac: np.ndarray,
+) -> str:
+    if explicit_label is not None:
+        return explicit_label
+    frac_list = [round(float(v), 6) for v in np.asarray(canonical_frac, dtype=float).tolist()]
+    return f"derived:{frac_list}"
+
+
 def _match_kpoint(
     frac: np.ndarray,
     kpoints: dict[str, np.ndarray],
     tolerance: float,
 ) -> str | None:
-    arr = np.asarray(frac, dtype=float)
-    canonical = arr - np.floor(arr)
-    canonical[np.isclose(canonical, 1.0, atol=1e-10)] = 0.0
+    arr = _canonical_frac(frac)
     for label, candidate in kpoints.items():
-        delta = canonical - np.asarray(candidate, dtype=float)
+        delta = arr - _canonical_frac(candidate)
         delta_mod = delta - np.rint(delta)
         if np.allclose(delta_mod, 0.0, atol=tolerance):
             return label

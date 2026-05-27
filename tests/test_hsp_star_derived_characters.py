@@ -6,6 +6,9 @@ from valleyscope.analysis.hsp_star_derived_characters import (
     collect_derived_characters_by_target,
     has_derived_character_for,
 )
+from valleyscope.analysis.target_subspace_closure import (
+    build_target_subspace_closure_report,
+)
 
 
 def _make_conjugation_report():
@@ -15,7 +18,9 @@ def _make_conjugation_report():
             "MM": [
                 {
                     "source_kpoint": "MM",
+                    "source_frac": [0.5, 0.0, 0.0],
                     "target_kpoint_label": "MM2",
+                    "target_kpoint_key": "MM2",
                     "target_frac": [0.0, 0.5, 0.0],
                     "mapping_operation_id": 2,
                     "source_valley": "M1",
@@ -27,7 +32,9 @@ def _make_conjugation_report():
                 },
                 {
                     "source_kpoint": "MM",
+                    "source_frac": [0.5, 0.0, 0.0],
                     "target_kpoint_label": "MM3",
+                    "target_kpoint_key": "MM3",
                     "target_frac": [0.5, 0.5, 0.0],
                     "mapping_operation_id": 1,
                     "source_valley": "M3",
@@ -39,7 +46,9 @@ def _make_conjugation_report():
                 },
                 {
                     "source_kpoint": "MM",
+                    "source_frac": [0.5, 0.0, 0.0],
                     "target_kpoint_label": "MM2",
+                    "target_kpoint_key": "MM2",
                     "target_frac": [0.0, 0.5, 0.0],
                     "mapping_operation_id": 2,
                     "source_valley": "M2",
@@ -111,7 +120,9 @@ def test_source_diagnostic_only_derived_diagnostic_only():
             "MM": [
                 {
                     "source_kpoint": "MM",
+                    "source_frac": [0.5, 0.0, 0.0],
                     "target_kpoint_label": "MM2",
+                    "target_kpoint_key": "MM2",
                     "target_frac": [0.0, 0.5, 0.0],
                     "mapping_operation_id": 2,
                     "source_valley": "M1",
@@ -161,7 +172,9 @@ def test_unitary_character_copied_exactly():
             "MM": [
                 {
                     "source_kpoint": "MM",
+                    "source_frac": [0.5, 0.0, 0.0],
                     "target_kpoint_label": "MM2",
+                    "target_kpoint_key": "MM2",
                     "target_frac": [0.0, 0.5, 0.0],
                     "mapping_operation_id": 2,
                     "source_valley": "M3",
@@ -226,12 +239,114 @@ def test_has_derived_character_for():
 
 
 def test_closure_failed_blocks_derived():
+    d_bad = np.array([[2.0, 0.0], [0.0, 1.0]], dtype=np.complex128)
+    closure_report = build_target_subspace_closure_report(
+        raw_representations_by_kpoint={
+            "MM": {
+                4: {
+                    "D_raw": d_bad,
+                    "kind": "C2",
+                    "order": 2,
+                    "little_group_passed": True,
+                    "sector_mapping": {},
+                },
+            },
+        },
+        operation_orders={4: 2},
+        unitarity_tol=1e-10,
+    )
+
     report = build_hsp_star_derived_characters(
         conjugation_report=_make_conjugation_report(),
         source_character_diagnostics=_make_source_char_diagnostics(),
-        target_subspace_closure_blockers=["target_subspace_closure_failed"],
+        target_subspace_closure_report=closure_report,
     )
 
     blocked = [e for e in report["entries"] if e.get("status") == "blocked_by_source_closure"]
-    assert len(blocked) == 2
-    assert len(report["blocked_sources"]) == 2
+    assert len(blocked) == 1  # Only M1 C2 (op=4) is blocked by closure
+    assert len(report["blocked_sources"]) == 1
+
+
+def test_source_character_merge_multiple_subspaces():
+    """Same kpoint, three singleton subspaces, only M3 has usable character."""
+    conj_report = {
+        "status": "ok",
+        "by_source_kpoint": {
+            "MM": [
+                {
+                    "source_kpoint": "MM",
+                    "source_frac": [0.5, 0.0, 0.0],
+                    "target_kpoint_label": None,
+                    "target_kpoint_key": "derived:[0.0, 0.5, 0.0]",
+                    "target_frac": [0.0, 0.5, 0.0],
+                    "mapping_operation_id": 2,
+                    "source_valley": "M3",
+                    "target_valley": "M3",
+                    "source_preserving_operation_id": 5,
+                    "derived_target_operation_id": 9,
+                    "conjugation_status": "matched",
+                    "reason": "",
+                },
+            ],
+        },
+    }
+    # Merged diagnostics: M1 and M2 have no character data (empty), M3 has data
+    merged_chars = {
+        "MM": {
+            "status": "ok",
+            "local_irrep_ready": True,
+            "diagnostic_only": False,
+            "per_valley": {
+                "M1": [],
+                "M2": [],
+                "M3": [
+                    {
+                        "operation_id": 5,
+                        "valley": "M3",
+                        "character": {"real": 0.0, "imag": -2.0},
+                        "eigenphases": [-0.25, -0.25],
+                        "representation_unitarity_error": 1e-6,
+                    },
+                ],
+            },
+        },
+    }
+
+    report = build_hsp_star_derived_characters(
+        conjugation_report=conj_report,
+        source_character_diagnostics=merged_chars,
+    )
+
+    derived = [e for e in report["entries"] if e.get("status") == "derived"]
+    assert len(derived) == 1
+    assert derived[0]["source_valley"] == "M3"
+    assert derived[0]["target_kpoint_key"] == "derived:[0.0, 0.5, 0.0]"
+
+
+def test_derived_gate_exact_matching():
+    """Derived character for one target/op/valley should not unblock others."""
+    from valleyscope.analysis.hsp_star_derived_characters import has_derived_character_for
+
+    report = build_hsp_star_derived_characters(
+        conjugation_report=_make_conjugation_report(),
+        source_character_diagnostics=_make_source_char_diagnostics(),
+    )
+
+    # MM2/M1/op=7 has derived character
+    assert has_derived_character_for(report, "MM2", "M1", 7) is True
+    # MM2/M2/op=3 does NOT (source is missing_operation_product)
+    assert has_derived_character_for(report, "MM2", "M2", 3) is False
+    # MM2/M3/op=7 is a different valley
+    assert has_derived_character_for(report, "MM2", "M3", 7) is False
+    # Different kpoint
+    assert has_derived_character_for(report, "XX", "M1", 7) is False
+
+
+def test_blocked_by_no_hsp_star_character_derived():
+    """blocked_by must never contain hsp_star_character_derived."""
+    report = build_hsp_star_derived_characters(
+        conjugation_report=_make_conjugation_report(),
+        source_character_diagnostics=_make_source_char_diagnostics(),
+    )
+    encoded = json.dumps(report)
+    assert "hsp_star_character_derived" not in encoded

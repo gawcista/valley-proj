@@ -4,6 +4,7 @@ import numpy as np
 from valleyscope.analysis.target_subspace_closure import (
     build_target_subspace_closure_report,
     check_target_subspace_closure_blocked,
+    check_target_subspace_closure_blocked_for_operation,
 )
 
 
@@ -168,3 +169,69 @@ def test_no_data_returns_no_data_status():
         raw_representations_by_kpoint={},
     )
     assert report["status"] == "no_data"
+
+
+def test_closure_gate_per_operation():
+    """closure failure on op=5 (valley-changing) should NOT block op=4 (valley-preserving)."""
+    d_good = np.diag([1, -1, 1, -1, 1, -1]).astype(np.complex128)
+    d_bad = np.array([[2.0, 0.0], [0.0, 1.0]], dtype=np.complex128)
+
+    report = build_target_subspace_closure_report(
+        raw_representations_by_kpoint={
+            "MM": {
+                4: {
+                    "D_raw": d_good,
+                    "kind": "C2",
+                    "order": 2,
+                    "little_group_passed": True,
+                    "sector_mapping": {},
+                },
+                5: {
+                    "D_raw": d_bad,
+                    "kind": "C2",
+                    "order": 2,
+                    "little_group_passed": True,
+                    "sector_mapping": {},
+                },
+            },
+        },
+        operation_orders={4: 2, 5: 2},
+        unitarity_tol=1e-10,
+    )
+
+    # op=5 fails
+    assert check_target_subspace_closure_blocked_for_operation(report, "MM", 5) is True
+    # op=4 passes
+    assert check_target_subspace_closure_blocked_for_operation(report, "MM", 4) is False
+
+
+def test_closure_gate_valley_changing_op_fails_does_not_block():
+    """A failed valley-changing op should not block a valley-preserving subspace."""
+    d_bad = np.array([[2.0, 0.0], [0.0, 1.0]], dtype=np.complex128)
+    d_good = np.diag([1, -1]).astype(np.complex128)
+
+    report = build_target_subspace_closure_report(
+        raw_representations_by_kpoint={
+            "MM": {
+                3: {  # valley-changing
+                    "D_raw": d_bad,
+                    "kind": "C2",
+                    "order": 2,
+                    "little_group_passed": True,
+                    "sector_mapping": {},
+                },
+                4: {  # valley-preserving
+                    "D_raw": d_good,
+                    "kind": "C2",
+                    "order": 2,
+                    "little_group_passed": True,
+                    "sector_mapping": {},
+                },
+            },
+        },
+        operation_orders={3: 2, 4: 2},
+        unitarity_tol=1e-10,
+    )
+
+    assert check_target_subspace_closure_blocked_for_operation(report, "MM", 3) is True
+    assert check_target_subspace_closure_blocked_for_operation(report, "MM", 4) is False

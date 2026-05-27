@@ -15,14 +15,16 @@ from __future__ import annotations
 
 import numpy as np
 
-from valleyscope.analysis.hsp_star_conjugation import build_hsp_star_conjugation_report
+from valleyscope.analysis.target_subspace_closure import (
+    check_target_subspace_closure_blocked_for_operation,
+)
 
 
 def build_hsp_star_derived_characters(
     *,
     conjugation_report: dict[str, object],
     source_character_diagnostics: dict[str, dict[str, object]],
-    target_subspace_closure_blockers: list[str] | None = None,
+    target_subspace_closure_report: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Build derived HSP-star character entries from the conjugation graph.
 
@@ -30,20 +32,18 @@ def build_hsp_star_derived_characters(
     ----------
     conjugation_report : output of build_hsp_star_conjugation_report
     source_character_diagnostics : {kpoint_name: character_diagnostic_dict}
-        Per-kpoint valley-preserving character diagnostics (the per_valley
-        portion of symmetry_adapted_valley_report.valley_preserving_character_diagnostics).
-        Each entry should be the full character diagnostic dict with a "per_valley" key.
-    target_subspace_closure_blockers : list[str] or None
-        If the source kpoint has target_subspace_closure_failed, derived characters
-        are blocked.
+        Per-kpoint valley-preserving character diagnostics.  Each entry is the
+        full character diagnostic dict with a "per_valley" key.  All singleton
+        subspaces for a given kpoint should be merged into one dict so that
+        any valley's character can be found.
+    target_subspace_closure_report : dict or None
+        Used to check per-(source_kpoint, source_operation_id) whether the
+        D_raw at the source is closed.
 
     Returns
     -------
-    dict with keys: status, derivation_type, by_target_kpoint, blocked_sources
+    dict with keys: status, derivation_type, entries, blocked_sources
     """
-    closure_blockers = list(target_subspace_closure_blockers or [])
-    source_closure_failed = "target_subspace_closure_failed" in closure_blockers
-
     derived_entries: list[dict[str, object]] = []
     blocked_sources: list[dict[str, object]] = []
 
@@ -63,12 +63,13 @@ def build_hsp_star_derived_characters(
                 continue
             conjugation_status = str(entry.get("conjugation_status", ""))
 
-            if conjugation_status == "antiunitary_not_implemented":
+            if conjugation_status in ("antiunitary_not_implemented",
+                                       "improper_unitary_not_supported"):
                 derived_entries.append(_derived_entry(
                     entry=entry,
                     derivation_type="unitary_space_group",
                     status="not_implemented",
-                    reason="TRS/antiunitary derivation not implemented",
+                    reason=str(entry.get("reason", "conjugation not supported")),
                     trusted_for_ebr_input=False,
                 ))
                 continue
@@ -105,28 +106,38 @@ def build_hsp_star_derived_characters(
             source_status = str(source_chars.get("source_diagnostic_status", ""))
             source_trusted = bool(source_chars.get("source_trusted", False))
 
-            if source_closure_failed:
-                blocked_sources.append({
-                    "source_kpoint": source_kpoint,
-                    "source_valley": source_valley,
-                    "source_operation_id": source_op_id,
-                    "reason": "target_subspace_closure_failed at source",
-                })
-                derived_entries.append(_derived_entry(
-                    entry=entry,
-                    derivation_type="unitary_space_group",
-                    status="blocked_by_source_closure",
-                    reason="source target_subspace_closure_failed",
-                    trusted_for_ebr_input=False,
-                ))
-                continue
+            # Check per-(source_kpoint, source_op) closure, not global.
+            if target_subspace_closure_report is not None and source_op_id is not None:
+                if check_target_subspace_closure_blocked_for_operation(
+                    target_subspace_closure_report, source_kpoint, source_op_id,
+                ):
+                    blocked_sources.append({
+                        "source_kpoint": source_kpoint,
+                        "source_valley": source_valley,
+                        "source_operation_id": source_op_id,
+                        "reason": "target_subspace_closure_failed at source",
+                    })
+                    derived_entries.append(_derived_entry(
+                        entry=entry,
+                        derivation_type="unitary_space_group",
+                        status="blocked_by_source_closure",
+                        reason="source target_subspace_closure_failed",
+                        trusted_for_ebr_input=False,
+                    ))
+                    continue
 
             if source_status == "diagnostic_only" or not source_trusted:
+                reason = "source character is diagnostic_only"
+                if source_status == "diagnostic_only":
+                    reason += f" (source_status={source_status})"
+                if not source_trusted:
+                    source_local_ready = source_char_data.get("local_irrep_ready", False)
+                    reason += f" (source_local_irrep_ready={source_local_ready})"
                 derived_entries.append(_derived_entry(
                     entry=entry,
                     derivation_type="unitary_space_group",
                     status="diagnostic_only",
-                    reason="source character is diagnostic_only",
+                    reason=reason,
                     character=source_chars.get("character"),
                     eigenphases=source_chars.get("eigenphases"),
                     trusted_for_ebr_input=False,
@@ -147,7 +158,10 @@ def build_hsp_star_derived_characters(
     return {
         "status": status,
         "derivation_type": "unitary_space_group",
-        "derivation_formula": "chi_{k1,a1}(h) = chi_{k0,a0}(g) with h = r g r^{-1}, k1 = r k0, a1 = pi_r(a0)",
+        "derivation_formula": (
+            "chi_{k1,a1}(h) = chi_{k0,a0}(g) with "
+            "h = r g r^{-1}, k1 = r k0, a1 = pi_r(a0)"
+        ),
         "antiunitary_status": "not_implemented",
         "entries": derived_entries,
         "blocked_sources": blocked_sources,
@@ -157,9 +171,9 @@ def build_hsp_star_derived_characters(
 def collect_derived_characters_by_target(
     derived_report: dict[str, object],
 ) -> dict[str, dict[str, dict[object, dict[str, object]]]]:
-    """Collect derived characters indexed by (target_kpoint, target_valley, operation_id).
+    """Collect derived characters indexed by (target_kpoint_key, target_valley, operation_id).
 
-    Returns {target_kpoint: {valley: {op_id: {character, eigenphases, trusted, status}}}}.
+    Returns {target_kpoint_key: {valley: {op_id: {character, eigenphases, trusted, status}}}}.
     """
     result: dict[str, dict[str, dict[object, dict[str, object]]]] = {}
     for entry in derived_report.get("entries", []):
@@ -167,14 +181,19 @@ def collect_derived_characters_by_target(
             continue
         if not entry.get("trusted_for_ebr_input", False):
             continue
-        target_kp = str(entry.get("target_kpoint_label", ""))
+        target_key = entry.get("target_kpoint_key")
+        if target_key is None:
+            target_key = entry.get("target_kpoint_label")
+        if target_key is None:
+            continue
+        target_key = str(target_key)
         target_valley = str(entry.get("target_valley", ""))
         target_op = entry.get("derived_target_operation_id")
-        if not target_kp or not target_valley or target_op is None:
+        if not target_key or not target_valley or target_op is None:
             continue
         char_val = entry.get("character")
         phases = entry.get("eigenphases")
-        result.setdefault(target_kp, {}).setdefault(target_valley, {})[target_op] = {
+        result.setdefault(target_key, {}).setdefault(target_valley, {})[target_op] = {
             "character": char_val,
             "eigenphases": list(phases) if phases else [],
             "trusted_for_ebr_input": True,
@@ -185,13 +204,13 @@ def collect_derived_characters_by_target(
 
 def has_derived_character_for(
     derived_report: dict[str, object],
-    kpoint: str,
+    target_kpoint_key: str,
     valley: str,
     operation_id: object,
 ) -> bool:
-    """Check if a trusted derived character exists for a given (kpoint, valley, op)."""
+    """Check if a trusted derived character exists for a given (target_key, valley, op)."""
     by_target = collect_derived_characters_by_target(derived_report)
-    kp_data = by_target.get(kpoint, {})
+    kp_data = by_target.get(target_kpoint_key, {})
     valley_data = kp_data.get(valley, {})
     entry = valley_data.get(operation_id)
     return entry is not None and bool(entry.get("trusted_for_ebr_input", False))
@@ -245,7 +264,9 @@ def _derived_entry(
 ) -> dict[str, object]:
     e: dict[str, object] = {
         "source_kpoint": entry.get("source_kpoint"),
+        "source_frac": entry.get("source_frac"),
         "target_kpoint_label": entry.get("target_kpoint_label"),
+        "target_kpoint_key": entry.get("target_kpoint_key"),
         "target_frac": entry.get("target_frac"),
         "derivation_operation_id": entry.get("mapping_operation_id"),
         "source_valley": entry.get("source_valley"),

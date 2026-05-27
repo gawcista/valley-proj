@@ -202,3 +202,65 @@ def test_same_kpoint_skipped():
     for entry in entries:
         if entry.get("mapping_operation_id") == 0:
             assert entry["target_kpoint_label"] != "MM"
+
+
+def test_single_explicit_mm_generates_derived_targets():
+    """P312 + only one explicit MM: conjugation must generate entries for
+    the other two star targets even though they are not in kpoint_frac_by_name."""
+    report = build_hsp_star_conjugation_report(
+        kpoint_frac_by_name={"MM": [0.5, 0.0, 0.0]},
+        operations=_p312_ops_with_valley_mappings(),
+        valley_names=["M1", "M2", "M3"],
+    )
+
+    assert report["status"] == "ok"
+    entries = report["by_source_kpoint"]["MM"]
+    assert len(entries) > 0
+
+    # Check that derived targets are generated (target_kpoint_label may be None)
+    derived_targets = {
+        tuple(round(v, 6) for v in e["target_frac"])
+        for e in entries
+    }
+    assert (0.0, 0.5, 0.0) in derived_targets
+    assert (0.5, 0.5, 0.0) in derived_targets
+
+    # Verify target_kpoint_key is set
+    for e in entries:
+        assert "target_kpoint_key" in e
+        assert e["target_kpoint_key"] is not None
+
+
+def test_improper_unitary_det_not_trs():
+    """det != 1 should give improper_unitary_not_supported, not antiunitary."""
+    # C3^2 maps X->Y but we set det=-1 (improper).
+    # g=E (identity) preserves VA. The conjugation is improper due to r's det.
+    rot_c3sq = np.array([[-1, 1, 0], [-1, 0, 0], [0, 0, 1]], dtype=float)
+    ops = [
+        {
+            "operation_id": 0, "kind": "E", "order": 1, "det": 1,
+            "rotation_frac": np.eye(3, dtype=int),
+            "translation_frac": np.zeros(3),
+            "sector_mapping": {"VA": "VA", "VB": "VB"},
+        },
+        {
+            "operation_id": 2, "kind": "improper_C3sq", "order": 3, "det": -1,
+            "rotation_frac": rot_c3sq,
+            "translation_frac": np.zeros(3),
+            "sector_mapping": {"VA": "VB", "VB": "VA"},
+        },
+    ]
+    report = build_hsp_star_conjugation_report(
+        kpoint_frac_by_name={
+            "X": [0.5, 0.0, 0.0],
+            "Y": [0.0, 0.5, 0.0],
+        },
+        operations=ops,
+        valley_names=["VA", "VB"],
+    )
+
+    entries = report.get("by_source_kpoint", {}).get("X", [])
+    improper = [e for e in entries if "improper_unitary" in str(e.get("conjugation_status", ""))]
+    assert len(improper) > 0
+    antiunitary = [e for e in entries if "antiunitary" in str(e.get("conjugation_status", ""))]
+    assert len(antiunitary) == 0
