@@ -9,7 +9,10 @@ from valleyscope.analysis.projector_symmetry import (
     build_projector_symmetry_report,
 )
 from valleyscope.analysis.hsp_star import build_hsp_star_report
-from valleyscope.analysis.hsp_star_conjugation import build_hsp_star_conjugation_report
+from valleyscope.analysis.hsp_star_conjugation import (
+    build_hsp_star_conjugation_report,
+    compute_target_kpoint_key,
+)
 from valleyscope.analysis.hsp_star_derived_characters import (
     build_hsp_star_derived_characters,
     collect_derived_characters_by_target,
@@ -346,6 +349,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 symmetry_adapted_valley_report=symmetry_adapted_valley_report,
                 hsp_star_derived_characters=hsp_star_derived_characters,
                 kpoint_frac_by_name=symmetry_payload.get("kpoint_frac_by_name", {}),
+                operations=symmetry_payload.get("detected_operations", []),
             )
 
     if symmetry_payload["status"] == "ok":
@@ -1172,12 +1176,13 @@ def _apply_derived_characters_to_report(
     symmetry_adapted_valley_report: dict[str, object],
     hsp_star_derived_characters: dict[str, object],
     kpoint_frac_by_name: dict[str, list[float]],
+    operations: list[dict[str, object]] | None = None,
 ) -> None:
-    """Post-process: apply HSP-star derived characters to EBR readiness in report.
+    """Post-process: apply HSP-star derived characters to EBR readiness.
 
-    Matches derived characters to subspaces by target_kpoint_key (which may be
-    a symmetry-derivable key), target_valley, and required preserving
-    operation IDs from the full-space-group subspace candidate.
+    For each subspace, computes the target HSP-star key for each
+    full-space-group preserving operation, then checks whether a trusted
+    derived character exists for exactly (target_kpoint_key, valley, op).
     """
     by_kpoint = symmetry_adapted_valley_report.get("by_kpoint", {})
     if not isinstance(by_kpoint, dict):
@@ -1185,6 +1190,7 @@ def _apply_derived_characters_to_report(
     for kpoint_name, kpoint_data in by_kpoint.items():
         if not isinstance(kpoint_data, dict):
             continue
+        k_frac = kpoint_frac_by_name.get(kpoint_name)
         for subspace in kpoint_data.get("valley_preserving_subspaces", []):
             if not isinstance(subspace, dict):
                 continue
@@ -1201,6 +1207,10 @@ def _apply_derived_characters_to_report(
                 valley=valley,
                 hsp_star_derived_characters=hsp_star_derived_characters,
                 full_preserving_ops=full_preserving_ops,
+                kpoint_name=kpoint_name,
+                k_frac=k_frac,
+                kpoint_frac_by_name=kpoint_frac_by_name,
+                operations=operations,
             )
 
 
@@ -1228,7 +1238,9 @@ def _build_hsp_star_derived_character_layer(
         valley_names=valley_names,
     )
 
-    # Merge ALL singleton subspace character diagnostics for each kpoint.
+    # Merge ALL singleton subspace character diagnostics for each kpoint,
+    # preserving per-valley readiness so one valley's diagnostic_only
+    # status does not pollute another valley at the same kpoint.
     source_char_diagnostics: dict[str, dict[str, object]] = {}
     by_kpoint = symmetry_adapted_valley_report.get("by_kpoint", {})
     if isinstance(by_kpoint, dict):
@@ -1236,35 +1248,46 @@ def _build_hsp_star_derived_character_layer(
             if not isinstance(kp_data, dict):
                 continue
             merged_per_valley: dict[str, list[dict[str, object]]] = {}
-            merged_status = "ok"
-            merged_diagnostic_only = False
-            merged_local_irrep_ready = True
+            per_valley_status: dict[str, str] = {}
+            per_valley_diag_only: dict[str, bool] = {}
+            per_valley_ready: dict[str, bool] = {}
             for subspace in kp_data.get("valley_preserving_subspaces", []):
                 if not isinstance(subspace, dict):
                     continue
                 char_diag = subspace.get("valley_preserving_character_diagnostics")
                 if not isinstance(char_diag, dict):
                     continue
-                per_valley = char_diag.get("per_valley", {})
-                if not isinstance(per_valley, dict):
+                subspace_valley = str(
+                    subspace.get("orbit", [""])[0] if subspace.get("orbit") else ""
+                )
+                pv = char_diag.get("per_valley", {})
+                if not isinstance(pv, dict):
                     continue
-                for valley, items in per_valley.items():
+                for valley, items in pv.items():
                     if not isinstance(items, list):
                         continue
                     merged_per_valley.setdefault(str(valley), []).extend(items)
-                if char_diag.get("diagnostic_only", True):
-                    merged_diagnostic_only = True
-                if not char_diag.get("local_irrep_ready", False):
-                    merged_local_irrep_ready = False
-                sub_status = str(char_diag.get("status", "ok"))
-                if sub_status != "ok":
-                    merged_status = sub_status
+                # Per-valley trust: only set for the valley this subspace
+                # actually represents.
+                if subspace_valley:
+                    per_valley_status[subspace_valley] = str(
+                        char_diag.get("status", "ok")
+                    )
+                    per_valley_diag_only[subspace_valley] = bool(
+                        char_diag.get("diagnostic_only", True)
+                    )
+                    per_valley_ready[subspace_valley] = bool(
+                        char_diag.get("local_irrep_ready", False)
+                    )
             if merged_per_valley:
                 source_char_diagnostics[kpoint_name] = {
-                    "status": merged_status,
-                    "local_irrep_ready": merged_local_irrep_ready,
-                    "diagnostic_only": merged_diagnostic_only,
+                    "status": "ok",
+                    "local_irrep_ready": True,
+                    "diagnostic_only": False,
                     "per_valley": merged_per_valley,
+                    "per_valley_status": per_valley_status,
+                    "per_valley_diagnostic_only": per_valley_diag_only,
+                    "per_valley_ready": per_valley_ready,
                 }
 
     derived_chars = build_hsp_star_derived_characters(
@@ -1455,11 +1478,18 @@ def _apply_hsp_star_derived_character_gate(
     valley: str,
     hsp_star_derived_characters: dict[str, object] | None,
     full_preserving_ops: list[object] | None = None,
+    kpoint_name: str = "",
+    k_frac: list[float] | None = None,
+    kpoint_frac_by_name: dict[str, list[float]] | None = None,
+    operations: list[dict[str, object]] | None = None,
 ) -> None:
     """Apply HSP-star derived character status to EBR readiness.
 
-    Checks whether a trusted derived character exists for this valley with a
-    preserving operation_id matching the full-space-group valley-preserving set.
+    For each non-identity full-space-group valley-preserving operation,
+    computes the target HSP-star key that this operation maps the current
+    kpoint to, then checks for an exact (target_key, valley, op_id) match
+    in the trusted derived character set.
+
     Success is recorded in resolved_by and character_source, not blocked_by.
     """
     if hsp_star_derived_characters is None:
@@ -1472,34 +1502,66 @@ def _apply_hsp_star_derived_character_gate(
         return
 
     preserving_ops = list(full_preserving_ops or [])
+    kpfbn = dict(kpoint_frac_by_name or {})
+    ops = list(operations or [])
     derived_by_target = collect_derived_characters_by_target(hsp_star_derived_characters)
 
-    # Check if any trusted derived character exists for this valley with a
-    # NON-IDENTITY operation_id matching one of the full preserving operations.
-    # Identity is always available locally and should not count.
-    has_derived_for_this_valley = False
-    for kp_data in derived_by_target.values():
-        valley_data = kp_data.get(valley, {})
-        if not valley_data:
+    # Build operation rotation lookup
+    op_rotation: dict[object, np.ndarray] = {}
+    for op in ops:
+        op_id = op.get("operation_id")
+        rot = op.get("rotation_frac")
+        if op_id is not None and rot is not None:
+            op_rotation[op_id] = np.asarray(rot, dtype=float)
+
+    # For each non-identity preserving op, compute the target HSP-star key
+    # and check for exact (target_key, valley, op_id) match.
+    has_exact_derived_match = False
+    matched_targets: list[str] = []
+    source_frac = np.asarray(k_frac, dtype=float) if k_frac is not None else None
+
+    for op_id in preserving_ops:
+        if op_id == 0 or op_id == "__identity__":
             continue
-        for op_id in preserving_ops:
-            if op_id == 0 or op_id == "__identity__":
-                continue
+        # Compute target key: where does this op map the current kpoint?
+        if source_frac is not None and op_id in op_rotation:
+            target_key = compute_target_kpoint_key(
+                source_frac=source_frac,
+                operation_rotation=op_rotation[op_id],
+                kpoint_frac_by_name=kpfbn,
+            )
+        else:
+            # Fallback: check all targets (non-precise).
+            target_key = None
+
+        # Check exact match in derived characters
+        if target_key is not None:
+            kp_data = derived_by_target.get(target_key, {})
+            valley_data = kp_data.get(valley, {})
             if op_id in valley_data:
-                has_derived_for_this_valley = True
-                break
-        if has_derived_for_this_valley:
-            break
+                has_exact_derived_match = True
+                matched_targets.append(f"{target_key}:{valley}:{op_id}")
+        else:
+            # Fallback: check any target (kept for backward compat when
+            # k_frac or operation info is unavailable).
+            for tk, kp_data in derived_by_target.items():
+                valley_data = kp_data.get(valley, {})
+                if op_id in valley_data:
+                    has_exact_derived_match = True
+                    matched_targets.append(f"{tk}:{valley}:{op_id}")
+                    break
 
     resolved_by: list[str] = list(ebr_mapping.get("resolved_by", []) or [])
 
-    if has_derived_for_this_valley:
+    if has_exact_derived_match:
         new_blockers = [b for b in blockers if b not in relevant_blockers]
         ebr_mapping["blocked_by"] = new_blockers
         ebr_mapping["character_source"] = "hsp_star_derived"
         if "hsp_star_character_derived" not in resolved_by:
             resolved_by.append("hsp_star_character_derived")
         ebr_mapping["resolved_by"] = resolved_by
+        if matched_targets:
+            ebr_mapping["derived_character_targets"] = matched_targets
         notes = str(ebr_mapping.get("notes", "") or "")
         if "HSP-star derived character available" not in notes:
             ebr_mapping["notes"] = notes + (

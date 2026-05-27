@@ -7,8 +7,10 @@ character at k1 for h = r g r^{-1} is:
     chi_{k1,a1}(h) = chi_{k0,a0}(g)
 
 This is a similarity-transform relation at the character level and does not
-require additional DFT.  Only unitary space-group derivations are implemented;
-TRS/antiunitary derivations are marked not_implemented.
+require additional DFT.  Only unitary (det=1) space-group derivations are
+implemented.  Improper unitary (det=-1) operations are schema-recognised but
+marked not supported; they are distinct from antiunitary (TRS) operations
+which are not represented in the current spglib unitary operation list.
 """
 
 from __future__ import annotations
@@ -64,7 +66,8 @@ def build_hsp_star_derived_characters(
             conjugation_status = str(entry.get("conjugation_status", ""))
 
             if conjugation_status in ("antiunitary_not_implemented",
-                                       "improper_unitary_not_supported"):
+                                       "improper_unitary_not_supported",
+                                       "source_not_in_hsp_little_group"):
                 derived_entries.append(_derived_entry(
                     entry=entry,
                     derivation_type="unitary_space_group",
@@ -162,7 +165,9 @@ def build_hsp_star_derived_characters(
             "chi_{k1,a1}(h) = chi_{k0,a0}(g) with "
             "h = r g r^{-1}, k1 = r k0, a1 = pi_r(a0)"
         ),
-        "antiunitary_status": "not_implemented",
+        "antiunitary_status": (
+            "not_represented_in_current_spglib_unitary_operation_list"
+        ),
         "entries": derived_entries,
         "blocked_sources": blocked_sources,
     }
@@ -225,7 +230,12 @@ def _find_source_character(
     valley: str,
     op_id: object,
 ) -> dict[str, object] | None:
-    """Extract source character from per_valley character diagnostics."""
+    """Extract source character from per_valley character diagnostics.
+
+    Trust is determined per-valley from per_valley_diagnostic_only and
+    per_valley_ready dicts.  Falls back to global flags if per-valley
+    data is not available.
+    """
     per_valley = char_data.get("per_valley", {})
     if not isinstance(per_valley, dict):
         return None
@@ -239,14 +249,26 @@ def _find_source_character(
             char = item.get("character")
             if char is None:
                 return None
+            # Per-valley trust: use per_valley_diagnostic_only and
+            # per_valley_ready if available, otherwise fall back to
+            # global flags.
+            pv_diag = char_data.get("per_valley_diagnostic_only", {})
+            pv_ready = char_data.get("per_valley_ready", {})
+            if isinstance(pv_diag, dict) and valley in pv_diag:
+                valley_diag = bool(pv_diag[valley])
+            else:
+                valley_diag = bool(char_data.get("diagnostic_only", True))
+            if isinstance(pv_ready, dict) and valley in pv_ready:
+                valley_ready = bool(pv_ready[valley])
+            else:
+                valley_ready = bool(char_data.get("local_irrep_ready", False))
             return {
                 "character": char,
                 "eigenphases": item.get("eigenphases"),
-                "source_diagnostic_status": str(char_data.get("status", "")),
-                "source_trusted": (
-                    not bool(char_data.get("diagnostic_only", True))
-                    and bool(char_data.get("local_irrep_ready", False))
+                "source_diagnostic_status": (
+                    "diagnostic_only" if valley_diag else "ok"
                 ),
+                "source_trusted": (not valley_diag and valley_ready),
                 "source_unitarity_error": item.get("representation_unitarity_error", 0.0),
             }
     return None
@@ -293,7 +315,9 @@ def _empty_derived_report(reason: str) -> dict[str, object]:
         "status": "not_evaluated",
         "derivation_type": "unitary_space_group",
         "derivation_formula": "chi_{k1,a1}(h) = chi_{k0,a0}(g) with h = r g r^{-1}",
-        "antiunitary_status": "not_implemented",
+        "antiunitary_status": (
+            "not_represented_in_current_spglib_unitary_operation_list"
+        ),
         "entries": [],
         "blocked_sources": [],
         "reason": reason,

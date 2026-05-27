@@ -5,15 +5,22 @@ operation r that maps k0 -> k1 = r k0, the conjugate h = r g r^{-1} should be
 a valley-preserving operation at k1 for the mapped valley pi_r(a0).
 
 This module builds the conjugation graph and identifies which derived operations
-are available without additional DFT.  TRS/antiunitary derivations are recognised
-in the schema but marked not_implemented.
+are available without additional DFT.
+
+Only unitary space-group operations (det=1) are supported.  Improper unitary
+operations (det=-1) are schema-recognised but marked not supported; they are
+distinct from antiunitary (TRS) operations which are not represented in the
+current spglib unitary operation list.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
-from valleyscope.symmetry.little_group import reciprocal_transform
+from valleyscope.symmetry.little_group import (
+    reciprocal_transform,
+    is_little_group_operation,
+)
 
 
 def build_hsp_star_conjugation_report(
@@ -83,7 +90,30 @@ def build_hsp_star_conjugation_report(
                     if g_mapped is None or str(g_mapped) != str(source_valley):
                         continue
 
-                    # Det != 1 means improper unitary (not TRS).  We do not
+                    # g must belong to the source kpoint's HSP little group.
+                    # Valley-preserving operations that map the kpoint to
+                    # another star member are not valid source operations for
+                    # character derivation at this kpoint.
+                    if not is_little_group_operation(g_rot, source_frac):
+                        entries.append(_conjugation_entry(
+                            source_kpoint=source_label,
+                            source_frac=source_frac,
+                            target_kpoint_label=None,
+                            target_kpoint_key="",
+                            target_frac=np.zeros(3),
+                            mapping_operation_id=r_op_id,
+                            source_valley=source_valley,
+                            target_valley=target_valley,
+                            source_operation_id=g_op_id,
+                            conjugation_status="source_not_in_hsp_little_group",
+                            reason=(
+                                f"g={g_op_id} preserves {source_valley} but is "
+                                f"not in the HSP little group at {source_label}"
+                            ),
+                        ))
+                        continue
+
+                    # Det != 1 means improper unitary.  We do not
                     # support improper unitary conjugations yet.
                     r_det = int(op_r.get("det", 1))
                     g_det = int(op_g.get("det", 1))
@@ -271,6 +301,33 @@ def _make_target_key(
         return explicit_label
     frac_list = [round(float(v), 6) for v in np.asarray(canonical_frac, dtype=float).tolist()]
     return f"derived:{frac_list}"
+
+
+def compute_target_kpoint_key(
+    *,
+    source_frac: np.ndarray,
+    operation_rotation: np.ndarray,
+    kpoint_frac_by_name: dict[str, list[float]],
+    tolerance: float = 1e-5,
+) -> str:
+    """Compute the target_kpoint_key for a source kpoint mapped by an operation.
+
+    This is the same key used in conjugation entries.  If the target matches
+    an explicit kpoint label, that label is used; otherwise a stable
+    ``derived:[...]`` key is generated.
+    """
+    kpoints = {
+        str(name): np.asarray(frac, dtype=float)
+        for name, frac in kpoint_frac_by_name.items()
+    }
+    source_arr = np.asarray(source_frac, dtype=float)
+    rot = np.asarray(operation_rotation, dtype=float)
+    target_frac = _canonical_frac(reciprocal_transform(rot, source_arr))
+    target_label = _match_kpoint(target_frac, kpoints, tolerance=tolerance)
+    return _make_target_key(
+        explicit_label=target_label,
+        canonical_frac=target_frac,
+    )
 
 
 def _match_kpoint(

@@ -1,7 +1,10 @@
 import json
 import numpy as np
 
-from valleyscope.analysis.hsp_star_conjugation import build_hsp_star_conjugation_report
+from valleyscope.analysis.hsp_star_conjugation import (
+    build_hsp_star_conjugation_report,
+    compute_target_kpoint_key,
+)
 
 
 def _p312_ops_with_valley_mappings():
@@ -264,3 +267,47 @@ def test_improper_unitary_det_not_trs():
     assert len(improper) > 0
     antiunitary = [e for e in entries if "antiunitary" in str(e.get("conjugation_status", ""))]
     assert len(antiunitary) == 0
+
+
+def test_source_not_in_hsp_little_group_filtered():
+    """g that preserves valley but is not in source HSP little group
+    must be marked source_not_in_hsp_little_group, not matched."""
+    ops = _p312_ops_with_valley_mappings()
+    report = build_hsp_star_conjugation_report(
+        kpoint_frac_by_name={"MM": [0.5, 0.0, 0.0]},
+        operations=ops,
+        valley_names=["M1", "M2", "M3"],
+    )
+    entries = report["by_source_kpoint"]["MM"]
+    not_lg = [e for e in entries if e.get("conjugation_status") == "source_not_in_hsp_little_group"]
+    assert len(not_lg) > 0
+
+    # Verify these entries are NOT matched
+    matched = [e for e in entries if e.get("conjugation_status") == "matched"]
+    for e in matched:
+        src_op = e.get("source_preserving_operation_id")
+        # Identity is always in the little group
+        if src_op == 0:
+            continue
+        # Every matched non-identity source op must be in the HSP little group
+        # at MM=[0.5,0,0].  For P312, only op=5 (C2_M3) is in the MM little group.
+        assert src_op == 5, f"op={src_op} matched but not in MM little group"
+
+
+def test_compute_target_kpoint_key_explicit():
+    key = compute_target_kpoint_key(
+        source_frac=np.array([0.5, 0.0, 0.0]),
+        operation_rotation=np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]]),
+        kpoint_frac_by_name={"MM": [0.5, 0.0, 0.0], "MM3": [0.5, 0.5, 0.0]},
+    )
+    assert key == "MM3"
+
+
+def test_compute_target_kpoint_key_derived():
+    key = compute_target_kpoint_key(
+        source_frac=np.array([0.5, 0.0, 0.0]),
+        operation_rotation=np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]]),
+        kpoint_frac_by_name={"MM": [0.5, 0.0, 0.0]},
+    )
+    assert key.startswith("derived:[")
+    assert "0.5" in key
