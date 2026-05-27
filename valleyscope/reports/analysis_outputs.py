@@ -35,6 +35,9 @@ def write_analysis_outputs(
     symmetry_eigenvalue_summary: dict[str, object] | None = None,
     projector_symmetry_report: dict[str, object] | None = None,
     symmetry_adapted_valley_report: dict[str, object] | None = None,
+    target_subspace_closure_report: dict[str, object] | None = None,
+    hsp_star_conjugation_report: dict[str, object] | None = None,
+    hsp_star_derived_characters: dict[str, object] | None = None,
 ) -> dict[str, object]:
     output_dir = config.output.directory
     outputs: dict[str, object] = {}
@@ -54,6 +57,9 @@ def write_analysis_outputs(
             basis_transforms=basis_transforms,
             projector_symmetry_report=projector_symmetry_report,
             symmetry_adapted_valley_report=symmetry_adapted_valley_report,
+            target_subspace_closure_report=target_subspace_closure_report,
+            hsp_star_conjugation_report=hsp_star_conjugation_report,
+            hsp_star_derived_characters=hsp_star_derived_characters,
         )
     _write_summary_outputs(
         config=config,
@@ -66,6 +72,7 @@ def write_analysis_outputs(
         symmetry_eigenvalue_summary=symmetry_eigenvalue_summary,
         projector_symmetry_report=projector_symmetry_report,
         symmetry_adapted_valley_report=symmetry_adapted_valley_report,
+        target_subspace_closure_report=target_subspace_closure_report,
     )
     return outputs
 
@@ -86,6 +93,9 @@ def _write_detailed_outputs(
     basis_transforms: dict[str, dict[str, object]],
     projector_symmetry_report: dict[str, object] | None = None,
     symmetry_adapted_valley_report: dict[str, object] | None = None,
+    target_subspace_closure_report: dict[str, object] | None = None,
+    hsp_star_conjugation_report: dict[str, object] | None = None,
+    hsp_star_derived_characters: dict[str, object] | None = None,
 ) -> None:
     if config.output.write_csv:
         outputs["valley_weights_csv"] = write_valley_weights_csv(
@@ -109,6 +119,21 @@ def _write_detailed_outputs(
             outputs["symmetry_adapted_valley_analysis_json"] = write_json(
                 output_dir / "symmetry_adapted_valley_analysis.json",
                 symmetry_adapted_valley_report,
+            )
+        if target_subspace_closure_report is not None:
+            outputs["target_subspace_closure_json"] = write_json(
+                output_dir / "target_subspace_closure.json",
+                target_subspace_closure_report,
+            )
+        if hsp_star_conjugation_report is not None:
+            outputs["hsp_star_conjugation_json"] = write_json(
+                output_dir / "hsp_star_conjugation.json",
+                hsp_star_conjugation_report,
+            )
+        if hsp_star_derived_characters is not None:
+            outputs["hsp_star_derived_characters_json"] = write_json(
+                output_dir / "hsp_star_derived_characters.json",
+                hsp_star_derived_characters,
             )
     outputs["diagnostics_h5"] = write_diagnostics_h5(
         output_dir / "diagnostics.h5",
@@ -136,6 +161,9 @@ def _write_summary_outputs(
     symmetry_eigenvalue_summary: dict[str, object] | None = None,
     projector_symmetry_report: dict[str, object] | None = None,
     symmetry_adapted_valley_report: dict[str, object] | None = None,
+    target_subspace_closure_report: dict[str, object] | None = None,
+    hsp_star_conjugation_report: dict[str, object] | None = None,
+    hsp_star_derived_characters: dict[str, object] | None = None,
 ) -> None:
     summary_path_plan: dict[str, Path] = {}
     if config.output.write_summary_txt or not config.output.write_detailed_files:
@@ -157,6 +185,9 @@ def _write_summary_outputs(
         symmetry_eigenvalue_summary=symmetry_eigenvalue_summary,
         projector_symmetry_report=projector_symmetry_report,
         symmetry_adapted_valley_report=symmetry_adapted_valley_report,
+        target_subspace_closure_report=target_subspace_closure_report,
+        hsp_star_conjugation_report=hsp_star_conjugation_report,
+        hsp_star_derived_characters=hsp_star_derived_characters,
     )
     summary_text = render_summary_text(summary_payload)
     if "valley_summary_txt" in summary_path_plan:

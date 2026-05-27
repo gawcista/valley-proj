@@ -23,6 +23,9 @@ def build_summary_payload(
     symmetry_eigenvalue_summary: dict[str, Any] | None = None,
     projector_symmetry_report: dict[str, Any] | None = None,
     symmetry_adapted_valley_report: dict[str, Any] | None = None,
+    target_subspace_closure_report: dict[str, Any] | None = None,
+    hsp_star_conjugation_report: dict[str, Any] | None = None,
+    hsp_star_derived_characters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     eigen_rows = [] if symmetry_rows is None else symmetry_rows
     warnings = _collect_warnings(subspace_payload, symmetry_payload, eigen_rows)
@@ -82,6 +85,12 @@ def build_summary_payload(
         payload["projector_symmetry"] = _compact_projector_symmetry(projector_symmetry_report)
     if symmetry_adapted_valley_report is not None:
         payload["symmetry_adapted_valley_analysis"] = symmetry_adapted_valley_report
+    if target_subspace_closure_report is not None:
+        payload["target_subspace_closure"] = target_subspace_closure_report
+    if hsp_star_conjugation_report is not None:
+        payload["hsp_star_conjugation"] = hsp_star_conjugation_report
+    if hsp_star_derived_characters is not None:
+        payload["hsp_star_derived_characters"] = hsp_star_derived_characters
     return payload
 
 
@@ -351,6 +360,10 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     if isinstance(hsp_star_report, dict) and hsp_star_report.get("by_kpoint"):
         lines.append("")
         lines.append("HSP-star coverage:")
+        lines.append(
+            "Note: symmetry-derivable representatives do NOT require additional DFT. "
+            "They can be obtained via space-group conjugation from explicit HSP data."
+        )
         rows = []
         for kpoint, payload in hsp_star_report.get("by_kpoint", {}).items():
             if not isinstance(payload, dict):
@@ -362,7 +375,7 @@ def render_summary_text(summary: dict[str, Any]) -> str:
                     payload.get("star_size", ""),
                     payload.get("explicit_count", ""),
                     payload.get("symmetry_derivable_count", 0),
-                    payload.get("requires_additional_dft", ""),
+                    str(payload.get("requires_additional_dft", False)),
                     _format_hsp_star_representatives(
                         payload.get("symmetry_derivable_representatives", [])
                     ),
@@ -372,7 +385,7 @@ def render_summary_text(summary: dict[str, Any]) -> str:
             _table(
                 [
                     "kpoint", "status", "star", "explicit",
-                    "derived", "extra_dft", "symmetry-derived reps",
+                    "derivable", "extra_dft", "symmetry-derived reps",
                 ],
                 rows,
             )
@@ -482,6 +495,18 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     symmetry_adapted = summary.get("symmetry_adapted_valley_analysis")
     if isinstance(symmetry_adapted, dict):
         _render_symmetry_adapted_valley_analysis(lines, symmetry_adapted)
+
+    target_closure = summary.get("target_subspace_closure")
+    if isinstance(target_closure, dict):
+        _render_target_subspace_closure(lines, target_closure)
+
+    hsp_star_conj = summary.get("hsp_star_conjugation")
+    if isinstance(hsp_star_conj, dict):
+        _render_hsp_star_conjugation(lines, hsp_star_conj)
+
+    hsp_star_derived = summary.get("hsp_star_derived_characters")
+    if isinstance(hsp_star_derived, dict):
+        _render_hsp_star_derived_characters(lines, hsp_star_derived)
 
     _section(lines, "Warnings")
     if summary["warnings"]:
@@ -1136,6 +1161,112 @@ def _infer_valley_names_from_by_kpoint(by_kpoint: dict[str, Any]) -> list[str]:
                 if isinstance(val, dict) and "allowed_operation_ids" in val:
                     return list(payload.keys())
     return []
+
+
+def _render_target_subspace_closure(
+    lines: list[str],
+    report: dict[str, Any],
+) -> None:
+    _section(lines, "Target-subspace symmetry closure")
+    lines.append(f"status: {report.get('status', 'no_data')}")
+    lines.append(
+        f"tolerances: unitarity={report.get('unitarity_tol')}, "
+        f"group_relation={report.get('group_relation_tol')}"
+    )
+    failed_count = 0
+    warn_count = 0
+    for kpoint, rows in report.get("by_kpoint", {}).items():
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            status = str(row.get("status", ""))
+            if status == "failed":
+                failed_count += 1
+                lines.append(
+                    f"  FAILED {kpoint} op={row.get('operation_id')}: "
+                    f"{row.get('reason', '')}"
+                )
+            elif status == "warn":
+                warn_count += 1
+    if failed_count == 0 and warn_count == 0:
+        lines.append("all operations: target subspace closed")
+    elif failed_count > 0:
+        lines.append(
+            f"target_subspace_closure_failed: {failed_count} operation(s) "
+            f"have non-unitary or non-closed D_raw in the target subspace"
+        )
+    lines.append("")
+
+
+def _render_hsp_star_conjugation(
+    lines: list[str],
+    report: dict[str, Any],
+) -> None:
+    _section(lines, "HSP-star conjugation")
+    lines.append(f"status: {report.get('status', 'not_evaluated')}")
+    by_source = report.get("by_source_kpoint", {})
+    if not isinstance(by_source, dict) or not by_source:
+        lines.append("(none)")
+        lines.append("")
+        return
+    for source_kp, entries in by_source.items():
+        matched = [e for e in entries if e.get("conjugation_status") == "matched"]
+        missing = [e for e in entries if e.get("conjugation_status") == "missing_operation_product"]
+        antiunitary = [e for e in entries if e.get("conjugation_status") == "antiunitary_not_implemented"]
+        lines.append(
+            f"{source_kp}: {len(matched)} matched, {len(missing)} missing, "
+            f"{len(antiunitary)} antiunitary-not-implemented"
+        )
+        for e in matched:
+            lines.append(
+                f"  {e.get('source_valley')} -> {e.get('target_valley')} "
+                f"@ {e.get('target_kpoint_label')}: "
+                f"g={e.get('source_preserving_operation_id')} "
+                f"-> h={e.get('derived_target_operation_id')} "
+                f"via r={e.get('mapping_operation_id')}"
+            )
+    lines.append("")
+
+
+def _render_hsp_star_derived_characters(
+    lines: list[str],
+    report: dict[str, Any],
+) -> None:
+    _section(lines, "HSP-star derived characters")
+    lines.append(f"status: {report.get('status', 'not_evaluated')}")
+    lines.append(f"derivation_type: {report.get('derivation_type', '')}")
+    lines.append(f"antiunitary_status: {report.get('antiunitary_status', '')}")
+    derived = [e for e in report.get("entries", []) if e.get("status") == "derived"]
+    diag = [e for e in report.get("entries", []) if e.get("status") == "diagnostic_only"]
+    blocked = [e for e in report.get("entries", []) if "blocked" in str(e.get("status", ""))]
+    not_impl = [e for e in report.get("entries", []) if e.get("status") == "not_implemented"]
+    missing = [e for e in report.get("entries", []) if "missing" in str(e.get("status", ""))]
+
+    lines.append(
+        f"derived: {len(derived)}, diagnostic_only: {len(diag)}, "
+        f"blocked: {len(blocked)}, not_implemented: {len(not_impl)}, "
+        f"missing: {len(missing)}"
+    )
+    for e in derived:
+        char = e.get("character", {})
+        char_str = ""
+        if isinstance(char, dict):
+            char_str = f"{char.get('real', 0)}+{char.get('imag', 0)}i"
+        lines.append(
+            f"  {e.get('target_kpoint_label')}/{e.get('target_valley')} "
+            f"op={e.get('derived_target_operation_id')}: "
+            f"chi={char_str}, trusted={e.get('trusted_for_ebr_input')}"
+        )
+    if not derived and not diag and not blocked:
+        lines.append("(no derived characters available)")
+    blocked_sources = report.get("blocked_sources", [])
+    if blocked_sources:
+        lines.append("blocked sources:")
+        for bs in blocked_sources:
+            lines.append(f"  {bs.get('source_kpoint')}/{bs.get('source_valley')}: {bs.get('reason')}")
+    lines.append("")
 
 
 def _output_file_label(name: str) -> str:

@@ -9,6 +9,16 @@ from valleyscope.analysis.projector_symmetry import (
     build_projector_symmetry_report,
 )
 from valleyscope.analysis.hsp_star import build_hsp_star_report
+from valleyscope.analysis.hsp_star_conjugation import build_hsp_star_conjugation_report
+from valleyscope.analysis.hsp_star_derived_characters import (
+    build_hsp_star_derived_characters,
+    collect_derived_characters_by_target,
+)
+from valleyscope.analysis.target_subspace_closure import (
+    build_target_subspace_closure_report,
+    check_target_subspace_closure_blocked,
+    check_target_subspace_closure_blocked_for_operation,
+)
 from valleyscope.analysis.symmetry_adapted_valley_report import (
     build_symmetry_adapted_valley_report,
     summarize_symmetry_adapted_valley_report,
@@ -273,6 +283,8 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         projectors_by_kpoint[next(iter(projectors_by_kpoint))].sector_names
     ) if projectors_by_kpoint else []
     projector_symmetry_report: dict[str, object] | None = None
+    target_subspace_closure_report: dict[str, object] | None = None
+    target_subspace_closure_blockers: list[str] = []
     if symmetry_payload["status"] == "ok" and symmetry_payload.get("symmetry_eigenvalue_enabled", True):
         projector_symmetry_report = build_projector_symmetry_report(
             valley_matrices_by_kpoint=valley_matrices_by_kpoint,
@@ -283,6 +295,22 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             symmetry_rows=symmetry_rows,
             projector_symmetry_report=projector_symmetry_report,
         )
+        # Build target-subspace symmetry-closure diagnostic (independent of projector symmetry)
+        effective_orders: dict[object, int] = {}
+        for op in symmetry_payload.get("detected_operations", []):
+            op_id = op.get("operation_id")
+            order = op.get("order")
+            if op_id is not None and order is not None:
+                effective_orders[op_id] = int(order)
+        target_subspace_closure_report = build_target_subspace_closure_report(
+            raw_representations_by_kpoint=raw_representations_by_kpoint,
+            operation_orders=effective_orders,
+            spinor_wavefunction=bool(symmetry_payload.get("spinor_wavefunction", False)),
+            unitarity_tol=float(config.rotation.unitarity_tol),
+        )
+        target_subspace_closure_blockers = check_target_subspace_closure_blocked(
+            target_subspace_closure_report,
+        )
 
     if symmetry_payload["status"] == "ok":
         symmetry_payload["hsp_star_report"] = build_hsp_star_report(
@@ -292,13 +320,32 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
 
     # --- Formal symmetry-adapted valley report ---
     symmetry_adapted_valley_report: dict[str, object] | None = None
+    hsp_star_conjugation_report: dict[str, object] | None = None
+    hsp_star_derived_characters: dict[str, object] | None = None
     if config.symmetry_adapted_valley.enabled:
         symmetry_adapted_valley_report = _build_symmetry_adapted_valley_report(
             valley_matrices_by_kpoint=valley_matrices_by_kpoint,
             raw_representations_by_kpoint=raw_representations_by_kpoint,
             symmetry_payload=symmetry_payload,
             config=config,
+            target_subspace_closure_report=target_subspace_closure_report,
+            target_subspace_closure_blockers=target_subspace_closure_blockers,
         )
+        # Build HSP-star conjugation and derived characters
+        hsp_star_conjugation_report, hsp_star_derived_characters = (
+            _build_hsp_star_derived_character_layer(
+                symmetry_payload=symmetry_payload,
+                symmetry_adapted_valley_report=symmetry_adapted_valley_report,
+                target_subspace_closure_blockers=target_subspace_closure_blockers,
+                valley_names=valley_names,
+            )
+        )
+        # Apply derived character gate as post-processing
+        if hsp_star_derived_characters is not None:
+            _apply_derived_characters_to_report(
+                symmetry_adapted_valley_report=symmetry_adapted_valley_report,
+                hsp_star_derived_characters=hsp_star_derived_characters,
+            )
 
     if symmetry_payload["status"] == "ok":
         build_valley_preserving_subgroup_report(
@@ -329,6 +376,9 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         symmetry_eigenvalue_summary=symmetry_eigenvalue_summary,
         projector_symmetry_report=projector_symmetry_report,
         symmetry_adapted_valley_report=symmetry_adapted_valley_report,
+        target_subspace_closure_report=target_subspace_closure_report,
+        hsp_star_conjugation_report=hsp_star_conjugation_report,
+        hsp_star_derived_characters=hsp_star_derived_characters,
     )
     return outputs
 
@@ -824,6 +874,8 @@ def _build_symmetry_adapted_valley_report(
     raw_representations_by_kpoint: dict[str, dict[object, dict[str, object]]],
     symmetry_payload: dict[str, object],
     config: object,
+    target_subspace_closure_report: dict[str, object] | None = None,
+    target_subspace_closure_blockers: list[str] | None = None,
 ) -> dict[str, object]:
     """Build per-kpoint symmetry-adapted valley analysis.
 
@@ -831,6 +883,7 @@ def _build_symmetry_adapted_valley_report(
     ``not_evaluated`` stub or contains orbit-level reports when inputs are
     sufficient for the toy pipeline.
     """
+    closure_blockers = list(target_subspace_closure_blockers or [])
     by_kpoint: dict[str, object] = {}
     valley_names = list(
         symmetry_payload.get("valley_names", [])
@@ -938,13 +991,17 @@ def _build_symmetry_adapted_valley_report(
                 )
                 continue
 
+            orbit_inferred_rank, orbit_rank_source = _infer_orbit_rank(
+                seed_projectors=seed_projectors,
+                orbit=orbit,
+            )
             report = build_symmetry_adapted_valley_report(
                 seed_projectors=seed_projectors,
                 representations=d_g_dict,
                 valley_mappings=valley_mappings_dict,
                 orbit=orbit,
                 reference_valley=orbit[0],
-                rank=None,
+                rank=orbit_inferred_rank,
                 rank_method="gap",
                 unitarity_tol=float(config.symmetry_adapted_valley.representation_unitarity_fail_tol),
                 modulus_tol=float(config.rotation.root_deviation_tol),
@@ -978,6 +1035,8 @@ def _build_symmetry_adapted_valley_report(
             ebr_unitarity_max=float(config.symmetry_adapted_valley.ebr_unitarity_max),
             space_group_valley_mappings=space_group_valley_mappings,
             space_group_operation_orders=space_group_operation_orders,
+            target_subspace_closure_blockers=closure_blockers,
+            target_subspace_closure_report=target_subspace_closure_report,
         )
 
         by_kpoint[kpoint_name] = _aggregate_symmetry_adapted_kpoint(
@@ -1010,6 +1069,8 @@ def _build_valley_preserving_subspace_reports(
     ebr_unitarity_max: float = 1e-3,
     space_group_valley_mappings: dict[object, dict[str, str]] | None = None,
     space_group_operation_orders: dict[object, int] | None = None,
+    target_subspace_closure_blockers: list[str] | None = None,
+    target_subspace_closure_report: dict[str, object] | None = None,
 ) -> list[dict[str, object]]:
     """Build singleton reports for per-valley preserving-subgroup analysis.
 
@@ -1092,8 +1153,114 @@ def _build_valley_preserving_subspace_reports(
                 ebr_mapping=ebr_mapping,
                 subspace_space_group=summary["subspace_space_group"],
             )
+            _apply_target_subspace_closure_gate(
+                ebr_mapping=ebr_mapping,
+                closure_blockers=target_subspace_closure_blockers,
+                target_subspace_closure_report=target_subspace_closure_report,
+                kpoint_name="",
+                valley_preserving_ops=summary.get("hsp_preserving_operation_ids", []),
+            )
         reports.append(summary)
     return reports
+
+
+def _apply_derived_characters_to_report(
+    *,
+    symmetry_adapted_valley_report: dict[str, object],
+    hsp_star_derived_characters: dict[str, object],
+) -> None:
+    """Post-process: apply HSP-star derived characters to EBR readiness in report."""
+    by_kpoint = symmetry_adapted_valley_report.get("by_kpoint", {})
+    if not isinstance(by_kpoint, dict):
+        return
+    for kpoint_data in by_kpoint.values():
+        if not isinstance(kpoint_data, dict):
+            continue
+        for subspace in kpoint_data.get("valley_preserving_subspaces", []):
+            if not isinstance(subspace, dict):
+                continue
+            ebr_mapping = subspace.get("ebr_mapping_input")
+            if not isinstance(ebr_mapping, dict):
+                continue
+            valley = str(subspace.get("orbit", [""])[0] if subspace.get("orbit") else "")
+            _apply_hsp_star_derived_character_gate(
+                ebr_mapping=ebr_mapping,
+                valley=valley,
+                hsp_star_derived_characters=hsp_star_derived_characters,
+            )
+
+
+def _build_hsp_star_derived_character_layer(
+    *,
+    symmetry_payload: dict[str, object],
+    symmetry_adapted_valley_report: dict[str, object] | None,
+    target_subspace_closure_blockers: list[str],
+    valley_names: list[str],
+) -> tuple[dict[str, object] | None, dict[str, object] | None]:
+    """Build HSP-star conjugation and derived character reports.
+
+    Returns (conjugation_report, derived_characters) or (None, None).
+    """
+    if symmetry_adapted_valley_report is None:
+        return None, None
+    kpoint_frac_by_name = symmetry_payload.get("kpoint_frac_by_name", {})
+    operations = symmetry_payload.get("detected_operations", [])
+    if not kpoint_frac_by_name or not operations or not valley_names:
+        return None, None
+
+    conjugation_report = build_hsp_star_conjugation_report(
+        kpoint_frac_by_name=kpoint_frac_by_name,
+        operations=operations,
+        valley_names=valley_names,
+    )
+
+    source_char_diagnostics: dict[str, dict[str, object]] = {}
+    by_kpoint = symmetry_adapted_valley_report.get("by_kpoint", {})
+    if isinstance(by_kpoint, dict):
+        for kpoint_name, kp_data in by_kpoint.items():
+            if not isinstance(kp_data, dict):
+                continue
+            for subspace in kp_data.get("valley_preserving_subspaces", []):
+                if not isinstance(subspace, dict):
+                    continue
+                char_diag = subspace.get("valley_preserving_character_diagnostics")
+                if isinstance(char_diag, dict):
+                    source_char_diagnostics[kpoint_name] = char_diag
+                    break
+
+    derived_chars = build_hsp_star_derived_characters(
+        conjugation_report=conjugation_report,
+        source_character_diagnostics=source_char_diagnostics,
+        target_subspace_closure_blockers=target_subspace_closure_blockers,
+    )
+
+    return conjugation_report, derived_chars
+
+
+def _infer_orbit_rank(
+    *,
+    seed_projectors: dict[str, np.ndarray],
+    orbit: list[str],
+) -> tuple[int | None, str]:
+    """Infer per-valley rank for a full orbit when target dim is divisible by orbit size.
+
+    Returns (rank, rank_source).  If not divisible or no data, returns (None, "auto_gap").
+    """
+    if not orbit or not seed_projectors:
+        return None, "auto_gap"
+    available = [v for v in orbit if v in seed_projectors]
+    if not available:
+        return None, "auto_gap"
+    first = np.asarray(seed_projectors[available[0]])
+    if first.ndim != 2 or first.shape[0] != first.shape[1]:
+        return None, "auto_gap"
+    dim = int(first.shape[0])
+    n_orbit = len(orbit)
+    if n_orbit > 0 and dim % n_orbit == 0:
+        rank = dim // n_orbit
+        if rank > 0:
+            return rank, "target_dim_div_orbit_size"
+    return None, "auto_gap"
 
 
 def _infer_uniform_local_valley_rank(
@@ -1241,6 +1408,95 @@ def _build_subspace_space_group_for_valley(
         "source": "full_space_group_valley_mapping",
         "reason": reason,
     }
+
+
+def _apply_hsp_star_derived_character_gate(
+    *,
+    ebr_mapping: dict[str, object],
+    valley: str,
+    hsp_star_derived_characters: dict[str, object] | None,
+) -> None:
+    """Replace hsp_local_preserving_character_missing with derived status when available."""
+    if hsp_star_derived_characters is None:
+        return
+    blockers: list[str] = list(ebr_mapping.get("blocked_by", []) or [])
+    if "hsp_local_preserving_character_missing" not in blockers:
+        return
+
+    derived_by_target = collect_derived_characters_by_target(hsp_star_derived_characters)
+    has_derived = any(
+        valley in kp_data
+        for kp_data in derived_by_target.values()
+    )
+
+    if has_derived:
+        new_blockers = [
+            "hsp_star_character_derived" if b == "hsp_local_preserving_character_missing" else b
+            for b in blockers
+        ]
+        ebr_mapping["blocked_by"] = new_blockers
+        notes = str(ebr_mapping.get("notes", "") or "")
+        if "HSP-star derived character available" not in notes:
+            ebr_mapping["notes"] = notes + (
+                " HSP-star derived character available; "
+                "local character was sourced from symmetry conjugation."
+            )
+    else:
+        new_blockers = [
+            "hsp_star_derivation_not_available" if b == "hsp_local_preserving_character_missing" else b
+            for b in blockers
+        ]
+        ebr_mapping["blocked_by"] = new_blockers
+
+
+def _apply_target_subspace_closure_gate(
+    *,
+    ebr_mapping: dict[str, object],
+    closure_blockers: list[str] | None,
+    target_subspace_closure_report: dict[str, object] | None = None,
+    kpoint_name: str = "",
+    valley_preserving_ops: list[object] | None = None,
+) -> None:
+    """Apply target-subspace closure blockers to EBR readiness.
+
+    Only blocks when a valley-preserving operation has a closure failure,
+    since valley-changing operations are expected to have non-unitary D_raw
+    in the target subspace.
+    """
+    if not closure_blockers:
+        return
+    preserving_ops = list(valley_preserving_ops or [])
+
+    # Check if any closure failure is for a valley-preserving operation
+    has_vp_closure_failure = False
+    if target_subspace_closure_report is not None and kpoint_name and preserving_ops:
+        for op_id in preserving_ops:
+            if check_target_subspace_closure_blocked_for_operation(
+                target_subspace_closure_report, kpoint_name, op_id,
+            ):
+                has_vp_closure_failure = True
+                break
+
+    filtered_blockers: list[str] = []
+    for blocker in closure_blockers:
+        if blocker == "target_subspace_closure_failed":
+            if has_vp_closure_failure:
+                filtered_blockers.append(blocker)
+        elif blocker == "target_subspace_closure_not_evaluated":
+            if has_vp_closure_failure:
+                filtered_blockers.append(blocker)
+        else:
+            filtered_blockers.append(blocker)
+
+    if not filtered_blockers:
+        return
+    if ebr_mapping.get("ready") is True and filtered_blockers:
+        ebr_mapping["ready"] = False
+    blockers: list[str] = list(ebr_mapping.get("blocked_by", []) or [])
+    for blocker in filtered_blockers:
+        if blocker not in blockers:
+            blockers.append(blocker)
+    ebr_mapping["blocked_by"] = blockers
 
 
 def _refine_ebr_mapping_with_subspace_space_group(
