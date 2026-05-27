@@ -1431,6 +1431,56 @@ def test_summary_text_renders_hsp_star_coverage(tmp_path):
     assert "[0, 0.5, 0] via ops [2]" in text
 
 
+def test_write_analysis_outputs_plumbs_hsp_star_reports_to_summary(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["output"]["write_detailed_files"] = False
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    config = load_config(config_path)
+
+    from valleyscope.reports.analysis_outputs import write_analysis_outputs
+
+    hsp_star_conjugation = {
+        "status": "ok",
+        "entries": [{"conjugation_status": "matched"}],
+    }
+    hsp_star_derived = {
+        "status": "ok",
+        "entries": [{"status": "derived"}],
+    }
+
+    outputs = write_analysis_outputs(
+        config=config,
+        qcut=0.5,
+        weight_rows=[],
+        sector_names=["K_valley"],
+        subspace_payload={"kpoints": {}},
+        symmetry_payload={
+            "status": "ok",
+            "detected_operations": [],
+            "candidate_rotations": [],
+            "little_group_check": {"status": "evaluated_per_kpoint"},
+            "valley_preservation_check": {"status": "completed"},
+        },
+        symmetry_rows=[],
+        projectors_by_kpoint={},
+        qcut_scan_payload={},
+        symmetry_representation_payload={},
+        basis_transforms={},
+        hsp_star_conjugation_report=hsp_star_conjugation,
+        hsp_star_derived_characters=hsp_star_derived,
+    )
+
+    payload = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    assert payload["hsp_star_conjugation"] == hsp_star_conjugation
+    assert payload["hsp_star_derived_characters"] == hsp_star_derived
+
+
 def test_summary_marks_spinor_rotation_as_diagnostic_only(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "config.yaml"

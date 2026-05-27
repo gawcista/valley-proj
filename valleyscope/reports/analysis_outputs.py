@@ -73,6 +73,8 @@ def write_analysis_outputs(
         projector_symmetry_report=projector_symmetry_report,
         symmetry_adapted_valley_report=symmetry_adapted_valley_report,
         target_subspace_closure_report=target_subspace_closure_report,
+        hsp_star_conjugation_report=hsp_star_conjugation_report,
+        hsp_star_derived_characters=hsp_star_derived_characters,
     )
     return outputs
 
