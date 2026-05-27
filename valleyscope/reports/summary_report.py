@@ -927,6 +927,52 @@ def _render_symmetry_adapted_valley_analysis(
         )
         lines.append("")
 
+    # Subspace representation quality (diagnostic-only)
+    quality_rows: list[list[Any]] = []
+    for kpoint, kp_data in by_kpoint.items():
+        if not isinstance(kp_data, dict):
+            continue
+        for item in kp_data.get("valley_preserving_subspaces", []):
+            if not isinstance(item, dict):
+                continue
+            quality = item.get("subspace_representation_quality")
+            if not isinstance(quality, dict):
+                continue
+            for row in quality.get("rows", []):
+                if not isinstance(row, dict):
+                    continue
+                if not row.get("is_valley_preserving"):
+                    continue
+                if row.get("operation_id", 0) == 0:
+                    continue
+                quality_rows.append([
+                    kpoint,
+                    row.get("valley", ""),
+                    row.get("operation_id"),
+                    row.get("operation_order", ""),
+                    _fmt(row.get("basis_orthonormality_error")),
+                    _fmt(row.get("D_raw_unitarity_error")),
+                    _fmt(row.get("projector_invariance_error")),
+                    _fmt(row.get("local_representation_unitarity_error")),
+                    _fmt(row.get("local_group_relation_error")),
+                    _fmt(row.get("eigenvalue_modulus_deviation")),
+                    row.get("diagnosis", ""),
+                ])
+    if quality_rows:
+        lines.append("subspace representation quality (diagnostic-only):")
+        lines.extend(
+            _table(
+                [
+                    "kpoint", "valley", "op", "order",
+                    "basis_ortho", "D_raw_unit", "proj_inv",
+                    "local_unit", "group_rel", "eval_mod_dev",
+                    "diagnosis",
+                ],
+                quality_rows,
+            )
+        )
+        lines.append("")
+
 
 def _symmetry_adapted_orbit_row(kpoint: Any, item: dict[str, Any]) -> list[Any]:
     projectors = item.get("symmetry_adapted_projectors", {})

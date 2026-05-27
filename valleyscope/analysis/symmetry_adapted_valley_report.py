@@ -130,6 +130,17 @@ def build_symmetry_adapted_valley_report(
 
     # Stage 2: VP representations + sewing
     valley_bases = dict(sym_result.eigenvectors)
+    # Store raw matrices for downstream diagnostics (e.g. subspace_representation_quality).
+    # These are stripped by summarize_symmetry_adapted_valley_report and do not
+    # appear in the public JSON schema.
+    _internal_raw_eigenvectors = {
+        str(valley): np.asarray(vecs, dtype=np.complex128)
+        for valley, vecs in sym_result.eigenvectors.items()
+    }
+    _internal_raw_projectors = {
+        str(valley): np.asarray(p, dtype=np.complex128)
+        for valley, p in sym_result.projectors.items()
+    }
     rep_diag = build_symmetry_adapted_representation_diagnostics(
         valley_bases=valley_bases,
         representations=representations,
@@ -250,6 +261,10 @@ def build_symmetry_adapted_valley_report(
             ebr_seed_overlap_min=ebr_seed_overlap_min,
             ebr_unitarity_max=ebr_unitarity_max,
         ),
+        # Internal raw matrices for downstream quality diagnostics.
+        # Stripped from public JSON by summarize_symmetry_adapted_valley_report.
+        "_internal_raw_eigenvectors": _internal_raw_eigenvectors,
+        "_internal_raw_projectors": _internal_raw_projectors,
     }
 
 

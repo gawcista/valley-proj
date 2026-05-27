@@ -13,6 +13,9 @@ from valleyscope.analysis.hsp_star_conjugation import (
     build_hsp_star_conjugation_report,
     compute_target_kpoint_key,
 )
+from valleyscope.analysis.subspace_representation_quality import (
+    build_subspace_representation_quality_report,
+)
 from valleyscope.analysis.hsp_star_derived_characters import (
     build_hsp_star_derived_characters,
     collect_derived_characters_by_target,
@@ -1145,7 +1148,26 @@ def _build_valley_preserving_subspace_reports(
             ebr_seed_overlap_min=ebr_seed_overlap_min,
             ebr_unitarity_max=ebr_unitarity_max,
         )
+        # Build subspace representation quality diagnostics from raw matrices
+        # before they are stripped by summarization.
+        raw_eigenvectors = report.get("_internal_raw_eigenvectors", {})
+        raw_projectors = report.get("_internal_raw_projectors", {})
+        if not isinstance(raw_eigenvectors, dict):
+            raw_eigenvectors = {}
+        if not isinstance(raw_projectors, dict):
+            raw_projectors = {}
+        quality_report = build_subspace_representation_quality_report(
+            valley_bases=raw_eigenvectors,
+            projectors=raw_projectors,
+            representations=local_representations,
+            valley_mappings=local_mappings,
+            operation_orders=operation_orders_by_id,
+            spinor_wavefunction=spinor_wavefunction,
+            target_valleys=[str(valley)],
+        )
+
         summary = summarize_symmetry_adapted_valley_report(report)
+        summary["subspace_representation_quality"] = quality_report
         summary["analysis_scope"] = "valley_preserving_subspace"
         summary["local_rank_source"] = rank_source
         summary["hsp_preserving_operation_ids"] = list(preserving_ops)

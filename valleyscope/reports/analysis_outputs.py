@@ -135,6 +135,13 @@ def _write_detailed_outputs(
                 output_dir / "hsp_star_derived_characters.json",
                 hsp_star_derived_characters,
             )
+        if symmetry_adapted_valley_report is not None:
+            quality_json_path = output_dir / "subspace_representation_quality.json"
+            quality_report = _extract_quality_report(symmetry_adapted_valley_report)
+            if quality_report is not None:
+                outputs["subspace_representation_quality_json"] = write_json(
+                    quality_json_path, quality_report,
+                )
     outputs["diagnostics_h5"] = write_diagnostics_h5(
         output_dir / "diagnostics.h5",
         projectors_by_kpoint,
@@ -196,3 +203,42 @@ def _write_summary_outputs(
         outputs["valley_summary_json"] = write_summary_json(summary_path_plan["valley_summary_json"], summary_payload)
     outputs["summary_text"] = summary_text
     outputs["summary_stdout"] = config.output.summary_stdout
+
+
+def _extract_quality_report(
+    symmetry_adapted_valley_report: dict[str, object],
+) -> dict[str, object] | None:
+    """Extract consolidated subspace_representation_quality from the report."""
+    all_rows: list[dict[str, object]] = []
+    by_kpoint = symmetry_adapted_valley_report.get("by_kpoint", {})
+    if not isinstance(by_kpoint, dict):
+        return None
+    for kpoint_name, kp_data in by_kpoint.items():
+        if not isinstance(kp_data, dict):
+            continue
+        for subspace in kp_data.get("valley_preserving_subspaces", []):
+            if not isinstance(subspace, dict):
+                continue
+            quality = subspace.get("subspace_representation_quality")
+            if not isinstance(quality, dict):
+                continue
+            for row in quality.get("rows", []):
+                if not isinstance(row, dict):
+                    continue
+                row_copy = dict(row)
+                row_copy["kpoint"] = kpoint_name
+                all_rows.append(row_copy)
+    if not all_rows:
+        return None
+    return {
+        "status": "quality_issues_detected"
+        if any(r.get("diagnosis") not in ("ok", "not_valley_preserving", "missing_inputs")
+               for r in all_rows)
+        else "ok",
+        "interpretation": (
+            "Per-(kpoint, valley, operation) subspace representation quality. "
+            "Decomposes local representation unitarity error. "
+            "Diagnostic-only; does not modify readiness."
+        ),
+        "rows": all_rows,
+    }
