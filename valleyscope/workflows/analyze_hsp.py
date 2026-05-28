@@ -16,6 +16,9 @@ from valleyscope.analysis.hsp_star_conjugation import (
 from valleyscope.analysis.subspace_representation_quality import (
     build_subspace_representation_quality_report,
 )
+from valleyscope.analysis.irrep_workflow_decision import (
+    build_irrep_workflow_decisions,
+)
 from valleyscope.analysis.hsp_star_derived_characters import (
     build_hsp_star_derived_characters,
     collect_derived_characters_by_target,
@@ -372,6 +375,19 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
 
     sector_names = list(projectors_by_kpoint[next(iter(projectors_by_kpoint))].sector_masks)
     symmetry_eigenvalue_summary = _build_symmetry_eigenvalue_summary(symmetry_payload, symmetry_rows)
+
+    # --- Irrep workflow decision layer ---
+    irrep_workflow_decisions: dict[str, object] | None = None
+    if config.symmetry_adapted_valley.enabled:
+        irrep_workflow_decisions = build_irrep_workflow_decisions(
+            projector_symmetry_report=projector_symmetry_report,
+            target_subspace_closure_report=target_subspace_closure_report,
+            symmetry_adapted_valley_report=symmetry_adapted_valley_report,
+            symmetry_rows=symmetry_rows,
+            valley_names=valley_names,
+            spinor_convention_verified=config.spinor.convention_verified,
+        )
+
     outputs = write_analysis_outputs(
         config=config,
         qcut=qcut,
@@ -390,6 +406,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         target_subspace_closure_report=target_subspace_closure_report,
         hsp_star_conjugation_report=hsp_star_conjugation_report,
         hsp_star_derived_characters=hsp_star_derived_characters,
+        irrep_workflow_decisions=irrep_workflow_decisions,
     )
     return outputs
 

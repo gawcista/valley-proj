@@ -38,6 +38,7 @@ def write_analysis_outputs(
     target_subspace_closure_report: dict[str, object] | None = None,
     hsp_star_conjugation_report: dict[str, object] | None = None,
     hsp_star_derived_characters: dict[str, object] | None = None,
+    irrep_workflow_decisions: dict[str, object] | None = None,
 ) -> dict[str, object]:
     output_dir = config.output.directory
     outputs: dict[str, object] = {}
@@ -60,6 +61,7 @@ def write_analysis_outputs(
             target_subspace_closure_report=target_subspace_closure_report,
             hsp_star_conjugation_report=hsp_star_conjugation_report,
             hsp_star_derived_characters=hsp_star_derived_characters,
+            irrep_workflow_decisions=irrep_workflow_decisions,
         )
     _write_summary_outputs(
         config=config,
@@ -98,6 +100,7 @@ def _write_detailed_outputs(
     target_subspace_closure_report: dict[str, object] | None = None,
     hsp_star_conjugation_report: dict[str, object] | None = None,
     hsp_star_derived_characters: dict[str, object] | None = None,
+    irrep_workflow_decisions: dict[str, object] | None = None,
 ) -> None:
     if config.output.write_csv:
         outputs["valley_weights_csv"] = write_valley_weights_csv(
@@ -144,6 +147,11 @@ def _write_detailed_outputs(
                 outputs["subspace_representation_quality_json"] = write_json(
                     quality_json_path, quality_report,
                 )
+        if irrep_workflow_decisions is not None:
+            outputs["irrep_workflow_decisions_json"] = write_json(
+                output_dir / "irrep_workflow_decisions.json",
+                irrep_workflow_decisions,
+            )
     outputs["diagnostics_h5"] = write_diagnostics_h5(
         output_dir / "diagnostics.h5",
         projectors_by_kpoint,
@@ -173,6 +181,7 @@ def _write_summary_outputs(
     target_subspace_closure_report: dict[str, object] | None = None,
     hsp_star_conjugation_report: dict[str, object] | None = None,
     hsp_star_derived_characters: dict[str, object] | None = None,
+    irrep_workflow_decisions: dict[str, object] | None = None,
 ) -> None:
     summary_path_plan: dict[str, Path] = {}
     if config.output.write_summary_txt or not config.output.write_detailed_files:
@@ -197,6 +206,7 @@ def _write_summary_outputs(
         target_subspace_closure_report=target_subspace_closure_report,
         hsp_star_conjugation_report=hsp_star_conjugation_report,
         hsp_star_derived_characters=hsp_star_derived_characters,
+        irrep_workflow_decisions=irrep_workflow_decisions,
     )
     summary_text = render_summary_text(summary_payload)
     if "valley_summary_txt" in summary_path_plan:

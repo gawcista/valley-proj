@@ -26,6 +26,7 @@ def build_summary_payload(
     target_subspace_closure_report: dict[str, Any] | None = None,
     hsp_star_conjugation_report: dict[str, Any] | None = None,
     hsp_star_derived_characters: dict[str, Any] | None = None,
+    irrep_workflow_decisions: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     eigen_rows = [] if symmetry_rows is None else symmetry_rows
     warnings = _collect_warnings(subspace_payload, symmetry_payload, eigen_rows)
@@ -91,6 +92,8 @@ def build_summary_payload(
         payload["hsp_star_conjugation"] = hsp_star_conjugation_report
     if hsp_star_derived_characters is not None:
         payload["hsp_star_derived_characters"] = hsp_star_derived_characters
+    if irrep_workflow_decisions is not None:
+        payload["irrep_workflow_decisions"] = irrep_workflow_decisions
     return payload
 
 
@@ -507,6 +510,10 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     hsp_star_derived = summary.get("hsp_star_derived_characters")
     if isinstance(hsp_star_derived, dict):
         _render_hsp_star_derived_characters(lines, hsp_star_derived)
+
+    irrep_decisions = summary.get("irrep_workflow_decisions")
+    if isinstance(irrep_decisions, dict):
+        _render_irrep_workflow_decisions(lines, irrep_decisions)
 
     _section(lines, "Warnings")
     if summary["warnings"]:
@@ -1333,6 +1340,46 @@ def _render_hsp_star_derived_characters(
         lines.append("blocked sources:")
         for bs in blocked_sources:
             lines.append(f"  {bs.get('source_kpoint')}/{bs.get('source_valley')}: {bs.get('reason')}")
+    lines.append("")
+
+
+def _render_irrep_workflow_decisions(
+    lines: list[str],
+    report: dict[str, Any],
+) -> None:
+    _section(lines, "Irrep workflow decisions")
+    paths = report.get("workflow_paths", [])
+    levels = report.get("readiness_levels", [])
+    lines.append(f"paths: {', '.join(paths)}")
+    lines.append(f"levels: {', '.join(levels)}")
+    by_kpoint = report.get("by_kpoint", {})
+    if not isinstance(by_kpoint, dict) or not by_kpoint:
+        lines.append("(none)")
+        lines.append("")
+        return
+    rows: list[list[Any]] = []
+    for kp_name, valleys in by_kpoint.items():
+        if not isinstance(valleys, dict):
+            continue
+        for v_name, d in valleys.items():
+            if not isinstance(d, dict):
+                continue
+            rows.append([
+                kp_name, v_name,
+                d.get("workflow_path", ""),
+                d.get("readiness_level", ""),
+                d.get("uses_symmetry_adapted_projector", ""),
+                d.get("direct_qcut_allowed", ""),
+                d.get("reason", "")[:80],
+            ])
+    if rows:
+        lines.extend(
+            _table(
+                ["kpoint", "valley", "path", "readiness",
+                 "uses_sym_adapt", "qcut_allowed", "reason"],
+                rows,
+            )
+        )
     lines.append("")
 
 
