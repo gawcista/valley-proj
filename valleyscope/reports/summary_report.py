@@ -1221,6 +1221,7 @@ def _render_target_subspace_closure(
     )
     failed_count = 0
     warn_count = 0
+    detail_rows: list[list[Any]] = []
     for kpoint, rows in report.get("by_kpoint", {}).items():
         if not isinstance(rows, list):
             continue
@@ -1230,12 +1231,31 @@ def _render_target_subspace_closure(
             status = str(row.get("status", ""))
             if status == "failed":
                 failed_count += 1
-                lines.append(
-                    f"  FAILED {kpoint} op={row.get('operation_id')}: "
-                    f"{row.get('reason', '')}"
-                )
             elif status == "warn":
                 warn_count += 1
+            # Build detail row for non-ok entries
+            if status in ("failed", "warn") and row.get("is_valley_preserving", True):
+                detail_rows.append([
+                    kpoint,
+                    row.get("operation_id"),
+                    row.get("classification", ""),
+                    _fmt(row.get("raw_unitarity_error")),
+                    _fmt(row.get("max_closure_residual")),
+                    _fmt(row.get("target_wavefunction_gram_error")),
+                    _fmt(row.get("mapping_miss_count")),
+                    row.get("worst_source_state", "") if row.get("worst_source_state") is not None else "",
+                    "N/A" if row.get("closure_residual_by_source_state") is None
+                    else _short_list(row.get("closure_residual_by_source_state")),
+                ])
+    if detail_rows:
+        lines.extend(
+            _table(
+                ["kpoint", "op", "classification", "unit_err",
+                 "max_residual", "gram_err", "miss_count", "worst_state",
+                 "residuals"],
+                detail_rows,
+            )
+        )
     if failed_count == 0 and warn_count == 0:
         lines.append("all operations: target subspace closed")
     elif failed_count > 0:

@@ -219,14 +219,64 @@ To resolve this, one would need either:
 - explicit D_raw re-unitarization (polar decomposition, not currently
   used for character computation).
 
-## 5. pytest Result
+## 5. D_raw Closure Provenance Diagnostics
+
+The `target_subspace_closure` module now classifies D_raw non-unitarity by
+root cause: `target_subspace_not_closed`, `plane_wave_mapping_loss`,
+`input_wavefunctions_nonorthonormal`, or `insufficient_provenance`.
+
+Key added fields per (kpoint, operation):
+- `D_raw_singular_values` — SVD spectrum
+- `projected_norm_by_source_state` = diag(D^dag D) — per-state fidelity
+- `closure_residual_by_source_state` = max(0, 1 - projected_norm)
+- `target_wavefunction_gram_error` = ||C^dag C - I||_F
+- `classification` — root-cause category
+- `expanded_band_sensitivity` — explicit `not_available` unless extra bands in HDF5
+- `plane_wave_norm_preservation` — `not_available` from current implementation
+
+Closure tolerances are now set from `symmetry_adapted_valley.representation_unitarity_fail_tol`
+(1e-2 for normal preset), not from the very loose `rotation.unitarity_tol` (2.0 on tZrSe2).
+
+### tZrSe2 Target-Subspace Closure Table
+
+| Kpoint | op | classification | unitarity_err | max_residual | gram_err | D_raw SV range |
+|--------|----|----------------|---------------|-------------|----------|----------------|
+| GammaM | 5 | target_subspace_not_closed | 2.8e-2 | 1.2e-2 | 1.2e-5 | [0.993, 0.997] |
+| MM | 5 | target_subspace_not_closed | 1.9e-2 | 1.3e-2 | 7.3e-5 | [0.994, 0.998] |
+| GammaM | 1-4 | raw_representation_ok | <3e-5 | <2e-5 | 1.2e-5 | [0.999, 1.000] |
+
+**Key finding**: MM/op=5 D_raw singular values are [0.994, 0.998] — very close to 1.
+The max_closure_residual of 1.3% means per-state target-subspace leakage is mild.
+This is the "mild non-closure (possible expanded-band sensitivity)" case: a few
+extra bands might bring D_raw into tolerance without any code change.
+
+### tMoTe2 Target-Subspace Closure Table
+
+| Kpoint | op | classification | unitarity_err | max_residual | gram_err | D_raw SV range |
+|--------|----|----------------|---------------|-------------|----------|----------------|
+| GammaM | 5 (K<->Kp C2) | target_subspace_not_closed | 1.41 | 1.0 | 2.0e-7 | [0.0, 1.0] |
+| KM | 5 (K<->Kp C2) | target_subspace_not_closed | 1.41 | 1.0 | 4.1e-8 | [0.0, 1.0] |
+| MM | 5 (K<->Kp C2) | target_subspace_not_closed | 1.41 | 1.0 | 1.3e-7 | [0.0, 1.0] |
+
+tMoTe2 op=5 is the valley-changing K<->Kp C2. The 2-band subspace is
+fundamentally not closed under this operation (residual=1.0). This is expected
+physics and does not block valley-preserving EBR (the closure gate filters
+valley-changing ops).
+
+### Expanded-band sensitivity
+
+Neither tZrSe2 (6 bands = iband 2929-2934) nor tMoTe2 (2 bands = iband 2195-2196)
+HDF5 files contain extra bands outside the target window. Expanded-band
+sensitivity cannot be evaluated without new HDF5 input.
+
+## 6. pytest Result
 
 ```bash
 pytest -q
-# 361 passed
+# 366 passed
 ```
 
-## 6. Next Steps
+## 7. Next Steps
 
 1. Verify the tZrSe2 spinor convention against a known benchmark so
    `spinor_convention_unverified` is cleared.

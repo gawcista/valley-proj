@@ -1,8 +1,12 @@
-"""Target-subspace symmetry-closure diagnostic.
+"""Target-subspace symmetry-closure diagnostic with provenance classification.
 
-Checks whether the raw six-band subspace D_raw is closed under each symmetry
-operation.  This is independent of projector symmetry-consistency; a non-unitary
-or non-closed D_raw here means the target subspace itself is not a faithful
+Checks whether the raw subspace D_raw is closed under each symmetry operation
+and classifies the root cause of any failure: target-subspace leakage,
+plane-wave mapping loss, non-orthonormal input wavefunctions, or
+insufficient provenance data.
+
+This is independent of projector symmetry-consistency; a non-unitary
+or non-closed D_raw means the target subspace is not a faithful
 representation of the symmetry group, and EBR mapping must be blocked.
 """
 
@@ -10,8 +14,13 @@ from __future__ import annotations
 
 import numpy as np
 
-DEFAULT_UNITARITY_TOL = 1e-3
-DEFAULT_GROUP_RELATION_TOL = 1e-2
+DEFAULT_CLOSURE_UNITARITY_TOL = 1e-3
+DEFAULT_CLOSURE_GROUP_RELATION_TOL = 1e-2
+DEFAULT_GRAM_ORTHONORMALITY_TOL = 1e-6
+DEFAULT_GRAM_WARN_TOL = 1e-6
+# Gram error deemed physically significant for input non-orthonormality:
+DEFAULT_GRAM_FAIL_TOL = 1e-3
+SMALL_NUMBER = 1e-14
 
 
 def build_target_subspace_closure_report(
@@ -19,20 +28,38 @@ def build_target_subspace_closure_report(
     raw_representations_by_kpoint: dict[str, dict[object, dict[str, object]]],
     operation_orders: dict[object, int] | None = None,
     spinor_wavefunction: bool = False,
-    unitarity_tol: float = DEFAULT_UNITARITY_TOL,
-    group_relation_tol: float = DEFAULT_GROUP_RELATION_TOL,
+    unitarity_tol: float = DEFAULT_CLOSURE_UNITARITY_TOL,
+    group_relation_tol: float = DEFAULT_CLOSURE_GROUP_RELATION_TOL,
+    coefficients_by_kpoint: dict[str, np.ndarray] | None = None,
 ) -> dict[str, object]:
-    """Build per-(kpoint, operation) closure diagnostic for D_raw.
+    """Build per-(kpoint, operation) closure diagnostic with provenance.
 
     Returns a report keyed by kpoint, each containing a list of per-operation
-    diagnostics.
+    diagnostics with provenance classification.
     """
     operation_orders = operation_orders or {}
+    coeffs_by_kp = dict(coefficients_by_kpoint or {})
     by_kpoint: dict[str, object] = {}
     overall_status = "ok"
 
     for kpoint_name, op_payloads in raw_representations_by_kpoint.items():
         rows: list[dict[str, object]] = []
+
+        # Per-kpoint: target wavefunction Gram matrix diagnostic
+        coeffs = coeffs_by_kp.get(kpoint_name)
+        gram_err: float | None = None
+        gram_diag: str = "not_available"
+        if coeffs is not None:
+            c_arr = np.asarray(coeffs, dtype=np.complex128)
+            if c_arr.ndim == 3:
+                n_bands = c_arr.shape[0]
+                c_flat = c_arr.reshape(n_bands, -1)
+                gram = c_flat @ c_flat.conj().T
+                gram_err = float(
+                    np.linalg.norm(gram - np.eye(n_bands, dtype=np.complex128), ord="fro")
+                )
+                gram_diag = "available"
+
         for op_id, op_data in op_payloads.items():
             if not isinstance(op_data, dict):
                 continue
@@ -46,15 +73,30 @@ def build_target_subspace_closure_report(
                     op_id=op_id, kpoint=kpoint_name,
                     little_group_passed=little_group_passed,
                     mapping_miss_count=mapping_miss_count,
+                    classification="insufficient_provenance",
                     status="not_evaluated",
                     reason="D_raw not available",
+                    provenance_notes="D_raw was not built (skipped by upstream diagnostic)",
                 ))
                 continue
 
             d_raw = np.asarray(d_raw, dtype=np.complex128)
             n = d_raw.shape[0]
+
+            # --- Singular values of D_raw ---
+            sv = np.linalg.svd(d_raw, compute_uv=False)
+            sv_list = [float(v) for v in sv.tolist()]
+
+            # --- Per-source-state projected norm and closure residual ---
+            d_dag_d = d_raw.conj().T @ d_raw
+            diag_norms = np.real(np.diag(d_dag_d))
+            projected_norms = [float(v) for v in diag_norms.tolist()]
+            residuals = [float(max(0.0, 1.0 - v)) for v in diag_norms]
+            max_residual = float(np.max(residuals)) if residuals else 0.0
+            worst_idx = int(np.argmax(residuals)) if residuals else -1
+
             raw_unitarity = float(
-                np.linalg.norm(d_raw.conj().T @ d_raw - np.eye(n, dtype=np.complex128), ord="fro")
+                np.linalg.norm(d_dag_d - np.eye(n, dtype=np.complex128), ord="fro")
             )
 
             group_rel_err, group_rel_label = _check_group_relation(
@@ -63,26 +105,55 @@ def build_target_subspace_closure_report(
                 spinor_wavefunction=spinor_wavefunction,
             )
 
-            # Determine status
-            status, reason = _closure_status(
+            # --- Provenance classification ---
+            classification, class_reason = _classify_provenance(
                 little_group_passed=little_group_passed,
                 mapping_miss_count=mapping_miss_count,
+                gram_err=gram_err,
                 raw_unitarity=raw_unitarity,
-                group_rel_err=group_rel_err,
-                group_rel_label=group_rel_label,
+                singular_values=sv_list,
                 unitarity_tol=unitarity_tol,
-                group_relation_tol=group_relation_tol,
+                gram_tol=DEFAULT_GRAM_ORTHONORMALITY_TOL,
             )
+
+            status = "ok"
+            status_reason = ""
+            if classification == "raw_representation_ok":
+                if group_rel_err is not None and group_rel_err > group_relation_tol:
+                    status = "warn"
+                    if group_rel_err > 10.0 * group_relation_tol:
+                        status = "failed"
+                    status_reason = (
+                        f"group_relation_error ({group_rel_label})"
+                        f"={group_rel_err:.2e} > tol={group_relation_tol:.2e}"
+                    )
+            elif classification == "insufficient_provenance":
+                status = "not_evaluated"
+                status_reason = class_reason
+            else:
+                status = "failed"
+                status_reason = class_reason
 
             row = _closure_row(
                 op_id=op_id, kpoint=kpoint_name,
                 little_group_passed=little_group_passed,
                 mapping_miss_count=mapping_miss_count,
                 raw_unitarity_error=raw_unitarity,
+                D_raw_singular_values=sv_list,
                 group_relation_error=group_rel_err,
                 group_relation_label=group_rel_label,
+                projected_norm_by_source_state=projected_norms,
+                closure_residual_by_source_state=residuals,
+                max_closure_residual=max_residual,
+                worst_source_state=worst_idx if worst_idx >= 0 else None,
+                target_wavefunction_gram_error=gram_err,
+                target_wavefunction_gram_status=gram_diag,
+                classification=classification,
+                provenance_notes=class_reason,
                 status=status,
-                reason=reason,
+                reason=status_reason if status_reason else (
+                    "target subspace closed under this operation"
+                ),
             )
             rows.append(row)
             if status == "failed":
@@ -101,12 +172,24 @@ def build_target_subspace_closure_report(
         "unitarity_tol": unitarity_tol,
         "group_relation_tol": group_relation_tol,
         "interpretation": (
-            "Checks whether D_raw for each (kpoint, operation) is consistent "
-            "with a unitary representation closed under the target subspace. "
+            "Checks whether D_raw for each (kpoint, operation) is a closed "
+            "representation in the target subspace. "
             "raw_unitarity_error = ||D^dag D - I||_F. "
-            "group_relation_error reports ||D^order - (+/-)I||_F for spinless "
-            "or spinful convention as appropriate. "
-            "This diagnostic is independent of projector symmetry-consistency."
+            "projected_norm_by_source_state = diag(D^dag D) measures per-state "
+            "fidelity under the operation. "
+            "closure_residual_by_source_state = max(0, 1 - projected_norm) "
+            "quantifies target-subspace leakage. "
+            "D_raw_singular_values reports the SVD spectrum. "
+            "target_wavefunction_gram_error = ||C^dag C - I||_F checks input "
+            "wavefunction orthonormality. "
+            "plane_wave_norm_preservation: not_available from current "
+            "build_plane_wave_representation (no pre-projection norm tracked). "
+            "expanded_band_sensitivity: not_available unless HDF5 contains "
+            "bands outside the target window. "
+            "classification distinguishes root cause: "
+            "raw_representation_ok, target_subspace_not_closed, "
+            "plane_wave_mapping_loss, input_wavefunctions_nonorthonormal, "
+            "insufficient_provenance."
         ),
         "by_kpoint": by_kpoint,
     }
@@ -115,10 +198,7 @@ def build_target_subspace_closure_report(
 def check_target_subspace_closure_blocked(
     report: dict[str, object],
 ) -> list[str]:
-    """Return list of blocker keys from the closure report (global summary).
-
-    Example: ["target_subspace_closure_failed"] if any operation has status=failed.
-    """
+    """Return list of blocker keys from the closure report (global summary)."""
     blockers: list[str] = []
     for rows in report.get("by_kpoint", {}).values():
         if not isinstance(rows, list):
@@ -166,23 +246,57 @@ def _closure_row(
     mapping_miss_count: int,
     status: str,
     reason: str,
+    classification: str,
+    provenance_notes: str = "",
     raw_unitarity_error: float | None = None,
+    D_raw_singular_values: list[float] | None = None,
     group_relation_error: float | None = None,
     group_relation_label: str = "",
+    projected_norm_by_source_state: list[float] | None = None,
+    closure_residual_by_source_state: list[float] | None = None,
+    max_closure_residual: float | None = None,
+    worst_source_state: int | None = None,
+    target_wavefunction_gram_error: float | None = None,
+    target_wavefunction_gram_status: str = "not_available",
 ) -> dict[str, object]:
     row: dict[str, object] = {
         "operation_id": op_id,
         "kpoint": kpoint,
         "little_group_passed": little_group_passed,
         "mapping_miss_count": mapping_miss_count,
+        "classification": classification,
         "status": status,
         "reason": reason,
     }
+    if provenance_notes:
+        row["provenance_notes"] = provenance_notes
     if raw_unitarity_error is not None:
         row["raw_unitarity_error"] = raw_unitarity_error
+    if D_raw_singular_values is not None:
+        row["D_raw_singular_values"] = D_raw_singular_values
     if group_relation_error is not None:
         row["group_relation_error"] = group_relation_error
         row["group_relation_label"] = group_relation_label
+    if projected_norm_by_source_state is not None:
+        row["projected_norm_by_source_state"] = projected_norm_by_source_state
+    if closure_residual_by_source_state is not None:
+        row["closure_residual_by_source_state"] = closure_residual_by_source_state
+    if max_closure_residual is not None:
+        row["max_closure_residual"] = max_closure_residual
+    if worst_source_state is not None and worst_source_state >= 0:
+        row["worst_source_state"] = worst_source_state
+    if target_wavefunction_gram_error is not None:
+        row["target_wavefunction_gram_error"] = target_wavefunction_gram_error
+    row["target_wavefunction_gram_status"] = target_wavefunction_gram_status
+    # Provenance fields that are not available from current implementation
+    row["plane_wave_norm_preservation"] = (
+        "not_available: build_plane_wave_representation does not track "
+        "pre-projection norm"
+    )
+    row["expanded_band_sensitivity"] = (
+        "not_available: HDF5 contains only target window bands; "
+        "expanded-band analysis requires bands outside iband"
+    )
     return row
 
 
@@ -192,10 +306,6 @@ def _check_group_relation(
     order: int,
     spinor_wavefunction: bool,
 ) -> tuple[float | None, str]:
-    """Check D^order relation.  For spinless: D^order ≈ I.  For spinful: D^order ≈ -I.
-
-    Returns (error, label).  error is None if order < 2 (identity, not evaluated).
-    """
     if order < 2:
         return None, ""
     d_pow = np.linalg.matrix_power(d_raw, order)
@@ -210,36 +320,64 @@ def _check_group_relation(
     return err, label
 
 
-def _closure_status(
+def _classify_provenance(
     *,
     little_group_passed: bool,
     mapping_miss_count: int,
+    gram_err: float | None,
     raw_unitarity: float,
-    group_rel_err: float | None,
-    group_rel_label: str,
+    singular_values: list[float],
     unitarity_tol: float,
-    group_relation_tol: float,
+    gram_tol: float,
 ) -> tuple[str, str]:
+    """Classify the D_raw non-unitarity into a root-cause category.
+
+    Priority order:
+    1. insufficient_provenance (not in little group)
+    2. plane_wave_mapping_loss
+    3. input_wavefunctions_nonorthonormal (gram_err > 1e-3, physical)
+    4. target_subspace_not_closed (dominant: D_raw non-unitary)
+
+    Mild gram errors (< 1e-3) are noted but do not override the
+    target-subspace closure classification.
+    """
     if not little_group_passed:
-        return "not_evaluated", "not in little group"
+        return "insufficient_provenance", "not in little group"
     if mapping_miss_count > 0:
-        return "failed", f"plane-wave mapping_miss_count={mapping_miss_count}"
-    reasons: list[str] = []
-    failed = False
-    warned = False
-    if raw_unitarity > unitarity_tol:
-        failed = True
-        reasons.append(f"raw_unitarity_error={raw_unitarity:.2e} > tol={unitarity_tol:.2e}")
-    if group_rel_err is not None and group_rel_err > group_relation_tol:
-        reasons.append(
-            f"group_relation_error ({group_rel_label})={group_rel_err:.2e} > tol={group_relation_tol:.2e}"
+        return (
+            "plane_wave_mapping_loss",
+            f"plane-wave mapping_miss_count={mapping_miss_count}",
         )
-        if group_rel_err > 10.0 * group_relation_tol:
-            failed = True
-        else:
-            warned = True
-    if failed:
-        return "failed", "; ".join(reasons)
-    if warned:
-        return "warn", "; ".join(reasons)
-    return "ok", "target subspace closed under this operation"
+    # Only classify as input non-orthonormal if physically significant
+    gram_fail_tol = max(gram_tol, 1e-3)
+    if gram_err is not None and gram_err > gram_fail_tol:
+        return (
+            "input_wavefunctions_nonorthonormal",
+            f"target wavefunction Gram error={gram_err:.2e} > tol={gram_fail_tol:.2e}",
+        )
+    if raw_unitarity <= unitarity_tol:
+        msg = "D_raw is unitary in target subspace"
+        if gram_err is not None and gram_err > gram_tol:
+            msg += f" (mild gram_error={gram_err:.2e} noted)"
+        return "raw_representation_ok", msg
+    # Subspace not closed
+    min_sv = float(np.min(singular_values)) if singular_values else 0.0
+    max_sv = float(np.max(singular_values)) if singular_values else 0.0
+    msg_parts = [
+        f"D_raw unitarity error={raw_unitarity:.2e} > tol={unitarity_tol:.2e}"
+    ]
+    if gram_err is not None and gram_err > gram_tol:
+        msg_parts.append(
+            f"mild gram_error={gram_err:.2e} noted but not primary cause"
+        )
+    if min_sv < 0.9 or max_sv > 1.1:
+        msg_parts.append(
+            f"singular values [{min_sv:.4f}, {max_sv:.4f}] "
+            f"indicate significant subspace leakage"
+        )
+    else:
+        msg_parts.append(
+            f"singular values within [0.9, 1.1] suggest mild non-closure "
+            f"(possible expanded-band sensitivity)"
+        )
+    return "target_subspace_not_closed", "; ".join(msg_parts)

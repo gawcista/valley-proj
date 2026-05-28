@@ -126,6 +126,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     basis_transforms: dict[str, dict[str, np.ndarray]] = {}
     symmetry_representation_payload: dict[str, object] = {}
     raw_representations_by_kpoint: dict[str, dict[object, dict[str, object]]] = {}
+    coefficients_by_kpoint: dict[str, np.ndarray] = {}
     valley_matrices_by_kpoint: dict[str, dict[str, np.ndarray]] = {}
     symmetry_payload: dict[str, object] = _prepare_symmetry_payload(config, monolayer_recip)
     symmetry_payload["spinor_wavefunction"] = bool(wavefunctions.metadata.spinor)
@@ -134,6 +135,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         kpoint = wavefunctions.find_kpoint(kpoint_name)
         positions = _target_band_positions(kpoint.band_indices_vasp, config.analysis.iband)
         coefficients = kpoint.coefficients[positions]
+        coefficients_by_kpoint[kpoint_name] = coefficients
         q_cart = kpoint.cart.reshape(1, 3) + kpoint.g_vectors_cart
         projectors = build_sector_projectors(
             q_cart,
@@ -312,7 +314,8 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             raw_representations_by_kpoint=raw_representations_by_kpoint,
             operation_orders=effective_orders,
             spinor_wavefunction=bool(symmetry_payload.get("spinor_wavefunction", False)),
-            unitarity_tol=float(config.rotation.unitarity_tol),
+            unitarity_tol=float(config.symmetry_adapted_valley.representation_unitarity_fail_tol),
+            coefficients_by_kpoint=_coefficients_lookup(coefficients_by_kpoint, raw_representations_by_kpoint),
         )
         target_subspace_closure_blockers = check_target_subspace_closure_blocked(
             target_subspace_closure_report,
@@ -1319,6 +1322,18 @@ def _build_hsp_star_derived_character_layer(
     )
 
     return conjugation_report, derived_chars
+
+
+def _coefficients_lookup(
+    coefficients_by_kpoint: dict[str, np.ndarray],
+    raw_representations_by_kpoint: dict[str, dict[object, dict[str, object]]],
+) -> dict[str, np.ndarray]:
+    """Build coefficient lookup matching raw_representations_by_kpoint keys."""
+    result: dict[str, np.ndarray] = {}
+    for kp_name in raw_representations_by_kpoint:
+        if kp_name in coefficients_by_kpoint:
+            result[kp_name] = coefficients_by_kpoint[kp_name]
+    return result
 
 
 def _infer_orbit_rank(
