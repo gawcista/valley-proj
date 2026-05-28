@@ -231,19 +231,23 @@ Key added fields per (kpoint, operation):
 - `closure_residual_by_source_state` = max(0, 1 - projected_norm)
 - `target_wavefunction_gram_error` = ||C^dag C - I||_F
 - `classification` — root-cause category
+- `closure_quality` — three-level user-facing quality:
+  `clean`, `usable_with_caution`, or `blocked`
 - `expanded_band_sensitivity` — explicit `not_available` unless extra bands in HDF5
 - `plane_wave_norm_preservation` — `not_available` from current implementation
 
 Closure tolerances are now set from `symmetry_adapted_valley.representation_unitarity_fail_tol`
 (1e-2 for normal preset), not from the very loose `rotation.unitarity_tol` (2.0 on tZrSe2).
+Percent-level non-closure with singular values near one is reported as
+`usable_with_caution`, not grouped with O(1) leakage.
 
 ### tZrSe2 Target-Subspace Closure Table
 
-| Kpoint | op | classification | unitarity_err | max_residual | gram_err | D_raw SV range |
-|--------|----|----------------|---------------|-------------|----------|----------------|
-| GammaM | 5 | target_subspace_not_closed | 2.8e-2 | 1.2e-2 | 1.2e-5 | [0.993, 0.997] |
-| MM | 5 | target_subspace_not_closed | 1.9e-2 | 1.3e-2 | 7.3e-5 | [0.994, 0.998] |
-| GammaM | 1-4 | raw_representation_ok | <3e-5 | <2e-5 | 1.2e-5 | [0.999, 1.000] |
+| Kpoint | op | quality | classification | unitarity_err | max_residual | gram_err | D_raw SV range |
+|--------|----|---------|----------------|---------------|-------------|----------|----------------|
+| GammaM | 5 | usable_with_caution | target_subspace_not_closed | 2.8e-2 | 1.2e-2 | 1.2e-5 | [0.993, 0.997] |
+| MM | 5 | usable_with_caution | target_subspace_not_closed | 1.9e-2 | 1.3e-2 | 7.3e-5 | [0.994, 0.998] |
+| GammaM | 1-4 | clean | raw_representation_ok | <3e-5 | <2e-5 | 1.2e-5 | [0.999, 1.000] |
 
 **Key finding**: MM/op=5 D_raw singular values are [0.994, 0.998] — very close to 1.
 The max_closure_residual of 1.3% means per-state target-subspace leakage is mild.
@@ -252,11 +256,11 @@ extra bands might bring D_raw into tolerance without any code change.
 
 ### tMoTe2 Target-Subspace Closure Table
 
-| Kpoint | op | classification | unitarity_err | max_residual | gram_err | D_raw SV range |
-|--------|----|----------------|---------------|-------------|----------|----------------|
-| GammaM | 5 (K<->Kp C2) | target_subspace_not_closed | 1.41 | 1.0 | 2.0e-7 | [0.0, 1.0] |
-| KM | 5 (K<->Kp C2) | target_subspace_not_closed | 1.41 | 1.0 | 4.1e-8 | [0.0, 1.0] |
-| MM | 5 (K<->Kp C2) | target_subspace_not_closed | 1.41 | 1.0 | 1.3e-7 | [0.0, 1.0] |
+| Kpoint | op | quality | classification | unitarity_err | max_residual | gram_err | D_raw SV range |
+|--------|----|---------|----------------|---------------|-------------|----------|----------------|
+| GammaM | 5 (K<->Kp C2) | blocked | target_subspace_not_closed | 1.41 | 1.0 | 2.0e-7 | [0.0, 1.0] |
+| KM | 5 (K<->Kp C2) | blocked | target_subspace_not_closed | 1.41 | 1.0 | 4.1e-8 | [0.0, 1.0] |
+| MM | 5 (K<->Kp C2) | blocked | target_subspace_not_closed | 1.41 | 1.0 | 1.3e-7 | [0.0, 1.0] |
 
 tMoTe2 op=5 is the valley-changing K<->Kp C2. The 2-band subspace is
 fundamentally not closed under this operation (residual=1.0). This is expected

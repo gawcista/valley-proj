@@ -1238,6 +1238,7 @@ def _render_target_subspace_closure(
                 detail_rows.append([
                     kpoint,
                     row.get("operation_id"),
+                    row.get("closure_quality", ""),
                     row.get("classification", ""),
                     _fmt(row.get("raw_unitarity_error")),
                     _fmt(row.get("max_closure_residual")),
@@ -1250,7 +1251,7 @@ def _render_target_subspace_closure(
     if detail_rows:
         lines.extend(
             _table(
-                ["kpoint", "op", "classification", "unit_err",
+                ["kpoint", "op", "quality", "classification", "unit_err",
                  "max_residual", "gram_err", "miss_count", "worst_state",
                  "residuals"],
                 detail_rows,

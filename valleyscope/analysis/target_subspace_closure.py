@@ -20,6 +20,9 @@ DEFAULT_GRAM_ORTHONORMALITY_TOL = 1e-6
 DEFAULT_GRAM_WARN_TOL = 1e-6
 # Gram error deemed physically significant for input non-orthonormality:
 DEFAULT_GRAM_FAIL_TOL = 1e-3
+DEFAULT_USABLE_WITH_CAUTION_UNITARITY_TOL = 3e-2
+DEFAULT_USABLE_WITH_CAUTION_RESIDUAL_TOL = 3e-2
+DEFAULT_USABLE_WITH_CAUTION_SV_DEVIATION_TOL = 3e-2
 SMALL_NUMBER = 1e-14
 
 
@@ -74,6 +77,7 @@ def build_target_subspace_closure_report(
                     little_group_passed=little_group_passed,
                     mapping_miss_count=mapping_miss_count,
                     classification="insufficient_provenance",
+                    closure_quality="blocked",
                     status="not_evaluated",
                     reason="D_raw not available",
                     provenance_notes="D_raw was not built (skipped by upstream diagnostic)",
@@ -115,6 +119,13 @@ def build_target_subspace_closure_report(
                 unitarity_tol=unitarity_tol,
                 gram_tol=DEFAULT_GRAM_ORTHONORMALITY_TOL,
             )
+            closure_quality = _closure_quality(
+                classification=classification,
+                raw_unitarity=raw_unitarity,
+                singular_values=sv_list,
+                max_residual=max_residual,
+                unitarity_tol=unitarity_tol,
+            )
 
             status = "ok"
             status_reason = ""
@@ -129,6 +140,9 @@ def build_target_subspace_closure_report(
                     )
             elif classification == "insufficient_provenance":
                 status = "not_evaluated"
+                status_reason = class_reason
+            elif closure_quality == "usable_with_caution":
+                status = "warn"
                 status_reason = class_reason
             else:
                 status = "failed"
@@ -149,6 +163,7 @@ def build_target_subspace_closure_report(
                 target_wavefunction_gram_error=gram_err,
                 target_wavefunction_gram_status=gram_diag,
                 classification=classification,
+                closure_quality=closure_quality,
                 provenance_notes=class_reason,
                 status=status,
                 reason=status_reason if status_reason else (
@@ -189,7 +204,9 @@ def build_target_subspace_closure_report(
             "classification distinguishes root cause: "
             "raw_representation_ok, target_subspace_not_closed, "
             "plane_wave_mapping_loss, input_wavefunctions_nonorthonormal, "
-            "insufficient_provenance."
+            "insufficient_provenance. "
+            "closure_quality is the user-facing three-level quality: clean, "
+            "usable_with_caution, blocked."
         ),
         "by_kpoint": by_kpoint,
     }
@@ -247,6 +264,7 @@ def _closure_row(
     status: str,
     reason: str,
     classification: str,
+    closure_quality: str,
     provenance_notes: str = "",
     raw_unitarity_error: float | None = None,
     D_raw_singular_values: list[float] | None = None,
@@ -265,6 +283,7 @@ def _closure_row(
         "little_group_passed": little_group_passed,
         "mapping_miss_count": mapping_miss_count,
         "classification": classification,
+        "closure_quality": closure_quality,
         "status": status,
         "reason": reason,
     }
@@ -381,3 +400,32 @@ def _classify_provenance(
             f"(possible expanded-band sensitivity)"
         )
     return "target_subspace_not_closed", "; ".join(msg_parts)
+
+
+def _closure_quality(
+    *,
+    classification: str,
+    raw_unitarity: float,
+    singular_values: list[float],
+    max_residual: float,
+    unitarity_tol: float,
+) -> str:
+    """Map detailed provenance to a three-level user-facing quality label."""
+    if classification == "raw_representation_ok":
+        return "clean"
+    if classification != "target_subspace_not_closed":
+        return "blocked"
+    min_sv = float(np.min(singular_values)) if singular_values else 0.0
+    max_sv = float(np.max(singular_values)) if singular_values else 0.0
+    usable_unitarity_tol = max(
+        3.0 * unitarity_tol,
+        DEFAULT_USABLE_WITH_CAUTION_UNITARITY_TOL,
+    )
+    if (
+        raw_unitarity <= usable_unitarity_tol
+        and max_residual <= DEFAULT_USABLE_WITH_CAUTION_RESIDUAL_TOL
+        and abs(min_sv - 1.0) <= DEFAULT_USABLE_WITH_CAUTION_SV_DEVIATION_TOL
+        and abs(max_sv - 1.0) <= DEFAULT_USABLE_WITH_CAUTION_SV_DEVIATION_TOL
+    ):
+        return "usable_with_caution"
+    return "blocked"

@@ -63,7 +63,25 @@ def test_singular_value_deficient_classified():
     row = report["by_kpoint"]["MM"][0]
     assert row["status"] == "failed"
     assert row["classification"] == "target_subspace_not_closed"
+    assert row["closure_quality"] == "blocked"
     assert "singular values" in row["reason"]
+
+
+def test_mild_nonclosure_is_usable_with_caution():
+    """A percent-level non-closure should warn, not be grouped with O(1) leakage."""
+    d_mild = np.diag([0.996, 0.996, 0.994, 0.994]).astype(np.complex128)
+
+    report = build_target_subspace_closure_report(
+        raw_representations_by_kpoint=_make_raw_reps({5: d_mild}),
+        operation_orders={5: 2},
+        unitarity_tol=1e-2,
+    )
+
+    row = report["by_kpoint"]["MM"][0]
+    assert row["status"] == "warn"
+    assert row["classification"] == "target_subspace_not_closed"
+    assert row["closure_quality"] == "usable_with_caution"
+    assert check_target_subspace_closure_blocked(report) == []
 
 
 def test_c2_spinless_group_relation():
@@ -120,6 +138,7 @@ def test_summary_json_exposes_new_fields():
     assert "projected_norm_by_source_state" in encoded
     assert "closure_residual_by_source_state" in encoded
     assert "classification" in encoded
+    assert "closure_quality" in encoded
     assert "target_wavefunction_gram_status" in encoded
     assert "plane_wave_norm_preservation" in encoded
     assert "expanded_band_sensitivity" in encoded
