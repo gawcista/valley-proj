@@ -192,6 +192,36 @@ def test_usable_with_caution_never_trusted():
     assert d["readiness_level"] != READINESS_TRUSTED
 
 
+def test_seed_warning_with_verified_spinor_stays_cautious():
+    d = decide_irrep_workflow(
+        seed_symmetry_status="warn",
+        seed_symmetry_max_epsilon=0.05,
+        seed_symmetry_failed_count=0,
+        seed_symmetry_warn_count=1,
+        closure_quality="clean",
+        qcut_eigenvalue_ready_count=2,
+        qcut_eigenvalue_total_count=2,
+        spinor_convention_verified=True,
+    )
+    assert d["workflow_path"] == PATH_DIRECT_QCUT
+    assert d["readiness_level"] == READINESS_USABLE_WITH_CAUTION
+    assert d["direct_qcut_allowed"] is True
+
+
+def test_partial_qcut_readiness_does_not_take_direct_path():
+    d = decide_irrep_workflow(
+        seed_symmetry_status="passed",
+        seed_symmetry_failed_count=0,
+        closure_quality="clean",
+        qcut_eigenvalue_ready_count=1,
+        qcut_eigenvalue_total_count=2,
+        spinor_convention_verified=True,
+    )
+    assert d["workflow_path"] == PATH_BLOCKED
+    assert d["readiness_level"] == READINESS_BLOCKED
+    assert d["direct_qcut_allowed"] is False
+
+
 # -----------------------------------------------------------------------
 # 6. build_irrep_workflow_decisions integration
 # -----------------------------------------------------------------------
@@ -240,7 +270,8 @@ def test_build_decisions_direct_qcut_toy():
                         "orbit": ["K"],
                         "local_irrep_ready": True,
                         "diagnostic_only": False,
-                        "subspace_space_group": {
+                        "hsp_preserving_operation_ids": [1],
+                        "subspace_group": {
                             "valley_preserving_operation_ids": [1],
                         },
                         "symmetry_adapted_projectors": {
@@ -291,7 +322,8 @@ def test_build_decisions_blocked_toy():
                         "orbit": ["M3"],
                         "local_irrep_ready": False,
                         "diagnostic_only": True,
-                        "subspace_space_group": {
+                        "hsp_preserving_operation_ids": [5],
+                        "subspace_group": {
                             "valley_preserving_operation_ids": [5],
                         },
                         "symmetry_adapted_projectors": {
@@ -308,6 +340,55 @@ def test_build_decisions_blocked_toy():
     d = result["by_kpoint"]["MM"]["M3"]
     assert d["workflow_path"] == PATH_BLOCKED
     assert d["readiness_level"] == READINESS_BLOCKED
+
+
+def test_non_little_group_closure_rows_do_not_block_identity_only_subspace():
+    result = build_irrep_workflow_decisions(
+        projector_symmetry_report={
+            "by_kpoint": {
+                "MM": {
+                    "seed_projector_symmetry": [],
+                },
+            },
+        },
+        target_subspace_closure_report={
+            "by_kpoint": {
+                "MM": [{
+                    "operation_id": 5,
+                    "kpoint": "MM",
+                    "little_group_passed": False,
+                    "closure_quality": "blocked",
+                    "status": "not_evaluated",
+                    "reason": "D_raw not available",
+                }],
+            },
+        },
+        symmetry_adapted_valley_report={
+            "by_kpoint": {
+                "MM": {
+                    "valley_preserving_subspaces": [{
+                        "orbit": ["M1"],
+                        "local_irrep_ready": True,
+                        "diagnostic_only": False,
+                        "hsp_preserving_operation_ids": [0],
+                        "subspace_group": {
+                            "valley_preserving_operation_ids": [0],
+                        },
+                        "symmetry_adapted_projectors": {
+                            "status": "ok",
+                            "seed_overlap": {"M1": 0.9},
+                        },
+                    }],
+                },
+            },
+        },
+        symmetry_rows=[],
+        valley_names=["M1"],
+    )
+    d = result["by_kpoint"]["MM"]["M1"]
+    assert d["workflow_path"] == PATH_BLOCKED
+    assert "closure blocked" not in d["reason"]
+    assert "not_evaluated" in d["reason"]
 
 
 # -----------------------------------------------------------------------
@@ -353,7 +434,8 @@ def test_schema_no_forbidden_terms():
                         "orbit": ["K"],
                         "local_irrep_ready": True,
                         "diagnostic_only": False,
-                        "subspace_space_group": {
+                        "hsp_preserving_operation_ids": [1],
+                        "subspace_group": {
                             "valley_preserving_operation_ids": [1],
                         },
                         "symmetry_adapted_projectors": {

@@ -54,7 +54,12 @@ def decide_irrep_workflow(
 
     # --- Direct q-cut path ---
     # Seed projector symmetry must pass for valley-preserving operations.
-    seed_ok = (
+    seed_clean = (
+        seed_symmetry_status == "passed"
+        and seed_symmetry_failed_count == 0
+        and seed_symmetry_warn_count == 0
+    )
+    seed_usable = (
         seed_symmetry_status not in ("failed", "not_evaluated")
         and seed_symmetry_failed_count == 0
         and (seed_symmetry_max_epsilon is None or seed_symmetry_max_epsilon <= 0.1)
@@ -62,14 +67,15 @@ def decide_irrep_workflow(
     # Target subspace must not be blocked.
     closure_ok = closure_quality not in ("blocked", "not_evaluated")
     closure_usable = closure_quality in ("usable_with_caution", "ok", "clean")
-    # Q-cut eigenvalue readiness: at least one ready eigenvalue per op.
+    closure_clean = closure_quality in ("ok", "clean")
+    # Q-cut eigenvalue readiness: all relevant rows must be ready.
     qcut_ok = (
         qcut_eigenvalue_total_count > 0
-        and qcut_eigenvalue_ready_count > 0
+        and qcut_eigenvalue_ready_count == qcut_eigenvalue_total_count
     )
 
-    if seed_ok and closure_ok and qcut_ok:
-        if spinor_convention_verified:
+    if seed_usable and closure_ok and qcut_ok:
+        if seed_clean and closure_clean and spinor_convention_verified:
             return _decision(
                 workflow_path=PATH_DIRECT_QCUT,
                 readiness=READINESS_TRUSTED,
@@ -77,17 +83,28 @@ def decide_irrep_workflow(
                 uses_symmetry_adapted_projector=False,
                 direct_qcut_allowed=True,
             )
-        else:
-            return _decision(
-                workflow_path=PATH_DIRECT_QCUT,
-                readiness=READINESS_USABLE_WITH_CAUTION,
-                reason="q-cut seed basis is symmetry-consistent but spinor convention unverified",
-                required_followup="verify spinor convention against benchmark",
-                uses_symmetry_adapted_projector=False,
-                direct_qcut_allowed=True,
+        followups: list[str] = []
+        caution_reasons: list[str] = []
+        if not seed_clean:
+            caution_reasons.append(
+                f"seed projector symmetry has warnings "
+                f"(status={seed_symmetry_status}, warn={seed_symmetry_warn_count})"
             )
+        if not closure_clean:
+            caution_reasons.append(f"target-subspace closure quality={closure_quality}")
+        if not spinor_convention_verified:
+            caution_reasons.append("spinor convention unverified")
+            followups.append("verify spinor convention against benchmark")
+        return _decision(
+            workflow_path=PATH_DIRECT_QCUT,
+            readiness=READINESS_USABLE_WITH_CAUTION,
+            reason="; ".join(caution_reasons) if caution_reasons else "direct q-cut path usable with caution",
+            required_followup="; ".join(followups),
+            uses_symmetry_adapted_projector=False,
+            direct_qcut_allowed=True,
+        )
 
-    if not seed_ok:
+    if not seed_usable:
         reasons.append(
             f"seed projector symmetry not clean "
             f"(status={seed_symmetry_status}, failed={seed_symmetry_failed_count})"
@@ -229,10 +246,14 @@ def build_irrep_workflow_decisions(
                 if not orbit:
                     continue
                 v = str(orbit[0])
-                sg = subspace.get("subspace_space_group", {})
-                if isinstance(sg, dict):
-                    for op_id in sg.get("valley_preserving_operation_ids", []):
-                        vp_ops_by_kp_valley.setdefault(kp_name, {}).setdefault(v, set()).add(op_id)
+                hsp_ops = subspace.get("hsp_preserving_operation_ids")
+                if not isinstance(hsp_ops, list):
+                    sg = subspace.get("subspace_group", {})
+                    hsp_ops = sg.get("valley_preserving_operation_ids", []) if isinstance(sg, dict) else []
+                if not isinstance(hsp_ops, list):
+                    hsp_ops = []
+                for op_id in hsp_ops:
+                    vp_ops_by_kp_valley.setdefault(kp_name, {}).setdefault(v, set()).add(op_id)
 
     closure_by_kp: dict[str, dict[str, list[dict[str, Any]]]] = {}
     if isinstance(target_subspace_closure_report, dict):
@@ -241,6 +262,8 @@ def build_irrep_workflow_decisions(
                 continue
             for row in rows:
                 if not isinstance(row, dict):
+                    continue
+                if not bool(row.get("little_group_passed", True)):
                     continue
                 op_id = row.get("operation_id")
                 for v in valley_names:

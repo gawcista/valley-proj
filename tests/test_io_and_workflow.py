@@ -1453,6 +1453,22 @@ def test_write_analysis_outputs_plumbs_hsp_star_reports_to_summary(tmp_path):
         "status": "ok",
         "entries": [{"status": "derived"}],
     }
+    irrep_workflow_decisions = {
+        "status": "ok",
+        "workflow_paths": ["direct_qcut", "symmetry_adapted", "blocked"],
+        "readiness_levels": ["trusted", "usable_with_caution", "blocked"],
+        "by_kpoint": {
+            "Gamma": {
+                "K_valley": {
+                    "workflow_path": "direct_qcut",
+                    "readiness_level": "trusted",
+                    "reason": "test",
+                    "uses_symmetry_adapted_projector": False,
+                    "direct_qcut_allowed": True,
+                },
+            },
+        },
+    }
 
     outputs = write_analysis_outputs(
         config=config,
@@ -1474,11 +1490,13 @@ def test_write_analysis_outputs_plumbs_hsp_star_reports_to_summary(tmp_path):
         basis_transforms={},
         hsp_star_conjugation_report=hsp_star_conjugation,
         hsp_star_derived_characters=hsp_star_derived,
+        irrep_workflow_decisions=irrep_workflow_decisions,
     )
 
     payload = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     assert payload["hsp_star_conjugation"] == hsp_star_conjugation
     assert payload["hsp_star_derived_characters"] == hsp_star_derived
+    assert payload["irrep_workflow_decisions"] == irrep_workflow_decisions
 
 
 def test_summary_marks_spinor_rotation_as_diagnostic_only(tmp_path):

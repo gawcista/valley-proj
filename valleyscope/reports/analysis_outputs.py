@@ -77,6 +77,7 @@ def write_analysis_outputs(
         target_subspace_closure_report=target_subspace_closure_report,
         hsp_star_conjugation_report=hsp_star_conjugation_report,
         hsp_star_derived_characters=hsp_star_derived_characters,
+        irrep_workflow_decisions=irrep_workflow_decisions,
     )
     return outputs
 
