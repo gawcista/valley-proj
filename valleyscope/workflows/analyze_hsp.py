@@ -19,6 +19,9 @@ from valleyscope.analysis.subspace_representation_quality import (
 from valleyscope.analysis.irrep_workflow_decision import (
     build_irrep_workflow_decisions,
 )
+from valleyscope.analysis.valley_irrep_matching import (
+    build_valley_irrep_matching_report,
+)
 from valleyscope.analysis.hsp_star_derived_characters import (
     build_hsp_star_derived_characters,
     collect_derived_characters_by_target,
@@ -378,6 +381,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
 
     # --- Irrep workflow decision layer ---
     irrep_workflow_decisions: dict[str, object] | None = None
+    valley_irrep_matching: dict[str, object] | None = None
     if config.symmetry_adapted_valley.enabled:
         irrep_workflow_decisions = build_irrep_workflow_decisions(
             projector_symmetry_report=projector_symmetry_report,
@@ -386,6 +390,10 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             symmetry_rows=symmetry_rows,
             valley_names=valley_names,
             spinor_convention_verified=config.spinor.convention_verified,
+        )
+        valley_irrep_matching = build_valley_irrep_matching_report(
+            irrep_workflow_decisions=irrep_workflow_decisions,
+            symmetry_adapted_valley_report=symmetry_adapted_valley_report,
         )
 
     outputs = write_analysis_outputs(
@@ -407,6 +415,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         hsp_star_conjugation_report=hsp_star_conjugation_report,
         hsp_star_derived_characters=hsp_star_derived_characters,
         irrep_workflow_decisions=irrep_workflow_decisions,
+        valley_irrep_matching=valley_irrep_matching,
     )
     return outputs
 

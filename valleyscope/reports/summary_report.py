@@ -27,6 +27,7 @@ def build_summary_payload(
     hsp_star_conjugation_report: dict[str, Any] | None = None,
     hsp_star_derived_characters: dict[str, Any] | None = None,
     irrep_workflow_decisions: dict[str, Any] | None = None,
+    valley_irrep_matching: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     eigen_rows = [] if symmetry_rows is None else symmetry_rows
     warnings = _collect_warnings(subspace_payload, symmetry_payload, eigen_rows)
@@ -94,6 +95,8 @@ def build_summary_payload(
         payload["hsp_star_derived_characters"] = hsp_star_derived_characters
     if irrep_workflow_decisions is not None:
         payload["irrep_workflow_decisions"] = irrep_workflow_decisions
+    if valley_irrep_matching is not None:
+        payload["valley_irrep_matching"] = valley_irrep_matching
     return payload
 
 
@@ -514,6 +517,10 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     irrep_decisions = summary.get("irrep_workflow_decisions")
     if isinstance(irrep_decisions, dict):
         _render_irrep_workflow_decisions(lines, irrep_decisions)
+
+    irrep_matching = summary.get("valley_irrep_matching")
+    if isinstance(irrep_matching, dict):
+        _render_valley_irrep_matching(lines, irrep_matching)
 
     _section(lines, "Warnings")
     if summary["warnings"]:
@@ -1377,6 +1384,50 @@ def _render_irrep_workflow_decisions(
             _table(
                 ["kpoint", "valley", "path", "readiness",
                  "uses_sym_adapt", "qcut_allowed", "reason"],
+                rows,
+            )
+        )
+    lines.append("")
+
+
+def _render_valley_irrep_matching(
+    lines: list[str],
+    report: dict[str, Any],
+) -> None:
+    _section(lines, "Valley irrep matching")
+    lines.append(f"status: {report.get('status', 'not_evaluated')}")
+    lines.append(
+        f"tables implemented: {', '.join(report.get('tables_implemented', []))}"
+    )
+    by_kpoint = report.get("by_kpoint", {})
+    if not isinstance(by_kpoint, dict) or not by_kpoint:
+        lines.append("(none)")
+        lines.append("")
+        return
+    rows: list[list[Any]] = []
+    for kp_name, valleys in by_kpoint.items():
+        if not isinstance(valleys, dict):
+            continue
+        for v_name, ops in valleys.items():
+            if not isinstance(ops, dict):
+                continue
+            for op_id, m in ops.items():
+                if not isinstance(m, dict):
+                    continue
+                rows.append([
+                    kp_name, v_name, op_id,
+                    m.get("subspace_group_candidate", ""),
+                    m.get("matching_status", ""),
+                    m.get("matched_irrep", "") or "",
+                    _short_list(m.get("eigenphases", [])),
+                    str(m.get("reason", ""))[:80],
+                    m.get("readiness_level", ""),
+                ])
+    if rows:
+        lines.extend(
+            _table(
+                ["kpoint", "valley", "op", "group", "status",
+                 "irrep", "phases", "reason", "readiness"],
                 rows,
             )
         )
