@@ -33,23 +33,6 @@ _C2_SPINFUL_IRREPS: list[dict[str, object]] = [
     {"label": "C2_spinor_phase_-1/4",  "phases": [-0.25]},
 ]
 
-# Spinful C3 rank-2 products (two-dimensional irreps are not reduced).
-# For P3 with rank-2, the irrep is the direct sum of two 1D irreps.
-# We do NOT decompose; we report the pair.
-_C3_SPINFUL_RANK2_PATTERNS: list[dict[str, object]] = [
-    {"label": "C3_spinor_+1/6&+1/2", "phases": [1.0 / 6.0, 0.5]},
-    {"label": "C3_spinor_-1/6&+1/2", "phases": [-1.0 / 6.0, 0.5]},
-    {"label": "C3_spinor_+1/6&-1/6", "phases": [-1.0 / 6.0, 1.0 / 6.0]},
-]
-
-# Spinful C2 rank-2 products
-_C2_SPINFUL_RANK2_PATTERNS: list[dict[str, object]] = [
-    {"label": "C2_spinor_+1/4&+1/4", "phases": [0.25, 0.25]},
-    {"label": "C2_spinor_-1/4&-1/4", "phases": [-0.25, -0.25]},
-    {"label": "C2_spinor_+1/4&-1/4", "phases": [-0.25, 0.25]},
-]
-
-
 def _canonical_phase(phase: float) -> float:
     """Wrap phase to (-0.5, 0.5]."""
     p = phase % 1.0
@@ -89,6 +72,14 @@ def _match_phases_to_table(
         ):
             return str(entry["label"])
     return None
+
+
+def _candidate_matches_order(candidate: str | None, operation_order: int) -> bool:
+    if candidate in ("C3_like", "P3"):
+        return operation_order == 3
+    if candidate in ("C2_like", "P2"):
+        return operation_order == 2
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +122,18 @@ def match_valley_irrep(
         "operation_order": operation_order,
     }
 
+    if readiness_level not in {
+        READINESS_TRUSTED,
+        READINESS_USABLE_WITH_CAUTION,
+        READINESS_BLOCKED,
+    }:
+        return {
+            **result_base,
+            "matched_irrep": None,
+            "matching_status": "blocked",
+            "reason": f"unknown readiness_level={readiness_level}",
+        }
+
     if readiness_level == READINESS_BLOCKED:
         return {
             **result_base,
@@ -159,32 +162,33 @@ def match_valley_irrep(
         }
 
     rank = len(canonical)
+    if rank != 1:
+        return {
+            **result_base,
+            "matched_irrep": None,
+            "matching_status": "failed_ambiguous",
+            "reason": (
+                f"rank={rank} contains multiple eigenphases; minimal matcher "
+                "does not decompose direct sums into one-dimensional irreps"
+            ),
+        }
+
+    if not _candidate_matches_order(subspace_group_candidate, operation_order):
+        return {
+            **result_base,
+            "matched_irrep": None,
+            "matching_status": "failed_no_table",
+            "reason": (
+                f"no irrep table for subspace_group_candidate="
+                f"{subspace_group_candidate!r} and operation_order={operation_order}"
+            ),
+        }
 
     # Select table
     if operation_order == 3:
-        if rank == 1:
-            table = _C3_SPINFUL_IRREPS
-        elif rank == 2:
-            table = _C3_SPINFUL_RANK2_PATTERNS
-        else:
-            return {
-                **result_base,
-                "matched_irrep": None,
-                "matching_status": "not_applicable",
-                "reason": f"no irrep table for C3 rank={rank}",
-            }
+        table = _C3_SPINFUL_IRREPS
     elif operation_order == 2:
-        if rank == 1:
-            table = _C2_SPINFUL_IRREPS
-        elif rank == 2:
-            table = _C2_SPINFUL_RANK2_PATTERNS
-        else:
-            return {
-                **result_base,
-                "matched_irrep": None,
-                "matching_status": "not_applicable",
-                "reason": f"no irrep table for C2 rank={rank}",
-            }
+        table = _C2_SPINFUL_IRREPS
     else:
         return {
             **result_base,
@@ -284,19 +288,28 @@ def build_valley_irrep_matching_report(
                         phases = item.get("eigenphases")
                         if not phases:
                             continue
-                        order = int(op_orders.get(str(op_id), op_orders.get(op_id, 2)))
-                        result = match_valley_irrep(
-                            eigenphases=list(phases),
-                            operation_order=order,
-                            subspace_group_candidate=sg_candidate,
-                            readiness_level=readiness,
-                            allow_caution=allow_caution,
-                        )
+                        order_raw = op_orders.get(str(op_id), op_orders.get(op_id))
+                        if order_raw is None:
+                            result = {
+                                "matched_irrep": None,
+                                "matching_status": "failed_no_table",
+                                "reason": f"missing operation order for operation_id={op_id}",
+                                "eigenphases": list(phases),
+                                "operation_order": None,
+                            }
+                        else:
+                            order = int(order_raw)
+                            result = match_valley_irrep(
+                                eigenphases=list(phases),
+                                operation_order=order,
+                                subspace_group_candidate=sg_candidate,
+                                readiness_level=readiness,
+                                allow_caution=allow_caution,
+                            )
                         result["workflow_path"] = path
                         result["readiness_level"] = readiness
                         result["subspace_group_candidate"] = sg_candidate
                         result["operation_id"] = op_id
-                        result["operation_order"] = order
                         op_matches[str(op_id)] = result
             if op_matches:
                 kp_matches[v_name] = op_matches

@@ -94,15 +94,15 @@ def test_c2_phase_minus_one_quarter():
     assert "-1/4" in r["matched_irrep"]
 
 
-def test_c2_rank2_plus_minus():
+def test_rank2_plus_minus_is_ambiguous_not_single_irrep():
     r = match_valley_irrep(
         eigenphases=[-0.25, 0.25],
         operation_order=2,
         subspace_group_candidate="C2_like",
         readiness_level="trusted",
     )
-    assert r["matching_status"] == "matched"
-    assert "+1/4&-1/4" in r["matched_irrep"]
+    assert r["matching_status"] == "failed_ambiguous"
+    assert r["matched_irrep"] is None
 
 
 # -----------------------------------------------------------------------
@@ -137,17 +137,39 @@ def test_unsupported_order_not_applicable():
         subspace_group_candidate="C4_like",
         readiness_level="trusted",
     )
-    assert r["matching_status"] == "not_applicable"
+    assert r["matching_status"] == "failed_no_table"
 
 
-def test_unsupported_rank_not_applicable():
+def test_unsupported_rank_failed_ambiguous():
     r = match_valley_irrep(
         eigenphases=[0.1, 0.2, 0.3],
         operation_order=3,
         subspace_group_candidate="C3_like",
         readiness_level="trusted",
     )
-    assert r["matching_status"] == "not_applicable"
+    assert r["matching_status"] == "failed_ambiguous"
+
+
+def test_candidate_mismatch_does_not_match_by_order_only():
+    r = match_valley_irrep(
+        eigenphases=[0.25],
+        operation_order=2,
+        subspace_group_candidate="C3_like",
+        readiness_level="trusted",
+    )
+    assert r["matching_status"] == "failed_no_table"
+    assert r["matched_irrep"] is None
+
+
+def test_missing_candidate_does_not_match_by_order_only():
+    r = match_valley_irrep(
+        eigenphases=[0.25],
+        operation_order=2,
+        subspace_group_candidate=None,
+        readiness_level="trusted",
+    )
+    assert r["matching_status"] == "failed_no_table"
+    assert r["matched_irrep"] is None
 
 
 # -----------------------------------------------------------------------
@@ -191,6 +213,16 @@ def test_blocked_is_blocked():
         operation_order=2,
         subspace_group_candidate="C2_like",
         readiness_level="blocked",
+    )
+    assert r["matching_status"] == "blocked"
+
+
+def test_unknown_readiness_is_blocked():
+    r = match_valley_irrep(
+        eigenphases=[0.25],
+        operation_order=2,
+        subspace_group_candidate="C2_like",
+        readiness_level="unknown",
     )
     assert r["matching_status"] == "blocked"
 
@@ -246,6 +278,44 @@ def test_build_matching_report_with_data():
     match = r["by_kpoint"]["GammaM"]["K_valley"]["1"]
     assert match["matching_status"] == "matched"
     assert "1/2" in match["matched_irrep"]
+
+
+def test_build_matching_report_missing_operation_order_does_not_default_to_c2():
+    decisions = {
+        "by_kpoint": {
+            "MM": {
+                "M_valley": {
+                    "workflow_path": "symmetry_adapted",
+                    "readiness_level": "trusted",
+                },
+            },
+        },
+    }
+    sa = {
+        "by_kpoint": {
+            "MM": {
+                "valley_preserving_subspaces": [{
+                    "orbit": ["M_valley"],
+                    "subspace_group": {"subspace_group_candidate": "C2_like"},
+                    "valley_preserving_character_diagnostics": {
+                        "per_valley": {
+                            "M_valley": [{
+                                "operation_id": 5,
+                                "eigenphases": [0.25],
+                            }],
+                        },
+                    },
+                }],
+            },
+        },
+    }
+    r = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=decisions,
+        symmetry_adapted_valley_report=sa,
+    )
+    match = r["by_kpoint"]["MM"]["M_valley"]["5"]
+    assert match["matching_status"] == "failed_no_table"
+    assert "missing operation order" in match["reason"]
 
 
 # -----------------------------------------------------------------------

@@ -1469,6 +1469,27 @@ def test_write_analysis_outputs_plumbs_hsp_star_reports_to_summary(tmp_path):
             },
         },
     }
+    valley_irrep_matching = {
+        "status": "ok",
+        "tables_implemented": ["spinful_C3"],
+        "by_kpoint": {
+            "Gamma": {
+                "K_valley": {
+                    "1": {
+                        "workflow_path": "direct_qcut",
+                        "readiness_level": "trusted",
+                        "subspace_group_candidate": "C3_like",
+                        "operation_id": 1,
+                        "operation_order": 3,
+                        "matched_irrep": "C3_spinor_phase_+1/2",
+                        "matching_status": "matched",
+                        "reason": "test",
+                        "eigenphases": [0.5],
+                    },
+                },
+            },
+        },
+    }
 
     outputs = write_analysis_outputs(
         config=config,
@@ -1491,12 +1512,16 @@ def test_write_analysis_outputs_plumbs_hsp_star_reports_to_summary(tmp_path):
         hsp_star_conjugation_report=hsp_star_conjugation,
         hsp_star_derived_characters=hsp_star_derived,
         irrep_workflow_decisions=irrep_workflow_decisions,
+        valley_irrep_matching=valley_irrep_matching,
     )
 
     payload = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     assert payload["hsp_star_conjugation"] == hsp_star_conjugation
     assert payload["hsp_star_derived_characters"] == hsp_star_derived
     assert payload["irrep_workflow_decisions"] == irrep_workflow_decisions
+    assert payload["valley_irrep_matching"] == valley_irrep_matching
+    assert "Valley irrep matching" in outputs["summary_text"]
+    assert "C3_spinor_phase_+1/2" in outputs["summary_text"]
 
 
 def test_summary_marks_spinor_rotation_as_diagnostic_only(tmp_path):

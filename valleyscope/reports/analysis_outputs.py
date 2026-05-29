@@ -80,6 +80,7 @@ def write_analysis_outputs(
         hsp_star_conjugation_report=hsp_star_conjugation_report,
         hsp_star_derived_characters=hsp_star_derived_characters,
         irrep_workflow_decisions=irrep_workflow_decisions,
+        valley_irrep_matching=valley_irrep_matching,
     )
     return outputs
 
