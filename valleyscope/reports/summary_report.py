@@ -28,6 +28,7 @@ def build_summary_payload(
     hsp_star_derived_characters: dict[str, Any] | None = None,
     irrep_workflow_decisions: dict[str, Any] | None = None,
     valley_irrep_matching: dict[str, Any] | None = None,
+    ebr_input_candidates: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     eigen_rows = [] if symmetry_rows is None else symmetry_rows
     warnings = _collect_warnings(subspace_payload, symmetry_payload, eigen_rows)
@@ -97,6 +98,8 @@ def build_summary_payload(
         payload["irrep_workflow_decisions"] = irrep_workflow_decisions
     if valley_irrep_matching is not None:
         payload["valley_irrep_matching"] = valley_irrep_matching
+    if ebr_input_candidates is not None:
+        payload["valley_ebr_input_candidates"] = ebr_input_candidates
     return payload
 
 
@@ -521,6 +524,10 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     irrep_matching = summary.get("valley_irrep_matching")
     if isinstance(irrep_matching, dict):
         _render_valley_irrep_matching(lines, irrep_matching)
+
+    ebr_candidates = summary.get("valley_ebr_input_candidates")
+    if isinstance(ebr_candidates, dict):
+        _render_ebr_input_candidates(lines, ebr_candidates)
 
     _section(lines, "Warnings")
     if summary["warnings"]:
@@ -1431,6 +1438,46 @@ def _render_valley_irrep_matching(
                 rows,
             )
         )
+    lines.append("")
+
+
+def _render_ebr_input_candidates(
+    lines: list[str],
+    report: dict[str, Any],
+) -> None:
+    _section(lines, "EBR input candidates")
+    lines.append(f"status: {report.get('status', 'no_data')}")
+    lines.append(f"candidates: {report.get('candidate_count', 0)}")
+    lines.append(f"blocked: {report.get('blocked_count', 0)}")
+    lines.append(
+        f"reduced EBR decomposition: "
+        f"{report.get('reduced_ebr_decomposition_status', 'not_implemented')}"
+    )
+    cands = report.get("candidates", [])
+    if isinstance(cands, list) and cands:
+        rows: list[list[Any]] = []
+        for c in cands:
+            rows.append([
+                c.get("kpoint", ""), c.get("valley", ""),
+                c.get("operation_id", ""), c.get("operation_order", ""),
+                c.get("matched_irrep", "") or "",
+                _short_list(c.get("eigenphases", [])),
+                c.get("workflow_path", ""),
+                c.get("readiness_level", ""),
+            ])
+        lines.extend(
+            _table(["kpoint", "valley", "op", "order", "irrep",
+                    "phases", "path", "readiness"], rows)
+        )
+    blocked_rows = report.get("blocked", [])
+    if isinstance(blocked_rows, list) and blocked_rows:
+        lines.append("blocked/not-ready:")
+        for b in blocked_rows[:10]:
+            lines.append(
+                f"  {b.get('kpoint','')}/{b.get('valley','')} "
+                f"op={b.get('operation_id','')}: "
+                f"{b.get('reason','')[:100]}"
+            )
     lines.append("")
 
 
