@@ -219,7 +219,21 @@ G_k^{(M_3)} = C_3^2 G_k^{(M_1)} C_3^{-2}.
 
 Single-valley irreps should be matched to the corresponding valley-preserving subgroup $G_k^{(M_i)}$, while the full M-star representation also requires valley-changing operations and valley sewing matrices.
 
-**V1.1 scope:** ValleyScope currently reports valley orbits and operation mappings. Strict minimal coset representatives, induced representation decomposition, and reduced EBR decomposition are deferred to later work. Full-group irreps describe the entire M-star manifold; valley-preserving irreps describe $G_k^{(M_i)}$. If both are presented, the orbit, mapping, and induction-subduction relations must also be stated, otherwise the information is incomplete.
+**Current scope:** ValleyScope reports valley orbits, operation mappings, and
+valley-preserving subgroups. The workflow includes three irrep paths:
+`direct_qcut` (clean systems where the q-cut seed basis already passes all
+readiness gates, e.g. tMoTe2 GammaM/KM), `symmetry_adapted` (P_a^sym
+fallback when the seed basis needs symmetry-adapted purification, e.g.
+tZrSe2 M-star), and `blocked` (missing data or O(1) failures). Single-valley
+irreps are matched to the corresponding valley-preserving subgroup;
+multi-valley M-star representations require valley-changing operations and
+valley sewing matrices beyond the single-valley analysis. A default-off
+exact-integer external-table reduced EBR mapping interface exists but
+requires a user-supplied validated table — no built-in unreviewed EBR tables
+are provided. Full-group irreps describe the entire M-star manifold;
+valley-preserving irreps describe $G_k^{(M_i)}$. If both are presented, the
+orbit, mapping, and induction-subduction relations must also be stated,
+otherwise the information is incomplete.
 
 ## Workflow
 
@@ -575,17 +589,51 @@ not the old all-valley intersection. An operation that preserves one valley whil
 
 ## Reading the Outputs
 
-The analyzer writes results under `output.directory`:
+The analyzer writes results under `output.directory`.
+
+### Main User Entry
 
 ```text
-valley_summary.txt          ← read first (human-readable)
-valley_summary.json
+valley_summary.txt           ← read first (human-readable)
+valley_summary.json          ← machine-readable
+```
+
+### Formal Analysis Outputs
+
+```text
+symmetry_adapted_valley_analysis.json   ← symmetry-adapted valley analysis
+valley_irrep_matching.json              ← valley-preserving irrep matching
+irrep_workflow_decisions.json           ← workflow path decisions
+projector_symmetry_report.json          ← seed projector symmetry
+target_subspace_closure.json            ← D_raw closure diagnostics
+subspace_representation_quality.json    ← representation quality decomposition
+```
+
+### Downstream EBR Entry
+
+```text
+valley_ebr_input_candidates.json        ← trusted irrep candidates
+valley_ebr_problem_instances.json       ← per-valley EBR problem instances
+valley_ebr_export_bundle.json           ← complete ready bundles for external tools
+```
+
+### Optional External-Table Reduced EBR Mapping
+
+```text
+valley_reduced_ebr_mapping.json         ← only when analysis.reduced_ebr.enabled
+```
+
+### Debug / Detail Outputs
+
+```text
 valley_weights.csv          ← quick scan
 valley_subspace.json        ← multi-valley subspace data
 symmetry_eigenvalues.csv    ← symmetry eigenvalues
 symmetry_report.json        ← symmetry analysis
-valley_basis_transform.h5   ← basis transform for later calculations
-diagnostics.h5              ← projector masks and q-cut scan data (debug)
+valley_basis_transform.h5   ← basis transform
+diagnostics.h5              ← projector masks and q-cut scan data
+hsp_star_conjugation.json   ← HSP-star conjugation graphs
+hsp_star_derived_characters.json ← derived HSP-star characters
 ```
 
 ### `valley_weights.csv`
@@ -664,7 +712,7 @@ The main columns mean:
 
 ### `symmetry_characters` in `valley_summary.json`
 
-The summary JSON contains a first-class `symmetry_characters` list. Each row is grouped by `(kpoint, target_valley, operation_id)` and records `character_raw`, `character_valley`, readiness flags, and whether the operation was accepted for that valley-preserving representation. Rows are included only after the HSP-little-group and valley-preserving checks pass. This is the character input layer for later valley-preserving irrep matching; no character table or reduced EBR decomposition is applied here.
+The summary JSON contains a first-class `symmetry_characters` list. Each row is grouped by `(kpoint, target_valley, operation_id)` and records `character_raw`, `character_valley`, readiness flags, and whether the operation was accepted for that valley-preserving representation. Rows are included only after the HSP-little-group and valley-preserving checks pass. This is the character input layer for downstream valley irrep matching; valley-preserving irrep matching is performed by `valley_irrep_matching.json`, and reduced EBR decomposition is available as a default-off exact-integer external-table interface (`valley_reduced_ebr_mapping.json`, only when `analysis.reduced_ebr.enabled`).
 
 ### `valley_basis_transform.h5`
 
@@ -722,7 +770,13 @@ while still appearing in `subspace_space_group.valley_preserving_operation_ids`.
 
 These reports do not promote trusted irrep labels by themselves.
 For spinor wavefunctions, `irrep_matching_input_ready` remains false until the
-spinor convention is explicitly benchmark-verified.
+spinor convention is explicitly benchmark-verified. Valley irrep matching is
+performed by downstream layers: `valley_irrep_matching.json` for phase-based
+matching, `valley_ebr_input_candidates.json` / `valley_ebr_problem_instances.json`
+/ `valley_ebr_export_bundle.json` for EBR input collection and completeness
+assessment, and `valley_reduced_ebr_mapping.json` (only when
+`analysis.reduced_ebr.enabled`) for exact-integer external-table reduced EBR
+mapping.
 
 ### `diagnostics.h5`
 

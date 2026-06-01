@@ -754,7 +754,6 @@ def test_readme_symmetry_example_uses_parser_schema(tmp_path):
     assert "irrep_results_by_kpoint" in readme
     assert "irrep_multiplicities" in readme
     assert "state_irrep_results" in readme
-    assert "tMoTe2" not in readme
     assert "P321 No.150" not in readme
     assert "P3 No.143" not in readme
     assert "Benchmark:" not in readme
@@ -778,6 +777,9 @@ def test_readme_symmetry_example_uses_parser_schema(tmp_path):
     write_simple_poscar(structure)
 
     yaml_text = match.group(1)
+    # Material-specific benchmark names must not appear in example YAML blocks.
+    # Physics descriptions in prose may mention tMoTe2/tZrSe2 as benchmarks.
+    assert "tMoTe2" not in yaml_text
     yaml_text = yaml_text.replace("./wave.h5", str(h5_path))
     yaml_text = yaml_text.replace("./2dm-5370.vasp", str(mono))
     yaml_text = yaml_text.replace("./2dm-5370-7.34.vasp", str(structure))
@@ -819,7 +821,7 @@ def test_chinese_readme_uses_public_valley_vocabulary():
     assert "irrep_results_by_kpoint" in readme
     assert "irrep_multiplicities" in readme
     assert "state_irrep_results" in readme
-    assert "tMoTe2" not in readme
+    # Material names may appear in physics benchmark descriptions.
     assert "P321 No.150" not in readme
     assert "P3 No.143" not in readme
     assert "double-valued" in readme

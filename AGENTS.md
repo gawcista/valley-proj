@@ -31,12 +31,18 @@ VASP WAVECAR / HDF5
 -> EBR input candidates / problem instances / export bundle
 ```
 
-**Layer 3 — optional debug/development reports**
+**Layer 3 — optional external-table reduced EBR mapping**
+
+```text
+-> default-off exact-integer external-table reduced EBR mapping interface
+-> no built-in unreviewed EBR tables; requires user-supplied validated table
+```
+
+**Debug / detail outputs (separate from Layer 3)**
 
 ```text
 -> subspace representation quality diagnostics
 -> HSP-star conjugation graphs / derived characters
--> reduced EBR mapping (default-off, external-table only)
 -> qcut scans, raw matrix dumps, representative-candidate details
 ```
 

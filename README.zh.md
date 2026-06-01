@@ -206,7 +206,17 @@ G_k^{(M_3)} = C_3^2 G_k^{(M_1)} C_3^{-2}.
 
 Single-valley irrep 应当匹配到对应的 valley-preserving subgroup $G_k^{(M_i)}$；完整 M-star representation 还需要 valley-changing operations 和 valley sewing matrices。
 
-**V1.1 范围：** ValleyScope 目前输出 valley orbits 和 operation mappings。严格 minimal coset representatives、induced representation decomposition 和 reduced EBR decomposition 留待后续工作。Full-group irrep 描述整个 M-star manifold；valley-preserving irrep 描述 $G_k^{(M_i)}$。如果同时列出 full-group irrep 和 valley-subgroup irrep，还必须说明 orbit、mapping 和 induction-subduction 关系，否则信息仍不完整。
+**当前范围：** ValleyScope 输出 valley orbits、operation mappings 和
+valley-preserving subgroups。工作流包含三条 irrep 路径：
+`direct_qcut`（干净系统，q-cut seed basis 已通过所有 readiness gates，
+例如 tMoTe2 GammaM/KM）、`symmetry_adapted`（P_a^sym 回退，seed basis
+需要对称化纯化，例如 tZrSe2 M-star）、`blocked`（数据缺失或 O(1) 级失败）。
+单谷 irreps 匹配到对应的 valley-preserving subgroup；多谷 M-star 表示需要
+valley-changing operations 和 valley sewing matrices。仓库包含一个默认关闭的
+exact-integer external-table reduced EBR mapping 接口，但必须使用用户提供并
+验证过的表——不内置任何未审核的 EBR 表。Full-group irrep 描述整个 M-star
+manifold；valley-preserving irrep 描述 $G_k^{(M_i)}$。如果同时列出两者，
+还必须说明 orbit、mapping 和 induction-subduction 关系，否则信息仍不完整。
 
 ## 运行流程
 
@@ -552,17 +562,51 @@ Valley-preserving gate 为：
 
 ## 读取输出
 
-分析结果写到 `output.directory`：
+分析结果写到 `output.directory`。
+
+### 主入口
 
 ```text
-valley_summary.txt          ← 最先看
-valley_summary.json
+valley_summary.txt           ← 最先看（人类可读）
+valley_summary.json          ← 机器可读
+```
+
+### Formal Analysis 输出
+
+```text
+symmetry_adapted_valley_analysis.json   ← 对称适配 valley 分析
+valley_irrep_matching.json              ← valley-preserving irrep 匹配
+irrep_workflow_decisions.json           ← 工作流路径决策
+projector_symmetry_report.json          ← seed projector 对称性
+target_subspace_closure.json            ← D_raw 闭包诊断
+subspace_representation_quality.json    ← 表示质量分解
+```
+
+### 下游 EBR 入口
+
+```text
+valley_ebr_input_candidates.json        ← 受信任的 irrep 候选
+valley_ebr_problem_instances.json       ← 按 valley 归类的 EBR 问题实例
+valley_ebr_export_bundle.json           ← 供下游工具使用的完整就绪 bundle
+```
+
+### 可选 External-Table Reduced EBR Mapping
+
+```text
+valley_reduced_ebr_mapping.json         ← 仅在 analysis.reduced_ebr.enabled 时生成
+```
+
+### Debug / 详细输出
+
+```text
 valley_weights.csv          ← 第一眼检查
-valley_subspace.json        ← 双谷子空间数据
+valley_subspace.json        ← 多谷子空间数据
 symmetry_eigenvalues.csv    ← 对称本征值
 symmetry_report.json        ← 对称性分析
 valley_basis_transform.h5   ← 谷适配基变换
-diagnostics.h5              ← 调试用
+diagnostics.h5              ← projector mask 和 q-cut scan 数据
+hsp_star_conjugation.json   ← HSP-star 共轭图
+hsp_star_derived_characters.json ← 衍生 HSP-star character
 ```
 
 ### valley_weights.csv
@@ -609,7 +653,7 @@ q-cut windows 是否形成合理的 valley seed；可信的 valley-preserving ir
 
 ### valley_summary.json 中的 symmetry_characters
 
-summary JSON 包含一等字段 `symmetry_characters`。每一行按 `(kpoint, target_valley, operation_id)` 聚合，记录 `character_raw`、`character_valley`、readiness flags，以及该操作是否可作为该 valley 的 valley-preserving representation。只有通过 HSP-little-group 和 valley-preserving 检查的操作会进入这里。这是为后续 valley-preserving irrep matching 准备的 character 输入层；这里不使用 character table，也不做 reduced EBR decomposition。
+summary JSON 包含一等字段 `symmetry_characters`。每一行按 `(kpoint, target_valley, operation_id)` 聚合，记录 `character_raw`、`character_valley`、readiness flags，以及该操作是否可作为该 valley 的 valley-preserving representation。只有通过 HSP-little-group 和 valley-preserving 检查的操作会进入这里。这是下游 valley irrep matching 的 character 输入层；valley-preserving irrep matching 由 `valley_irrep_matching.json` 执行，reduced EBR decomposition 以默认关闭的 exact-integer external-table 接口形式存在（`valley_reduced_ebr_mapping.json`，仅在 `analysis.reduced_ebr.enabled` 时生成）。
 
 ### valley_basis_transform.h5
 

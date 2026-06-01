@@ -623,13 +623,14 @@ def _build_ebr_mapping_input(
     return {
         "ready": ready,
         "blocked_by": blocked_by,
-        "required_tables": ["unknown — character table matching not yet implemented"],
+        "required_tables": ["external_reduced_ebr_table"],
         "subspace_group_candidate": subspace_group_candidate,
         "valley_preserving_characters_available": chars_available,
         "spinor_convention_verified": spinor_convention_verified,
         "notes": (
-            "EBR mapping requires character table matching for valley-preserving "
-            "subgroup irreps. Not implemented in the current formal analysis layer."
+            "Valley irrep matching is downstream in valley_irrep_matching; "
+            "reduced EBR decomposition requires a user-supplied validated "
+            "external table (see required_tables)."
         ),
     }
 
@@ -696,7 +697,7 @@ def _blocked_ebr_mapping_input(
     return {
         "ready": False,
         "blocked_by": blocked_by,
-        "required_tables": ["unknown — character table matching not yet implemented"],
+        "required_tables": ["external_reduced_ebr_table"],
         "subspace_group_candidate": None,
         "valley_preserving_characters_available": False,
         "spinor_convention_verified": bool(spinor_convention_verified),
