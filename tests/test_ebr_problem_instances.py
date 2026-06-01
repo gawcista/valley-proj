@@ -60,6 +60,8 @@ def test_candidates_group_into_instances():
     assert inst["ready_for_ebr_decomposition"] is True
     assert "GammaM" in inst["irreps_by_kpoint"]
     assert "KM" in inst["irreps_by_kpoint"]
+    assert inst["optional_hsps"] == ["MM"]
+    assert inst["missing_optional_hsps"] == ["MM"]
 
 
 # -----------------------------------------------------------------------
@@ -179,7 +181,8 @@ def test_schema_fields():
                 "workflow_path", "readiness_level", "irreps_by_kpoint",
                 "operations_by_kpoint", "candidate_count", "status",
                 "ready_for_ebr_decomposition", "blocked_by",
-                "expected_hsps", "actual_hsps"]:
+                "expected_hsps", "optional_hsps", "actual_hsps",
+                "missing_optional_hsps"]:
         assert key in inst, f"missing key: {key}"
     assert r["reduced_ebr_decomposition_status"] == "not_implemented"
 
@@ -227,3 +230,32 @@ def test_multiple_valleys():
     assert r["instance_count"] == 2
     valleys = {inst["valley"] for inst in r["instances"]}
     assert valleys == {"K_valley", "Kp_valley"}
+
+
+def test_same_valley_different_provenance_not_merged():
+    cands = {
+        "candidates": [
+            {
+                "kpoint": "GammaM", "valley": "K_valley",
+                "workflow_path": "direct_qcut", "readiness_level": "trusted",
+                "subspace_group_candidate": "C3_like",
+                "operation_id": 1, "operation_order": 3,
+                "matched_irrep": "C3_spinor_phase_+1/2",
+                "ready_for_ebr_input": True,
+            },
+            {
+                "kpoint": "GammaM", "valley": "K_valley",
+                "workflow_path": "symmetry_adapted", "readiness_level": "trusted",
+                "subspace_group_candidate": "C3_like",
+                "operation_id": 1, "operation_order": 3,
+                "matched_irrep": "C3_spinor_phase_+1/2",
+                "ready_for_ebr_input": True,
+            },
+        ],
+    }
+    r = build_ebr_problem_instances(ebr_input_candidates=cands)
+    assert r["instance_count"] == 2
+    assert {inst["workflow_path"] for inst in r["instances"]} == {
+        "direct_qcut",
+        "symmetry_adapted",
+    }

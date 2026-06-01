@@ -1511,12 +1511,13 @@ def _render_ebr_problem_instances(
                 str(inst.get("ready_for_ebr_decomposition", "")),
                 _short_list(inst.get("blocked_by", [])),
                 _short_list(inst.get("expected_hsps", [])),
+                _short_list(inst.get("missing_optional_hsps", [])),
                 _short_list(inst.get("actual_hsps", [])),
             ])
         lines.extend(
             _table(
                 ["id", "valley", "group", "status", "ready",
-                 "blocked_by", "expected_hsp", "actual_hsp"],
+                 "blocked_by", "expected_hsp", "missing_optional", "actual_hsp"],
                 rows,
             )
         )
@@ -1536,6 +1537,7 @@ def _output_file_label(name: str) -> str:
         "projector_symmetry_report_json": "Projector symmetry report",
         "symmetry_adapted_valley_analysis_json": "Symmetry-adapted valley analysis",
         "valley_ebr_input_candidates_json": "Valley EBR input candidates",
+        "valley_ebr_problem_instances_json": "Valley EBR problem instances",
     }
     return labels.get(name, name.replace("_", " ").title())
 

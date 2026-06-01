@@ -65,17 +65,20 @@ def build_ebr_problem_instances(
     if not candidates:
         return _empty_report("no trusted EBR input candidates")
 
-    # Group by (subspace_group_candidate, valley)
-    groups: dict[tuple[str, str], list[dict[str, object]]] = {}
+    # Group by the full workflow identity.  Mixing direct q-cut and
+    # symmetry-adapted candidates would make downstream EBR provenance unclear.
+    groups: dict[tuple[str, str, str, str], list[dict[str, object]]] = {}
     for c in candidates:
         sg = str(c.get("subspace_group_candidate", ""))
         valley = str(c.get("valley", ""))
-        groups.setdefault((sg, valley), []).append(c)
+        workflow_path = str(c.get("workflow_path", ""))
+        readiness_level = str(c.get("readiness_level", ""))
+        groups.setdefault((sg, valley, workflow_path, readiness_level), []).append(c)
 
     instances: list[dict[str, object]] = []
     instance_counter = 0
 
-    for (sg, valley), cands in groups.items():
+    for (sg, valley, workflow_path, readiness_level), cands in groups.items():
         instance_counter += 1
         instance_id = f"ebr_instance_{instance_counter:03d}"
 
@@ -98,6 +101,7 @@ def build_ebr_problem_instances(
         actual_hsps = set(irreps_by_kpoint.keys())
         required = set(expected)
         missing_required = [h for h in required if h not in actual_hsps]
+        missing_optional = [h for h in optional if h not in actual_hsps]
 
         blocked_by: list[str] = []
         if not expected and not optional:
@@ -118,8 +122,8 @@ def build_ebr_problem_instances(
             "instance_id": instance_id,
             "valley": valley,
             "subspace_group_candidate": sg,
-            "workflow_path": cands[0].get("workflow_path", ""),
-            "readiness_level": cands[0].get("readiness_level", ""),
+            "workflow_path": workflow_path,
+            "readiness_level": readiness_level,
             "irreps_by_kpoint": {k: v for k, v in sorted(irreps_by_kpoint.items())},
             "operations_by_kpoint": {
                 k: sorted(v, key=_sort_key)
@@ -130,7 +134,9 @@ def build_ebr_problem_instances(
             "ready_for_ebr_decomposition": ready,
             "blocked_by": blocked_by,
             "expected_hsps": expected,
+            "optional_hsps": optional,
             "actual_hsps": sorted(actual_hsps),
+            "missing_optional_hsps": missing_optional,
         })
 
     overall_status = "has_instances" if instances else "no_instances"
