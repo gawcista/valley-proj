@@ -155,6 +155,40 @@ def test_failed_ambiguous_not_candidate():
     assert "matching_status=failed_ambiguous" in r["blocked"][0]["reason"]
 
 
+def test_diagnostic_only_flag_blocks_even_if_status_is_matched():
+    decisions = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "workflow_path": "direct_qcut",
+                    "readiness_level": "trusted",
+                },
+            },
+        },
+    }
+    matching = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "1": {
+                        "matching_status": "matched",
+                        "diagnostic_only": True,
+                        "matched_irrep": "C3_spinor_phase_+1/2",
+                        "operation_order": 3,
+                    },
+                },
+            },
+        },
+    }
+    r = build_ebr_input_candidates(
+        irrep_workflow_decisions=decisions,
+        valley_irrep_matching=matching,
+    )
+    assert r["candidate_count"] == 0
+    assert r["blocked_count"] == 1
+    assert "diagnostic_only=true" in r["blocked"][0]["reason"]
+
+
 # -----------------------------------------------------------------------
 # 4. Blocked readiness
 # -----------------------------------------------------------------------

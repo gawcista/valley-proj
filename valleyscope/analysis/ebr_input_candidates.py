@@ -70,12 +70,14 @@ def build_ebr_input_candidates(
                     continue
                 match_status = str(match.get("matching_status", ""))
                 matched_irrep = match.get("matched_irrep")
+                diagnostic_only = bool(match.get("diagnostic_only", False))
 
                 # Candidate gate
                 if (
                     readiness == "trusted"
                     and path != "blocked"
                     and match_status == "matched"
+                    and not diagnostic_only
                     and matched_irrep is not None
                 ):
                     sg_candidate = match.get("subspace_group_candidate")
@@ -105,6 +107,8 @@ def build_ebr_input_candidates(
                     reasons.append("path=blocked")
                 if match_status != "matched":
                     reasons.append(f"matching_status={match_status}")
+                if diagnostic_only:
+                    reasons.append("diagnostic_only=true")
                 if matched_irrep is None:
                     reasons.append("no matched_irrep")
 

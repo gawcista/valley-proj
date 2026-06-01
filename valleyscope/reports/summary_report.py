@@ -1493,6 +1493,7 @@ def _output_file_label(name: str) -> str:
         "diagnostics_h5": "Projector, qcut, and symmetry matrices",
         "projector_symmetry_report_json": "Projector symmetry report",
         "symmetry_adapted_valley_analysis_json": "Symmetry-adapted valley analysis",
+        "valley_ebr_input_candidates_json": "Valley EBR input candidates",
     }
     return labels.get(name, name.replace("_", " ").title())
 
