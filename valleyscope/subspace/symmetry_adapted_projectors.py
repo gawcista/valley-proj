@@ -1,8 +1,9 @@
-"""Toy-only construction of symmetry-adapted valley projectors.
+"""Construction of symmetry-adapted valley projectors P_a^sym.
 
-This module builds symmetry-adapted valley projectors P_a^sym from q-cut
-valley seed projectors P_a^0.  It does NOT integrate into the production
-analyze_hsp workflow.  All inputs are synthetic matrices.
+Builds symmetry-adapted valley projectors P_a^sym from q-cut valley seed
+projectors P_a^0 via valley-preserving subgroup averaging and spectral
+purification.  Integrated into the production analyze_hsp workflow
+through the symmetry-adapted valley report layer.
 """
 
 from __future__ import annotations

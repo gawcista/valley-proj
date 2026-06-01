@@ -1,8 +1,9 @@
-"""Toy-only helper: extract valley-preserving representations and valley sewing
-matrices from symmetry-adapted valley projector bases U_a.
+"""Valley-preserving representations and valley sewing matrices.
 
-Does NOT integrate into the production analyze_hsp workflow.
-All inputs are synthetic matrices.
+Extracts valley-preserving representation matrices D_a(g) = U_a^dag D_g U_a
+and valley sewing matrices B_{ba}(g) = U_b^dag D_g U_a from symmetry-adapted
+valley projector bases U_a.  Integrated into the production analyze_hsp
+workflow through the symmetry-adapted valley report layer.
 """
 
 from __future__ import annotations

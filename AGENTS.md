@@ -9,21 +9,85 @@ ValleyScope is a VASP post-processing workflow for high-throughput extraction
 of valley-resolved irreps in moire materials. The long-term target is
 valley-resolved reduced EBR decomposition for a moire database.
 
-The current physical layering is:
+The current physical layering is organized in three layers:
+
+**Layer 1 — valley projection + seed/projector diagnostics**
 
 ```text
 VASP WAVECAR / HDF5
 -> q-cut valley seed projectors P_a^0
--> seed projector diagnostics
+-> seed projector symmetry-consistency diagnostics
 -> moire HSP symmetry representations D_g
--> projector symmetry-consistency checks
--> future symmetry-adapted valley projectors P_a^sym
--> valley-preserving irreps plus valley sewing data
--> future valley-resolved reduced EBR decomposition
+-> target-subspace closure diagnostics
+```
+
+**Layer 2 — trusted valley-preserving irreps with gated readiness**
+
+```text
+-> irrep workflow decision (direct_qcut / symmetry_adapted / blocked)
+-> formal symmetry-adapted valley analysis (P_a^sym when needed)
+-> valley-preserving irreps (character / eigenphase)
+-> minimal valley-preserving irrep matching (C3, C2 spinful)
+-> EBR input candidates / problem instances / export bundle
+```
+
+**Layer 3 — optional debug/development reports**
+
+```text
+-> subspace representation quality diagnostics
+-> HSP-star conjugation graphs / derived characters
+-> reduced EBR mapping (default-off, external-table only)
+-> qcut scans, raw matrix dumps, representative-candidate details
 ```
 
 The q-cut valley seed projector is a momentum-valley seed and diagnostic. It
 does not automatically define a trusted valley irrep basis.
+
+## Direct qcut trusted path (tMoTe2-like clean systems)
+
+A clean system such as tMoTe2 P321 can take the `direct_qcut` path when:
+
+- seed projector symmetry passes for valley-preserving operations;
+- target-subspace closure quality is clean/usable for valley-preserving ops;
+- spinor convention is verified when spinful;
+- root deviation and block leakage gates pass;
+- all relevant rows are `topology_input_ready` / `local_irrep_ready`.
+
+In this case `P_a^sym` reconstruction is not forced. The q-cut seed basis is
+already a valid valley irrep input.
+
+For tZrSe2 P312 M-star, the symmetry-adapted path remains physically
+reasonable but current blockers are `spinor_convention_unverified`, low seed
+overlap in some rows, and D_raw target-subspace closure / expanded-band
+sensitivity. These must not be hidden with tolerance changes.
+
+## Reduced EBR Status
+
+The repo has a default-off external-table exact integer mapping interface
+(`valleyscope/analysis/reduced_ebr_mapping.py`). No built-in unreviewed EBR
+tables, compatibility relations, heuristic fits, or decomposition reports
+are produced without a user-supplied validated table. Export bundles
+(`valley_ebr_export_bundle.json`) package complete ready problem instances
+for downstream tools.
+
+## Public Output Schema
+
+**Main user entry**:
+- `valley_summary.txt` / `valley_summary.json`
+
+**Downstream EBR entry**:
+- `valley_ebr_export_bundle.json` (ready problem instances)
+- `valley_reduced_ebr_mapping.json` (only when `analysis.reduced_ebr.enabled`)
+
+**Debug / detail outputs**:
+- `diagnostics.h5` — projector, qcut, and symmetry matrices
+- `subspace_representation_quality.json` — per-operation quality decomposition
+- `hsp_star_conjugation.json` — full conjugation graphs
+- `hsp_star_derived_characters.json` — derived character entries
+- `target_subspace_closure.json` — closure provenance diagnostics
+- `qcut_scan_payload` in diagnostics.h5
+- raw matrix dumps in diagnostics.h5
+- representative-candidate details in symmetry-adapted analysis JSON
 
 ## Roles
 
@@ -106,19 +170,24 @@ Current work may include:
 * Moire HSP symmetry representations.
 * Valley orbit and valley mapping reports.
 * Seed projector symmetry-consistency diagnostics.
-* Diagnostic-only q-cut-basis symmetry eigenvalues.
-* Prototype irrep matching when all readiness checks pass.
+* Formal symmetry-adapted valley analysis (gated: direct_qcut bypasses P_a^sym).
+* Target-subspace closure provenance diagnostics.
+* HSP-star conjugation and derived character layer.
+* Irrep workflow decision layer.
+* Minimal valley-preserving irrep matching (C3, C2 spinful).
+* EBR input candidate collection / problem instances / export bundle.
+* Default-off external-table reduced EBR mapping interface.
 
 Current work must not implement:
 
-* symmetry-adapted valley projectors `P_a^sym` unless assigned as a reviewed
-  task;
-* reduced EBR decomposition;
+* built-in unreviewed EBR tables;
+* heuristic or floating-point EBR fitting;
+* compatibility relations;
 * Berry curvature;
 * Wilson loop;
 * Chern number;
 * full-mBZ valley-goodness validation;
-* unreviewed character-table, subgroup, or compatibility-relation logic.
+* unreviewed character-table logic beyond the implemented spinful C3/C2 tables.
 
 ## Hard Rules
 
@@ -135,6 +204,7 @@ Current work must not implement:
 * Do not restore removed public fields such as `valley_sectors` or
   `target_bands_vasp`.
 * Do not add large WAVECAR files or large real-material outputs to the repo.
+* Do not claim reduced EBR decomposition without a user-supplied validated table.
 
 ## Readiness And Output Rules
 
@@ -184,4 +254,3 @@ When reviewing cc output, Codex must check:
 * old schema is only retained as an explicit legacy alias when necessary;
 * toy tests do not depend on large WAVECAR files;
 * `pytest -q` or the relevant targeted tests are reported.
-

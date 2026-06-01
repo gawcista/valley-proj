@@ -1,7 +1,8 @@
-"""Toy-only character / eigenphase diagnostics for valley-preserving
-representation matrices D_a(h) = U_a^dag D_h U_a.
+"""Character / eigenphase diagnostics for valley-preserving representation
+matrices D_a(h) = U_a^dag D_h U_a.
 
-Does NOT integrate into analyze_hsp.  Does NOT perform irrep table matching.
+Integrated into the production workflow.  Irrep table matching is performed
+by the separate valley_irrep_matching module.
 """
 
 from __future__ import annotations

@@ -58,7 +58,7 @@ def build_symmetry_adapted_valley_report(
 
     local_irrep_ready is True only when every pipeline stage passes readiness
     checks.  The separate irrep_matching_input_ready gate controls whether the
-    result may be passed to future table matching.
+    result may be passed to valley irrep matching and EBR input layers.
     """
     # Stage 1: symmetry-adapted projectors
     try:
