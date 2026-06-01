@@ -102,6 +102,8 @@ def test_mixed_partial_export():
                 "instance_id": "ebr_instance_001",
                 "valley": "K_valley",
                 "subspace_group_candidate": "C3_like",
+                "workflow_path": "direct_qcut",
+                "readiness_level": "trusted",
                 "status": "complete",
                 "ready_for_ebr_decomposition": True,
                 "irreps_by_kpoint": {"GammaM": []},
@@ -123,6 +125,31 @@ def test_mixed_partial_export():
     assert r["status"] == "partial_export"
     assert r["bundle_count"] == 1
     assert r["excluded_count"] == 1
+
+
+def test_complete_but_not_trusted_is_excluded():
+    r = build_ebr_export_bundle(ebr_problem_instances={
+        "instances": [{
+            "instance_id": "ebr_instance_001",
+            "valley": "K_valley",
+            "subspace_group_candidate": "C3_like",
+            "workflow_path": "symmetry_adapted",
+            "readiness_level": "usable_with_caution",
+            "status": "complete",
+            "ready_for_ebr_decomposition": True,
+            "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
+            "operations_by_kpoint": {"GammaM": [1]},
+            "expected_hsps": ["GammaM", "KM"],
+            "optional_hsps": ["MM"],
+            "missing_optional_hsps": ["MM"],
+        }],
+    })
+    assert r["bundle_count"] == 0
+    assert r["excluded_count"] == 1
+    assert any(
+        "readiness_level=usable_with_caution" in reason
+        for reason in r["excluded_instances"][0]["exclusion_reasons"]
+    )
 
 
 # -----------------------------------------------------------------------

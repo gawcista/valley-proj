@@ -89,6 +89,7 @@ def write_analysis_outputs(
         valley_irrep_matching=valley_irrep_matching,
         ebr_input_candidates=ebr_input_candidates,
         ebr_problem_instances=ebr_problem_instances,
+        ebr_export_bundle=ebr_export_bundle,
     )
     return outputs
 

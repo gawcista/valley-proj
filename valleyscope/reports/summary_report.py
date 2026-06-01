@@ -1592,6 +1592,7 @@ def _output_file_label(name: str) -> str:
         "symmetry_adapted_valley_analysis_json": "Symmetry-adapted valley analysis",
         "valley_ebr_input_candidates_json": "Valley EBR input candidates",
         "valley_ebr_problem_instances_json": "Valley EBR problem instances",
+        "valley_ebr_export_bundle_json": "Valley EBR export bundle",
     }
     return labels.get(name, name.replace("_", " ").title())
 

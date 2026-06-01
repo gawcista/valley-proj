@@ -1490,6 +1490,38 @@ def test_write_analysis_outputs_plumbs_hsp_star_reports_to_summary(tmp_path):
             },
         },
     }
+    ebr_input_candidates = {
+        "status": "has_candidates",
+        "candidate_count": 1,
+        "blocked_count": 0,
+        "candidates": [{"ready_for_ebr_input": True}],
+        "blocked": [],
+    }
+    ebr_problem_instances = {
+        "status": "has_instances",
+        "instance_count": 1,
+        "instances": [{"instance_id": "ebr_instance_001"}],
+    }
+    ebr_export_bundle = {
+        "status": "ready_for_external_solver",
+        "schema_version": "1.0.0",
+        "bundle_count": 1,
+        "excluded_count": 0,
+        "reduced_ebr_decomposition_status": "not_implemented",
+        "bundles": [
+            {
+                "bundle_id": "bundle_ebr_instance_001",
+                "valley": "K_valley",
+                "subspace_group_candidate": "C3_like",
+                "workflow_path": "direct_qcut",
+                "expected_hsps": ["GammaM", "KM"],
+                "optional_hsps": ["MM"],
+                "missing_optional_hsps": ["MM"],
+                "ready_for_external_solver": True,
+            },
+        ],
+        "excluded_instances": [],
+    }
 
     outputs = write_analysis_outputs(
         config=config,
@@ -1513,6 +1545,9 @@ def test_write_analysis_outputs_plumbs_hsp_star_reports_to_summary(tmp_path):
         hsp_star_derived_characters=hsp_star_derived,
         irrep_workflow_decisions=irrep_workflow_decisions,
         valley_irrep_matching=valley_irrep_matching,
+        ebr_input_candidates=ebr_input_candidates,
+        ebr_problem_instances=ebr_problem_instances,
+        ebr_export_bundle=ebr_export_bundle,
     )
 
     payload = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
@@ -1520,8 +1555,13 @@ def test_write_analysis_outputs_plumbs_hsp_star_reports_to_summary(tmp_path):
     assert payload["hsp_star_derived_characters"] == hsp_star_derived
     assert payload["irrep_workflow_decisions"] == irrep_workflow_decisions
     assert payload["valley_irrep_matching"] == valley_irrep_matching
+    assert payload["valley_ebr_input_candidates"] == ebr_input_candidates
+    assert payload["valley_ebr_problem_instances"] == ebr_problem_instances
+    assert payload["valley_ebr_export_bundle"] == ebr_export_bundle
     assert "Valley irrep matching" in outputs["summary_text"]
     assert "C3_spinor_phase_+1/2" in outputs["summary_text"]
+    assert "EBR export bundle" in outputs["summary_text"]
+    assert "bundle_ebr_instance_001" in outputs["summary_text"]
 
 
 def test_summary_marks_spinor_rotation_as_diagnostic_only(tmp_path):

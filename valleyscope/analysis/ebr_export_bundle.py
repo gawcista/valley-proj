@@ -38,14 +38,16 @@ def build_ebr_export_bundle(
         ready = bool(inst.get("ready_for_ebr_decomposition", False))
         status = str(inst.get("status", ""))
 
-        if ready and status == "complete":
+        readiness_level = str(inst.get("readiness_level", ""))
+
+        if ready and status == "complete" and readiness_level == "trusted":
             bundles.append({
                 "bundle_id": f"bundle_{inst.get('instance_id', '?')}",
                 "source_instance_id": inst.get("instance_id", ""),
                 "valley": inst.get("valley", ""),
                 "subspace_group_candidate": inst.get("subspace_group_candidate", ""),
                 "workflow_path": inst.get("workflow_path", ""),
-                "readiness_level": inst.get("readiness_level", ""),
+                "readiness_level": readiness_level,
                 "irreps_by_kpoint": inst.get("irreps_by_kpoint", {}),
                 "operations_by_kpoint": inst.get("operations_by_kpoint", {}),
                 "expected_hsps": inst.get("expected_hsps", []),
@@ -65,6 +67,8 @@ def build_ebr_export_bundle(
             blocked = inst.get("blocked_by", [])
             if blocked:
                 reasons.append(f"blocked_by={blocked}")
+        if readiness_level != "trusted":
+            reasons.append(f"readiness_level={readiness_level}")
         excluded.append({
             "source_instance_id": inst.get("instance_id", ""),
             "valley": inst.get("valley", ""),
