@@ -29,6 +29,7 @@ def build_summary_payload(
     irrep_workflow_decisions: dict[str, Any] | None = None,
     valley_irrep_matching: dict[str, Any] | None = None,
     ebr_input_candidates: dict[str, Any] | None = None,
+    ebr_problem_instances: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     eigen_rows = [] if symmetry_rows is None else symmetry_rows
     warnings = _collect_warnings(subspace_payload, symmetry_payload, eigen_rows)
@@ -100,6 +101,8 @@ def build_summary_payload(
         payload["valley_irrep_matching"] = valley_irrep_matching
     if ebr_input_candidates is not None:
         payload["valley_ebr_input_candidates"] = ebr_input_candidates
+    if ebr_problem_instances is not None:
+        payload["valley_ebr_problem_instances"] = ebr_problem_instances
     return payload
 
 
@@ -528,6 +531,10 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     ebr_candidates = summary.get("valley_ebr_input_candidates")
     if isinstance(ebr_candidates, dict):
         _render_ebr_input_candidates(lines, ebr_candidates)
+
+    ebr_instances = summary.get("valley_ebr_problem_instances")
+    if isinstance(ebr_instances, dict):
+        _render_ebr_problem_instances(lines, ebr_instances)
 
     _section(lines, "Warnings")
     if summary["warnings"]:
@@ -1478,6 +1485,41 @@ def _render_ebr_input_candidates(
                 f"op={b.get('operation_id','')}: "
                 f"{b.get('reason','')[:100]}"
             )
+    lines.append("")
+
+
+def _render_ebr_problem_instances(
+    lines: list[str],
+    report: dict[str, Any],
+) -> None:
+    _section(lines, "EBR problem instances")
+    lines.append(f"status: {report.get('status', 'no_data')}")
+    lines.append(f"instance count: {report.get('instance_count', 0)}")
+    lines.append(
+        f"reduced EBR decomposition: "
+        f"{report.get('reduced_ebr_decomposition_status', 'not_implemented')}"
+    )
+    instances = report.get("instances", [])
+    if isinstance(instances, list) and instances:
+        rows: list[list[Any]] = []
+        for inst in instances:
+            rows.append([
+                inst.get("instance_id", ""),
+                inst.get("valley", ""),
+                inst.get("subspace_group_candidate", ""),
+                inst.get("status", ""),
+                str(inst.get("ready_for_ebr_decomposition", "")),
+                _short_list(inst.get("blocked_by", [])),
+                _short_list(inst.get("expected_hsps", [])),
+                _short_list(inst.get("actual_hsps", [])),
+            ])
+        lines.extend(
+            _table(
+                ["id", "valley", "group", "status", "ready",
+                 "blocked_by", "expected_hsp", "actual_hsp"],
+                rows,
+            )
+        )
     lines.append("")
 
 

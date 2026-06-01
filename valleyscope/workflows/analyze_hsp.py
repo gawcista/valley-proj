@@ -25,6 +25,9 @@ from valleyscope.analysis.valley_irrep_matching import (
 from valleyscope.analysis.ebr_input_candidates import (
     build_ebr_input_candidates,
 )
+from valleyscope.analysis.ebr_problem_instances import (
+    build_ebr_problem_instances,
+)
 from valleyscope.analysis.hsp_star_derived_characters import (
     build_hsp_star_derived_characters,
     collect_derived_characters_by_target,
@@ -386,6 +389,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     irrep_workflow_decisions: dict[str, object] | None = None
     valley_irrep_matching: dict[str, object] | None = None
     ebr_input_candidates: dict[str, object] | None = None
+    ebr_problem_instances: dict[str, object] | None = None
     if config.symmetry_adapted_valley.enabled:
         irrep_workflow_decisions = build_irrep_workflow_decisions(
             projector_symmetry_report=projector_symmetry_report,
@@ -403,6 +407,9 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             irrep_workflow_decisions=irrep_workflow_decisions,
             valley_irrep_matching=valley_irrep_matching,
             symmetry_adapted_valley_report=symmetry_adapted_valley_report,
+        )
+        ebr_problem_instances = build_ebr_problem_instances(
+            ebr_input_candidates=ebr_input_candidates,
         )
 
     outputs = write_analysis_outputs(
@@ -426,6 +433,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         irrep_workflow_decisions=irrep_workflow_decisions,
         valley_irrep_matching=valley_irrep_matching,
         ebr_input_candidates=ebr_input_candidates,
+        ebr_problem_instances=ebr_problem_instances,
     )
     return outputs
 
