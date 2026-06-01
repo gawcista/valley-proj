@@ -30,6 +30,7 @@ def build_summary_payload(
     valley_irrep_matching: dict[str, Any] | None = None,
     ebr_input_candidates: dict[str, Any] | None = None,
     ebr_problem_instances: dict[str, Any] | None = None,
+    ebr_export_bundle: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     eigen_rows = [] if symmetry_rows is None else symmetry_rows
     warnings = _collect_warnings(subspace_payload, symmetry_payload, eigen_rows)
@@ -103,6 +104,8 @@ def build_summary_payload(
         payload["valley_ebr_input_candidates"] = ebr_input_candidates
     if ebr_problem_instances is not None:
         payload["valley_ebr_problem_instances"] = ebr_problem_instances
+    if ebr_export_bundle is not None:
+        payload["valley_ebr_export_bundle"] = ebr_export_bundle
     return payload
 
 
@@ -535,6 +538,10 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     ebr_instances = summary.get("valley_ebr_problem_instances")
     if isinstance(ebr_instances, dict):
         _render_ebr_problem_instances(lines, ebr_instances)
+
+    ebr_bundle = summary.get("valley_ebr_export_bundle")
+    if isinstance(ebr_bundle, dict):
+        _render_ebr_export_bundle(lines, ebr_bundle)
 
     _section(lines, "Warnings")
     if summary["warnings"]:
@@ -1521,6 +1528,53 @@ def _render_ebr_problem_instances(
                 rows,
             )
         )
+    lines.append("")
+
+
+def _render_ebr_export_bundle(
+    lines: list[str],
+    report: dict[str, Any],
+) -> None:
+    _section(lines, "EBR export bundle")
+    lines.append(f"status: {report.get('status', 'no_data')}")
+    lines.append(f"schema version: {report.get('schema_version', '')}")
+    lines.append(f"bundles: {report.get('bundle_count', 0)}")
+    lines.append(f"excluded: {report.get('excluded_count', 0)}")
+    lines.append(
+        f"reduced EBR decomposition: "
+        f"{report.get('reduced_ebr_decomposition_status', 'not_implemented')}"
+    )
+    bundles = report.get("bundles", [])
+    if isinstance(bundles, list) and bundles:
+        rows: list[list[Any]] = []
+        for b in bundles:
+            rows.append([
+                b.get("bundle_id", ""),
+                b.get("valley", ""),
+                b.get("subspace_group_candidate", ""),
+                b.get("workflow_path", ""),
+                _short_list(b.get("expected_hsps", [])),
+                _short_list(b.get("optional_hsps", [])),
+                _short_list(b.get("missing_optional_hsps", [])),
+                b.get("ready_for_external_solver", ""),
+            ])
+        lines.extend(
+            _table(
+                ["bundle_id", "valley", "group", "path",
+                 "expected_hsp", "optional_hsp", "missing_opt",
+                 "ext_solver_ready"],
+                rows,
+            )
+        )
+    excluded = report.get("excluded_instances", [])
+    if isinstance(excluded, list) and excluded:
+        lines.append("excluded instances:")
+        for e in excluded:
+            lines.append(
+                f"  {e.get('source_instance_id','')} "
+                f"{e.get('valley','')}/{e.get('subspace_group_candidate','')}: "
+                f"{'; '.join(e.get('exclusion_reasons', []))[:120]}"
+            )
     lines.append("")
 
 
