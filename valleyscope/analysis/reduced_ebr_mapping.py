@@ -1,0 +1,299 @@
+"""Reduced EBR mapping: exact integer decomposition from export bundles.
+
+Loads a user-supplied reduced-EBR table, validates it, and performs
+brute-force exact integer matching.  No built-in tables are provided;
+real-material EBR claims require an explicit table file.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+_REQUIRED_TABLE_KEYS = {"schema_version", "subspace_group_candidate",
+                         "expected_hsps", "irreps", "ebrs"}
+
+
+def load_reduced_ebr_table(path: str | Path) -> dict:
+    """Load and validate a reduced EBR table from JSON.
+
+    Raises ValueError for missing keys, empty irrep/EBR lists,
+    mismatched vector lengths, or non-integer/nonnegative entries.
+    """
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    missing = _REQUIRED_TABLE_KEYS - set(raw)
+    if missing:
+        raise ValueError(f"reduced EBR table missing keys: {sorted(missing)}")
+
+    if not isinstance(raw.get("subspace_group_candidate"), str) or not raw["subspace_group_candidate"]:
+        raise ValueError("table subspace_group_candidate must be a non-empty string")
+
+    expected_hsps = raw["expected_hsps"]
+    irreps = raw["irreps"]
+    ebrs = raw["ebrs"]
+    if not isinstance(expected_hsps, list):
+        raise ValueError("table expected_hsps must be a list")
+    if not isinstance(irreps, list) or not irreps:
+        raise ValueError("table irreps must be a non-empty list")
+    if not all(isinstance(label, str) and label for label in irreps):
+        raise ValueError("table irreps must be non-empty strings")
+    if len(set(irreps)) != len(irreps):
+        raise ValueError("table irreps must be unique")
+    if not isinstance(ebrs, list) or not ebrs:
+        raise ValueError("table ebrs must be a non-empty list")
+
+    n_irreps = len(irreps)
+    for ebr in ebrs:
+        if not isinstance(ebr, dict):
+            raise ValueError("each EBR entry must be a mapping")
+        label = ebr.get("label")
+        if not isinstance(label, str) or not label:
+            raise ValueError("each EBR must define a non-empty label")
+        vector = ebr.get("vector")
+        if not isinstance(vector, list):
+            raise ValueError(f"EBR '{label}' missing vector")
+        if len(vector) != n_irreps:
+            raise ValueError(
+                f"EBR '{label}' vector length {len(vector)} "
+                f"!= irrep count {n_irreps}"
+            )
+        if not all(isinstance(v, int) and v >= 0 for v in vector):
+            raise ValueError(
+                f"EBR '{label}' vector must be nonnegative integers"
+            )
+
+    return raw
+
+
+def build_reduced_ebr_mapping(
+    *,
+    ebr_export_bundle: dict | None,
+    table: dict | None = None,
+    max_coefficient: int = 6,
+) -> dict:
+    """Brute-force exact integer decomposition of export bundle irrep vectors.
+
+    Parameters
+    ----------
+    ebr_export_bundle : output of build_ebr_export_bundle
+    table : validated reduced EBR table dict (from load_reduced_ebr_table)
+    max_coefficient : int, max coefficient per EBR in brute-force search
+    """
+    max_coefficient = int(max_coefficient)
+    if max_coefficient < 0:
+        raise ValueError("max_coefficient must be nonnegative")
+
+    if ebr_export_bundle is None:
+        return _status("not_evaluated", "no export bundle available")
+
+    bundles = ebr_export_bundle.get("bundles", [])
+
+    if table is None:
+        return {
+            **_status("missing_table", "no reduced EBR table provided"),
+            "solutions": [],
+            "excluded_bundles": [
+                {"bundle_id": b.get("bundle_id", "?"), "reason": "missing_table"}
+                for b in bundles if isinstance(b, dict)
+            ],
+            "table_status": "not_provided",
+        }
+
+    table_group = str(table.get("subspace_group_candidate", ""))
+    table_irreps = table["irreps"]
+    table_ebrs = table["ebrs"]
+    n_irreps = len(table_irreps)
+
+    solutions: list[dict] = []
+    excluded: list[dict] = []
+
+    for bundle in bundles:
+        if not isinstance(bundle, dict):
+            continue
+        if not bundle.get("ready_for_external_solver"):
+            excluded.append({
+                "bundle_id": bundle.get("bundle_id", "?"),
+                "reason": "not ready for external solver",
+            })
+            continue
+
+        bundle_group = str(bundle.get("subspace_group_candidate", ""))
+        if bundle_group != table_group:
+            excluded.append({
+                "bundle_id": bundle.get("bundle_id", "?"),
+                "reason": (
+                    f"table group {table_group} != "
+                    f"bundle group {bundle_group}"
+                ),
+            })
+            continue
+
+        # Build bundle irrep vector from exported valley-preserving irreps.
+        bundle_irreps = bundle.get("irreps_by_kpoint", {})
+        irrep_counts = _count_irreps(bundle_irreps, table_irreps)
+        if irrep_counts is None:
+            excluded.append({
+                "bundle_id": bundle.get("bundle_id", "?"),
+                "reason": "could not resolve irrep keys to table irreps",
+            })
+            continue
+
+        # Brute-force exact match
+        match = _brute_force_exact(irrep_counts, table_ebrs, max_coefficient)
+        if match is not None:
+            solutions.append({
+                "bundle_id": bundle.get("bundle_id", ""),
+                "valley": bundle.get("valley", ""),
+                "subspace_group_candidate": bundle_group,
+                "irrep_vector": irrep_counts,
+                "ebr_decomposition": [
+                    {"label": ebr["label"], "coefficient": int(coeff)}
+                    for ebr, coeff in zip(table_ebrs, match)
+                    if coeff > 0
+                ],
+                "status": "solved_exact",
+            })
+        else:
+            solutions.append({
+                "bundle_id": bundle.get("bundle_id", ""),
+                "valley": bundle.get("valley", ""),
+                "subspace_group_candidate": bundle_group,
+                "irrep_vector": irrep_counts,
+                "status": "no_exact_solution",
+            })
+
+    if not solutions:
+        return {
+            **_status("not_evaluated", "no bundles to decompose"),
+            "solutions": [],
+            "excluded_bundles": excluded,
+            "table_status": "loaded" if table else "not_provided",
+        }
+
+    all_solved = all(s.get("status") == "solved_exact" for s in solutions)
+    mapping_status = "solved_exact" if all_solved else "no_exact_solution"
+    return {
+        "status": mapping_status,
+        "mapping_status": mapping_status,
+        "reduced_ebr_decomposition_status": mapping_status,
+        "table_status": "loaded",
+        "solutions": solutions,
+        "excluded_bundles": excluded,
+        "solver": "brute_force_exact_integer",
+        "max_coefficient": max_coefficient,
+        "interpretation": (
+            "Exact integer linear combination of EBR vectors matching the "
+            "bundle irrep count vector.  No heuristic fit; only exact matches "
+            "are reported.  A missing_table status means no user-supplied "
+            "reduced EBR table was provided."
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Internal
+# ---------------------------------------------------------------------------
+
+def _count_irreps(
+    bundle_irreps: dict[str, list[str]],
+    table_irreps: list[str],
+) -> list[int] | None:
+    """Count bundle labels against table irreps without HSP-only fallback.
+
+    Exact table labels are preferred. If one side contains an operation suffix
+    such as ``:op3`` and the other side does not, a unique suffix-stripped match
+    is allowed. Ambiguous operation-suffix matches are rejected.
+    """
+    table_index = {label: idx for idx, label in enumerate(table_irreps)}
+    base_to_indices: dict[str, list[int]] = {}
+    for idx, label in enumerate(table_irreps):
+        base = _strip_operation_suffix(label)
+        base_to_indices.setdefault(base, []).append(idx)
+
+    counts = [0 for _ in table_irreps]
+    saw_label = False
+    for kp, labels in bundle_irreps.items():
+        if not isinstance(labels, list):
+            return None
+        for label in labels:
+            saw_label = True
+            key = _bundle_irrep_key(str(kp), str(label))
+            idx = _resolve_table_irrep_index(key, table_index, base_to_indices)
+            if idx is None:
+                return None
+            counts[idx] += 1
+
+    if sum(counts) == 0 and saw_label:
+        return None  # couldn't resolve
+    return counts
+
+
+def _bundle_irrep_key(kpoint: str, label: str) -> str:
+    return label if ":" in label else f"{kpoint}:{label}"
+
+
+def _strip_operation_suffix(key: str) -> str:
+    base, sep, suffix = key.rpartition(":")
+    if sep and suffix.startswith("op") and len(suffix) > 2:
+        return base
+    return key
+
+
+def _resolve_table_irrep_index(
+    key: str,
+    table_index: dict[str, int],
+    base_to_indices: dict[str, list[int]],
+) -> int | None:
+    if key in table_index:
+        return table_index[key]
+
+    base = _strip_operation_suffix(key)
+    if base != key and base in table_index:
+        return table_index[base]
+
+    candidates = base_to_indices.get(key, [])
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
+
+
+def _brute_force_exact(
+    target: list[int],
+    ebrs: list[dict],
+    max_coeff: int,
+) -> list[int] | None:
+    """Brute-force search for exact integer combination of EBR vectors."""
+    n_ebrs = len(ebrs)
+    n_irreps = len(target)
+
+    # Recursive search
+    def search(idx: int, remaining: list[int], coeffs: list[int]) -> list[int] | None:
+        if all(r == 0 for r in remaining):
+            return coeffs
+        if idx >= n_ebrs:
+            return None
+        max_c = min(max_coeff, max(remaining) // max(1, max(ebrs[idx]["vector"])))
+        for c in range(max_c + 1):
+            vec = ebrs[idx]["vector"]
+            new_rem = [remaining[i] - c * vec[i] for i in range(n_irreps)]
+            if any(r < 0 for r in new_rem):
+                continue
+            result = search(idx + 1, new_rem, coeffs + [c])
+            if result is not None:
+                return result
+        return None
+
+    return search(0, list(target), [])
+
+
+def _status(status: str, reason: str) -> dict:
+    return {
+        "status": status,
+        "mapping_status": status,
+        "reduced_ebr_decomposition_status": status,
+        "table_status": "not_applicable",
+        "solutions": [],
+        "excluded_bundles": [],
+        "solver": "brute_force_exact_integer",
+        "interpretation": reason,
+    }

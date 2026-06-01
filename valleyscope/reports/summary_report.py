@@ -31,6 +31,7 @@ def build_summary_payload(
     ebr_input_candidates: dict[str, Any] | None = None,
     ebr_problem_instances: dict[str, Any] | None = None,
     ebr_export_bundle: dict[str, Any] | None = None,
+    reduced_ebr_mapping: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     eigen_rows = [] if symmetry_rows is None else symmetry_rows
     warnings = _collect_warnings(subspace_payload, symmetry_payload, eigen_rows)
@@ -106,6 +107,8 @@ def build_summary_payload(
         payload["valley_ebr_problem_instances"] = ebr_problem_instances
     if ebr_export_bundle is not None:
         payload["valley_ebr_export_bundle"] = ebr_export_bundle
+    if reduced_ebr_mapping is not None:
+        payload["valley_reduced_ebr_mapping"] = reduced_ebr_mapping
     return payload
 
 
@@ -542,6 +545,10 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     ebr_bundle = summary.get("valley_ebr_export_bundle")
     if isinstance(ebr_bundle, dict):
         _render_ebr_export_bundle(lines, ebr_bundle)
+
+    ebr_solve = summary.get("valley_reduced_ebr_mapping")
+    if isinstance(ebr_solve, dict):
+        _render_reduced_ebr_mapping(lines, ebr_solve)
 
     _section(lines, "Warnings")
     if summary["warnings"]:
@@ -1578,6 +1585,40 @@ def _render_ebr_export_bundle(
     lines.append("")
 
 
+def _render_reduced_ebr_mapping(
+    lines: list[str],
+    report: dict[str, Any],
+) -> None:
+    _section(lines, "Reduced EBR mapping")
+    lines.append(f"status: {report.get('status', 'no_data')}")
+    lines.append(f"mapping status: {report.get('mapping_status', report.get('status', ''))}")
+    lines.append(f"table: {report.get('table_status', '')}")
+    lines.append(
+        f"reduced EBR decomposition: "
+        f"{report.get('reduced_ebr_decomposition_status', '')}"
+    )
+    for sol in report.get("solutions", []):
+        if not isinstance(sol, dict):
+            continue
+        decomp = sol.get("ebr_decomposition")
+        if isinstance(decomp, list):
+            terms = [
+                f"{e.get('label', '')} x {e.get('coefficient', '')}"
+                for e in decomp
+                if isinstance(e, dict)
+            ]
+            lines.append(
+                f"  {sol.get('bundle_id', '')} {sol.get('valley', '')}: "
+                f"{' + '.join(terms) if terms else 'no exact solution'}"
+            )
+    excluded = report.get("excluded_bundles", [])
+    if isinstance(excluded, list) and excluded:
+        lines.append("excluded bundles:")
+        for e in excluded:
+            lines.append(f"  {e.get('bundle_id', '')}: {e.get('reason', '')}")
+    lines.append("")
+
+
 def _output_file_label(name: str) -> str:
     labels = {
         "valley_summary_txt": "Human-readable summary",
@@ -1593,6 +1634,7 @@ def _output_file_label(name: str) -> str:
         "valley_ebr_input_candidates_json": "Valley EBR input candidates",
         "valley_ebr_problem_instances_json": "Valley EBR problem instances",
         "valley_ebr_export_bundle_json": "Valley EBR export bundle",
+        "valley_reduced_ebr_mapping_json": "Valley reduced EBR mapping",
     }
     return labels.get(name, name.replace("_", " ").title())
 

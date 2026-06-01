@@ -31,6 +31,10 @@ from valleyscope.analysis.ebr_problem_instances import (
 from valleyscope.analysis.ebr_export_bundle import (
     build_ebr_export_bundle,
 )
+from valleyscope.analysis.reduced_ebr_mapping import (
+    build_reduced_ebr_mapping,
+    load_reduced_ebr_table,
+)
 from valleyscope.analysis.hsp_star_derived_characters import (
     build_hsp_star_derived_characters,
     collect_derived_characters_by_target,
@@ -394,6 +398,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     ebr_input_candidates: dict[str, object] | None = None
     ebr_problem_instances: dict[str, object] | None = None
     ebr_export_bundle: dict[str, object] | None = None
+    reduced_ebr_mapping: dict[str, object] | None = None
     if config.symmetry_adapted_valley.enabled:
         irrep_workflow_decisions = build_irrep_workflow_decisions(
             projector_symmetry_report=projector_symmetry_report,
@@ -418,6 +423,15 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         ebr_export_bundle = build_ebr_export_bundle(
             ebr_problem_instances=ebr_problem_instances,
         )
+        if config.reduced_ebr.enabled:
+            table = None
+            if config.reduced_ebr.table_file:
+                table = load_reduced_ebr_table(config.reduced_ebr.table_file)
+            reduced_ebr_mapping = build_reduced_ebr_mapping(
+                ebr_export_bundle=ebr_export_bundle,
+                table=table,
+                max_coefficient=config.reduced_ebr.max_coefficient,
+            )
 
     outputs = write_analysis_outputs(
         config=config,
@@ -442,6 +456,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         ebr_input_candidates=ebr_input_candidates,
         ebr_problem_instances=ebr_problem_instances,
         ebr_export_bundle=ebr_export_bundle,
+        reduced_ebr_mapping=reduced_ebr_mapping,
     )
     return outputs
 

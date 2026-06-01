@@ -99,6 +99,13 @@ class RotationConfig:
 
 
 @dataclass(frozen=True)
+class ReducedEbrConfig:
+    enabled: bool = False
+    table_file: Path | None = None
+    max_coefficient: int = 6
+
+
+@dataclass(frozen=True)
 class SymmetryAdaptedValleyConfig:
     enabled: bool = True
     seed_overlap_warn_tol: float = 0.8
@@ -123,6 +130,7 @@ class AppConfig:
     spinor: SpinorConfig = field(default_factory=SpinorConfig)
     rotation: RotationConfig = field(default_factory=RotationConfig)
     symmetry_adapted_valley: SymmetryAdaptedValleyConfig = field(default_factory=SymmetryAdaptedValleyConfig)
+    reduced_ebr: ReducedEbrConfig = field(default_factory=ReducedEbrConfig)
     monolayer_lattices: dict[str, np.ndarray] = field(default_factory=dict)
     layer_transforms: dict[str, dict[str, Any]] = field(default_factory=dict)
 
@@ -480,6 +488,19 @@ def _parse_rotation_config(raw: dict[str, Any]) -> RotationConfig:
     )
 
 
+def _parse_reduced_ebr_config(base: Path, raw: dict[str, Any]) -> ReducedEbrConfig:
+    if not isinstance(raw, dict):
+        return ReducedEbrConfig()
+    max_coefficient = int(raw.get("max_coefficient", 6))
+    if max_coefficient < 0:
+        raise ValueError("analysis.reduced_ebr.max_coefficient must be nonnegative")
+    return ReducedEbrConfig(
+        enabled=bool(raw.get("enabled", False)),
+        table_file=resolve_config_path(base, raw.get("table_file")),
+        max_coefficient=max_coefficient,
+    )
+
+
 def _parse_symmetry_adapted_valley_config(raw: dict[str, Any]) -> SymmetryAdaptedValleyConfig:
     if not isinstance(raw, dict):
         return SymmetryAdaptedValleyConfig()
@@ -563,6 +584,7 @@ def load_config(path: str | Path) -> AppConfig:
         symmetry_adapted_valley=_parse_symmetry_adapted_valley_config(
             analysis_raw.get("symmetry_adapted_valley", {})
         ),
+        reduced_ebr=_parse_reduced_ebr_config(base, analysis_raw.get("reduced_ebr", {})),
         output=OutputConfig(
             directory=resolve_config_path(base, output_raw.get("directory", "valley_analysis")),
             write_json=bool(output_raw.get("write_json", True)),
