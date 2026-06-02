@@ -73,6 +73,10 @@ envelope momentum `k_M - k_a^fold`. The moire reciprocal lattice is used
 only to find `k_a^fold` / `G_a^M`; it does not redefine the monolayer
 valley itself. Deprecated alias: `folded_family`.
 
+**Readiness boundary**: `k_resolved_parent_valley` changes only reporting
+weights and center diagnostics. Seed projector matrices, projector symmetry,
+and all irrep/EBR readiness gates always use fixed-center projectors.
+
 Deprecated aliases `fixed_point` and `folded_family` are accepted and
 normalized internally.
 

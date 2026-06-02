@@ -70,6 +70,10 @@ moire k 点远离所有固定中心时，所有 center mask 可能为空，导�
 
 弃用别名 `fixed_point` 和 `folded_family` 可被接受并内部规范化。
 
+**Readiness 边界**: `k_resolved_parent_valley` 仅改变 reporting weights
+和 center diagnostics。种子投影矩阵、投影仪对称性、以及所有 irrep/EBR
+readiness gates 始终使用 fixed-center projectors。
+
 ### 权重与谷间混合诊断
 
 设 $P_i$ 是第 $i$ 个谷的投影算符。默认策略下，落入多个谷投影窗口的平面波分量会从所有谷投影算符中移除，放入重叠投影算符 $P_\times$：

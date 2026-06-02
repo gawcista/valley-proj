@@ -74,6 +74,10 @@ momentum-space parent-valley projection, not full Bloch-state unfolding.
   `Q_a(k_M) = Q_a + (k_M - k_a^fold)` are used for each sampled moire k_M.
   Deprecated alias: `folded_family`.
 
+**Readiness boundary**: `k_resolved_parent_valley` is weight/report-only.
+Seed projector matrices and all irrep/EBR readiness gates use fixed-center
+projectors regardless of `projector_mode`.
+
 Do not treat high q-cut valley purity as irrep readiness. Do not test
 valley-changing operations as invariance of a single label operator.
 

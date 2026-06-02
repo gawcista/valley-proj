@@ -48,6 +48,11 @@ VASP WAVECAR / HDF5
 -> sampled-k branch coverage diagnostic
 ```
 
+Note: `diagnostics.h5/projectors/*` stores the projectors used for weight
+computation (reporting projectors). In `k_resolved_parent_valley` mode
+these are k-dependent dynamic-center projectors, not the fixed-center
+seed projectors used for readiness gates.
+
 The q-cut valley seed projector is a momentum-valley seed and diagnostic. It
 does not automatically define a trusted valley irrep basis.
 
@@ -75,6 +80,14 @@ parent-valley projector folds each `Q_a` into the moire BZ to obtain
 parent-valley diagnostic**. The moire reciprocal lattice may be used to find
 `k_a^fold` / `G_a^M`, but must not be used to redefine the monolayer valley
 itself.
+
+**Readiness boundary**: `k_resolved_parent_valley` is strictly a
+weight/report-only diagnostic. Reporting weights, center-resolved weights,
+CSV, and summary status use k-dependent dynamic centers. Seed projector
+matrices, projector symmetry-consistency, symmetry-adapted diagnostics,
+irrep workflow decisions, and EBR pipeline always use `fixed_center`
+seed projectors regardless of `projector_mode`. This prevents k-dependent
+centers from entering the readiness path.
 
 Deprecated aliases `fixed_point` (→ `fixed_center`) and `folded_family`
 (→ `k_resolved_parent_valley`) are accepted in config but normalized

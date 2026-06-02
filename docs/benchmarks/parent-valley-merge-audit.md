@@ -70,49 +70,36 @@ intermediate/debug 文件（数量随配置和启用的分析层变化）。用�
 
 ## 审计问题 4: Parent-valley projection 是否影响 irrep readiness？
 
-**结论: 默认 `fixed_center` 路径不受影响；但 `k_resolved_parent_valley`
-不是完全独立的显示层。当前实现中，如果用户显式启用
-`k_resolved_parent_valley`，它会进入 seed projector/readiness path，仍受所有
-projector symmetry 和 irrep readiness gates 约束。**
+**当前结论 (b31dc7a 实施后)**:
 
-验证路径:
+`k_resolved_parent_valley` 是严格的 **weight/report-only diagnostic**。
 
-1. `projector_mode` 影响 `adjust_centers_for_parent_valley()` 中 center 位置
-   的调整 (`sector_projectors.py:101-155`)，进而影响
-   `build_sector_projectors()` 产生的 `center_masks` 和 `sector_masks`。
+代码分离 (`analyze_hsp.py`):
+- `reporting_projectors`: 使用 mode-adjusted centers → 仅用于 weights,
+  center_weights, CSV, summary status
+- `seed_projectors`: 始终使用 `fixed_center` → 用于 seed matrices, projector
+  symmetry-consistency, symmetry-adapted diagnostics, irrep workflow
+  decisions, EBR pipeline
 
-2. 这些 masks 直接影响 `W_val`、`P_v`、`center_weights` 的计算
-   (`weights.py`)；同时也会影响 `_add_valley_subspace_diagnostic()` 生成的
-   q-cut seed matrices。后者会进入:
-   - seed projector symmetry-consistency (`projector_symmetry.py`);
-   - `apply_projector_symmetry_gate()` 对 q-cut symmetry rows 的降级；
-   - symmetry-adapted valley report 的 seed/projector diagnostics；
-   - `build_irrep_workflow_decisions()` 中的 seed status 和 q-cut readiness
-     统计。
+`fixed_center_not_captured` 状态仅影响 `valley_subspace.json` 和 summary
+中的显示文本（`_short_valley_status()` 映射），不改变任何 readiness gate。
 
-3. `irrep_workflow_decision.py` 的决策逻辑本身不直接读取
-   `projector_mode` 字符串，但会读取由当前 projector mode 产生的 seed
-   symmetry status、q-cut eigenvalue readiness、symmetry-adapted projector
-   quality 和 spinor convention。因此 `k_resolved_parent_valley` 若被用于完整
-   workflow，会通过 seed/projector 数据间接影响 readiness。
+<details>
+<summary>审计历史: 原始审计发现及修正路径</summary>
 
-4. `fixed_center_not_captured` 状态仅影响 `valley_subspace.json` 和 summary
-   中的**显示文本**（`_short_valley_status()` 映射），不改变任何 readiness
-   gate。这个结论只适用于默认 `fixed_center` 下的 low-W_val 解释。
+原始审计时 (`3d9f03d`) 发现 `projector_mode` 通过以下路径影响 readiness:
+`projector_mode → effective_centers → seed_matrices → projector_symmetry →
+irrep_workflow`。具体来说:
+1. `projector_mode` → `adjust_centers_for_parent_valley()` 调整 center 位置
+2. → `build_sector_projectors()` 产生 masks
+3. → `_add_valley_subspace_diagnostic()` 使用 masks 生成 seed matrices
+4. → `build_projector_symmetry_report()` 检查种子投影仪对称性
+5. → `build_irrep_workflow_decisions()` 读取 seed symmetry status
 
-**结论 (修正于 b31dc7a)**:
+提交 `b31dc7a` 通过拆分 reporting/seed projectors 切断了路径 3-5:
+readiness 路径始终使用 fixed-center seed projectors。
 
-原始审计发现 parent-valley projection 的代码路径确实会影响 readiness
-（`projector_mode → effective_centers → seed_matrices → projector_symmetry →
-irrep_workflow`）。提交 `b31dc7a` 已修正:
-
-- `reporting_projectors`: 使用 mode-adjusted centers，仅用于 weights/report
-- `seed_projectors`: 始终使用 `fixed_center`，用于所有 readiness gates
-
-现在 `k_resolved_parent_valley` 是严格的 weight/report-only diagnostic。
-所有 irrep/EBR readiness 评估使用不变的 fixed-center seed projectors。
-
-已不需要二选一——设计边界已通过代码强制实施:
+</details>
 
 ---
 
@@ -167,34 +154,27 @@ Blocker 优先级: B1 (spinor) > B2 (closure) > B3 (seed) > B4 (cascade) > B5 (p
 
 | 优先级 | 行动 | 理由 | 风险 |
 |--------|------|------|------|
-| **P0** | 明确 parent-valley projection 与 readiness 的边界 | ✅ 已解决 (b31dc7a): weight/report-only diagnostic, seed_projectors 始终 fixed_center | 中 |
-| **P1** | Schema 冻结文档 | 合并后 schema 需要正式文档化，避免 drift | 低 (只读) |
-| **P2** | tZrSe2 spinor 约定验证 | B1 是所有 tZrSe2 路径的根阻塞器 | 需要外部 benchmark |
-| **P3** | tZrSe2 expanded-band HDF5 | B2 (closure) 可能由截断效应引起 | 需要额外 DFT 计算 |
-| **P4** | tMoTe2 C3 irrep table 审查 | 已有 trusted candidates，需要审查后发布 | 低 (已有数据) |
+| **P1** | Schema 冻结文档 + 回归测试 | 合并后 schema 需要正式文档化；readiness 边界需要测试锁定 | 低 |
+| **P2** | tMoTe2 C3 irrep table 审查 | 已有 4 个 trusted candidates (GammaM/KM × K/K')，需要审查后发布 | 低 (已有数据) |
+| **P3** | tZrSe2 spinor 约定验证 | B1 是所有 tZrSe2 路径的根阻塞器 | 需要外部 benchmark |
+| **P4** | tZrSe2 expanded-band HDF5 | B2 (closure) 可能由截断效应引起 | 需要额外 DFT 计算 |
 | **P5** | tZrSe2 GammaM q-cut 优化 | B3 (seed overlap) 可通过 q-cut 扫描改善 | 低 (参数扫描) |
 | **P6** | Reviewed EBR table 摄入 | 仅当有审核过的外部表时才安全 | 高 (无表则无输出) |
+
+注: P0 (parent-valley readiness 边界) 已于 `b31dc7a` 解决。
 
 ### 推荐下一轮 cc 任务
 
 ```text
-1. [P0] 先写一页设计结论或方法说明，明确 `k_resolved_parent_valley`
-   是否只能作为 weight/report-only diagnostic，还是允许作为 gated seed
-   projector mode 进入 readiness。该决定会影响后续 schema freeze。
+1. 添加 readiness-boundary 回归测试: 验证 k_resolved_parent_valley 模式
+   改变 reporting weights 但不改变 seed matrices / projector symmetry /
+   irrep-EBR readiness。
 
-2. [P1] 写 docs/schema.md — 冻结公共输出 schema (valley_summary.json,
-   valley_ebr_export_bundle.json)，含每个字段的类型、含义、示例值。
-   参考 valleyscope/reports/summary_report.py 的 build_summary_payload()。
+2. 更新 AGENTS.md/README.md/PLAN.md: 明确 parent-valley mode 是
+   reporting-only；readiness seed projectors 始终使用 fixed_center。
 
-3. [P4] 审查 tMoTe2 C3 irrep table — 检查 valleyscope/irreps/tables.py
-   中的自旋 C3 不可约表示表是否正确。运行 tMoTe2 benchmark 并记录精确的
-   irrep 标签、本征相、和 readiness 状态。更新 docs/benchmarks/。
-
-4. [P2/P3/P5 调研] tZrSe2 blocker 进展评估 — 不修改代码，但评估:
-   a) 是否有可用的 spinor benchmark 数据？
-   b) expanded-band HDF5 是否已生成？
-   c) GammaM q-cut scan 的最佳 fraction 范围？
-   输出调研报告。
+3. 冻结 tMoTe2 C3 benchmark: 审查 irreps/tables.py 中的自旋 C3 表，
+   运行完整 tMoTe2 benchmark 并记录精确 irrep 标签。更新
 ```
 
 ### 不应做的事
