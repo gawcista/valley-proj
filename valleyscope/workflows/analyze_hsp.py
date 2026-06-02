@@ -166,18 +166,18 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         coefficients_by_kpoint[kpoint_name] = coefficients
         kpoint_frac_by_name[kpoint_name] = np.asarray(kpoint.frac, dtype=float)
         q_cart = kpoint.cart.reshape(1, 3) + kpoint.g_vectors_cart
-        # Adjust valley centers for k_resolved_parent_valley projector mode.
-        effective_centers = config.valley_centers
+        # --- Reporting projectors (may use k-dependent centers) ---
+        reporting_centers = config.valley_centers
         if config.projection.projector_mode == "k_resolved_parent_valley":
-            effective_centers = adjust_centers_for_parent_valley(
+            reporting_centers = adjust_centers_for_parent_valley(
                 config.valley_centers,
                 kpoint.cart,
                 wavefunctions.metadata.lattice.reciprocal_cart,
                 use_2d=config.projection.use_2d_momentum_only,
             )
-        projectors = build_sector_projectors(
+        reporting_projectors = build_sector_projectors(
             q_cart,
-            effective_centers,
+            reporting_centers,
             config.valley_subspaces,
             monolayer_recip,
             qcut,
@@ -185,9 +185,27 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             overlap_policy=config.projection.overlap_policy,
             emit_warnings=False,
         )
-        projectors_by_kpoint[kpoint_name] = projectors
-        weights = compute_valley_weights(coefficients, projectors)
-        sector_names = projectors.sector_names
+        projectors_by_kpoint[kpoint_name] = reporting_projectors
+        weights = compute_valley_weights(coefficients, reporting_projectors)
+
+        # --- Readiness seed projectors (always fixed_center) ---
+        # Seed matrices, projector symmetry-consistency, symmetry-adapted
+        # diagnostics, irrep workflow decisions, and EBR pipeline always use
+        # fixed-center projectors so that k_resolved_parent_valley is a
+        # weight/report-only diagnostic and does not affect readiness gates.
+        seed_projectors = reporting_projectors
+        if config.projection.projector_mode == "k_resolved_parent_valley":
+            seed_projectors = build_sector_projectors(
+                q_cart,
+                config.valley_centers,
+                config.valley_subspaces,
+                monolayer_recip,
+                qcut,
+                use_2d=config.projection.use_2d_momentum_only,
+                overlap_policy=config.projection.overlap_policy,
+                emit_warnings=False,
+            )
+        sector_names = reporting_projectors.sector_names
         for local_pos, result in enumerate(weights):
             source_pos = positions[local_pos]
             rows.append(
@@ -201,7 +219,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             )
         kpoint_subspace = {
             "qcut": qcut,
-            "warnings": projectors.warnings,
+            "warnings": reporting_projectors.warnings,
             "symmetry_status": "not_requested",
             "weights": [
                 _build_weight_entry(
@@ -221,7 +239,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             kpoint.band_indices_vasp[positions],
             kpoint.energies_eV[positions],
             coefficients,
-            projectors,
+            seed_projectors,
             config.analysis.degeneracy_tol_meV,
             thresholds=config.projection.thresholds if config.projection.thresholds else None,
             max_w_overlap=max_w_overlap,
@@ -244,7 +262,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             scan = scan_qcut(
                 q_cart,
                 coefficients,
-                effective_centers,
+                reporting_centers,
                 config.valley_subspaces,
                 monolayer_recip,
                 scan_qcuts,
@@ -257,7 +275,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 "qcuts": [entry.qcut for entry in scan.entries],
                 "overlap_count": [entry.overlap_count for entry in scan.entries],
                 "band_indices_vasp": kpoint.band_indices_vasp[positions],
-                "sector_names": np.asarray(projectors.sector_names, dtype="S"),
+                "sector_names": np.asarray(reporting_projectors.sector_names, dtype="S"),
                 "w_val": [
                     [result.w_val for result in entry.weights]
                     for entry in scan.entries
@@ -279,7 +297,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     for entry in scan.entries
                 ],
             }
-        valley_names = list(projectors.sector_names)
+        valley_names = list(reporting_projectors.sector_names)
         if symmetry_payload["status"] == "ok":
             update_valley_preserving_operation_inventory(
                 symmetry_payload=symmetry_payload,
