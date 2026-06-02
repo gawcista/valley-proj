@@ -222,6 +222,8 @@ def _write_detailed_outputs(
         qcut_scan_payload,
         symmetry_representation_payload,
         symmetry_payload,
+        projector_mode=config.projection.projector_mode,
+        center_weight_rows=weight_rows if config.projection.projector_mode == "k_resolved_parent_valley" else None,
     )
     if config.output.write_hdf5_basis_transform:
         outputs["valley_basis_transform_h5"] = write_basis_transform_h5(

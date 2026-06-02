@@ -138,7 +138,7 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     lines.append(f"target k-points: {', '.join(summary['target_kpoints'])}")
     lines.append(f"iband (VASP): {', '.join(str(v) for v in summary['iband'])}")
     qcut = summary["qcut"]
-    lines.append(f"projector mode: {qcut.get('projector_mode', 'fixed_point')}")
+    lines.append(f"projector mode: {qcut.get('projector_mode', 'fixed_center')}")
     lines.append(f"qcut mode: {qcut['mode']}")
     lines.append(f"qcut value: {_fmt(qcut['value_Ainv'])} A^-1")
     if qcut.get("fraction") is not None:

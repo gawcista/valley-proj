@@ -74,7 +74,9 @@ def fold_center_into_moire_bz(
         basis_2d = basis[:2, :2]
         q_2d = q[:2]
         frac_2d = q_2d @ np.linalg.inv(basis_2d)
-        g_int_2d = np.rint(frac_2d)
+        # Deterministic wrapping to centered half-open [-0.5, 0.5):
+        # +0.5 -> -0.5 with g_int += 1; -0.5 -> -0.5 with g_int unchanged.
+        g_int_2d = np.floor(frac_2d + 0.5)
         folded_frac_2d = frac_2d - g_int_2d
         folded_cart_2d = folded_frac_2d @ basis_2d
         folded_frac = np.zeros(3, dtype=float)
@@ -85,7 +87,7 @@ def fold_center_into_moire_bz(
         folded_cart[:2] = folded_cart_2d
     else:
         frac = q @ np.linalg.inv(basis)
-        g_int = np.rint(frac)
+        g_int = np.floor(frac + 0.5)
         folded_frac = frac - g_int
         folded_cart = folded_frac @ basis
     return folded_frac, g_int, folded_cart

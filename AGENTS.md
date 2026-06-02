@@ -53,28 +53,36 @@ does not automatically define a trusted valley irrep basis.
 
 ### Projector modes
 
-Two projector-center modes are available (config key `projection.projector_mode`):
+Two projector-center modes are available (config key `projection.projector_mode`).
+This is momentum-space parent-valley projection, not full monolayer Bloch-state
+unfolding.
 
-**`fixed_point`** (default, backward compatible): For each moire k-point,
-compare plane-wave momenta `q = k_M + G_M` to fixed monolayer valley centers
-`Q_a` modulo the monolayer reciprocal lattice. This is a **local
-fixed-valley-point diagnostic** — it asks whether `q` lies near a fixed `Q_a`.
-When the sampled k-point is far from all fixed centers, all center masks may
-be empty, giving `W_val = 0`. This indicates a k/center mismatch, not
-necessarily absence of valley-family origin.
+**`fixed_center`** (default): For each moire k-point, compare plane-wave
+momenta `q = k_M + G_M` to fixed monolayer valley centers `Q_a` modulo the
+monolayer reciprocal lattice. This is a **local fixed-valley-point
+diagnostic** — it asks whether `q` lies near a fixed `Q_a`. When the sampled
+k-point is far from all fixed centers, all center masks may be empty, giving
+`W_val = 0`. This is reported as `fixed_center_not_captured` (not bare
+`not_derived`) — it indicates a k/center mismatch, not necessarily absence of
+parent-valley origin.
 
-**`folded_family`**: For an NHSP valley-derived miniband, the physical
-question is whether the miniband comes from the valley family
-`Q_a + envelope momentum` across the moire BZ. The folded-family projector
-folds each `Q_a` into the moire BZ to obtain `k_a^fold`, then uses the
-k-dependent dynamic center `Q_a(k_M) = Q_a + (k_M - k_a^fold)`. This is an
-**NHSP valley-family / miniband-origin diagnostic**. The moire reciprocal
-lattice may be used to find `k_a^fold` / `G_a^M`, but must not be used to
-redefine the monolayer valley itself.
+**`k_resolved_parent_valley`**: For an NHSP parent-valley-derived miniband,
+the physical question is whether the miniband comes from the parent-valley
+family `Q_a + envelope momentum` across the moire BZ. The k-resolved
+parent-valley projector folds each `Q_a` into the moire BZ to obtain
+`k_a^fold`, then uses the k-dependent dynamic center
+`Q_a(k_M) = Q_a + (k_M - k_a^fold)`. This is a **momentum-space
+parent-valley diagnostic**. The moire reciprocal lattice may be used to find
+`k_a^fold` / `G_a^M`, but must not be used to redefine the monolayer valley
+itself.
 
-Low `fixed_point` `W_val` should not be described as final proof that a state
-is not valley-family-derived. If keeping compact `not_derived`, qualify it as
-projector-mode-specific in docs and warnings.
+Deprecated aliases `fixed_point` (→ `fixed_center`) and `folded_family`
+(→ `k_resolved_parent_valley`) are accepted in config but normalized
+internally.
+
+Low `fixed_center` `W_val` must use `fixed_center_not_captured` or
+`low_fixed_center_weight` in summary output, never an unqualified
+`not_derived`.
 
 ## Direct qcut trusted path (tMoTe2-like clean systems)
 

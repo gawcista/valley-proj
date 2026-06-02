@@ -98,20 +98,23 @@ def build_sector_projectors(
     )
 
 
-def adjust_centers_for_folded_family(
+def adjust_centers_for_parent_valley(
     centers: list[ValleyCenter],
     moire_k_cart: np.ndarray,
     moire_reciprocal_cart: np.ndarray,
     *,
     use_2d: bool = True,
 ) -> list[ValleyCenter]:
-    """Create k-dependent dynamic centers for the folded_family projector mode.
+    """Create k-dependent dynamic centers for k-resolved parent-valley projection.
 
     Each monolayer valley center Q_a is folded into the moire BZ:
         Q_a = k_a^fold + G_a^M
 
     For a given moire k-point k_M, the dynamic center is:
         Q_a(k_M) = Q_a + (k_M - k_a^fold) = k_M + G_a^M
+
+    This is momentum-space parent-valley projection, not full monolayer
+    Bloch-state unfolding.
 
     Parameters
     ----------
@@ -150,3 +153,7 @@ def adjust_centers_for_folded_family(
             )
         )
     return adjusted
+
+
+# Deprecated alias — use adjust_centers_for_parent_valley.
+adjust_centers_for_folded_family = adjust_centers_for_parent_valley

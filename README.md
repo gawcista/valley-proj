@@ -52,22 +52,29 @@ The labels used in YAML, such as `K_valley`, are user-chosen names for these val
 
 ### Projector Modes
 
-Two projector-center modes are available via `projection.projector_mode`:
+Two projector-center modes are available via `projection.projector_mode`.
+This is momentum-space parent-valley projection, not full monolayer
+Bloch-state unfolding.
 
-**`fixed_point`** (default, backward compatible): The local fixed-valley-point
-diagnostic. Plane-wave momenta `q = k_M + G_M` are compared to fixed monolayer
-valley centers `Q_a` modulo the monolayer reciprocal lattice. When the sampled
-moire k-point is far from all fixed centers, all center masks may be empty,
-giving `W_val = 0`. This indicates a k/center mismatch, not necessarily
-absence of valley-family origin.
+**`fixed_center`** (default): The local fixed-valley-point diagnostic.
+Plane-wave momenta `q = k_M + G_M` are compared to fixed monolayer
+valley centers `Q_a` modulo the monolayer reciprocal lattice. When the
+sampled moire k-point is far from all fixed centers, all center masks
+may be empty, giving `W_val = 0`. The summary reports this as
+`fixed_center_not_captured` (not bare `not_derived`) — a k/center
+mismatch, not necessarily absence of parent-valley origin.
 
-**`folded_family`**: The NHSP valley-family / miniband-origin diagnostic. Each
-monolayer valley center `Q_a` is folded into the moire BZ to obtain
+**`k_resolved_parent_valley`**: The momentum-space parent-valley diagnostic.
+Each monolayer valley center `Q_a` is folded into the moire BZ to obtain
 `k_a^fold`. For each sampled moire k_M, the dynamic center
-`Q_a(k_M) = Q_a + (k_M - k_a^fold)` is used, asking whether a moire miniband
-at k_M comes from the valley family centered at `Q_a` with envelope momentum
-`k_M - k_a^fold`. The moire reciprocal lattice is used only to find
-`k_a^fold` / `G_a^M`; it does not redefine the monolayer valley itself.
+`Q_a(k_M) = Q_a + (k_M - k_a^fold)` is used, asking whether a moire
+miniband at k_M comes from the parent valley centered at `Q_a` with
+envelope momentum `k_M - k_a^fold`. The moire reciprocal lattice is used
+only to find `k_a^fold` / `G_a^M`; it does not redefine the monolayer
+valley itself. Deprecated alias: `folded_family`.
+
+Deprecated aliases `fixed_point` and `folded_family` are accepted and
+normalized internally.
 
 ### Weights and Intervalley-Mixing Diagnostics
 
@@ -450,7 +457,7 @@ valley_subspaces:
     centers: [top_Kp, bottom_Kp]
 
 projection:
-  projector_mode: fixed_point   # default; or folded_family for NHSP miniband diagnostics
+  projector_mode: fixed_center   # default; or k_resolved_parent_valley for parent-valley diagnostics
   qcut_fraction: 0.20
   qcut_scan: [0.15, 0.20, 0.25, 0.30]
   thresholds:

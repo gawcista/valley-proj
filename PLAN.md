@@ -64,13 +64,15 @@ Inside this subspace:
 
 ### Projector modes
 
-Two projector-center modes (`projection.projector_mode`):
+Two projector-center modes (`projection.projector_mode`). This is
+momentum-space parent-valley projection, not full Bloch-state unfolding.
 
-- **`fixed_point`** (default): Local fixed-valley-point diagnostic.
+- **`fixed_center`** (default): Local fixed-valley-point diagnostic.
   `q = k_M + G_M` is compared to fixed monolayer valley centers `Q_a`.
-- **`folded_family`**: NHSP valley-family / miniband-origin diagnostic.
+- **`k_resolved_parent_valley`**: Momentum-space parent-valley diagnostic.
   `Q_a` is folded into the moire BZ to obtain `k_a^fold`; dynamic centers
   `Q_a(k_M) = Q_a + (k_M - k_a^fold)` are used for each sampled moire k_M.
+  Deprecated alias: `folded_family`.
 
 Do not treat high q-cut valley purity as irrep readiness. Do not test
 valley-changing operations as invariance of a single label operator.

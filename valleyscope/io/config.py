@@ -28,10 +28,31 @@ class AnalysisConfig:
     degeneracy_tol_meV: float = 1.0
 
 
+# Canonical projector_mode values and their deprecated aliases.
+_PROJECTOR_MODE_ALIASES: dict[str, str] = {
+    "fixed_center": "fixed_center",
+    "k_resolved_parent_valley": "k_resolved_parent_valley",
+    # Deprecated aliases — normalized internally.
+    "fixed_point": "fixed_center",
+    "folded_family": "k_resolved_parent_valley",
+}
+
+
+def _normalize_projector_mode(raw: str) -> str:
+    """Normalize projector_mode, raising on invalid values."""
+    canonical = _PROJECTOR_MODE_ALIASES.get(str(raw))
+    if canonical is None:
+        raise ValueError(
+            f"projection.projector_mode must be 'fixed_center' or 'k_resolved_parent_valley'; "
+            f"got {raw!r}"
+        )
+    return canonical
+
+
 @dataclass(frozen=True)
 class ProjectionConfig:
     use_2d_momentum_only: bool = True
-    projector_mode: str = "fixed_point"
+    projector_mode: str = "fixed_center"
     qcut_mode: str = "moire_shell"
     qcut_shell: float = 3.0
     qcut_Ainv: float | None = None
@@ -574,7 +595,7 @@ def load_config(path: str | Path) -> AppConfig:
         valley_subspaces=valley_subspaces,
         projection=ProjectionConfig(
             use_2d_momentum_only=bool(projection_raw.get("use_2d_momentum_only", True)),
-            projector_mode=str(projection_raw.get("projector_mode", "fixed_point")),
+            projector_mode=_normalize_projector_mode(projection_raw.get("projector_mode", "fixed_center")),
             qcut_mode=_projection_qcut_mode(projection_raw),
             qcut_shell=float(projection_raw.get("qcut_shell", 3.0)),
             qcut_Ainv=projection_raw.get("qcut_Ainv"),

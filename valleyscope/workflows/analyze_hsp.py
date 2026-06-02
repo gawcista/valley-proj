@@ -78,7 +78,7 @@ from valleyscope.projection.qcut_scan import (
 )
 from valleyscope.projection.sector_projectors import (
     SectorProjectors,
-    adjust_centers_for_folded_family,
+    adjust_centers_for_parent_valley,
     build_sector_projectors,
 )
 from valleyscope.projection.weights import compute_valley_weights
@@ -166,10 +166,10 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         coefficients_by_kpoint[kpoint_name] = coefficients
         kpoint_frac_by_name[kpoint_name] = np.asarray(kpoint.frac, dtype=float)
         q_cart = kpoint.cart.reshape(1, 3) + kpoint.g_vectors_cart
-        # Adjust valley centers for folded_family projector mode.
+        # Adjust valley centers for k_resolved_parent_valley projector mode.
         effective_centers = config.valley_centers
-        if config.projection.projector_mode == "folded_family":
-            effective_centers = adjust_centers_for_folded_family(
+        if config.projection.projector_mode == "k_resolved_parent_valley":
+            effective_centers = adjust_centers_for_parent_valley(
                 config.valley_centers,
                 kpoint.cart,
                 wavefunctions.metadata.lattice.reciprocal_cart,
@@ -469,9 +469,9 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         kpoint_names=config.analysis.kpoints,
         kpoint_frac_by_name=kpoint_frac_by_name,
     )
-    # --- Warn when fixed_point projector has large k-center mismatch ---
-    if config.projection.projector_mode == "fixed_point":
-        _warn_fixed_point_center_distance(
+    # --- Warn when fixed_center projector has large k-center mismatch ---
+    if config.projection.projector_mode == "fixed_center":
+        _warn_fixed_center_distance(
             folded_center_report=folded_center_report,
             kpoint_names=config.analysis.kpoints,
             weight_rows=rows,
@@ -2061,32 +2061,53 @@ def _build_sampled_k_coverage(
     }
 
 
-def _warn_fixed_point_center_distance(
+def _warn_fixed_center_distance(
     *,
     folded_center_report,
     kpoint_names: list[str],
     weight_rows: list[dict[str, object]],
     subspace_payload: dict[str, object],
 ) -> None:
-    """Emit a diagnostic warning when fixed_point projector detects W_val=0
+    """Emit a diagnostic warning when fixed_center projector detects W_val=0
     or low weight that may be due to k/center mismatch rather than absence
-    of valley-family origin."""
+    of valley-family origin.
+
+    Also injects mode-aware qualification into subspace_payload weight entries
+    so that valley_summary.json/txt carry the qualification.
+    """
     import warnings
 
     kp_names = list(kpoint_names)
     large_distance_Ainv = 0.1  # heuristic threshold for warning
+    warned_centers: set[str] = set()
     for entry in folded_center_report.entries:
         dists = folded_center_report.kpoint_distances.get(entry.center_name, [])
         if not dists:
             continue
         min_dist = float(min(dists))
         if min_dist > large_distance_Ainv:
+            warned_centers.add(entry.center_name)
             nearest_idx = int(min(range(len(dists)), key=lambda i: dists[i]))
             nearest_k = kp_names[nearest_idx] if nearest_idx < len(kp_names) else "?"
             message = (
-                f"fixed_point projector: folded center {entry.center_name} is "
+                f"fixed_center projector: folded center {entry.center_name} is "
                 f"{min_dist:.3f} A^-1 from nearest sampled k-point {nearest_k}. "
-                "Low fixed-point W_val may indicate k/center mismatch, not "
-                "absence of valley-family origin. Consider projector_mode: folded_family."
+                "Low fixed-center W_val may indicate k/center mismatch, not "
+                "absence of parent-valley origin. Consider projector_mode: k_resolved_parent_valley."
             )
             warnings.warn(message, UserWarning, stacklevel=2)
+    # Inject mode-aware qualification into subspace weights.
+    if warned_centers:
+        for kp_name, kp_data in subspace_payload.get("kpoints", {}).items():
+            if not isinstance(kp_data, dict):
+                continue
+            for w in kp_data.get("weights", []):
+                if not isinstance(w, dict):
+                    continue
+                if w.get("valley_status") in ("not_derived", "not_valley_derived") and w.get("W_val", 1.0) < 0.01:
+                    w["valley_status"] = "fixed_center_not_captured"
+                    w["valley_status_note"] = (
+                        "fixed_center projector: W_val near zero may indicate "
+                        "k/center mismatch, not absence of parent-valley origin. "
+                        "Consider k_resolved_parent_valley projector_mode."
+                    )
