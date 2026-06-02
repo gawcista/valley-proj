@@ -88,7 +88,7 @@ valley-changing operations as invariance of a single label operator.
 | Phase 4 | Real benchmarks (tMoTe2, tZrSe2) | Smoke tests pass; blockers documented |
 | Phase 5 | EBR input/candidate/problem/export pipeline | Done |
 | Phase 6 | Reduced EBR mapping interface | Default-off external-table solver exists; no built-in tables |
-| Phase 7 | Parent-valley / k-resolved projector diagnostics | In review — cc/folded-family-projection branch |
+| Phase 7 | Parent-valley / k-resolved projector diagnostics | Done — merged to main |
 
 ## Real Benchmarks
 
@@ -107,6 +107,10 @@ valley-changing operations as invariance of a single label operator.
 
 ## Open Work
 
+* Freeze public schema after parent-valley projection merge: distinguish main
+  user entry, downstream EBR entry, and debug/detail outputs.
+* Build a minimal benchmark matrix for tMoTe2, tZrSe2, and tPdSe2/PdSe2 with
+  expected `trusted`, `diagnostic_only`, and `blocked` outcomes.
 * Spinor convention benchmark verification for tZrSe2.
 * Expanded-band HDF5 to test D_raw closure sensitivity.
 * Design reviewed EBR table ingestion for trusted C3/C2 instances.
