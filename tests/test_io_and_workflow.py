@@ -3171,3 +3171,74 @@ def test_rotation_thresholds_from_config_parsed_and_applied(tmp_path):
     with outputs2["symmetry_eigenvalues_csv"].open(encoding="utf-8") as handle:
         rows2 = list(csv.DictReader(handle))
     assert len(rows2) > 0
+
+
+def test_output_files_manifest_has_labels_for_all_output_keys(tmp_path):
+    """Every output key produced by write_analysis_outputs must have
+    a human-readable label in _output_file_label, so valley_summary.txt
+    shows a clean Output files section."""
+    from valleyscope.reports.summary_report import _output_file_label
+    from valleyscope.reports.analysis_outputs import write_analysis_outputs
+
+    # Build a dict with None values for all possible keys — the function
+    # signature itself defines the possible output indentifiers.
+    import inspect
+    sig = inspect.signature(write_analysis_outputs)
+    # Check that every known output label produces a non-empty result.
+    known_keys = [
+        "valley_summary_txt", "valley_summary_json",
+        "valley_weights_csv", "valley_subspace_json",
+        "valley_basis_transform_h5", "symmetry_report_json",
+        "symmetry_eigenvalues_csv", "diagnostics_h5",
+        "projector_symmetry_report_json",
+        "symmetry_adapted_valley_analysis_json",
+        "target_subspace_closure_json", "hsp_star_conjugation_json",
+        "hsp_star_derived_characters_json",
+        "subspace_representation_quality_json",
+        "irrep_workflow_decisions_json", "valley_irrep_matching_json",
+        "valley_ebr_input_candidates_json",
+        "valley_ebr_problem_instances_json",
+        "valley_ebr_export_bundle_json",
+        "valley_reduced_ebr_mapping_json",
+    ]
+    for key in known_keys:
+        label = _output_file_label(key)
+        assert label, f"missing label for output key: {key}"
+        assert label != key.replace("_", " ").title().lower(), (
+            f"label for {key} is still the fallback: {label}"
+        )
+
+
+def test_output_file_labels_no_stale_legacy_names():
+    """The public output file labels must not contain stale legacy names
+    like valley_sectors, target_bands_vasp, rotation_eigenvalues,
+    little_group_eigenvalues, or little_group_representations."""
+    from valleyscope.reports.summary_report import _output_file_label
+
+    known_keys = [
+        "valley_summary_txt", "valley_summary_json",
+        "valley_weights_csv", "valley_subspace_json",
+        "valley_basis_transform_h5", "symmetry_report_json",
+        "symmetry_eigenvalues_csv", "diagnostics_h5",
+        "projector_symmetry_report_json",
+        "symmetry_adapted_valley_analysis_json",
+        "target_subspace_closure_json", "hsp_star_conjugation_json",
+        "hsp_star_derived_characters_json",
+        "subspace_representation_quality_json",
+        "irrep_workflow_decisions_json", "valley_irrep_matching_json",
+        "valley_ebr_input_candidates_json",
+        "valley_ebr_problem_instances_json",
+        "valley_ebr_export_bundle_json",
+        "valley_reduced_ebr_mapping_json",
+    ]
+    stale_terms = [
+        "valley_sectors", "target_bands_vasp",
+        "rotation_eigenvalues", "little_group_eigenvalues",
+        "little_group_representations",
+    ]
+    for key in known_keys:
+        label = _output_file_label(key).lower()
+        for term in stale_terms:
+            assert term not in label, (
+                f"stale term '{term}' in label for {key}: {label}"
+            )

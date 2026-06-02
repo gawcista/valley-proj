@@ -1635,6 +1635,12 @@ def _output_file_label(name: str) -> str:
         "valley_ebr_problem_instances_json": "Valley EBR problem instances",
         "valley_ebr_export_bundle_json": "Valley EBR export bundle",
         "valley_reduced_ebr_mapping_json": "Valley reduced EBR mapping",
+        "target_subspace_closure_json": "Target subspace closure",
+        "hsp_star_conjugation_json": "HSP star conjugation",
+        "hsp_star_derived_characters_json": "HSP star derived characters",
+        "subspace_representation_quality_json": "Subspace representation quality",
+        "irrep_workflow_decisions_json": "Irrep workflow decisions",
+        "valley_irrep_matching_json": "Valley irrep matching",
     }
     return labels.get(name, name.replace("_", " ").title())
 
