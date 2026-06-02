@@ -1619,30 +1619,32 @@ def _render_reduced_ebr_mapping(
     lines.append("")
 
 
+OUTPUT_FILE_LABELS: dict[str, str] = {
+    "valley_summary_txt": "Human-readable summary",
+    "valley_summary_json": "Machine-readable summary",
+    "valley_weights_csv": "Valley weights",
+    "valley_subspace_json": "Valley subspace analysis",
+    "valley_basis_transform_h5": "Valley basis transform",
+    "symmetry_report_json": "Symmetry analysis",
+    "symmetry_eigenvalues_csv": "Symmetry eigenvalues",
+    "diagnostics_h5": "Projector, qcut, and symmetry matrices",
+    "projector_symmetry_report_json": "Projector symmetry report",
+    "symmetry_adapted_valley_analysis_json": "Symmetry-adapted valley analysis",
+    "valley_ebr_input_candidates_json": "Valley EBR input candidates",
+    "valley_ebr_problem_instances_json": "Valley EBR problem instances",
+    "valley_ebr_export_bundle_json": "Valley EBR export bundle",
+    "valley_reduced_ebr_mapping_json": "Valley reduced EBR mapping",
+    "target_subspace_closure_json": "Target subspace closure",
+    "hsp_star_conjugation_json": "HSP star conjugation",
+    "hsp_star_derived_characters_json": "HSP star derived characters",
+    "subspace_representation_quality_json": "Subspace representation quality",
+    "irrep_workflow_decisions_json": "Irrep workflow decisions",
+    "valley_irrep_matching_json": "Valley irrep matching",
+}
+
+
 def _output_file_label(name: str) -> str:
-    labels = {
-        "valley_summary_txt": "Human-readable summary",
-        "valley_summary_json": "Machine-readable summary",
-        "valley_weights_csv": "Valley weights",
-        "valley_subspace_json": "Valley subspace analysis",
-        "valley_basis_transform_h5": "Valley basis transform",
-        "symmetry_report_json": "Symmetry analysis",
-        "symmetry_eigenvalues_csv": "Symmetry eigenvalues",
-        "diagnostics_h5": "Projector, qcut, and symmetry matrices",
-        "projector_symmetry_report_json": "Projector symmetry report",
-        "symmetry_adapted_valley_analysis_json": "Symmetry-adapted valley analysis",
-        "valley_ebr_input_candidates_json": "Valley EBR input candidates",
-        "valley_ebr_problem_instances_json": "Valley EBR problem instances",
-        "valley_ebr_export_bundle_json": "Valley EBR export bundle",
-        "valley_reduced_ebr_mapping_json": "Valley reduced EBR mapping",
-        "target_subspace_closure_json": "Target subspace closure",
-        "hsp_star_conjugation_json": "HSP star conjugation",
-        "hsp_star_derived_characters_json": "HSP star derived characters",
-        "subspace_representation_quality_json": "Subspace representation quality",
-        "irrep_workflow_decisions_json": "Irrep workflow decisions",
-        "valley_irrep_matching_json": "Valley irrep matching",
-    }
-    return labels.get(name, name.replace("_", " ").title())
+    return OUTPUT_FILE_LABELS.get(name, name.replace("_", " ").title())
 
 
 def _compact_projector_symmetry(report: dict[str, Any]) -> dict[str, Any]:
