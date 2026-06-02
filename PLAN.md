@@ -62,6 +62,16 @@ Inside this subspace:
 6. The `direct_qcut` path bypasses P_a^sym when the q-cut seed basis already
    passes all readiness gates (tMoTe2-like clean systems).
 
+### Projector modes
+
+Two projector-center modes (`projection.projector_mode`):
+
+- **`fixed_point`** (default): Local fixed-valley-point diagnostic.
+  `q = k_M + G_M` is compared to fixed monolayer valley centers `Q_a`.
+- **`folded_family`**: NHSP valley-family / miniband-origin diagnostic.
+  `Q_a` is folded into the moire BZ to obtain `k_a^fold`; dynamic centers
+  `Q_a(k_M) = Q_a + (k_M - k_a^fold)` are used for each sampled moire k_M.
+
 Do not treat high q-cut valley purity as irrep readiness. Do not test
 valley-changing operations as invariance of a single label operator.
 
@@ -76,6 +86,7 @@ valley-changing operations as invariance of a single label operator.
 | Phase 4 | Real benchmarks (tMoTe2, tZrSe2) | Smoke tests pass; blockers documented |
 | Phase 5 | EBR input/candidate/problem/export pipeline | Done |
 | Phase 6 | Reduced EBR mapping interface | Default-off external-table solver exists; no built-in tables |
+| Phase 7 | folded_family / k-dependent projector diagnostics | In progress — cc/folded-family-projection branch |
 
 ## Real Benchmarks
 

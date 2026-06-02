@@ -44,6 +44,8 @@ def write_analysis_outputs(
     ebr_problem_instances: dict[str, object] | None = None,
     ebr_export_bundle: dict[str, object] | None = None,
     reduced_ebr_mapping: dict[str, object] | None = None,
+    folded_center_payload: dict[str, object] | None = None,
+    sampled_k_coverage: dict[str, object] | None = None,
 ) -> dict[str, object]:
     output_dir = config.output.directory
     outputs: dict[str, object] = {}
@@ -72,6 +74,8 @@ def write_analysis_outputs(
             ebr_problem_instances=ebr_problem_instances,
             ebr_export_bundle=ebr_export_bundle,
             reduced_ebr_mapping=reduced_ebr_mapping,
+            folded_center_payload=folded_center_payload,
+            sampled_k_coverage=sampled_k_coverage,
         )
     _write_summary_outputs(
         config=config,
@@ -93,6 +97,8 @@ def write_analysis_outputs(
         ebr_problem_instances=ebr_problem_instances,
         ebr_export_bundle=ebr_export_bundle,
         reduced_ebr_mapping=reduced_ebr_mapping,
+        folded_center_payload=folded_center_payload,
+        sampled_k_coverage=sampled_k_coverage,
     )
     return outputs
 
@@ -122,6 +128,8 @@ def _write_detailed_outputs(
     ebr_problem_instances: dict[str, object] | None = None,
     ebr_export_bundle: dict[str, object] | None = None,
     reduced_ebr_mapping: dict[str, object] | None = None,
+    folded_center_payload: dict[str, object] | None = None,
+    sampled_k_coverage: dict[str, object] | None = None,
 ) -> None:
     if config.output.write_csv:
         outputs["valley_weights_csv"] = write_valley_weights_csv(
@@ -198,6 +206,16 @@ def _write_detailed_outputs(
                 output_dir / "valley_reduced_ebr_mapping.json",
                 reduced_ebr_mapping,
             )
+        if folded_center_payload is not None:
+            outputs["folded_center_report_json"] = write_json(
+                output_dir / "folded_center_report.json",
+                folded_center_payload,
+            )
+        if sampled_k_coverage is not None:
+            outputs["sampled_k_coverage_json"] = write_json(
+                output_dir / "sampled_k_coverage.json",
+                sampled_k_coverage,
+            )
     outputs["diagnostics_h5"] = write_diagnostics_h5(
         output_dir / "diagnostics.h5",
         projectors_by_kpoint,
@@ -233,6 +251,8 @@ def _write_summary_outputs(
     ebr_problem_instances: dict[str, object] | None = None,
     ebr_export_bundle: dict[str, object] | None = None,
     reduced_ebr_mapping: dict[str, object] | None = None,
+    folded_center_payload: dict[str, object] | None = None,
+    sampled_k_coverage: dict[str, object] | None = None,
 ) -> None:
     summary_path_plan: dict[str, Path] = {}
     if config.output.write_summary_txt or not config.output.write_detailed_files:
@@ -263,6 +283,8 @@ def _write_summary_outputs(
         ebr_problem_instances=ebr_problem_instances,
         ebr_export_bundle=ebr_export_bundle,
         reduced_ebr_mapping=reduced_ebr_mapping,
+        folded_center_payload=folded_center_payload,
+        sampled_k_coverage=sampled_k_coverage,
     )
     summary_text = render_summary_text(summary_payload)
     if "valley_summary_txt" in summary_path_plan:

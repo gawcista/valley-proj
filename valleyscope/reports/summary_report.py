@@ -32,10 +32,13 @@ def build_summary_payload(
     ebr_problem_instances: dict[str, Any] | None = None,
     ebr_export_bundle: dict[str, Any] | None = None,
     reduced_ebr_mapping: dict[str, Any] | None = None,
+    folded_center_payload: dict[str, Any] | None = None,
+    sampled_k_coverage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     eigen_rows = [] if symmetry_rows is None else symmetry_rows
     warnings = _collect_warnings(subspace_payload, symmetry_payload, eigen_rows)
     qcut_payload: dict[str, Any] = {
+        "projector_mode": config.projection.projector_mode,
         "mode": config.projection.qcut_mode,
         "value_Ainv": float(qcut),
         "scan": list(config.projection.qcut_scan),
@@ -112,6 +115,10 @@ def build_summary_payload(
         payload["valley_ebr_export_bundle"] = ebr_export_bundle
     if reduced_ebr_mapping is not None:
         payload["valley_reduced_ebr_mapping"] = reduced_ebr_mapping
+    if folded_center_payload is not None:
+        payload["folded_center_report"] = folded_center_payload
+    if sampled_k_coverage is not None:
+        payload["sampled_k_coverage"] = sampled_k_coverage
     return payload
 
 
@@ -131,6 +138,7 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     lines.append(f"target k-points: {', '.join(summary['target_kpoints'])}")
     lines.append(f"iband (VASP): {', '.join(str(v) for v in summary['iband'])}")
     qcut = summary["qcut"]
+    lines.append(f"projector mode: {qcut.get('projector_mode', 'fixed_point')}")
     lines.append(f"qcut mode: {qcut['mode']}")
     lines.append(f"qcut value: {_fmt(qcut['value_Ainv'])} A^-1")
     if qcut.get("fraction") is not None:
@@ -1645,6 +1653,8 @@ OUTPUT_FILE_LABELS: dict[str, str] = {
     "subspace_representation_quality_json": "Subspace representation quality",
     "irrep_workflow_decisions_json": "Irrep workflow decisions",
     "valley_irrep_matching_json": "Valley irrep matching",
+    "folded_center_report_json": "Folded-center report",
+    "sampled_k_coverage_json": "Sampled k-point coverage",
 }
 
 

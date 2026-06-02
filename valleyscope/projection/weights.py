@@ -18,6 +18,7 @@ DEFAULT_THRESHOLDS = {
 class ValleyWeightResult:
     band_position: int
     sector_weights: dict[str, float]
+    center_weights: dict[str, float]
     w_val: float
     purity: float
     residual_weight: float
@@ -51,6 +52,11 @@ def compute_valley_weights(coefficients: np.ndarray, projectors: SectorProjector
             name: float(np.sum(probs[mask]))
             for name, mask in projectors.sector_masks.items()
         }
+        # Center-resolved weights: raw window weights before overlap exclusion.
+        center_weights = {
+            name: float(np.sum(probs[mask]))
+            for name, mask in projectors.center_masks.items()
+        }
         w_val = float(sum(sector_weights.values()))
         overlap_weight = float(np.sum(probs[projectors.overlap_mask]))
         residual_weight = float(max(0.0, norm - w_val - overlap_weight))
@@ -62,6 +68,7 @@ def compute_valley_weights(coefficients: np.ndarray, projectors: SectorProjector
             ValleyWeightResult(
                 band_position=band_pos,
                 sector_weights=sector_weights,
+                center_weights=center_weights,
                 w_val=w_val,
                 purity=purity,
                 residual_weight=residual_weight,

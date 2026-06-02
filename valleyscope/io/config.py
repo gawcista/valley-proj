@@ -31,6 +31,7 @@ class AnalysisConfig:
 @dataclass(frozen=True)
 class ProjectionConfig:
     use_2d_momentum_only: bool = True
+    projector_mode: str = "fixed_point"
     qcut_mode: str = "moire_shell"
     qcut_shell: float = 3.0
     qcut_Ainv: float | None = None
@@ -543,6 +544,7 @@ def load_config(path: str | Path) -> AppConfig:
     projection_raw = raw.get("projection", {})
     allowed_projection_keys = {
         "use_2d_momentum_only",
+        "projector_mode",
         "qcut_mode",
         "qcut_shell",
         "qcut_Ainv",
@@ -572,6 +574,7 @@ def load_config(path: str | Path) -> AppConfig:
         valley_subspaces=valley_subspaces,
         projection=ProjectionConfig(
             use_2d_momentum_only=bool(projection_raw.get("use_2d_momentum_only", True)),
+            projector_mode=str(projection_raw.get("projector_mode", "fixed_point")),
             qcut_mode=_projection_qcut_mode(projection_raw),
             qcut_shell=float(projection_raw.get("qcut_shell", 3.0)),
             qcut_Ainv=projection_raw.get("qcut_Ainv"),

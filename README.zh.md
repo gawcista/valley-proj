@@ -50,6 +50,21 @@ d_a(\mathbf q)=
 ```
 YAML 中的 `K_valley` 等名称只是用户定义的谷子空间标签。
 
+### 投影模式
+
+通过 `projection.projector_mode` 可选择两种投影中心模式：
+
+**`fixed_point`**（默认，向后兼容）：局部固定谷点诊断。将平面波动量
+`q = k_M + G_M` 与固定的单层谷中心 `Q_a` 比较（模单层倒格矢）。当采样
+moire k 点远离所有固定中心时，所有 center mask 可能为空，导致
+`W_val = 0`。这表示 k/center 不匹配，不一定是谷家族起源的缺失。
+
+**`folded_family`**：NHSP 谷家族/迷你带起源诊断。将每个单层谷中心 `Q_a`
+折叠到 moire BZ 中得到 `k_a^fold`。对每个采样的 moire k_M，使用动态中心
+`Q_a(k_M) = Q_a + (k_M - k_a^fold)`，询问在 k_M 处的 moire 迷你带是否来自
+以 `Q_a` 为中心的谷家族（包络动量为 `k_M - k_a^fold`）。moire 倒格矢仅用于
+计算 `k_a^fold` / `G_a^M`，不重新定义单层谷本身。
+
 ### 权重与谷间混合诊断
 
 设 $P_i$ 是第 $i$ 个谷的投影算符。默认策略下，落入多个谷投影窗口的平面波分量会从所有谷投影算符中移除，放入重叠投影算符 $P_\times$：
@@ -405,6 +420,7 @@ valley_subspaces:
     centers: [top_Kp, bottom_Kp]
 
 projection:
+  projector_mode: fixed_point   # 默认；或 folded_family 用于 NHSP 迷你带诊断
   qcut_fraction: 0.20
   qcut_scan: [0.15, 0.20, 0.25, 0.30]
   thresholds:

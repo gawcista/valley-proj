@@ -8,7 +8,14 @@ from valleyscope.projection.weights import ValleyWeightResult
 
 def write_valley_weights_csv(path: str | Path, rows: list[dict[str, object]], sector_names: list[str]) -> Path:
     out = Path(path)
-    fieldnames = ["kpoint", "band_vasp", "energy_eV", *sector_names, "W_val", "P_v", "eta", "W_overlap", "W_res"]
+    # Collect center weight column names from rows if present.
+    center_cols: list[str] = []
+    for row in rows:
+        for key in row:
+            if key.startswith("center_") and key not in center_cols:
+                center_cols.append(key)
+    fieldnames = ["kpoint", "band_vasp", "energy_eV", *sector_names,
+                  "W_val", "P_v", "eta", "W_overlap", "W_res", *center_cols]
     with out.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
@@ -81,4 +88,7 @@ def weight_row(
     }
     for sector in sector_names:
         row[sector] = result.sector_weights.get(sector, 0.0)
+    # Center-resolved weights: raw window weights before overlap exclusion.
+    for center_name, weight in result.center_weights.items():
+        row[f"center_{center_name}"] = weight
     return row

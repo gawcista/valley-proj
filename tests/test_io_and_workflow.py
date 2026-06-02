@@ -595,6 +595,8 @@ def test_analyze_hsp_writes_csv_json_and_diagnostics_h5(tmp_path):
         "eta",
         "W_overlap",
         "W_res",
+        "center_K",
+        "center_Kp",
     ]
     subspace = json.loads(outputs["valley_subspace_json"].read_text(encoding="utf-8"))
     weight = subspace["kpoints"]["GammaM"]["weights"][0]

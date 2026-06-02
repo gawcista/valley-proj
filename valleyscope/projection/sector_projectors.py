@@ -7,6 +7,7 @@ import numpy as np
 
 from valleyscope.geometry.reciprocal import minimum_periodic_distance
 from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector, centers_by_name
+from valleyscope.projection.folded_center import fold_center_into_moire_bz
 
 
 @dataclass(frozen=True)
@@ -95,3 +96,57 @@ def build_sector_projectors(
         qcut=float(qcut),
         warnings=messages,
     )
+
+
+def adjust_centers_for_folded_family(
+    centers: list[ValleyCenter],
+    moire_k_cart: np.ndarray,
+    moire_reciprocal_cart: np.ndarray,
+    *,
+    use_2d: bool = True,
+) -> list[ValleyCenter]:
+    """Create k-dependent dynamic centers for the folded_family projector mode.
+
+    Each monolayer valley center Q_a is folded into the moire BZ:
+        Q_a = k_a^fold + G_a^M
+
+    For a given moire k-point k_M, the dynamic center is:
+        Q_a(k_M) = Q_a + (k_M - k_a^fold) = k_M + G_a^M
+
+    Parameters
+    ----------
+    centers : list of ValleyCenter
+        Original monolayer valley centers.
+    moire_k_cart : (3,) ndarray
+        Cartesian coordinate of the current moire k-point.
+    moire_reciprocal_cart : (3, 3) ndarray
+        Moire reciprocal lattice basis.
+    use_2d : bool
+        If True, only in-plane components are used.
+
+    Returns
+    -------
+    list of ValleyCenter
+        New centers with cart adjusted to Q_a(k_M).
+    """
+    k_m = np.asarray(moire_k_cart, dtype=float)
+    adjusted: list[ValleyCenter] = []
+    for center in centers:
+        folded_frac, g_int, folded_cart = fold_center_into_moire_bz(
+            center.cart, moire_reciprocal_cart, use_2d=use_2d,
+        )
+        # Q_a(k_M) = Q_a + (k_M - k_a^fold)
+        # k_a^fold = folded_cart (cartesian of folded frac position)
+        k_a_fold = np.asarray(folded_cart, dtype=float)
+        dynamic_center_cart = np.asarray(center.cart, dtype=float) + (k_m - k_a_fold)
+        if use_2d:
+            dynamic_center_cart[2] = 0.0
+        adjusted.append(
+            ValleyCenter(
+                name=center.name,
+                cart=dynamic_center_cart,
+                layer=center.layer,
+                reciprocal_cart=center.reciprocal_cart,
+            )
+        )
+    return adjusted

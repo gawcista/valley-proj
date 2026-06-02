@@ -44,10 +44,37 @@ VASP WAVECAR / HDF5
 -> subspace representation quality diagnostics
 -> HSP-star conjugation graphs / derived characters
 -> qcut scans, raw matrix dumps, representative-candidate details
+-> folded-center report (center folding into moire BZ, k-center distances)
+-> sampled-k branch coverage diagnostic
 ```
 
 The q-cut valley seed projector is a momentum-valley seed and diagnostic. It
 does not automatically define a trusted valley irrep basis.
+
+### Projector modes
+
+Two projector-center modes are available (config key `projection.projector_mode`):
+
+**`fixed_point`** (default, backward compatible): For each moire k-point,
+compare plane-wave momenta `q = k_M + G_M` to fixed monolayer valley centers
+`Q_a` modulo the monolayer reciprocal lattice. This is a **local
+fixed-valley-point diagnostic** — it asks whether `q` lies near a fixed `Q_a`.
+When the sampled k-point is far from all fixed centers, all center masks may
+be empty, giving `W_val = 0`. This indicates a k/center mismatch, not
+necessarily absence of valley-family origin.
+
+**`folded_family`**: For an NHSP valley-derived miniband, the physical
+question is whether the miniband comes from the valley family
+`Q_a + envelope momentum` across the moire BZ. The folded-family projector
+folds each `Q_a` into the moire BZ to obtain `k_a^fold`, then uses the
+k-dependent dynamic center `Q_a(k_M) = Q_a + (k_M - k_a^fold)`. This is an
+**NHSP valley-family / miniband-origin diagnostic**. The moire reciprocal
+lattice may be used to find `k_a^fold` / `G_a^M`, but must not be used to
+redefine the monolayer valley itself.
+
+Low `fixed_point` `W_val` should not be described as final proof that a state
+is not valley-family-derived. If keeping compact `not_derived`, qualify it as
+projector-mode-specific in docs and warnings.
 
 ## Direct qcut trusted path (tMoTe2-like clean systems)
 
@@ -86,7 +113,8 @@ for downstream tools.
 - `valley_reduced_ebr_mapping.json` (only when `analysis.reduced_ebr.enabled`)
 
 **Debug / detail outputs**:
-- `diagnostics.h5` — projector, qcut, and symmetry matrices
+- `diagnostics.h5` — projector, qcut, and symmetry matrices; center_masks and
+  center-resolved weights
 - `subspace_representation_quality.json` — optional/default-off standalone
   per-operation quality decomposition; data remains embedded in formal reports
 - `hsp_star_conjugation.json` — full conjugation graphs
@@ -95,6 +123,8 @@ for downstream tools.
 - `qcut_scan_payload` in diagnostics.h5
 - raw matrix dumps in diagnostics.h5
 - representative-candidate details in symmetry-adapted analysis JSON
+- `folded_center_report.json` — valley-center folding into moire BZ
+- `sampled_k_coverage.json` — branch coverage diagnostic for sampled k-points
 
 ## Roles
 

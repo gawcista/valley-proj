@@ -76,8 +76,16 @@ from valleyscope.projection.qcut_scan import (
     qcut_from_moire_shell,
     scan_qcut,
 )
-from valleyscope.projection.sector_projectors import SectorProjectors, build_sector_projectors
+from valleyscope.projection.sector_projectors import (
+    SectorProjectors,
+    adjust_centers_for_folded_family,
+    build_sector_projectors,
+)
 from valleyscope.projection.weights import compute_valley_weights
+from valleyscope.projection.folded_center import (
+    build_folded_center_report,
+    folded_center_report_to_dict,
+)
 from valleyscope.reports.analysis_outputs import write_analysis_outputs
 from valleyscope.reports.csv_report import weight_row
 from valleyscope.subspace.valley_basis import (
@@ -147,6 +155,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     raw_representations_by_kpoint: dict[str, dict[object, dict[str, object]]] = {}
     coefficients_by_kpoint: dict[str, np.ndarray] = {}
     valley_matrices_by_kpoint: dict[str, dict[str, np.ndarray]] = {}
+    kpoint_frac_by_name: dict[str, np.ndarray] = {}
     symmetry_payload: dict[str, object] = _prepare_symmetry_payload(config, monolayer_recip)
     symmetry_payload["spinor_wavefunction"] = bool(wavefunctions.metadata.spinor)
 
@@ -155,10 +164,20 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         positions = _target_band_positions(kpoint.band_indices_vasp, config.analysis.iband)
         coefficients = kpoint.coefficients[positions]
         coefficients_by_kpoint[kpoint_name] = coefficients
+        kpoint_frac_by_name[kpoint_name] = np.asarray(kpoint.frac, dtype=float)
         q_cart = kpoint.cart.reshape(1, 3) + kpoint.g_vectors_cart
+        # Adjust valley centers for folded_family projector mode.
+        effective_centers = config.valley_centers
+        if config.projection.projector_mode == "folded_family":
+            effective_centers = adjust_centers_for_folded_family(
+                config.valley_centers,
+                kpoint.cart,
+                wavefunctions.metadata.lattice.reciprocal_cart,
+                use_2d=config.projection.use_2d_momentum_only,
+            )
         projectors = build_sector_projectors(
             q_cart,
-            config.valley_centers,
+            effective_centers,
             config.valley_subspaces,
             monolayer_recip,
             qcut,
@@ -225,7 +244,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             scan = scan_qcut(
                 q_cart,
                 coefficients,
-                config.valley_centers,
+                effective_centers,
                 config.valley_subspaces,
                 monolayer_recip,
                 scan_qcuts,
@@ -433,6 +452,32 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 max_coefficient=config.reduced_ebr.max_coefficient,
             )
 
+    # --- Folded-center report ---
+    folded_center_report = build_folded_center_report(
+        centers=config.valley_centers,
+        moire_reciprocal_cart=wavefunctions.metadata.lattice.reciprocal_cart,
+        sampled_k_frac=kpoint_frac_by_name,
+        use_2d=config.projection.use_2d_momentum_only,
+    )
+    folded_center_payload = folded_center_report_to_dict(
+        folded_center_report,
+        kpoint_names=config.analysis.kpoints,
+    )
+    # --- Sampled-k coverage diagnostic ---
+    sampled_k_coverage = _build_sampled_k_coverage(
+        folded_center_report=folded_center_report,
+        kpoint_names=config.analysis.kpoints,
+        kpoint_frac_by_name=kpoint_frac_by_name,
+    )
+    # --- Warn when fixed_point projector has large k-center mismatch ---
+    if config.projection.projector_mode == "fixed_point":
+        _warn_fixed_point_center_distance(
+            folded_center_report=folded_center_report,
+            kpoint_names=config.analysis.kpoints,
+            weight_rows=rows,
+            subspace_payload=subspace_payload,
+        )
+
     outputs = write_analysis_outputs(
         config=config,
         qcut=qcut,
@@ -457,6 +502,8 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         ebr_problem_instances=ebr_problem_instances,
         ebr_export_bundle=ebr_export_bundle,
         reduced_ebr_mapping=reduced_ebr_mapping,
+        folded_center_payload=folded_center_payload,
+        sampled_k_coverage=sampled_k_coverage,
     )
     return outputs
 
@@ -820,6 +867,7 @@ def _build_weight_entry(
         "valley_status": status,
         "valley_weights": result.sector_weights,
         "sector_weights": result.sector_weights,
+        "center_weights": result.center_weights,
         "W_val": result.w_val,
         "P_v": result.purity,
         "eta": eta_raw,
@@ -1943,3 +1991,102 @@ def _detected_identity_operation_id(
         if order == 1 and all(mapping.get(valley) == target for valley, target in identity_mapping.items()):
             return operation.get("operation_id", "__identity__")
     return "__identity__"
+
+
+def _build_sampled_k_coverage(
+    *,
+    folded_center_report,
+    kpoint_names: list[str],
+    kpoint_frac_by_name: dict[str, np.ndarray],
+) -> dict[str, object]:
+    """Build a sampled-k branch coverage diagnostic.
+
+    Reports nearest sampled k for each folded center and flags when
+    sampled k-points appear to cover only one side/branch of available
+    k-space locations.  Purely diagnostic — does not block readiness.
+    """
+    import numpy as np
+
+    coverage_per_center: dict[str, object] = {}
+    kp_names = list(kpoint_names)
+    for entry in folded_center_report.entries:
+        dists = folded_center_report.kpoint_distances.get(entry.center_name, [])
+        if not dists:
+            continue
+        nearest_idx = int(np.argmin(dists))
+        nearest_k = kp_names[nearest_idx] if nearest_idx < len(kp_names) else "?"
+        coverage_per_center[entry.center_name] = {
+            "folded_frac": entry.folded_frac.tolist(),
+            "nearest_sampled_k": nearest_k,
+            "nearest_distance_Ainv": float(dists[nearest_idx]),
+            "all_distances": {
+                kp: float(d) for kp, d in zip(kp_names, dists)
+            },
+        }
+
+    # Simple branch coverage heuristic: for each center, check if all sampled
+    # k-points lie on one side of the folded center in frac space.
+    one_sided_warnings: list[dict[str, object]] = []
+    for entry in folded_center_report.entries:
+        folded_frac = np.asarray(entry.folded_frac, dtype=float)
+        k_fracs = []
+        for kp in kp_names:
+            kf = np.asarray(kpoint_frac_by_name.get(kp, np.zeros(3)), dtype=float)
+            delta = kf[:2] - folded_frac[:2]
+            delta -= np.rint(delta)
+            k_fracs.append(delta)
+        if len(k_fracs) < 2:
+            continue
+        k_arr = np.array(k_fracs, dtype=float)
+        if np.allclose(k_arr, 0.0, atol=1e-14):
+            continue
+        # Use uncentered SVD: projects points from origin (folded center).
+        # If all projections have the same sign, all sampled k lie on one
+        # side of the folded center.
+        u, s, vt = np.linalg.svd(k_arr, full_matrices=False)
+        proj = k_arr @ vt[0]
+        if len(proj) >= 2 and (np.all(proj >= -1e-10) or np.all(proj <= 1e-10)):
+            one_sided_warnings.append({
+                "center_name": entry.center_name,
+                "message": (
+                    f"Sampled k-points appear to cover only one side of "
+                    f"folded center {entry.center_name} (one-sided projection). "
+                    "This is a sampling diagnostic, not a code blocker."
+                ),
+            })
+
+    return {
+        "per_center": coverage_per_center,
+        "one_sided_branch_warnings": one_sided_warnings,
+    }
+
+
+def _warn_fixed_point_center_distance(
+    *,
+    folded_center_report,
+    kpoint_names: list[str],
+    weight_rows: list[dict[str, object]],
+    subspace_payload: dict[str, object],
+) -> None:
+    """Emit a diagnostic warning when fixed_point projector detects W_val=0
+    or low weight that may be due to k/center mismatch rather than absence
+    of valley-family origin."""
+    import warnings
+
+    kp_names = list(kpoint_names)
+    large_distance_Ainv = 0.1  # heuristic threshold for warning
+    for entry in folded_center_report.entries:
+        dists = folded_center_report.kpoint_distances.get(entry.center_name, [])
+        if not dists:
+            continue
+        min_dist = float(min(dists))
+        if min_dist > large_distance_Ainv:
+            nearest_idx = int(min(range(len(dists)), key=lambda i: dists[i]))
+            nearest_k = kp_names[nearest_idx] if nearest_idx < len(kp_names) else "?"
+            message = (
+                f"fixed_point projector: folded center {entry.center_name} is "
+                f"{min_dist:.3f} A^-1 from nearest sampled k-point {nearest_k}. "
+                "Low fixed-point W_val may indicate k/center mismatch, not "
+                "absence of valley-family origin. Consider projector_mode: folded_family."
+            )
+            warnings.warn(message, UserWarning, stacklevel=2)
