@@ -100,17 +100,19 @@ projector symmetry 和 irrep readiness gates 约束。**
    中的**显示文本**（`_short_valley_status()` 映射），不改变任何 readiness
    gate。这个结论只适用于默认 `fixed_center` 下的 low-W_val 解释。
 
-**结论**: parent-valley projection 对当前默认 benchmark/readiness 路径是
-保守的，因为默认仍是 `fixed_center`，且所有 irrep/EBR readiness gates 仍会
-执行。但它不应被描述为完全独立于 readiness 的纯显示层。下一步 schema
-freeze 前需要明确二选一:
+**结论 (修正于 b31dc7a)**:
 
-- 将 `k_resolved_parent_valley` 严格降级为 weight/report-only diagnostic，
-  readiness seed projectors 始终使用 `fixed_center`；或
-- 保持当前 "projector mode feeds seed path" 设计，但在 public schema 中明确
-  任何 `k_resolved_parent_valley` irrep/EBR readiness claim 都必须经过 seed
-  symmetry、closure、spinor 和 matching gates，且目前尚未作为正式 benchmark
-  冻结。
+原始审计发现 parent-valley projection 的代码路径确实会影响 readiness
+（`projector_mode → effective_centers → seed_matrices → projector_symmetry →
+irrep_workflow`）。提交 `b31dc7a` 已修正:
+
+- `reporting_projectors`: 使用 mode-adjusted centers，仅用于 weights/report
+- `seed_projectors`: 始终使用 `fixed_center`，用于所有 readiness gates
+
+现在 `k_resolved_parent_valley` 是严格的 weight/report-only diagnostic。
+所有 irrep/EBR readiness 评估使用不变的 fixed-center seed projectors。
+
+已不需要二选一——设计边界已通过代码强制实施:
 
 ---
 
@@ -165,7 +167,7 @@ Blocker 优先级: B1 (spinor) > B2 (closure) > B3 (seed) > B4 (cascade) > B5 (p
 
 | 优先级 | 行动 | 理由 | 风险 |
 |--------|------|------|------|
-| **P0** | 明确 parent-valley projection 与 readiness 的边界 | schema freeze 前必须决定是 weight-only diagnostic 还是 gated seed mode | 中 |
+| **P0** | 明确 parent-valley projection 与 readiness 的边界 | ✅ 已解决 (b31dc7a): weight/report-only diagnostic, seed_projectors 始终 fixed_center | 中 |
 | **P1** | Schema 冻结文档 | 合并后 schema 需要正式文档化，避免 drift | 低 (只读) |
 | **P2** | tZrSe2 spinor 约定验证 | B1 是所有 tZrSe2 路径的根阻塞器 | 需要外部 benchmark |
 | **P3** | tZrSe2 expanded-band HDF5 | B2 (closure) 可能由截断效应引起 | 需要额外 DFT 计算 |
