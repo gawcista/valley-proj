@@ -588,7 +588,8 @@ Valley-preserving gate 为：
 
 ## 读取输出
 
-分析结果写到 `output.directory`。
+分析结果写到 `output.directory`。冻结的公共 schema 定义在
+[`docs/schema.md`](docs/schema.md)。
 
 ### 主入口
 

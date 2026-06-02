@@ -621,7 +621,8 @@ not the old all-valley intersection. An operation that preserves one valley whil
 
 ## Reading the Outputs
 
-The analyzer writes results under `output.directory`.
+The analyzer writes results under `output.directory`. The frozen public schema
+is documented in [`docs/schema.md`](docs/schema.md).
 
 ### Main User Entry
 

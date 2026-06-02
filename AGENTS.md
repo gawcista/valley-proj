@@ -126,6 +126,10 @@ for downstream tools.
 
 ## Public Output Schema
 
+The frozen public schema is defined in [`docs/schema.md`](docs/schema.md).
+This section is a summary; the schema document is authoritative for field
+names, types, and stability guarantees.
+
 **Main user entry**:
 - `valley_summary.txt` / `valley_summary.json`
 
