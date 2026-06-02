@@ -3399,3 +3399,32 @@ def test_parent_valley_mode_changes_reporting_but_not_readiness(tmp_path):
     assert all(s == "fixed_center_not_captured" for s in fc_statuses), (
         f"fixed_center low-W_val should be fixed_center_not_captured, got {fc_statuses}"
     )
+
+
+def test_schema_doc_covers_public_outputs_and_reduced_ebr_statuses():
+    """docs/schema.md names the required public files and reduced-EBR statuses."""
+    schema_text = Path("docs/schema.md").read_text(encoding="utf-8")
+
+    # Public user and downstream EBR files must be named.
+    for name in [
+        "valley_summary.txt", "valley_summary.json",
+        "valley_ebr_export_bundle.json", "valley_reduced_ebr_mapping.json",
+    ]:
+        assert name in schema_text, f"docs/schema.md must mention {name}"
+
+    # Reduced-EBR public statuses must be listed in table or prose.
+    for status in [
+        "not_evaluated", "missing_table", "solved_exact", "no_exact_solution",
+    ]:
+        assert status in schema_text, (
+            f"docs/schema.md must document reduced-EBR status '{status}'"
+        )
+
+    # Reduced-EBR public field names must appear.
+    for field in [
+        "mapping_status", "reduced_ebr_decomposition_status",
+        "table_status", "not_applicable", "not_provided", "loaded",
+    ]:
+        assert field in schema_text, (
+            f"docs/schema.md must document reduced-EBR field '{field}'"
+        )

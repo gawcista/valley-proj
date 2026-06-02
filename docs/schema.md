@@ -126,25 +126,51 @@ AND `readiness_level == "trusted"`.
 Exact-integer reduced EBR decomposition. **Default-off**; requires
 `analysis.reduced_ebr.enabled: true` and a user-supplied validated table file.
 
+Top-level fields (always present):
+
 | Field | Type | Description |
 |-------|------|-------------|
-| `status` | string | `"not_evaluated"`, `"solved_exact"`, `"no_exact_solution"` |
-| `solutions` | list[object] | Per-bundle solution entries |
+| `status` | string | `"not_evaluated"`, `"missing_table"`, `"solved_exact"`, `"no_exact_solution"` |
+| `mapping_status` | string | Same as `status` |
+| `reduced_ebr_decomposition_status` | string | Same as `status` |
+| `table_status` | string | `"not_applicable"` (reduced_ebr disabled or no export bundle), `"not_provided"` (enabled but no table file), `"loaded"` (table loaded and decomposition attempted) |
+| `solutions` | list[object] | Per-bundle solution entries (empty list when no bundles to decompose) |
 | `excluded_bundles` | list[object] | Bundles excluded from solving |
 | `solver` | string | `"brute_force_exact_integer"` |
-| `table_status` | string | `"loaded"` or `"not_provided"` |
-| `interpretation` | string | Human-readable status |
+| `interpretation` | string | Human-readable status message |
 
-Each solution (when `status == "solved_exact"`):
+Conditional fields:
+
+| Field | Type | Condition |
+|-------|------|-----------|
+| `max_coefficient` | int | Present when a table is loaded and `analysis.reduced_ebr.enabled` |
+
+Each solution entry (common fields, always present):
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `bundle_id` | string | Source bundle ID |
 | `valley` | string | Valley label |
 | `subspace_group_candidate` | string | Group candidate |
-| `ebr_decomposition` | list[object] | EBR labels with integer coefficients |
+| `irrep_vector` | list[int] | Integer count vector aligned to table irrep order |
+| `status` | string | `"solved_exact"` or `"no_exact_solution"` |
+
+When `status == "solved_exact"`, additionally:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ebr_decomposition` | list[object] | EBR labels with integer coefficients (non-zero only) |
 | `ebr_decomposition[].label` | string | EBR irrep label from user table |
 | `ebr_decomposition[].coefficient` | int | Non-negative integer multiplicity |
+
+When `status == "no_exact_solution"`, `ebr_decomposition` is absent.
+
+Each excluded bundle:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `bundle_id` | string | Source bundle ID |
+| `reason` | string | `"missing_table"`, `"not ready for external solver"`, `"table group X != bundle group Y"`, or `"could not resolve irrep keys to table irreps"` |
 
 ---
 
@@ -187,3 +213,128 @@ schema version bump and are not part of the frozen public schema.
    `target_subspace_closure.json`, `hsp_star_*`
 3. **Layer 3 — optional external-table reduced EBR mapping**:
    `valley_reduced_ebr_mapping.json` (default-off)
+
+---
+
+## Compact Example Shapes
+
+### `valley_summary.json`
+
+```json
+{
+  "input": {
+    "wavefunction_h5": "wave.h5",
+    "operation_structure_file": "POSCAR",
+    "operation_detection_backend": "spglib",
+    "spinor_convention": "vasp_up_down_saxis_z",
+    "spinor_convention_verified": false,
+    "spinor_benchmark": null
+  },
+  "target_kpoints": ["GammaM", "KM"],
+  "iband": [2195, 2196],
+  "valley_subspaces": [
+    {"label": "K_valley", "centers": ["top_K", "bottom_K"]}
+  ],
+  "qcut": {
+    "projector_mode": "fixed_center",
+    "mode": "relative_min_valley_distance",
+    "value_Ainv": 0.034,
+    "fraction": 0.2,
+    "scan": [0.15, 0.20, 0.25]
+  },
+  "valley_projection_summary": [
+    {
+      "kpoint": "GammaM", "band_vasp": 2195,
+      "W_val": 0.98, "P_v": 0.99, "eta": 0.96,
+      "W_overlap": 0.0, "W_res": 0.02,
+      "status": "clean"
+    }
+  ],
+  "valley_subspace_analysis": [
+    {
+      "kpoint": "GammaM", "basis_status": "valley_separable",
+      "S_min": 0.97, "S_max": 0.99,
+      "min_concentration": 0.98,
+      "assigned_valleys": ["K_valley", "Kp_valley"],
+      "status": "clean"
+    }
+  ],
+  "warnings": [],
+  "legend": { "W_val": "valley-subspace weight", "P_v": "valley purity" }
+}
+```
+
+### `valley_ebr_export_bundle.json`
+
+```json
+{
+  "status": "ready_for_external_solver",
+  "bundle_count": 1,
+  "excluded_count": 0,
+  "schema_version": "1.0.0",
+  "reduced_ebr_decomposition_status": "not_implemented",
+  "interpretation": "1 bundle(s) ready for external reduced EBR decomposition",
+  "bundles": [
+    {
+      "bundle_id": "bundle_K_valley",
+      "source_instance_id": "K_valley",
+      "valley": "K_valley",
+      "subspace_group_candidate": "P3",
+      "workflow_path": "direct_qcut",
+      "readiness_level": "trusted",
+      "irreps_by_kpoint": {"GammaM": ["-K5"], "KM": ["-K6"]},
+      "operations_by_kpoint": {"GammaM": [0, 1, 2], "KM": [0, 1, 2]},
+      "expected_hsps": ["GammaM", "KM"],
+      "optional_hsps": ["MM"],
+      "missing_optional_hsps": ["MM"],
+      "ready_for_external_solver": true
+    }
+  ],
+  "excluded_instances": []
+}
+```
+
+### `valley_reduced_ebr_mapping.json` (with table)
+
+```json
+{
+  "status": "solved_exact",
+  "mapping_status": "solved_exact",
+  "reduced_ebr_decomposition_status": "solved_exact",
+  "table_status": "loaded",
+  "solutions": [
+    {
+      "bundle_id": "bundle_K_valley",
+      "valley": "K_valley",
+      "subspace_group_candidate": "P3",
+      "irrep_vector": [1, 1],
+      "status": "solved_exact",
+      "ebr_decomposition": [
+        {"label": "(A)1a", "coefficient": 1},
+        {"label": "(B)1a", "coefficient": 1}
+      ]
+    }
+  ],
+  "excluded_bundles": [],
+  "solver": "brute_force_exact_integer",
+  "max_coefficient": 6,
+  "interpretation": "Exact integer linear combination of EBR vectors ..."
+}
+```
+
+### `valley_reduced_ebr_mapping.json` (missing table)
+
+```json
+{
+  "status": "missing_table",
+  "mapping_status": "missing_table",
+  "reduced_ebr_decomposition_status": "missing_table",
+  "table_status": "not_provided",
+  "solutions": [],
+  "excluded_bundles": [
+    {"bundle_id": "bundle_K_valley", "reason": "missing_table"}
+  ],
+  "solver": "brute_force_exact_integer",
+  "interpretation": "no reduced EBR table provided"
+}
+```
