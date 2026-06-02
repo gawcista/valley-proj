@@ -87,7 +87,8 @@ for downstream tools.
 
 **Debug / detail outputs**:
 - `diagnostics.h5` — projector, qcut, and symmetry matrices
-- `subspace_representation_quality.json` — per-operation quality decomposition
+- `subspace_representation_quality.json` — optional/default-off standalone
+  per-operation quality decomposition; data remains embedded in formal reports
 - `hsp_star_conjugation.json` — full conjugation graphs
 - `hsp_star_derived_characters.json` — derived character entries
 - `target_subspace_closure.json` — closure provenance diagnostics

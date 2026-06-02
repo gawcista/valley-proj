@@ -161,7 +161,7 @@ def _write_detailed_outputs(
                 output_dir / "hsp_star_derived_characters.json",
                 hsp_star_derived_characters,
             )
-        if symmetry_adapted_valley_report is not None:
+        if symmetry_adapted_valley_report is not None and config.symmetry_adapted_valley.write_subspace_representation_quality:
             quality_json_path = output_dir / "subspace_representation_quality.json"
             quality_report = _extract_quality_report(symmetry_adapted_valley_report)
             if quality_report is not None:

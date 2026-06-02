@@ -606,8 +606,13 @@ valley_irrep_matching.json              ← valley-preserving irrep matching
 irrep_workflow_decisions.json           ← workflow path decisions
 projector_symmetry_report.json          ← seed projector symmetry
 target_subspace_closure.json            ← D_raw closure diagnostics
-subspace_representation_quality.json    ← representation quality decomposition
 ```
+
+`subspace_representation_quality` data remains embedded in
+`symmetry_adapted_valley_analysis.json` and `valley_summary.json`. The
+standalone `subspace_representation_quality.json` debug file is disabled by
+default and is written only when
+`analysis.symmetry_adapted_valley.write_subspace_representation_quality: true`.
 
 ### Downstream EBR Entry
 
@@ -634,6 +639,7 @@ valley_basis_transform.h5   ← basis transform
 diagnostics.h5              ← projector masks and q-cut scan data
 hsp_star_conjugation.json   ← HSP-star conjugation graphs
 hsp_star_derived_characters.json ← derived HSP-star characters
+subspace_representation_quality.json ← optional/default-off representation quality decomposition
 ```
 
 ### `valley_weights.csv`

@@ -1147,6 +1147,133 @@ def test_write_detailed_files_false_writes_only_summary_files(tmp_path):
     assert not (out_dir / "diagnostics.h5").exists()
 
 
+def test_subspace_representation_quality_standalone_json_default_off(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    config = load_config(config_path)
+    from valleyscope.reports.analysis_outputs import write_analysis_outputs
+
+    quality_row = {
+        "target_valley": "K_valley",
+        "operation_id": 0,
+        "diagnosis": "ok",
+        "local_unitarity_error": 1.0e-8,
+    }
+    symmetry_adapted_valley_report = {
+        "by_kpoint": {
+            "GammaM": {
+                "valley_preserving_subspaces": [
+                    {
+                        "reference_valley": "K_valley",
+                        "subspace_representation_quality": {"rows": [quality_row]},
+                    }
+                ]
+            }
+        }
+    }
+
+    outputs = write_analysis_outputs(
+        config=config,
+        qcut=0.5,
+        weight_rows=[],
+        sector_names=["K_valley"],
+        subspace_payload={"kpoints": {}},
+        symmetry_payload={
+            "status": "ok",
+            "detected_operations": [],
+            "candidate_rotations": [],
+            "little_group_check": {"status": "evaluated_per_kpoint"},
+            "valley_preservation_check": {"status": "completed"},
+        },
+        symmetry_rows=[],
+        projectors_by_kpoint={},
+        qcut_scan_payload={},
+        symmetry_representation_payload={},
+        basis_transforms={},
+        symmetry_adapted_valley_report=symmetry_adapted_valley_report,
+    )
+
+    assert config.symmetry_adapted_valley.write_subspace_representation_quality is False
+    assert "subspace_representation_quality_json" not in outputs
+    assert not (out_dir / "subspace_representation_quality.json").exists()
+    assert outputs["symmetry_adapted_valley_analysis_json"].exists()
+    analysis_payload = json.loads(outputs["symmetry_adapted_valley_analysis_json"].read_text(encoding="utf-8"))
+    assert analysis_payload["by_kpoint"]["GammaM"]["valley_preserving_subspaces"][0][
+        "subspace_representation_quality"
+    ]["rows"] == [quality_row]
+    summary_payload = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    assert "subspace_representation_quality_json" not in summary_payload["output_files"]
+    assert summary_payload["symmetry_adapted_valley_analysis"] == symmetry_adapted_valley_report
+
+
+def test_subspace_representation_quality_standalone_json_opt_in(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw.setdefault("analysis", {})["symmetry_adapted_valley"] = {
+        "write_subspace_representation_quality": True,
+    }
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    config = load_config(config_path)
+    from valleyscope.reports.analysis_outputs import write_analysis_outputs
+
+    quality_row = {
+        "target_valley": "K_valley",
+        "operation_id": 0,
+        "diagnosis": "unitarity_failed",
+        "local_unitarity_error": 2.0e-2,
+    }
+    symmetry_adapted_valley_report = {
+        "by_kpoint": {
+            "GammaM": {
+                "valley_preserving_subspaces": [
+                    {
+                        "reference_valley": "K_valley",
+                        "subspace_representation_quality": {"rows": [quality_row]},
+                    }
+                ]
+            }
+        }
+    }
+
+    outputs = write_analysis_outputs(
+        config=config,
+        qcut=0.5,
+        weight_rows=[],
+        sector_names=["K_valley"],
+        subspace_payload={"kpoints": {}},
+        symmetry_payload={
+            "status": "ok",
+            "detected_operations": [],
+            "candidate_rotations": [],
+            "little_group_check": {"status": "evaluated_per_kpoint"},
+            "valley_preservation_check": {"status": "completed"},
+        },
+        symmetry_rows=[],
+        projectors_by_kpoint={},
+        qcut_scan_payload={},
+        symmetry_representation_payload={},
+        basis_transforms={},
+        symmetry_adapted_valley_report=symmetry_adapted_valley_report,
+    )
+
+    assert config.symmetry_adapted_valley.write_subspace_representation_quality is True
+    assert outputs["subspace_representation_quality_json"] == out_dir / "subspace_representation_quality.json"
+    quality_payload = json.loads(outputs["subspace_representation_quality_json"].read_text(encoding="utf-8"))
+    assert quality_payload["status"] == "quality_issues_detected"
+    assert quality_payload["rows"] == [{**quality_row, "kpoint": "GammaM"}]
+    summary_payload = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    assert "subspace_representation_quality_json" in summary_payload["output_files"]
+
+
 def test_summary_warns_about_skipped_rotation_representation(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "config.yaml"

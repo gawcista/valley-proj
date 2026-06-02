@@ -116,6 +116,7 @@ class SymmetryAdaptedValleyConfig:
     representation_unitarity_fail_tol: float = 1e-2
     ebr_seed_overlap_min: float = 0.8
     ebr_unitarity_max: float = 1e-3
+    write_subspace_representation_quality: bool = False
 
 
 @dataclass(frozen=True)
@@ -514,6 +515,7 @@ def _parse_symmetry_adapted_valley_config(raw: dict[str, Any]) -> SymmetryAdapte
         representation_unitarity_fail_tol=float(raw.get("representation_unitarity_fail_tol", 1e-2)),
         ebr_seed_overlap_min=float(raw.get("ebr_seed_overlap_min", 0.8)),
         ebr_unitarity_max=float(raw.get("ebr_unitarity_max", 1e-3)),
+        write_subspace_representation_quality=bool(raw.get("write_subspace_representation_quality", False)),
     )
 
 

@@ -579,8 +579,13 @@ valley_irrep_matching.json              ← valley-preserving irrep 匹配
 irrep_workflow_decisions.json           ← 工作流路径决策
 projector_symmetry_report.json          ← seed projector 对称性
 target_subspace_closure.json            ← D_raw 闭包诊断
-subspace_representation_quality.json    ← 表示质量分解
 ```
+
+`subspace_representation_quality` 数据仍嵌在
+`symmetry_adapted_valley_analysis.json` 和 `valley_summary.json` 中。单独的
+`subspace_representation_quality.json` 是 debug 文件，默认关闭；只有设置
+`analysis.symmetry_adapted_valley.write_subspace_representation_quality: true`
+时才写出。
 
 ### 下游 EBR 入口
 
@@ -607,6 +612,7 @@ valley_basis_transform.h5   ← 谷适配基变换
 diagnostics.h5              ← projector mask 和 q-cut scan 数据
 hsp_star_conjugation.json   ← HSP-star 共轭图
 hsp_star_derived_characters.json ← 衍生 HSP-star character
+subspace_representation_quality.json ← 可选/默认关闭的表示质量分解
 ```
 
 ### valley_weights.csv

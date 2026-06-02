@@ -13,7 +13,8 @@ The repo already has:
 * moire HSP symmetry representation matrices D_raw;
 * seed projector symmetry-consistency diagnostic (`projector_symmetry_report.json`);
 * target-subspace closure provenance diagnostics (`target_subspace_closure.json`);
-* subspace representation quality diagnostics (`subspace_representation_quality.json`).
+* subspace representation quality diagnostics (embedded in formal reports;
+  standalone `subspace_representation_quality.json` is optional/default-off).
 
 **Layer 2 — gated irrep workflow:**
 * irrep workflow decision layer (`direct_qcut` / `symmetry_adapted` / `blocked`);
@@ -30,8 +31,9 @@ The repo already has:
 **Output and summary:**
 * `valley_summary.txt` / `valley_summary.json` (main user entry);
 * `valley_ebr_export_bundle.json` (downstream EBR entry);
-* debug/detail outputs: diagnostics.h5, subspace_representation_quality.json,
-  HSP-star conjugation/derived character JSONs, raw matrices, qcut scans.
+* debug/detail outputs: diagnostics.h5, optional/default-off
+  subspace_representation_quality.json, HSP-star conjugation/derived character
+  JSONs, raw matrices, qcut scans.
 
 ## Methodology
 
