@@ -674,6 +674,43 @@ def test_cli_prints_human_readable_summary(tmp_path, capsys):
     assert "qcut value" in out
 
 
+def test_summary_text_renders_qcut_fraction_for_relative_mode(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["projection"].pop("qcut_Ainv", None)
+    raw["projection"]["qcut_mode"] = "relative_min_valley_distance"
+    raw["projection"]["qcut_fraction"] = 0.2
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    config = load_config(config_path)
+    from valleyscope.reports.summary_report import build_summary_payload, render_summary_text
+
+    summary = build_summary_payload(
+        config=config,
+        qcut=0.034,
+        subspace_payload={"kpoints": {}},
+        symmetry_payload={
+            "status": "skipped",
+            "reason": "no structure",
+            "detected_operations": [],
+            "candidate_rotations": [],
+            "little_group_check": {"status": "not_run"},
+            "valley_preservation_check": {"status": "not_run"},
+        },
+        symmetry_rows=[],
+        output_paths={},
+    )
+
+    assert summary["qcut"]["fraction"] == pytest.approx(0.2)
+    text = render_summary_text(summary)
+    assert "qcut mode: relative_min_valley_distance" in text
+    assert "qcut value: 0.034 A^-1" in text
+    assert "qcut fraction: 0.2" in text
+
+
 def test_analyze_hsp_collects_overlap_warnings_without_raw_warning_output(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "config.yaml"

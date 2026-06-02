@@ -35,6 +35,13 @@ def build_summary_payload(
 ) -> dict[str, Any]:
     eigen_rows = [] if symmetry_rows is None else symmetry_rows
     warnings = _collect_warnings(subspace_payload, symmetry_payload, eigen_rows)
+    qcut_payload: dict[str, Any] = {
+        "mode": config.projection.qcut_mode,
+        "value_Ainv": float(qcut),
+        "scan": list(config.projection.qcut_scan),
+    }
+    if config.projection.qcut_mode == "relative_min_valley_distance":
+        qcut_payload["fraction"] = float(config.projection.qcut_fraction)
     payload: dict[str, Any] = {
         "input": {
             "wavefunction_h5": str(config.input.wavefunction_h5),
@@ -52,11 +59,7 @@ def build_summary_payload(
             {"label": sector.name, "centers": list(sector.centers)}
             for sector in config.valley_subspaces
         ],
-        "qcut": {
-            "mode": config.projection.qcut_mode,
-            "value_Ainv": float(qcut),
-            "scan": list(config.projection.qcut_scan),
-        },
+        "qcut": qcut_payload,
         "valley_projection_summary": _projection_rows(subspace_payload),
         "valley_subspace_analysis": _subspace_rows(subspace_payload),
         "valley_projector_quality": _projector_quality_rows(subspace_payload),
@@ -130,6 +133,8 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     qcut = summary["qcut"]
     lines.append(f"qcut mode: {qcut['mode']}")
     lines.append(f"qcut value: {_fmt(qcut['value_Ainv'])} A^-1")
+    if qcut.get("fraction") is not None:
+        lines.append(f"qcut fraction: {_fmt(qcut['fraction'])}")
     lines.append("")
 
     _section(lines, "Valley subspaces")

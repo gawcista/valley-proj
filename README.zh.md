@@ -503,6 +503,7 @@ target k-points: GammaM, KM, MM
 iband (VASP): 2195, 2196
 qcut mode: relative_min_valley_distance
 qcut value: 0.034 A^-1
+qcut fraction: 0.2
 
 Valley subspaces
 ----------------
