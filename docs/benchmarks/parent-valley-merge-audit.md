@@ -1,7 +1,8 @@
 # ValleyScope 公共 Schema 与 Benchmark Readiness 审计报告
 
 日期: 2026-06-02
-审计范围: 只读，commit `8742fe8` (parent-valley projection 合并后)
+审计范围: 只读，当前 `main` 上的 post-merge 状态；parent-valley
+projection 合并 commit 为 `8742fe8`。
 
 ## 审计问题 1: 主用户输出是否仅限于 valley_summary.txt/json？
 
@@ -9,7 +10,9 @@
 
 `valley_summary.txt` 和 `valley_summary.json` 是明确标注的"主用户入口"。它们由 `summary_report.py` 的 `build_summary_payload()` 构建，包含所有分析层的聚合信息。
 
-然而，当前默认输出目录下会写出 **21 个文件**，包括大量 intermediate/debug 文件。用户在 `README.md` 中看到的文档区分了三类输出：
+然而，在 detailed output 默认开启且相关分析层有数据时，输出目录会写出多种
+intermediate/debug 文件（数量随配置和启用的分析层变化）。用户在 `README.md`
+中看到的文档区分了三类输出：
 
 | 类别 | 文件 | 状态 |
 |------|------|------|
@@ -19,7 +22,8 @@
 | Formal Analysis | `symmetry_adapted_valley_analysis.json`, `valley_irrep_matching.json`, `irrep_workflow_decisions.json`, `projector_symmetry_report.json`, `target_subspace_closure.json` | 应该默认写但归类为中间产物 |
 | Debug/Detail | `diagnostics.h5`, `valley_weights.csv`, `valley_subspace.json`, `symmetry_report.json`, `symmetry_eigenvalues.csv`, `valley_basis_transform.h5`, `hsp_star_conjugation.json`, `hsp_star_derived_characters.json`, `subspace_representation_quality.json` (可选), `folded_center_report.json`, `sampled_k_coverage.json` | 大部分正确归类 |
 
-**建议**: `AGENTS.md` 第 79-95 行的 Public Output Schema 已清楚分层。不需要改代码，但建议在 `README.md` 中加强"主入口 vs 详细输出"的视觉区分。
+**建议**: `AGENTS.md` 的 Public Output Schema 已清楚分层。不需要改代码，
+但建议在 `README.md` 中加强"主入口 vs 详细输出"的视觉区分。
 
 ---
 
@@ -66,24 +70,47 @@
 
 ## 审计问题 4: Parent-valley projection 是否影响 irrep readiness？
 
-**结论: 不影响。正确保持 diagnostic 角色。**
+**结论: 默认 `fixed_center` 路径不受影响；但 `k_resolved_parent_valley`
+不是完全独立的显示层。当前实现中，如果用户显式启用
+`k_resolved_parent_valley`，它会进入 seed projector/readiness path，仍受所有
+projector symmetry 和 irrep readiness gates 约束。**
 
 验证路径:
 
-1. `projector_mode` 仅影响 `adjust_centers_for_parent_valley()` 中 center 位置的调整 (`sector_projectors.py:101-155`)，进而影响 `build_sector_projectors()` 产生的 center_masks 和 sector_masks。
+1. `projector_mode` 影响 `adjust_centers_for_parent_valley()` 中 center 位置
+   的调整 (`sector_projectors.py:101-155`)，进而影响
+   `build_sector_projectors()` 产生的 `center_masks` 和 `sector_masks`。
 
-2. 这些 masks 只影响 `W_val`、`P_v`、`center_weights` 的计算 (`weights.py`)。它们**不**影响:
-   - 投影仪对称一致性检查 (`projector_symmetry.py`)
-   - D_raw 子空间闭包 (`target_subspace_closure.py`)
-   - Irrep 工作流决策 (`irrep_workflow_decision.py`)
-   - EBR 准备就绪门控 (`ebr_input_candidates.py`)
-   - 自旋约定验证
+2. 这些 masks 直接影响 `W_val`、`P_v`、`center_weights` 的计算
+   (`weights.py`)；同时也会影响 `_add_valley_subspace_diagnostic()` 生成的
+   q-cut seed matrices。后者会进入:
+   - seed projector symmetry-consistency (`projector_symmetry.py`);
+   - `apply_projector_symmetry_gate()` 对 q-cut symmetry rows 的降级；
+   - symmetry-adapted valley report 的 seed/projector diagnostics；
+   - `build_irrep_workflow_decisions()` 中的 seed status 和 q-cut readiness
+     统计。
 
-3. `irrep_workflow_decision.py` 的决策逻辑 (`decide_irrep_workflow`, 第 25-180 行) 完全基于 seed symmetry status、closure quality、symmetry-adapted projector quality 和 spinor convention。**不依赖 projector_mode**。
+3. `irrep_workflow_decision.py` 的决策逻辑本身不直接读取
+   `projector_mode` 字符串，但会读取由当前 projector mode 产生的 seed
+   symmetry status、q-cut eigenvalue readiness、symmetry-adapted projector
+   quality 和 spinor convention。因此 `k_resolved_parent_valley` 若被用于完整
+   workflow，会通过 seed/projector 数据间接影响 readiness。
 
-4. `fixed_center_not_captured` 状态仅影响 `valley_subspace.json` 和 summary 中的**显示文本**（`_short_valley_status()` 映射），不改变任何 readiness gate。
+4. `fixed_center_not_captured` 状态仅影响 `valley_subspace.json` 和 summary
+   中的**显示文本**（`_short_valley_status()` 映射），不改变任何 readiness
+   gate。这个结论只适用于默认 `fixed_center` 下的 low-W_val 解释。
 
-**结论**: parent-valley projection 是纯 diagnostic 层。`fixed_center` W_val=0 被正确报告为 `fixed_center_not_captured`，不会污染 irrep readiness。
+**结论**: parent-valley projection 对当前默认 benchmark/readiness 路径是
+保守的，因为默认仍是 `fixed_center`，且所有 irrep/EBR readiness gates 仍会
+执行。但它不应被描述为完全独立于 readiness 的纯显示层。下一步 schema
+freeze 前需要明确二选一:
+
+- 将 `k_resolved_parent_valley` 严格降级为 weight/report-only diagnostic，
+  readiness seed projectors 始终使用 `fixed_center`；或
+- 保持当前 "projector mode feeds seed path" 设计，但在 public schema 中明确
+  任何 `k_resolved_parent_valley` irrep/EBR readiness claim 都必须经过 seed
+  symmetry、closure、spinor 和 matching gates，且目前尚未作为正式 benchmark
+  冻结。
 
 ---
 
@@ -138,25 +165,30 @@ Blocker 优先级: B1 (spinor) > B2 (closure) > B3 (seed) > B4 (cascade) > B5 (p
 
 | 优先级 | 行动 | 理由 | 风险 |
 |--------|------|------|------|
-| **P0** | Schema 冻结文档 | 合并后 schema 需要正式文档化，避免 drift | 低 (只读) |
-| **P1** | tZrSe2 spinor 约定验证 | B1 是所有 tZrSe2 路径的根阻塞器 | 需要外部 benchmark |
-| **P2** | tZrSe2 expanded-band HDF5 | B2 (closure) 可能由截断效应引起 | 需要额外 DFT 计算 |
-| **P3** | tMoTe2 C3 irrep table 审查 | 已有 trusted candidates，需要审查后发布 | 低 (已有数据) |
-| **P4** | tZrSe2 GammaM q-cut 优化 | B3 (seed overlap) 可通过 q-cut 扫描改善 | 低 (参数扫描) |
-| **P5** | Reviewed EBR table 摄入 | 仅当有审核过的外部表时才安全 | 高 (无表则无输出) |
+| **P0** | 明确 parent-valley projection 与 readiness 的边界 | schema freeze 前必须决定是 weight-only diagnostic 还是 gated seed mode | 中 |
+| **P1** | Schema 冻结文档 | 合并后 schema 需要正式文档化，避免 drift | 低 (只读) |
+| **P2** | tZrSe2 spinor 约定验证 | B1 是所有 tZrSe2 路径的根阻塞器 | 需要外部 benchmark |
+| **P3** | tZrSe2 expanded-band HDF5 | B2 (closure) 可能由截断效应引起 | 需要额外 DFT 计算 |
+| **P4** | tMoTe2 C3 irrep table 审查 | 已有 trusted candidates，需要审查后发布 | 低 (已有数据) |
+| **P5** | tZrSe2 GammaM q-cut 优化 | B3 (seed overlap) 可通过 q-cut 扫描改善 | 低 (参数扫描) |
+| **P6** | Reviewed EBR table 摄入 | 仅当有审核过的外部表时才安全 | 高 (无表则无输出) |
 
 ### 推荐下一轮 cc 任务
 
 ```text
-1. [P0] 写 docs/schema.md — 冻结公共输出 schema (valley_summary.json, 
+1. [P0] 先写一页设计结论或方法说明，明确 `k_resolved_parent_valley`
+   是否只能作为 weight/report-only diagnostic，还是允许作为 gated seed
+   projector mode 进入 readiness。该决定会影响后续 schema freeze。
+
+2. [P1] 写 docs/schema.md — 冻结公共输出 schema (valley_summary.json,
    valley_ebr_export_bundle.json)，含每个字段的类型、含义、示例值。
    参考 valleyscope/reports/summary_report.py 的 build_summary_payload()。
 
-2. [P3] 审查 tMoTe2 C3 irrep table — 检查 valleyscope/irreps/tables.py 
+3. [P4] 审查 tMoTe2 C3 irrep table — 检查 valleyscope/irreps/tables.py
    中的自旋 C3 不可约表示表是否正确。运行 tMoTe2 benchmark 并记录精确的
    irrep 标签、本征相、和 readiness 状态。更新 docs/benchmarks/。
 
-3. [P1/P2/P4 调研] tZrSe2 blocker 进展评估 — 不修改代码，但评估:
+4. [P2/P3/P5 调研] tZrSe2 blocker 进展评估 — 不修改代码，但评估:
    a) 是否有可用的 spinor benchmark 数据？
    b) expanded-band HDF5 是否已生成？
    c) GammaM q-cut scan 的最佳 fraction 范围？
