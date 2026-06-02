@@ -88,7 +88,7 @@ valley-changing operations as invariance of a single label operator.
 | Phase 4 | Real benchmarks (tMoTe2, tZrSe2) | Smoke tests pass; blockers documented |
 | Phase 5 | EBR input/candidate/problem/export pipeline | Done |
 | Phase 6 | Reduced EBR mapping interface | Default-off external-table solver exists; no built-in tables |
-| Phase 7 | folded_family / k-dependent projector diagnostics | In progress — cc/folded-family-projection branch |
+| Phase 7 | Parent-valley / k-resolved projector diagnostics | In review — cc/folded-family-projection branch |
 
 ## Real Benchmarks
 

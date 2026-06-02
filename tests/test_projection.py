@@ -340,3 +340,87 @@ def test_deprecated_alias_still_works():
     k_cart = np.array([0.0, 0.0, 0.0])
     result = adjust_centers_for_folded_family(centers, k_cart, MOIRE_RECIP)
     assert result[0].name == "V0"
+
+
+def test_short_valley_status_maps_fixed_center_not_captured():
+    """_short_valley_status maps fixed_center_not_captured explicitly."""
+    from valleyscope.reports.summary_report import _short_valley_status
+    assert _short_valley_status("fixed_center_not_captured") == "fixed_center_not_captured"
+
+
+def test_only_affected_low_weight_row_is_reclassified():
+    """Only low-W_val rows whose centers are far from that kpoint are reclassified."""
+    import numpy as np
+    from valleyscope.workflows.analyze_hsp import _warn_fixed_center_distance
+    from valleyscope.projection.folded_center import FoldedCenterReport, FoldedCenterEntry
+
+    # Two centers: V0 near k1 (dist 0.05), V0p far from both (dist 0.5)
+    # k1 has V0p weight=0, V0 weight=0.3 -> W_val > 0 -> NOT reclassified
+    # k2 has V0 weight=0, V0p weight=0 -> W_val=0 -> BOTH centers far? k2→V0p=0.3<0.1, so NOT far
+    # We want: only the row where ALL center_weights are zero AND ALL centers are far
+
+    subspace_payload = {
+        "kpoints": {
+            "k1": {
+                "weights": [
+                    {
+                        "band_vasp": 1, "W_val": 0.3, "P_v": 1.0,
+                        "valley_status": "clean",
+                        "center_weights": {"V0": 0.3, "V0p": 0.0},
+                    },
+                    {
+                        "band_vasp": 2, "W_val": 0.0, "P_v": 0.0,
+                        "valley_status": "not_valley_derived",
+                        "center_weights": {"V0": 0.0, "V0p": 0.0},
+                    },
+                ]
+            },
+            "k2": {
+                "weights": [
+                    {
+                        "band_vasp": 3, "W_val": 0.0, "P_v": 0.0,
+                        "valley_status": "not_valley_derived",
+                        "center_weights": {"V0": 0.0, "V0p": 0.0},
+                    },
+                ]
+            },
+        }
+    }
+
+    report = FoldedCenterReport(
+        entries=[
+            FoldedCenterEntry(
+                center_name="V0", layer=None,
+                cart=np.array([0.0, 0.0, 0.0]),
+                folded_frac=np.array([0.0, 0.0, 0.0]),
+                g_moire_int=np.array([0, 0, 0]),
+                folded_cart=np.array([0.0, 0.0, 0.0]),
+            ),
+            FoldedCenterEntry(
+                center_name="V0p", layer=None,
+                cart=np.array([5.0, 0.0, 0.0]),
+                folded_frac=np.array([0.0, 0.0, 0.0]),
+                g_moire_int=np.array([10, 0, 0]),
+                folded_cart=np.array([0.0, 0.0, 0.0]),
+            ),
+        ],
+        kpoint_distances={
+            "V0": [0.05, 0.4],
+            "V0p": [0.5, 0.3],
+        },
+    )
+
+    _warn_fixed_center_distance(
+        folded_center_report=report,
+        kpoint_names=["k1", "k2"],
+        weight_rows=[],
+        subspace_payload=subspace_payload,
+    )
+
+    # Band 1 at k1: W_val=0.3 > 0 → NOT reclassified
+    assert subspace_payload["kpoints"]["k1"]["weights"][0]["valley_status"] == "clean"
+    # Band 2 at k1: W_val=0, center V0 is near k1 (0.05<0.1) → NOT all centers far → NOT reclassified
+    assert subspace_payload["kpoints"]["k1"]["weights"][1]["valley_status"] == "not_valley_derived"
+    # Band 3 at k2: W_val=0, center V0p is near k2 (0.3 > 0.1)? Wait V0p→k2=0.3 > 0.1, V0→k2=0.4 > 0.1
+    # BOTH centers are >0.1 from k2 AND both center_weights are 0 → reclassified
+    assert subspace_payload["kpoints"]["k2"]["weights"][0]["valley_status"] == "fixed_center_not_captured"

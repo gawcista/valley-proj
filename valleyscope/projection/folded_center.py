@@ -2,8 +2,8 @@
 
 Provides diagnostic information about where monolayer valley centers land
 inside the moire Brillouin zone and how far they are from each sampled
-moiré k-point.  This is a companion diagnostic for the folded_family
-projector mode but is always computed when moire reciprocal lattice data
+moire k-point.  This is a companion diagnostic for k-resolved parent-valley
+projection but is always computed when moire reciprocal lattice data
 is available.
 """
 

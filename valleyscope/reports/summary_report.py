@@ -890,6 +890,19 @@ def _collect_warnings(
         warnings.append(
             "Some symmetry eigenvalues are diagnostic-only and are not topology_input_ready"
         )
+    # Collect fixed_center_not_captured per-kpoint warnings (deduplicated).
+    fc_warned_kpoints: set[str] = set()
+    for kpoint, payload in subspace_payload.get("kpoints", {}).items():
+        for weight in payload.get("weights", []):
+            if weight.get("valley_status") == "fixed_center_not_captured":
+                if kpoint not in fc_warned_kpoints:
+                    fc_warned_kpoints.add(kpoint)
+                    note = weight.get("valley_status_note", "")
+                    warnings.append(
+                        f"{kpoint}: fixed_center W_val near zero — "
+                        f"k/center mismatch, not necessarily non-parent-valley. "
+                        f"Consider k_resolved_parent_valley projector_mode."
+                    )
     if any(str(row.get("seed_projector_symmetry_status", "")) == "failed" for row in symmetry_rows):
         warnings.append(
             "Valley-preserving irrep labels based on the q-cut seed basis are "
@@ -1194,6 +1207,8 @@ def _short_valley_status(status: Any) -> str:
         return "not_evaluated"
     if value == "not_valley_derived" or value == "poor_valley_manifold":
         return "not_derived"
+    if value == "fixed_center_not_captured":
+        return "fixed_center_not_captured"
     if value == "projector_unreliable":
         return "unreliable"
     if value.endswith("clean") or value == "valley_separable_subspace" or value == "valley_separable":
