@@ -29,7 +29,9 @@ operations reduce the full 3D space-group irrep/EBR basis to a 2D subset.
 ### 2.1 `irrep2` — reduced-dimensional decomposition
 
 Local repository: `/home/gawcista/Working/database/irrep2` (available for
-inspection during this design task).
+inspection during this design task).  This repository is not public and must
+remain reference-only: do not add it as a dependency, import path, vendored
+source, or required runtime asset.
 
 Key patterns:
 - **Reduced basis**: the full 3D space-group irrep set is reduced to the
@@ -73,7 +75,7 @@ Key patterns:
 | Data storage | CSV in `irdata/` | JSON in `data/` | Versioned JSON in `valleyscope/data/` |
 | Versioning | Implicit (git) | Package version | Explicit `schema_version` + git hash provenance |
 | Basis reduction | HSP-filtered indices | Static full 3D table | Valley-preserving subgroup + HSP-filtered |
-| Decomposition | Smith normal form | Precomputed Smith form | Smith normal form (no OR-Tools dependency) |
+| Decomposition | Smith normal form | Precomputed Smith form | Exact integer solve; public `or-tools` may be used if justified |
 | Validation | Record-level status checks | Load-time structure checks | Load-time + schema contract tests |
 
 ## 3. Physical Objects
@@ -360,6 +362,9 @@ the following must pass:
 - **No 3D `irrep` Python package EBR table reuse as final output.**
   ValleyScope's target is valley-resolved reduced-dimensional irreps/EBRs,
   which are a subset of the full 3D tables.
+- **No `irrep2` runtime dependency.**  The local `irrep2` repository is useful
+  as a reduced-dimensional reference implementation, but it is not public and
+  must not be imported, vendored, or required by ValleyScope.
 - **No unreviewed built-in tables.**  Every shipped table must pass the
   validation rules above and have documented provenance.
 - **No compatibility relations yet.**  Reduced compatibility relations are a

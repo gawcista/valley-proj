@@ -754,6 +754,10 @@ def test_data_model_doc_mentions_irrep2():
     """Design doc must reference irrep2 as the reduced-dimensional inspiration."""
     doc = Path("docs/reduced_dimensional_irrep_ebr_data_model.md").read_text(encoding="utf-8")
     assert "irrep2" in doc, "design doc must mention irrep2"
+    assert "reference-only" in doc, "irrep2 must be documented as reference-only"
+    assert "No `irrep2` runtime dependency" in doc, (
+        "design doc must forbid irrep2 as a runtime dependency"
+    )
 
 
 def test_data_model_doc_mentions_reduced_dimensional():
@@ -898,12 +902,11 @@ def test_package_data_readme_states_no_tables():
     assert "currently" in readme.lower()
 
 
-def test_catalog_does_not_import_irrep_or_ortools():
-    """Catalog source must not import irrep, irrep2, or ortools."""
+def test_catalog_does_not_import_irrep2():
+    """Package-data catalog must not import the private irrep2 repository."""
     from valleyscope.data.reduced_ebr.catalog import package_data_root
     src = (package_data_root() / "catalog.py").read_text(encoding="utf-8")
-    for forbidden in ["import irrep", "from irrep", "import irrep2",
-                       "from irrep2", "import ortools", "from ortools"]:
+    for forbidden in ["import irrep2", "from irrep2"]:
         assert forbidden not in src, (
             f"catalog.py must not import {forbidden}"
         )
@@ -932,7 +935,7 @@ def test_package_data_no_material_names():
 
 
 def test_data_init_has_no_forbidden_imports():
-    """valleyscope/data/__init__.py must not import irrep, irrep2, or ortools."""
+    """valleyscope/data/__init__.py must not eagerly import solver packages."""
     src = Path("valleyscope/data/__init__.py").read_text(encoding="utf-8")
     for forbidden in ["import irrep", "from irrep", "import irrep2",
                        "from irrep2", "import ortools", "from ortools"]:
