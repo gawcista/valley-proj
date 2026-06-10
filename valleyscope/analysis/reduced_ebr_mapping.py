@@ -158,6 +158,7 @@ def build_reduced_ebr_mapping(
     table_irreps = table["irreps"]
     table_ebrs = table["ebrs"]
     n_irreps = len(table_irreps)
+    table_expected = set(table.get("expected_hsps", []))
 
     solutions: list[dict] = []
     excluded: list[dict] = []
@@ -183,8 +184,40 @@ def build_reduced_ebr_mapping(
             })
             continue
 
-        # Build bundle irrep vector from exported valley-preserving irreps.
+        # --- Reduced-dimensional basis compatibility gate ---
+        # The table and bundle must agree on the sampled HSP set.
         bundle_irreps = bundle.get("irreps_by_kpoint", {})
+        actual_hsps = set(bundle_irreps) if isinstance(bundle_irreps, dict) else set()
+
+        bundle_expected = bundle.get("expected_hsps")
+        if bundle_expected is not None and isinstance(bundle_expected, list):
+            bundle_expected_set = set(bundle_expected)
+        else:
+            # Legacy bundle without declared expected_hsps: derive from
+            # irreps_by_kpoint keys.
+            bundle_expected_set = actual_hsps
+
+        if bundle_expected_set != table_expected:
+            excluded.append({
+                "bundle_id": bundle.get("bundle_id", "?"),
+                "reason": (
+                    f"expected_hsps mismatch: "
+                    f"table has {sorted(table_expected)}, "
+                    f"bundle has {sorted(bundle_expected_set)}"
+                ),
+            })
+            continue
+
+        if actual_hsps != table_expected:
+            excluded.append({
+                "bundle_id": bundle.get("bundle_id", "?"),
+                "reason": (
+                    f"irrep HSP basis mismatch: "
+                    f"table expects {sorted(table_expected)}, "
+                    f"bundle irreps_by_kpoint has {sorted(actual_hsps)}"
+                ),
+            })
+            continue
         irrep_counts = _count_irreps(bundle_irreps, table_irreps)
         if irrep_counts is None:
             excluded.append({

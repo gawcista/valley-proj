@@ -225,6 +225,7 @@ def test_not_ready_excluded():
 
 def test_unknown_irrep_label_is_not_matched_by_hsp_only():
     table = dict(_SAMPLE_TABLE)
+    table["expected_hsps"] = ["GammaM"]
     table["irreps"] = ["GammaM:wrong_label"]
     table["ebrs"] = [{"label": "X", "vector": [1]}]
     b = {
@@ -233,6 +234,7 @@ def test_unknown_irrep_label_is_not_matched_by_hsp_only():
             "valley": "K",
             "subspace_group_candidate": "C3_like",
             "ready_for_external_solver": True,
+            "expected_hsps": ["GammaM"],
             "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
         }],
     }
@@ -1168,3 +1170,134 @@ def test_empty_manifest_still_lists_empty(monkeypatch, tmp_path):
     _set_fake_root(monkeypatch, root)
     from valleyscope.data.reduced_ebr.catalog import list_reviewed_reduced_ebr_tables
     assert list_reviewed_reduced_ebr_tables() == []
+
+
+# -----------------------------------------------------------------------
+# 19. Reduced EBR basis compatibility gate
+# -----------------------------------------------------------------------
+
+def _bundle_with_hsps(expected, irreps_by_kp, g="C3_like", ready=True):
+    return {
+        "bundles": [{
+            "bundle_id": "b_001", "valley": "K",
+            "subspace_group_candidate": g,
+            "ready_for_external_solver": ready,
+            "expected_hsps": expected,
+            "irreps_by_kpoint": irreps_by_kp,
+        }],
+    }
+
+
+def test_matching_basis_solves_exact():
+    """Matching expected_hsps and irreps_by_kpoint keys still produces solution."""
+    b = _bundle_with_hsps(
+        expected=["GammaM", "KM"],
+        irreps_by_kp={
+            "GammaM": ["C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"],
+            "KM": ["C3_spinor_phase_+1/6", "C3_spinor_phase_-1/6"],
+        },
+    )
+    r = build_reduced_ebr_mapping(ebr_export_bundle=b, table=_SAMPLE_TABLE)
+    assert r["status"] == "solved_exact"
+    assert r["solutions"][0]["status"] == "solved_exact"
+
+
+def test_table_extra_hsp_excludes_bundle():
+    """Table expects more HSPs than bundle has → excluded."""
+    b = _bundle_with_hsps(
+        expected=["GammaM"],
+        irreps_by_kp={"GammaM": ["C3_spinor_phase_+1/2"]},
+    )
+    r = build_reduced_ebr_mapping(ebr_export_bundle=b, table=_SAMPLE_TABLE)
+    assert len(r["excluded_bundles"]) == 1
+    assert "expected_hsps mismatch" in r["excluded_bundles"][0]["reason"]
+
+
+def test_bundle_extra_hsp_excludes_bundle():
+    """Bundle has more HSPs than table → excluded."""
+    b = _bundle_with_hsps(
+        expected=["GammaM", "KM", "MM"],
+        irreps_by_kp={
+            "GammaM": ["C3_spinor_phase_+1/2"],
+            "KM": ["C3_spinor_phase_+1/6"],
+            "MM": ["C3_spinor_phase_-1/6"],
+        },
+    )
+    r = build_reduced_ebr_mapping(ebr_export_bundle=b, table=_SAMPLE_TABLE)
+    assert len(r["excluded_bundles"]) == 1
+    assert "expected_hsps mismatch" in r["excluded_bundles"][0]["reason"]
+
+
+def test_irrep_keys_mismatch_excludes():
+    """Bundle irreps_by_kpoint keys don't match table expected_hsps → excluded."""
+    b = _bundle_with_hsps(
+        expected=["GammaM", "KM"],
+        irreps_by_kp={
+            "GammaM": ["C3_spinor_phase_+1/2"],
+            # KM missing — irreps_by_kpoint keys ≠ table expected_hsps
+        },
+    )
+    r = build_reduced_ebr_mapping(ebr_export_bundle=b, table=_SAMPLE_TABLE)
+    assert len(r["excluded_bundles"]) >= 1
+    reasons = " ".join(e["reason"] for e in r["excluded_bundles"])
+    assert "irrep HSP basis mismatch" in reasons
+
+
+def test_legacy_bundle_without_expected_hsps_still_works():
+    """Legacy bundle without expected_hsps derives basis from irreps_by_kpoint keys."""
+    b = {
+        "bundles": [{
+            "bundle_id": "b_001", "valley": "K",
+            "subspace_group_candidate": "C3_like",
+            "ready_for_external_solver": True,
+            "irreps_by_kpoint": {
+                "GammaM": ["C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"],
+                "KM": ["C3_spinor_phase_+1/6", "C3_spinor_phase_-1/6"],
+            },
+        }],
+    }
+    r = build_reduced_ebr_mapping(ebr_export_bundle=b, table=_SAMPLE_TABLE)
+    assert r["status"] == "solved_exact"
+
+
+def test_legacy_bundle_without_expected_hsps_fails_when_keys_mismatch():
+    """Legacy bundle without expected_hsps fails when irreps_by_kpoint keys mismatch table."""
+    b = {
+        "bundles": [{
+            "bundle_id": "b_001", "valley": "K",
+            "subspace_group_candidate": "C3_like",
+            "ready_for_external_solver": True,
+            "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
+        }],
+    }
+    r = build_reduced_ebr_mapping(ebr_export_bundle=b, table=_SAMPLE_TABLE)
+    assert len(r["excluded_bundles"]) == 1
+    reason = r["excluded_bundles"][0]["reason"]
+    assert "expected_hsps mismatch" in reason or "irrep HSP basis mismatch" in reason
+
+
+def test_basis_gate_before_group_check():
+    """Basis mismatch excludes even when group matches."""
+    b = _bundle_with_hsps(
+        expected=["GammaM"],
+        irreps_by_kp={"GammaM": ["C3_spinor_phase_+1/2"]},
+        g="C3_like",  # group matches table
+    )
+    r = build_reduced_ebr_mapping(ebr_export_bundle=b, table=_SAMPLE_TABLE)
+    assert len(r["excluded_bundles"]) == 1
+    assert "expected_hsps mismatch" in r["excluded_bundles"][0]["reason"]
+
+
+def test_no_material_names_in_basis_gate_code():
+    """Basis compatibility gate must not use material-specific logic."""
+    src = Path("valleyscope/analysis/reduced_ebr_mapping.py").read_text(encoding="utf-8")
+    for forbidden in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
+        assert forbidden not in src, (
+            f"reduced_ebr_mapping.py must not contain {forbidden!r}"
+        )
+
+
+def test_no_irrep2_import_in_basis_gate():
+    """Basis compatibility gate must not import irrep2."""
+    src = Path("valleyscope/analysis/reduced_ebr_mapping.py").read_text(encoding="utf-8")
+    assert "irrep2" not in src, "reduced_ebr_mapping.py must not import irrep2"
