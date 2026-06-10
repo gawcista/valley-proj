@@ -188,8 +188,19 @@ Each solution entry (common fields, always present):
 | `subspace_group_candidate` | string | Group candidate |
 | `irrep_vector` | list[int] | Integer count vector aligned to table irrep order |
 | `status` | string | `"solved_exact"` or `"no_exact_solution"` |
+| `classification` | string | `"atomic-compatible-candidate"`, `"fragile-topology-candidate"`, or `"stable-topology-candidate"` |
+| `integer_span_status` | string | `"in_integer_span"` or `"outside_integer_span"` |
+| `nonnegative_solution_status` | string | `"solved_exact"` or `"no_nonnegative_solution"` |
 
-When `status == "solved_exact"`, additionally:
+Classification semantics:
+- `atomic-compatible-candidate`: nonnegative exact integer EBR combination exists.
+- `fragile-topology-candidate`: target is in the integer EBR span but no
+  nonnegative combination exists (requires negative coefficients). An
+  `integer_solution` witness with signed coefficients is provided.
+- `stable-topology-candidate`: target is outside the integer EBR span.
+
+When `status == "solved_exact"` (and classification is atomic-compatible),
+additionally:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -198,13 +209,24 @@ When `status == "solved_exact"`, additionally:
 | `ebr_decomposition[].coefficient` | int | Non-negative integer multiplicity |
 
 When `status == "no_exact_solution"`, `ebr_decomposition` is absent.
+When `classification == "fragile-topology-candidate"`, additionally:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `integer_solution` | list[object] | Signed integer coefficient witness (one entry per non-zero EBR coefficient) |
+
+Conditional per-solution field:
+
+| Field | Type | Condition |
+|-------|------|-----------|
+| `search_status` | string | `"truncated_by_max_coefficient"` when `max_coefficient` truncated a derived physical bound |
 
 Each excluded bundle:
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `bundle_id` | string | Source bundle ID |
-| `reason` | string | `"missing_table"`, `"not ready for external solver"`, `"table group X != bundle group Y"`, or `"could not resolve irrep keys to table irreps"` |
+| `reason` | string | `"missing_table"`, `"not ready for external solver"`, `"table group X != bundle group Y"`, `"expected_hsps mismatch"`, `"irrep HSP basis mismatch"`, or `"could not resolve irrep keys to table irreps"` |
 
 ---
 

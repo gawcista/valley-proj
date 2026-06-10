@@ -1324,3 +1324,201 @@ def test_no_irrep2_import_in_basis_gate():
     """Basis compatibility gate must not import irrep2."""
     src = Path("valleyscope/analysis/reduced_ebr_mapping.py").read_text(encoding="utf-8")
     assert "irrep2" not in src, "reduced_ebr_mapping.py must not import irrep2"
+
+
+# -----------------------------------------------------------------------
+# 20. Integer-span classifier
+# -----------------------------------------------------------------------
+
+def test_atomic_compatible_classification():
+    """Nonnegative exact solution -> atomic-compatible-candidate."""
+    b = _bundle_with_hsps(
+        expected=["GammaM", "KM"],
+        irreps_by_kp={
+            "GammaM": ["C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"],
+            "KM": ["C3_spinor_phase_+1/6", "C3_spinor_phase_-1/6"],
+        },
+    )
+    r = build_reduced_ebr_mapping(ebr_export_bundle=b, table=_SAMPLE_TABLE)
+    assert r["status"] == "solved_exact"
+    s = r["solutions"][0]
+    assert s["classification"] == "atomic-compatible-candidate"
+    assert s["integer_span_status"] == "in_integer_span"
+    assert s["nonnegative_solution_status"] == "solved_exact"
+    assert "ebr_decomposition" in s
+    assert len(s["ebr_decomposition"]) > 0
+
+
+def test_fragile_topology_classification():
+    """Target in integer span but needs negative coefficient -> fragile-topology."""
+    # EBR columns: [1,0] (A), [1,1] (B)
+    # Target: [0,1] = 1*B - 1*A -> needs negative coeff for A
+    table = {
+        "schema_version": "1.0.0",
+        "subspace_group_candidate": "C1",
+        "expected_hsps": ["GammaM"],
+        "irreps": ["GammaM:irrep_A", "GammaM:irrep_B"],
+        "ebrs": [
+            {"label": "EBR_A", "vector": [1, 0]},
+            {"label": "EBR_B", "vector": [1, 1]},
+        ],
+    }
+    b = _bundle_with_hsps(
+        expected=["GammaM"], g="C1",
+        irreps_by_kp={"GammaM": ["irrep_B"]},
+    )
+    r = build_reduced_ebr_mapping(ebr_export_bundle=b, table=table)
+    assert r["status"] == "no_exact_solution"
+    s = r["solutions"][0]
+    assert s["classification"] == "fragile-topology-candidate"
+    assert s["integer_span_status"] == "in_integer_span"
+    assert s["nonnegative_solution_status"] == "no_nonnegative_solution"
+    assert "integer_solution" in s  # signed witness
+    # The integer solution [−1, 1] should appear
+    coeffs = {e["label"]: e["coefficient"] for e in s["integer_solution"]}
+    assert coeffs.get("EBR_A") == -1
+    assert coeffs.get("EBR_B") == 1
+
+
+def test_stable_topology_classification():
+    """Target outside integer span -> stable-topology-candidate."""
+    # EBR columns: [2,0] (A), [0,2] (B)
+    # Target: [1,0] — requires 0.5*A, not in integer span
+    table = {
+        "schema_version": "1.0.0",
+        "subspace_group_candidate": "C1",
+        "expected_hsps": ["GammaM"],
+        "irreps": ["GammaM:irrep_A", "GammaM:irrep_B"],
+        "ebrs": [
+            {"label": "EBR_A", "vector": [2, 0]},
+            {"label": "EBR_B", "vector": [0, 2]},
+        ],
+    }
+    b = _bundle_with_hsps(
+        expected=["GammaM"], g="C1",
+        irreps_by_kp={"GammaM": ["irrep_A"]},
+    )
+    r = build_reduced_ebr_mapping(ebr_export_bundle=b, table=table)
+    assert r["status"] == "no_exact_solution"
+    s = r["solutions"][0]
+    assert s["classification"] == "stable-topology-candidate"
+    assert s["integer_span_status"] == "outside_integer_span"
+    assert s["nonnegative_solution_status"] == "no_nonnegative_solution"
+
+
+def test_zero_ebr_vector_rejected_at_load(tmp_path):
+    """Zero EBR vector raises ValueError at table load time."""
+    bad = dict(_SAMPLE_TABLE)
+    bad["ebrs"] = [{"label": "EBR_ZERO", "vector": [0, 0, 0]}]
+    _write_table(tmp_path / "t.json", bad)
+    with pytest.raises(ValueError, match="positive"):
+        load_reduced_ebr_table(tmp_path / "t.json")
+
+
+def test_nonnegative_search_uses_physical_bounds():
+    """Nonnegative search finds solution when coeff exceeds old default max_coeff."""
+    # EBR: 1x [1,0] (A), 1x [0,1] (B)
+    # Target: [10, 10] -> 10*A + 10*B, needs coeff=10 > old default of 6
+    table = {
+        "schema_version": "1.0.0",
+        "subspace_group_candidate": "C1",
+        "expected_hsps": ["GammaM"],
+        "irreps": ["GammaM:irrep_A", "GammaM:irrep_B"],
+        "ebrs": [
+            {"label": "EBR_A", "vector": [1, 0]},
+            {"label": "EBR_B", "vector": [0, 1]},
+        ],
+    }
+    b = _bundle_with_hsps(
+        expected=["GammaM"], g="C1",
+        irreps_by_kp={
+            "GammaM": ["irrep_A"] * 10 + ["irrep_B"] * 10,
+        },
+    )
+    # Use max_coefficient=12 to allow solution
+    r = build_reduced_ebr_mapping(
+        ebr_export_bundle=b, table=table, max_coefficient=12,
+    )
+    assert r["status"] == "solved_exact"
+    s = r["solutions"][0]
+    assert s["classification"] == "atomic-compatible-candidate"
+    assert "search_status" not in s  # not truncated
+
+
+def test_max_coefficient_truncation_reported():
+    """When max_coefficient truncates a derived bound, search_status is set."""
+    # EBR: [1,0] (A), [0,1] (B). Target [10,10] needs c_A=10, c_B=10
+    # bounds = [10, 10]; max_coeff=5 -> truncated
+    table = {
+        "schema_version": "1.0.0",
+        "subspace_group_candidate": "C1",
+        "expected_hsps": ["GammaM"],
+        "irreps": ["GammaM:irrep_A", "GammaM:irrep_B"],
+        "ebrs": [
+            {"label": "EBR_A", "vector": [1, 0]},
+            {"label": "EBR_B", "vector": [0, 1]},
+        ],
+    }
+    b = _bundle_with_hsps(
+        expected=["GammaM"], g="C1",
+        irreps_by_kp={
+            "GammaM": ["irrep_A"] * 10 + ["irrep_B"] * 10,
+        },
+    )
+    r = build_reduced_ebr_mapping(
+        ebr_export_bundle=b, table=table, max_coefficient=5,
+    )
+    s = r["solutions"][0]
+    assert s["search_status"] == "truncated_by_max_coefficient"
+
+
+def test_classification_fields_on_existing_tests():
+    """All solutions must carry classification, integer_span_status,
+    and nonnegative_solution_status."""
+    r = build_reduced_ebr_mapping(ebr_export_bundle=_bundle(), table=_SAMPLE_TABLE)
+    for s in r["solutions"]:
+        assert s["classification"] in {
+            "atomic-compatible-candidate",
+            "fragile-topology-candidate",
+            "stable-topology-candidate",
+        }
+        assert s["integer_span_status"] in {"in_integer_span", "outside_integer_span"}
+        assert s["nonnegative_solution_status"] in {"solved_exact", "no_nonnegative_solution"}
+
+
+def test_cli_shows_classification_counts(tmp_path, capsys):
+    """CLI stdout includes classification counts when present."""
+    from valleyscope.cli import main
+    out = tmp_path / "out.json"
+    bundle_path = tmp_path / "bundle.json"
+    table_path = tmp_path / "table.json"
+    _write_bundle(bundle_path, [{
+        "bundle_id": "b_001", "valley": "K",
+        "subspace_group_candidate": "C3_like",
+        "ready_for_external_solver": True,
+        "expected_hsps": ["GammaM", "KM"],
+        "irreps_by_kpoint": {
+            "GammaM": ["C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"],
+            "KM": ["C3_spinor_phase_+1/6", "C3_spinor_phase_-1/6"],
+        },
+    }])
+    _write_table(table_path, _SAMPLE_TABLE)
+    rc = main(["map-reduced-ebr", str(bundle_path), str(table_path), "-o", str(out)])
+    assert rc == 0
+    captured = capsys.readouterr().out
+    assert "atomic-compatible" in captured
+
+
+def test_schema_fields_include_classification():
+    """Top-level schema must still include all required fields."""
+    r = build_reduced_ebr_mapping(ebr_export_bundle=_bundle(), table=_SAMPLE_TABLE)
+    for k in ["status", "mapping_status", "reduced_ebr_decomposition_status",
+              "table_status", "solutions", "excluded_bundles", "solver"]:
+        assert k in r, f"missing top-level key: {k}"
+
+
+def test_no_material_names_in_classifier():
+    """Classifier code must not contain real material names."""
+    src = Path("valleyscope/analysis/reduced_ebr_mapping.py").read_text(encoding="utf-8")
+    for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
+        assert name not in src, f"reduced_ebr_mapping.py contains {name!r}"

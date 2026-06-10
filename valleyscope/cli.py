@@ -108,10 +108,21 @@ def _map_reduced_ebr(args) -> int:
     solved = sum(1 for s in solutions if s.get("status") == "solved_exact")
     unsolved = len(solutions) - solved
 
+    atomic = sum(1 for s in solutions
+                 if s.get("classification") == "atomic-compatible-candidate")
+    fragile = sum(1 for s in solutions
+                  if s.get("classification") == "fragile-topology-candidate")
+    stable = sum(1 for s in solutions
+                 if s.get("classification") == "stable-topology-candidate")
+
     print(f"status:              {status}")
     print(f"total bundles:       {len(solutions)}")
     print(f"solved (exact):      {solved}")
     print(f"no exact solution:   {unsolved}")
+    if atomic or fragile or stable:
+        print(f"  atomic-compatible: {atomic}")
+        print(f"  fragile-topology:  {fragile}")
+        print(f"  stable-topology:   {stable}")
     print(f"excluded:            {len(excluded)}")
     print(f"reduced EBR mapping: {output_path}")
     return 0

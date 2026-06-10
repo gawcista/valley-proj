@@ -23,14 +23,28 @@ Without a table, the interface reports `status: missing_table`.
 
 ## Allowed Status Values
 
-`valley_reduced_ebr_mapping.json` reports these status values:
+`valley_reduced_ebr_mapping.json` reports these top-level status values:
 
 | Status | Meaning |
 |--------|---------|
 | `not_evaluated` | No export bundle available |
 | `missing_table` | `analysis.reduced_ebr.enabled: true` but no table file provided |
-| `solved_exact` | All bundles decomposed as exact integer combinations of EBR vectors |
-| `no_exact_solution` | At least one bundle could not be decomposed exactly |
+| `solved_exact` | All bundles classified as `atomic-compatible-candidate` |
+| `no_exact_solution` | At least one bundle classified as fragile or stable |
+
+Per-solution classification uses exact integer algebra (Smith normal form
+over ZZ):
+
+| Classification | Integer Span | Nonnegative Solution | Meaning |
+|---------------|-------------|---------------------|---------|
+| `atomic-compatible-candidate` | in span | solved_exact | Nonnegative exact integer EBR combination exists |
+| `fragile-topology-candidate` | in span | no_nonnegative_solution | Integer combination exists but needs negative coefficients; `integer_solution` witness provided |
+| `stable-topology-candidate` | outside span | no_nonnegative_solution | Target irrep vector is outside the integer EBR span |
+
+EBR vectors must have at least one positive entry (zero vectors are
+rejected at table-load time).  `max_coefficient` is a safety cap; if it
+truncates a derived physical bound, `search_status:
+truncated_by_max_coefficient` is set.
 
 ## Irrep Key Format
 
