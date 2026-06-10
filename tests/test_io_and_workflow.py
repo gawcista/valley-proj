@@ -3892,7 +3892,6 @@ def _e2e_write_table(path, data):
 def test_reduced_ebr_e2e_config_path_writes_mapping_and_embeds_in_summary(tmp_path):
     """E2E: analyze_hsp with analysis.reduced_ebr.enabled writes mapping JSON
     and embeds it in valley_summary.json."""
-    import numpy as np
     h5_path = tmp_path / "wf.h5"
     table_path = tmp_path / "table.json"
     out_dir = tmp_path / "out"
@@ -3913,7 +3912,10 @@ def test_reduced_ebr_e2e_config_path_writes_mapping_and_embeds_in_summary(tmp_pa
 
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     assert "valley_reduced_ebr_mapping" in summary
-    assert summary["valley_reduced_ebr_mapping"]["table_status"] == "loaded"
+    assert summary["valley_reduced_ebr_mapping"] == mapping
+    summary_text = outputs["valley_summary_txt"].read_text(encoding="utf-8")
+    assert "Reduced EBR mapping" in summary_text
+    assert "table: loaded" in summary_text
 
 
 def test_reduced_ebr_disabled_does_not_write_mapping(tmp_path):
@@ -4046,23 +4048,104 @@ def test_summary_text_truncated_search_surfaced():
     assert "truncated by max_coefficient" in text
 
 
-def test_e2e_smoke_no_material_names_in_new_code():
-    """E2E smoke tests must not use real material names in fixture data or logic."""
-    import subprocess, sys
-    result = subprocess.run(
-        ["git", "diff", "HEAD", "--", "tests/test_io_and_workflow.py"],
-        capture_output=True, text=True,
+def test_reduced_ebr_classifier_payload_written_consistently_to_public_outputs(tmp_path):
+    """Classifier output is written consistently to mapping JSON and summaries."""
+    from valleyscope.analysis.reduced_ebr_mapping import (
+        build_reduced_ebr_mapping,
+        load_reduced_ebr_table,
     )
-    diff_lines = result.stdout.split("\n")
-    # Only check added lines (starting with "+" but not "+++").
-    added = [l for l in diff_lines if l.startswith("+") and not l.startswith("+++")]
-    # Strip the leading "+" for checking.
-    for line in added:
-        content = line[1:]
-        for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
-            # Allow the name in the assertion list itself (this test).
-            if "for name in" in content:
-                continue
-            assert name not in content, (
-                f"E2E smoke diff must not add material name {name!r}: {content.strip()[:120]}"
-            )
+    from valleyscope.reports.analysis_outputs import write_analysis_outputs
+
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "cfg.yaml"
+    out_dir = tmp_path / "out"
+    table_path = tmp_path / "table.json"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+
+    table = {
+        "schema_version": "1.0.0",
+        "subspace_group_candidate": "C1",
+        "expected_hsps": ["GammaM"],
+        "irreps": ["GammaM:irrep_A", "GammaM:irrep_B", "GammaM:irrep_C"],
+        "ebrs": [
+            {"label": "EBR_A", "vector": [1, 0, 0]},
+            {"label": "EBR_B", "vector": [1, 1, 0]},
+            {"label": "EBR_C", "vector": [0, 0, 2]},
+        ],
+    }
+    _e2e_write_table(table_path, table)
+    loaded_table = load_reduced_ebr_table(table_path)
+    export_bundle = {
+        "bundles": [
+            {
+                "bundle_id": "b_atom",
+                "valley": "K",
+                "subspace_group_candidate": "C1",
+                "ready_for_external_solver": True,
+                "expected_hsps": ["GammaM"],
+                "irreps_by_kpoint": {"GammaM": ["irrep_A", "irrep_A", "irrep_B"]},
+            },
+            {
+                "bundle_id": "b_frag",
+                "valley": "K",
+                "subspace_group_candidate": "C1",
+                "ready_for_external_solver": True,
+                "expected_hsps": ["GammaM"],
+                "irreps_by_kpoint": {"GammaM": ["irrep_B"]},
+            },
+            {
+                "bundle_id": "b_stab",
+                "valley": "K",
+                "subspace_group_candidate": "C1",
+                "ready_for_external_solver": True,
+                "expected_hsps": ["GammaM"],
+                "irreps_by_kpoint": {"GammaM": ["irrep_C"]},
+            },
+        ],
+    }
+    mapping = build_reduced_ebr_mapping(
+        ebr_export_bundle=export_bundle,
+        table=loaded_table,
+    )
+    assert [s["classification"] for s in mapping["solutions"]] == [
+        "atomic-compatible-candidate",
+        "fragile-topology-candidate",
+        "stable-topology-candidate",
+    ]
+
+    config = load_config(config_path)
+    outputs = write_analysis_outputs(
+        config=config,
+        qcut=0.5,
+        weight_rows=[],
+        sector_names=["K_valley"],
+        subspace_payload={"kpoints": {}},
+        symmetry_payload={"status": "skipped", "reason": "test",
+                          "detected_operations": [], "candidate_rotations": [],
+                          "little_group_check": {"status": "not_run"},
+                          "valley_preservation_check": {"status": "not_run"}},
+        symmetry_rows=[],
+        projectors_by_kpoint={},
+        qcut_scan_payload={},
+        symmetry_representation_payload={},
+        basis_transforms={},
+        reduced_ebr_mapping=mapping,
+    )
+
+    mapping_json = json.loads(outputs["valley_reduced_ebr_mapping_json"].read_text(encoding="utf-8"))
+    summary_json = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    summary_text = outputs["valley_summary_txt"].read_text(encoding="utf-8")
+    assert mapping_json == mapping
+    assert summary_json["valley_reduced_ebr_mapping"] == mapping
+    assert "classifications: atomic-compatible=1, fragile-topology=1, stable-topology=1" in summary_text
+    assert "b_atom K: atomic-compatible" in summary_text
+    assert "b_frag K: fragile-topology" in summary_text
+    assert "b_stab K: stable-topology (outside integer span)" in summary_text
+
+
+def test_e2e_smoke_fixture_table_is_material_agnostic():
+    """E2E smoke fixture data must not name real validation materials."""
+    fixture_text = json.dumps(_E2E_SAMPLE_TABLE)
+    for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
+        assert name not in fixture_text
