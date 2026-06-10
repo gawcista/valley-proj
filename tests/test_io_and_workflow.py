@@ -3863,3 +3863,206 @@ def test_debug_profile_writes_all_expected_detail_files(tmp_path):
     # Summary must NOT mention suppression.
     summary_text = outputs["valley_summary_txt"].read_text(encoding="utf-8")
     assert "Debug/detail outputs suppressed" not in summary_text
+
+
+# -----------------------------------------------------------------------
+# Reduced EBR classification E2E smoke tests
+# -----------------------------------------------------------------------
+
+_E2E_SAMPLE_TABLE = {
+    "schema_version": "1.0.0",
+    "subspace_group_candidate": "C3_like",
+    "expected_hsps": ["GammaM", "KM"],
+    "irreps": [
+        "GammaM:C3_spinor_phase_+1/2",
+        "KM:C3_spinor_phase_+1/6",
+        "KM:C3_spinor_phase_-1/6",
+    ],
+    "ebrs": [
+        {"label": "EBR_A", "vector": [1, 0, 1]},
+        {"label": "EBR_B", "vector": [1, 1, 0]},
+    ],
+}
+
+
+def _e2e_write_table(path, data):
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_reduced_ebr_e2e_config_path_writes_mapping_and_embeds_in_summary(tmp_path):
+    """E2E: analyze_hsp with analysis.reduced_ebr.enabled writes mapping JSON
+    and embeds it in valley_summary.json."""
+    import numpy as np
+    h5_path = tmp_path / "wf.h5"
+    table_path = tmp_path / "table.json"
+    out_dir = tmp_path / "out"
+    _e2e_write_table(table_path, _E2E_SAMPLE_TABLE)
+    write_fixture(h5_path)
+    config_path = tmp_path / "cfg.yaml"
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["analysis"]["reduced_ebr"] = {"enabled": True, "table_file": str(table_path)}
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    outputs = analyze_hsp(config_path)
+
+    mapping_path = out_dir / "valley_reduced_ebr_mapping.json"
+    assert mapping_path.exists(), "valley_reduced_ebr_mapping.json must be written"
+    mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+    assert mapping["table_status"] == "loaded"
+
+    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    assert "valley_reduced_ebr_mapping" in summary
+    assert summary["valley_reduced_ebr_mapping"]["table_status"] == "loaded"
+
+
+def test_reduced_ebr_disabled_does_not_write_mapping(tmp_path):
+    """E2E: without analysis.reduced_ebr.enabled, no mapping JSON is written."""
+    h5_path = tmp_path / "wf.h5"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    config_path = tmp_path / "cfg.yaml"
+    write_config(config_path, h5_path, out_dir)
+
+    outputs = analyze_hsp(config_path)
+
+    assert not (out_dir / "valley_reduced_ebr_mapping.json").exists()
+    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    assert "valley_reduced_ebr_mapping" not in summary
+
+
+def test_summary_text_surfaces_atomic_fragile_stable_classification():
+    """E2E: summary text surfaces atomic, fragile, stable classifications."""
+    from valleyscope.reports.summary_report import build_summary_payload, render_summary_text
+    from valleyscope.io.config import load_config
+
+    mapping = {
+        "status": "no_exact_solution",
+        "mapping_status": "no_exact_solution",
+        "reduced_ebr_decomposition_status": "no_exact_solution",
+        "table_status": "loaded",
+        "solutions": [
+            {"bundle_id": "b_atom", "valley": "K", "status": "solved_exact",
+             "classification": "atomic-compatible-candidate",
+             "integer_span_status": "in_integer_span",
+             "nonnegative_solution_status": "solved_exact",
+             "ebr_decomposition": [
+                 {"label": "EBR_A", "coefficient": 1},
+                 {"label": "EBR_B", "coefficient": 2},
+             ]},
+            {"bundle_id": "b_frag", "valley": "K", "status": "no_exact_solution",
+             "classification": "fragile-topology-candidate",
+             "integer_span_status": "in_integer_span",
+             "nonnegative_solution_status": "no_nonnegative_solution",
+             "integer_solution": [
+                 {"label": "EBR_A", "coefficient": -1},
+                 {"label": "EBR_B", "coefficient": 1},
+             ]},
+            {"bundle_id": "b_stab", "valley": "K", "status": "no_exact_solution",
+             "classification": "stable-topology-candidate",
+             "integer_span_status": "outside_integer_span",
+             "nonnegative_solution_status": "no_nonnegative_solution"},
+        ],
+        "excluded_bundles": [],
+        "solver": "smith_normal_form_plus_bounded_nonnegative_search",
+    }
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        h5 = d / "wf.h5"
+        write_fixture(h5)
+        cfg_path = d / "cfg.yaml"
+        write_config(cfg_path, h5, d / "out")
+        config = load_config(cfg_path)
+
+        payload = build_summary_payload(
+            config=config, qcut=0.5,
+            subspace_payload={"kpoints": {}},
+            symmetry_payload={"status": "skipped", "reason": "toy",
+                              "detected_operations": [], "candidate_rotations": [],
+                              "little_group_check": {"status": "not_run"},
+                              "valley_preservation_check": {"status": "not_run"}},
+            symmetry_rows=[], output_paths={},
+            reduced_ebr_mapping=mapping,
+        )
+        text = render_summary_text(payload)
+
+    assert "atomic-compatible=1" in text
+    assert "fragile-topology=1" in text
+    assert "stable-topology=1" in text
+    assert "EBR_A x 1" in text
+    assert "EBR_B x 2" in text
+    assert "signed witness" in text
+    assert "EBR_A: -1" in text
+    assert "EBR_B: 1" in text
+    assert "outside integer span" in text
+
+
+def test_summary_text_truncated_search_surfaced():
+    """E2E: truncated_by_max_coefficient search status appears in summary."""
+    from valleyscope.reports.summary_report import build_summary_payload, render_summary_text
+    from valleyscope.io.config import load_config
+
+    mapping = {
+        "status": "no_exact_solution",
+        "mapping_status": "no_exact_solution",
+        "reduced_ebr_decomposition_status": "no_exact_solution",
+        "table_status": "loaded",
+        "solutions": [{
+            "bundle_id": "b_001", "valley": "K", "status": "no_exact_solution",
+            "classification": "fragile-topology-candidate",
+            "integer_span_status": "in_integer_span",
+            "nonnegative_solution_status": "no_nonnegative_solution",
+            "search_status": "truncated_by_max_coefficient",
+            "integer_solution": [{"label": "EBR_A", "coefficient": -1}],
+        }],
+        "excluded_bundles": [],
+        "solver": "smith_normal_form_plus_bounded_nonnegative_search",
+    }
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        h5 = d / "wf.h5"
+        write_fixture(h5)
+        cfg_path = d / "cfg.yaml"
+        write_config(cfg_path, h5, d / "out")
+        config = load_config(cfg_path)
+
+        payload = build_summary_payload(
+            config=config, qcut=0.5,
+            subspace_payload={"kpoints": {}},
+            symmetry_payload={"status": "skipped", "reason": "toy",
+                              "detected_operations": [], "candidate_rotations": [],
+                              "little_group_check": {"status": "not_run"},
+                              "valley_preservation_check": {"status": "not_run"}},
+            symmetry_rows=[], output_paths={},
+            reduced_ebr_mapping=mapping,
+        )
+        text = render_summary_text(payload)
+
+    assert "search_truncated=1" in text
+    assert "truncated by max_coefficient" in text
+
+
+def test_e2e_smoke_no_material_names_in_new_code():
+    """E2E smoke tests must not use real material names in fixture data or logic."""
+    import subprocess, sys
+    result = subprocess.run(
+        ["git", "diff", "HEAD", "--", "tests/test_io_and_workflow.py"],
+        capture_output=True, text=True,
+    )
+    diff_lines = result.stdout.split("\n")
+    # Only check added lines (starting with "+" but not "+++").
+    added = [l for l in diff_lines if l.startswith("+") and not l.startswith("+++")]
+    # Strip the leading "+" for checking.
+    for line in added:
+        content = line[1:]
+        for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
+            # Allow the name in the assertion list itself (this test).
+            if "for name in" in content:
+                continue
+            assert name not in content, (
+                f"E2E smoke diff must not add material name {name!r}: {content.strip()[:120]}"
+            )
