@@ -158,10 +158,23 @@ may edit small fixes, documentation, schema wiring, tests, and planning files,
 but should not take over large implementation work unless the user explicitly
 asks for it. New implementation tasks should be handed to cc with clear branch
 names, files to inspect, formulas, tests, non-goals, and handoff requirements.
+After every cc review, Codex must rewrite `.codex_cc_handoff.md` as the working
+handoff channel for cc. This file is not a user-facing report.
 
 cc is the main implementation agent. cc should work on an independent branch,
 self-test, self-review, and provide a Codex review handoff. cc must not merge
-to `main` unless the user explicitly authorizes it.
+to `main` unless the user explicitly authorizes it. cc must not create or push
+remote feature branches; `cc/*` branches are local review branches only.
+
+cc owns task test execution. cc handoff must include exact test commands and
+exact outputs. Codex should confirm the reported test evidence and should not
+use repeated pytest runs as a substitute for missing cc testing. Codex may still
+run targeted verification before a direct merge or when the handoff evidence is
+incomplete, stale, or inconsistent.
+
+Workflow guardrails are documented in `docs/agent_handoff_protocol.md`. cc
+should also follow `CLAUDE.md` and run `python scripts/check_agent_protocol.py`
+before requesting review.
 
 All agents must prioritize physical consistency over speed. If a convention is
 unclear after reading the repo and refs, ask the user in Chinese instead of
@@ -315,4 +328,8 @@ When reviewing cc output, Codex must check:
 * public schema uses the current terminology;
 * old schema is only retained as an explicit legacy alias when necessary;
 * toy tests do not depend on large WAVECAR files;
-* `pytest -q` or the relevant targeted tests are reported.
+* cc reported exact outputs for `pytest -q` or the relevant targeted tests;
+* `.codex_cc_handoff.md` was rewritten as the Codex/cc handoff, not treated as
+  a user-facing report;
+* no `origin/cc/*` remote branch or upstream-tracked `cc/*` branch is required
+  for review handoff.
