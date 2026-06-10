@@ -65,11 +65,17 @@ suffix-stripped matches are rejected.
    `subspace_group_candidate`. Mismatched groups are excluded with reason
    `"table group X != bundle group Y"`.
 
-2. Bundle irrep labels are resolved to table irrep indices via the irrep
+2. The table `expected_hsps` is the reduced-dimensional EBR basis contract.
+   For trusted decomposition, it must match the bundle `expected_hsps` set
+   and the HSP-key set of `bundle.irreps_by_kpoint`. Legacy bundles without
+   declared `expected_hsps` derive the basis only from `irreps_by_kpoint`
+   keys. Missing, extra, malformed, or inferred HSP data is not accepted.
+
+3. Bundle irrep labels are resolved to table irrep indices via the irrep
    key format above. Exact match is preferred; unique suffix-stripped match
    is a fallback. Ambiguous matches are rejected.
 
-3. The resolved bundle irrep count vector is then decomposed against the
+4. The resolved bundle irrep count vector is then decomposed against the
    EBR vectors using brute-force exact integer search up to
    `max_coefficient`. Only exact matches are reported; no heuristic or
    floating-point fitting is performed.

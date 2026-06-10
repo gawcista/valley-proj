@@ -190,12 +190,25 @@ def build_reduced_ebr_mapping(
         actual_hsps = set(bundle_irreps) if isinstance(bundle_irreps, dict) else set()
 
         bundle_expected = bundle.get("expected_hsps")
-        if bundle_expected is not None and isinstance(bundle_expected, list):
-            bundle_expected_set = set(bundle_expected)
-        else:
+        if bundle_expected is None:
             # Legacy bundle without declared expected_hsps: derive from
             # irreps_by_kpoint keys.
             bundle_expected_set = actual_hsps
+        elif (
+            isinstance(bundle_expected, list)
+            and all(isinstance(h, str) and h for h in bundle_expected)
+            and len(set(bundle_expected)) == len(bundle_expected)
+        ):
+            bundle_expected_set = set(bundle_expected)
+        else:
+            excluded.append({
+                "bundle_id": bundle.get("bundle_id", "?"),
+                "reason": (
+                    "malformed expected_hsps: expected a unique list of "
+                    "non-empty HSP labels"
+                ),
+            })
+            continue
 
         if bundle_expected_set != table_expected:
             excluded.append({

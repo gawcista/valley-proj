@@ -500,6 +500,15 @@ def test_table_schema_doc_labels_use_clike_form():
     assert 'C{order}_like' in doc_text
 
 
+def test_table_schema_doc_expected_hsps_basis_contract():
+    """Schema doc must state expected_hsps is enforced as the EBR basis contract."""
+    doc_text = Path("docs/reduced_ebr_table_schema.md").read_text(encoding="utf-8")
+    assert "reduced-dimensional EBR basis contract" in doc_text
+    assert "bundle `expected_hsps`" in doc_text
+    assert "`bundle.irreps_by_kpoint`" in doc_text
+    assert "Missing, extra, malformed, or inferred HSP data is not accepted" in doc_text
+
+
 def test_schema_md_labels_use_clike_form():
     """Verify docs/schema.md uses C{order}_like for subspace_group_candidate examples."""
     schema_text = Path("docs/schema.md").read_text(encoding="utf-8")
@@ -1241,6 +1250,20 @@ def test_irrep_keys_mismatch_excludes():
     assert len(r["excluded_bundles"]) >= 1
     reasons = " ".join(e["reason"] for e in r["excluded_bundles"])
     assert "irrep HSP basis mismatch" in reasons
+
+
+def test_malformed_declared_expected_hsps_excludes():
+    """Declared expected_hsps must be a unique list, not legacy fallback."""
+    b = _bundle_with_hsps(
+        expected="GammaM",
+        irreps_by_kp={
+            "GammaM": ["C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"],
+            "KM": ["C3_spinor_phase_+1/6", "C3_spinor_phase_-1/6"],
+        },
+    )
+    r = build_reduced_ebr_mapping(ebr_export_bundle=b, table=_SAMPLE_TABLE)
+    assert len(r["excluded_bundles"]) == 1
+    assert "malformed expected_hsps" in r["excluded_bundles"][0]["reason"]
 
 
 def test_legacy_bundle_without_expected_hsps_still_works():
