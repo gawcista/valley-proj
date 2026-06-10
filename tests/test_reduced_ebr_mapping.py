@@ -504,3 +504,219 @@ def test_schema_md_labels_use_clike_form():
     # Must not use P3/P2 as subspace_group_candidate example values.
     assert '"subspace_group_candidate": "P3"' not in schema_text
     assert '"subspace_group_candidate": "P2"' not in schema_text
+
+
+# -----------------------------------------------------------------------
+# 15. map-reduced-ebr CLI
+# -----------------------------------------------------------------------
+
+def _write_bundle(path: Path, bundles: list[dict]) -> None:
+    payload = {
+        "status": "ready_for_external_solver",
+        "bundle_count": len(bundles),
+        "excluded_count": 0,
+        "schema_version": "1.0.0",
+        "reduced_ebr_decomposition_status": "not_implemented",
+        "bundles": bundles,
+        "excluded_instances": [],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _cli(bundle: Path, table: Path, output: Path, *extra) -> int:
+    from valleyscope.cli import main
+    return main([
+        "map-reduced-ebr", str(bundle), str(table),
+        "-o", str(output), *extra,
+    ])
+
+
+def test_cli_solved_exact(tmp_path):
+    """CLI solves an exact-match toy bundle and writes the mapping JSON."""
+    out = tmp_path / "out.json"
+    bundle_path = tmp_path / "bundle.json"
+    table_path = tmp_path / "table.json"
+    _write_bundle(bundle_path, [{
+        "bundle_id": "b_001", "valley": "K",
+        "subspace_group_candidate": "C3_like",
+        "ready_for_external_solver": True,
+        "irreps_by_kpoint": {
+            "GammaM": ["C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"],
+            "KM": ["C3_spinor_phase_+1/6", "C3_spinor_phase_-1/6"],
+        },
+    }])
+    _write_table(table_path, _SAMPLE_TABLE)
+
+    rc = _cli(bundle_path, table_path, out)
+    assert rc == 0, f"CLI exited with {rc}"
+    assert out.exists()
+    mapping = json.loads(out.read_text(encoding="utf-8"))
+    assert mapping["status"] == "solved_exact"
+    s = mapping["solutions"][0]
+    assert s["status"] == "solved_exact"
+    labels = {e["label"] for e in s["ebr_decomposition"]}
+    assert labels == {"EBR_A", "EBR_B"}
+
+
+def test_cli_no_exact_solution(tmp_path):
+    """CLI reports no_exact_solution for an unsolvable toy bundle."""
+    out = tmp_path / "out.json"
+    bundle_path = tmp_path / "bundle.json"
+    table_path = tmp_path / "table.json"
+    _write_bundle(bundle_path, [{
+        "bundle_id": "b_001", "valley": "K",
+        "subspace_group_candidate": "C3_like",
+        "ready_for_external_solver": True,
+        "irreps_by_kpoint": {
+            "GammaM": ["C3_spinor_phase_+1/2"] * 5,
+            "KM": [],
+        },
+    }])
+    _write_table(table_path, _SAMPLE_TABLE)
+
+    rc = _cli(bundle_path, table_path, out)
+    assert rc == 0
+    mapping = json.loads(out.read_text(encoding="utf-8"))
+    assert mapping["status"] == "no_exact_solution"
+    assert mapping["solutions"][0]["status"] == "no_exact_solution"
+
+
+def test_cli_stdout_includes_status_and_output_path(capsys, tmp_path):
+    """CLI stdout includes solved_exact and the output path."""
+    out = tmp_path / "out.json"
+    bundle_path = tmp_path / "bundle.json"
+    table_path = tmp_path / "table.json"
+    _write_bundle(bundle_path, [{
+        "bundle_id": "b_001", "valley": "K",
+        "subspace_group_candidate": "C3_like",
+        "ready_for_external_solver": True,
+        "irreps_by_kpoint": {
+            "GammaM": ["C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"],
+            "KM": ["C3_spinor_phase_+1/6", "C3_spinor_phase_-1/6"],
+        },
+    }])
+    _write_table(table_path, _SAMPLE_TABLE)
+
+    _cli(bundle_path, table_path, out)
+    captured = capsys.readouterr().out
+    assert "solved_exact" in captured
+    assert str(out) in captured
+
+
+def test_cli_invalid_table_fails_without_writing_output(tmp_path):
+    """CLI fails on invalid table and does not write a misleading output file."""
+    out = tmp_path / "out.json"
+    bundle_path = tmp_path / "bundle.json"
+    table_path = tmp_path / "table.json"
+    # Table with duplicate EBR labels
+    bad_table = dict(_SAMPLE_TABLE)
+    bad_table["ebrs"] = [
+        {"label": "EBR_A", "vector": [1, 0, 1]},
+        {"label": "EBR_A", "vector": [1, 1, 0]},
+    ]
+    _write_bundle(bundle_path, [{
+        "bundle_id": "b_001", "valley": "K",
+        "subspace_group_candidate": "C3_like",
+        "ready_for_external_solver": True,
+        "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"], "KM": []},
+    }])
+    _write_table(table_path, bad_table)
+
+    rc = _cli(bundle_path, table_path, out)
+    assert rc != 0, "CLI should fail on invalid table"
+    assert not out.exists(), "Must not write output for invalid table"
+
+
+def test_cli_missing_table_file_fails():
+    """CLI fails when table file does not exist."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        _write_bundle(d / "bundle.json", [])
+        rc = _cli(d / "bundle.json", d / "nonexistent.json", d / "out.json")
+        assert rc != 0
+        assert not (d / "out.json").exists()
+
+
+def test_cli_missing_bundle_file_fails():
+    """CLI fails when bundle file does not exist."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        _write_table(d / "table.json", _SAMPLE_TABLE)
+        rc = _cli(d / "nonexistent.json", d / "table.json", d / "out.json")
+        assert rc != 0
+        assert not (d / "out.json").exists()
+
+
+def test_cli_respects_max_coefficient(tmp_path):
+    """CLI passes --max-coefficient through to the solver."""
+    out = tmp_path / "out.json"
+    bundle_path = tmp_path / "bundle.json"
+    table_path = tmp_path / "table.json"
+    # Bundle with large count that needs max_coeff >= 6
+    _write_bundle(bundle_path, [{
+        "bundle_id": "b_001", "valley": "K",
+        "subspace_group_candidate": "C3_like",
+        "ready_for_external_solver": True,
+        "irreps_by_kpoint": {
+            "GammaM": ["C3_spinor_phase_+1/2"] * 6,
+            "KM": ["C3_spinor_phase_+1/6"] * 6,
+        },
+    }])
+    table = {
+        "schema_version": "1.0.0",
+        "subspace_group_candidate": "C3_like",
+        "expected_hsps": ["GammaM", "KM"],
+        "irreps": ["GammaM:C3_spinor_phase_+1/2", "KM:C3_spinor_phase_+1/6"],
+        "ebrs": [{"label": "EBR_X", "vector": [1, 1]}],
+    }
+    _write_table(table_path, table)
+
+    # With max_coeff=6: 6*[1,1] = [6,6] -> exact
+    rc = _cli(bundle_path, table_path, out, "--max-coefficient", "6")
+    assert rc == 0
+    mapping = json.loads(out.read_text(encoding="utf-8"))
+    assert mapping["status"] == "solved_exact"
+
+
+def test_cli_analyze_hsp_reduced_ebr_unchanged(tmp_path):
+    """Existing analyze-hsp reduced-EBR behavior is unchanged by CLI addition."""
+    h5_path = tmp_path / "wf.h5"
+    import h5py, numpy as np
+    with h5py.File(h5_path, "w") as h5:
+        meta = h5.create_group("metadata")
+        lattice = meta.create_group("lattice")
+        lattice["direct_cart"] = np.eye(3)
+        lattice["reciprocal_cart"] = np.eye(3) * 10.0
+        meta["spinor"] = False; meta["source"] = "toy"; meta["vasp_band_index_base"] = 1
+        kp = h5.create_group("kpoints").create_group("0")
+        kp["name"] = "GammaM"; kp["frac"] = np.zeros(3); kp["cart"] = np.zeros(3)
+        kp["g_vectors_frac"] = np.array([[0, 0, 0], [1, 0, 0]])
+        kp["g_vectors_cart"] = np.array([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]])
+        kp["coefficients"] = np.array([[[1.0 + 0.0j, 0.0 + 0.0j]]])
+        kp["energies_eV"] = np.array([0.1]); kp["band_indices_vasp"] = np.array([101])
+
+    table_path = tmp_path / "table.json"
+    _write_table(table_path, _SAMPLE_TABLE)
+    config = {
+        "input": {"wavefunction_h5": str(h5_path)},
+        "analysis": {"kpoints": ["GammaM"], "iband": [101],
+                      "reduced_ebr": {"enabled": True, "table_file": str(table_path)}},
+        "monolayer_lattices": {"default": {"reciprocal_cart": np.eye(3).tolist()}},
+        "valley_centers": {"coordinate_mode": "cart", "centers": [
+            {"name": "K", "cart": [0.0, 0.0, 0.0]},
+            {"name": "Kp", "cart": [5.0, 0.0, 0.0]},
+        ]},
+        "valley_subspaces": [{"name": "K_valley", "centers": ["K"]},
+                             {"name": "Kp_valley", "centers": ["Kp"]}],
+        "output": {"directory": str(tmp_path / "out")},
+    }
+    config_path = tmp_path / "cfg.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    from valleyscope.workflows.analyze_hsp import analyze_hsp
+    outputs = analyze_hsp(config_path)
+    # With a real analyze-hsp run, reduced EBR mapping is present when enabled.
+    assert "valley_reduced_ebr_mapping_json" in outputs, (
+        "analyze-hsp must still write valley_reduced_ebr_mapping.json when enabled"
+    )

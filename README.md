@@ -655,6 +655,21 @@ valley_ebr_export_bundle.json           ← complete ready bundles for external 
 valley_reduced_ebr_mapping.json         ← only when analysis.reduced_ebr.enabled
 ```
 
+A standalone offline CLI performs exact-integer reduced EBR mapping from an
+existing `valley_ebr_export_bundle.json` plus a user-supplied validated
+external table:
+
+```bash
+valleyscope map-reduced-ebr \
+  valley_ebr_export_bundle.json \
+  external_reduced_ebr_table.json \
+  --output valley_reduced_ebr_mapping.json
+```
+
+The table path is required — no built-in EBR tables are provided.
+See `docs/reduced_ebr_table_schema.md` for the table format and
+`docs/schema.md` for the public output schema.
+
 ### Debug / Detail Outputs (debug profile only)
 
 These files are written only when `output.profile: debug`:

@@ -124,6 +124,44 @@ Given a bundle with irrep count vector `[2, 1, 1]`:
   }
   ```
 
+## Offline CLI
+
+A standalone CLI entry performs exact-integer reduced EBR mapping from an
+existing `valley_ebr_export_bundle.json` plus a user-supplied validated
+external table. This separates Layer 2 export-bundle generation from
+Layer 3 table-dependent mapping for high-throughput workflows.
+
+```bash
+valleyscope map-reduced-ebr \
+  valley_ebr_export_bundle.json \
+  external_reduced_ebr_table.json \
+  --output valley_reduced_ebr_mapping.json \
+  --max-coefficient 6
+```
+
+Arguments:
+- `bundle` — path to `valley_ebr_export_bundle.json` (required)
+- `table` — path to external reduced EBR table JSON (required; no built-in tables)
+- `--output`, `-o` — output path (default: `valley_reduced_ebr_mapping.json`)
+- `--max-coefficient` — max coefficient per EBR in brute-force search (default: 6)
+
+Stdout summary example:
+```
+status:              solved_exact
+total bundles:       1
+solved (exact):      1
+no exact solution:   0
+excluded:            0
+reduced EBR mapping: valley_reduced_ebr_mapping.json
+```
+
+The CLI:
+- is Layer 3 and requires a user-supplied validated table;
+- uses exact-integer brute-force matching only;
+- `C3_like` / `C2_like` must match the export bundle
+  `subspace_group_candidate`;
+- no decomposition claim is made without a validated external table.
+
 ## Explicit Non-Features
 
 - No built-in EBR tables are provided.

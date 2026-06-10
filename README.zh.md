@@ -621,6 +621,19 @@ valley_ebr_export_bundle.json           ← 供下游工具使用的完整就绪
 valley_reduced_ebr_mapping.json         ← 仅在 analysis.reduced_ebr.enabled 时生成
 ```
 
+独立的离线 CLI 可从已有的 `valley_ebr_export_bundle.json` 和用户提供的验证外部表
+执行精确整数 reduced EBR 映射：
+
+```bash
+valleyscope map-reduced-ebr \
+  valley_ebr_export_bundle.json \
+  external_reduced_ebr_table.json \
+  --output valley_reduced_ebr_mapping.json
+```
+
+表路径是必需的——不内置任何 EBR 表。
+参见 `docs/reduced_ebr_table_schema.md`（表格式）和 `docs/schema.md`（公共输出 schema）。
+
 ### Debug / 详细输出（仅 debug profile）
 
 以下文件仅在 `output.profile: debug` 时写出：
