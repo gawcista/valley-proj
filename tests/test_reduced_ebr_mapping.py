@@ -814,6 +814,15 @@ def test_data_model_doc_label_conventions():
     )
 
 
+def test_data_model_doc_no_material_specific_table_targets():
+    """Design doc must keep package-data targets symmetry-based, not material-based."""
+    doc = Path("docs/reduced_dimensional_irrep_ebr_data_model.md").read_text(encoding="utf-8")
+    for forbidden in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
+        assert forbidden not in doc, (
+            f"design doc must not use real material '{forbidden}' as a package-data target"
+        )
+
+
 def test_agents_md_uses_correct_package_name_irrep():
     """AGENTS.md must use the correct Python package name 'irrep' (singular)."""
     text = Path("AGENTS.md").read_text(encoding="utf-8")

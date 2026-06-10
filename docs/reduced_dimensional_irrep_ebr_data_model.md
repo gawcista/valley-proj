@@ -409,8 +409,10 @@ concepts.  Previous versions of this handoff incorrectly used `irreps`
    `README.md` explaining provenance requirements.
 3. **Loader** — `valleyscope/data/loader.py` with `list_available_tables()`,
    `load_table(name_or_path)`, validation against schema.
-4. **First reviewed tables** — for tMoTe2 `C3_like` (GammaM, KM) only after
-   literature review and benchmark verification.
+4. **First reviewed tables** — for a generic reviewed `C3_like` (GammaM, KM)
+   reduced-dimensional table only after literature review and benchmark
+   validation against real-material fixtures. The table identity must remain
+   symmetry/data-model based, not material-name based.
 5. **Convenience CLI** — `--builtin <name>` flag for `map-reduced-ebr`.
 6. **Config integration** — `analysis.reduced_ebr.table_name` as alternative
    to `table_file`.
