@@ -48,6 +48,7 @@ def write_analysis_outputs(
     sampled_k_coverage: dict[str, object] | None = None,
 ) -> dict[str, object]:
     output_dir = config.output.directory
+    output_dir.mkdir(parents=True, exist_ok=True)
     outputs: dict[str, object] = {}
     is_debug = config.output.profile == "debug"
 

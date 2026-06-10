@@ -3635,3 +3635,44 @@ def test_standard_profile_always_writes_summary_even_with_flags_false(tmp_path):
     assert outputs["valley_summary_json"].exists(), (
         "valley_summary.json must be written in standard profile even with write_summary_json=false"
     )
+
+
+def test_write_analysis_outputs_creates_standard_summary_directory(tmp_path):
+    """Report writer creates output.directory for standard profile summaries."""
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["output"]["profile"] = "standard"
+    raw["output"]["write_csv"] = False
+    raw["output"]["write_summary_txt"] = False
+    raw["output"]["write_summary_json"] = False
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    config = load_config(config_path)
+
+    from valleyscope.reports.analysis_outputs import write_analysis_outputs
+
+    assert not out_dir.exists()
+
+    outputs = write_analysis_outputs(
+        config=config,
+        qcut=0.1,
+        weight_rows=[],
+        sector_names=[],
+        subspace_payload={},
+        symmetry_payload={},
+        symmetry_rows=[],
+        projectors_by_kpoint={},
+        qcut_scan_payload={},
+        symmetry_representation_payload={},
+        basis_transforms={},
+    )
+
+    assert outputs["valley_summary_txt"].exists()
+    assert outputs["valley_summary_json"].exists()
+    assert sorted(path.name for path in out_dir.iterdir()) == [
+        "valley_summary.json",
+        "valley_summary.txt",
+    ]
