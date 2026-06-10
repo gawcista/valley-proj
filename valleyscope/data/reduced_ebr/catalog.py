@@ -169,7 +169,7 @@ def _validate_filename_safe(filename: str, name: str) -> None:
 
 def _resolve_table_path(filename: str) -> Path:
     """Resolve a manifest filename to an absolute path inside the package-data dir."""
-    root = package_data_root()
+    root = package_data_root().resolve()
     resolved = (root / filename).resolve()
     # Double-check: resolved path must stay inside package_data_root.
     try:

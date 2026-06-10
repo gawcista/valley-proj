@@ -1154,7 +1154,7 @@ def test_load_empty_name_raises(monkeypatch):
         load_reviewed_reduced_ebr_table("")
 
 
-def test_catalog_does_not_import_irrep2():
+def test_catalog_loader_integration_does_not_import_irrep2():
     """catalog.py must not import irrep2 (private reference-only repo)."""
     from valleyscope.data.reduced_ebr.catalog import package_data_root
     src = (package_data_root() / "catalog.py").read_text(encoding="utf-8")
