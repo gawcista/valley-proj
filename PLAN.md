@@ -102,6 +102,7 @@ valley-changing operations as invariance of a single label operator.
 | Phase 5 | EBR input/candidate/problem/export pipeline | Done |
 | Phase 6 | Reduced EBR mapping interface | Default-off external-table solver exists; no built-in tables |
 | Phase 7 | Parent-valley / k-resolved projector diagnostics | Done — merged to main |
+| Phase 8 | Output contract cleanup (standard/debug profiles) | Done — merged to main |
 
 ## Real Benchmarks
 
@@ -120,11 +121,18 @@ valley-changing operations as invariance of a single label operator.
 
 ## Open Work
 
-* Freeze public schema after parent-valley projection merge: distinguish main
-  user entry, downstream EBR entry, and debug/detail outputs.
-* Build a minimal benchmark matrix for tMoTe2, tZrSe2, and tPdSe2/PdSe2 with
-  expected `trusted`, `diagnostic_only`, and `blocked` outcomes.
-* Spinor convention benchmark verification for tZrSe2.
-* Expanded-band HDF5 to test D_raw closure sensitivity.
+* ~~Freeze public schema~~ — Done. `docs/schema.md` is the authoritative frozen
+  public schema. `output.profile: standard` (default) emits only public
+  user-facing outputs; debug/detail files require `output.profile: debug`.
+* ~~Build benchmark matrix~~ — Done. `docs/benchmarks/benchmark_matrix.md`
+  records tMoTe2 and tZrSe2 fixture status. tPdSe2/PdSe2 is deferred until
+  evidence exists.
+* **Benchmark matrix as regression anchor**: keep `docs/benchmarks/benchmark_matrix.md`
+  up to date with current fixture status so that output-contract regressions
+  are caught by standard-profile smoke tests.
+* Spinor convention benchmark verification for tZrSe2-like fixtures
+  (blocker B1 in `docs/benchmarks/tzrse2_blocker_evidence.md`).
+* Expanded-band HDF5 to test D_raw closure sensitivity for tZrSe2 M3 C2
+  (blocker B2).
 * Design reviewed EBR table ingestion for trusted C3/C2 instances.
 * High-throughput database pipeline.

@@ -300,6 +300,18 @@ Current work must not implement:
   `target_bands_vasp`.
 * Do not add large WAVECAR files or large real-material outputs to the repo.
 * Do not claim reduced EBR decomposition without a user-supplied validated table.
+* Use condensed-matter physics terminology in all output, docs, and program
+  logic: HSP little group, valley mapping, valley-preserving subgroup,
+  valley-preserving operation, valley-changing operation, valley sewing matrix.
+  Avoid generic or convenience terms that obscure the physical meaning.
+* All program logic, readiness gates, and output decisions must obey the
+  physics. Software convenience, example-specific behavior, and output-profile
+  plumbing must not override physical meaning.
+* Real materials (tMoTe2, tZrSe2, and future compounds) are validation fixtures
+  and regression examples only. They must not appear in `valleyscope/`
+  production logic, production output strings, config semantics, or schema
+  names. Benchmark docs under `docs/benchmarks/` and fixtures under
+  `real_tests/` may reference them by name.
 
 ## Readiness And Output Rules
 

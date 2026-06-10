@@ -3676,3 +3676,190 @@ def test_write_analysis_outputs_creates_standard_summary_directory(tmp_path):
         "valley_summary.json",
         "valley_summary.txt",
     ]
+
+
+# --- Standard profile output contract tests ---
+
+_STANDARD_PUBLIC_FILES = frozenset({
+    "valley_summary.txt",
+    "valley_summary.json",
+    "valley_weights.csv",
+    "valley_ebr_export_bundle.json",
+    "valley_reduced_ebr_mapping.json",
+})
+
+_DEBUG_ONLY_FILES = frozenset({
+    "valley_subspace.json",
+    "symmetry_report.json",
+    "symmetry_eigenvalues.csv",
+    "diagnostics.h5",
+    "valley_basis_transform.h5",
+    "projector_symmetry_report.json",
+    "symmetry_adapted_valley_analysis.json",
+    "target_subspace_closure.json",
+    "hsp_star_conjugation.json",
+    "hsp_star_derived_characters.json",
+    "subspace_representation_quality.json",
+    "irrep_workflow_decisions.json",
+    "valley_irrep_matching.json",
+    "valley_ebr_input_candidates.json",
+    "valley_ebr_problem_instances.json",
+    "folded_center_report.json",
+    "sampled_k_coverage.json",
+})
+
+
+def test_standard_profile_output_files_are_only_public_set(tmp_path):
+    """Standard profile writes only the contracted public output files."""
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["output"]["profile"] = "standard"
+    raw["output"].pop("write_detailed_files", None)
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    outputs = analyze_hsp(config_path)
+
+    all_written = {p.name for p in out_dir.iterdir() if p.is_file()}
+    # Every written file must be in the public set.
+    unexpected = all_written - _STANDARD_PUBLIC_FILES
+    assert not unexpected, f"Standard profile wrote non-public files: {unexpected}"
+    # No debug-only file may exist.
+    debug_found = all_written & _DEBUG_ONLY_FILES
+    assert not debug_found, f"Standard profile wrote debug/detail files: {debug_found}"
+    # Core public files must be present.
+    assert "valley_summary.txt" in all_written
+    assert "valley_summary.json" in all_written
+    assert "valley_weights.csv" in all_written
+
+
+def test_standard_profile_summary_output_files_excludes_debug_keys(tmp_path):
+    """valley_summary.json output_files must not list debug/detail files in standard profile."""
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["output"]["profile"] = "standard"
+    raw["output"].pop("write_detailed_files", None)
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    outputs = analyze_hsp(config_path)
+
+    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    output_keys = set(summary.get("output_files", {}).keys())
+    # Must include the public files that were actually written.
+    assert "valley_summary_txt" in output_keys
+    assert "valley_summary_json" in output_keys
+    assert "valley_weights_csv" in output_keys
+    # Must not include debug-only file keys.
+    debug_keys_in_summary = output_keys & {
+        "valley_subspace_json", "symmetry_report_json", "symmetry_eigenvalues_csv",
+        "diagnostics_h5", "valley_basis_transform_h5",
+        "projector_symmetry_report_json", "symmetry_adapted_valley_analysis_json",
+        "target_subspace_closure_json", "hsp_star_conjugation_json",
+        "hsp_star_derived_characters_json", "subspace_representation_quality_json",
+        "irrep_workflow_decisions_json", "valley_irrep_matching_json",
+        "valley_ebr_input_candidates_json", "valley_ebr_problem_instances_json",
+        "folded_center_report_json", "sampled_k_coverage_json",
+    }
+    assert not debug_keys_in_summary, (
+        f"Standard profile summary output_files lists debug/detail keys: {debug_keys_in_summary}"
+    )
+
+
+def test_standard_profile_ebr_export_bundle_present_when_payload_exists():
+    """valley_ebr_export_bundle.json is written in standard profile when payload exists."""
+    from valleyscope.reports.analysis_outputs import write_analysis_outputs
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        out_dir = Path(tmp)
+        h5_path = out_dir / "wf.h5"
+        write_fixture(h5_path)
+        config_path = out_dir / "cfg.yaml"
+        write_config(config_path, h5_path, out_dir)
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        raw["output"]["profile"] = "standard"
+        raw["output"].pop("write_detailed_files", None)
+        config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+        config = load_config(config_path)
+
+        ebr_bundle = {"status": "ready_for_external_solver", "bundle_count": 1,
+                      "excluded_count": 0, "schema_version": "1.0.0",
+                      "reduced_ebr_decomposition_status": "not_implemented",
+                      "bundles": [], "excluded_instances": []}
+        outputs = write_analysis_outputs(
+            config=config, qcut=0.5, weight_rows=[], sector_names=["K_valley"],
+            subspace_payload={"kpoints": {}},
+            symmetry_payload={"status": "skipped", "reason": "test",
+                              "detected_operations": [], "candidate_rotations": [],
+                              "little_group_check": {"status": "not_run"},
+                              "valley_preservation_check": {"status": "not_run"}},
+            symmetry_rows=[], projectors_by_kpoint={}, qcut_scan_payload={},
+            symmetry_representation_payload={}, basis_transforms={},
+            ebr_export_bundle=ebr_bundle,
+        )
+        assert outputs["valley_ebr_export_bundle_json"].exists()
+        assert (out_dir / "valley_ebr_export_bundle.json").exists()
+
+
+def test_standard_profile_no_ebr_export_bundle_when_payload_none():
+    """valley_ebr_export_bundle.json is NOT written when no EBR payload exists."""
+    from valleyscope.reports.analysis_outputs import write_analysis_outputs
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        out_dir = Path(tmp)
+        h5_path = out_dir / "wf.h5"
+        write_fixture(h5_path)
+        config_path = out_dir / "cfg.yaml"
+        write_config(config_path, h5_path, out_dir)
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        raw["output"]["profile"] = "standard"
+        raw["output"].pop("write_detailed_files", None)
+        config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+        config = load_config(config_path)
+
+        outputs = write_analysis_outputs(
+            config=config, qcut=0.5, weight_rows=[], sector_names=["K_valley"],
+            subspace_payload={"kpoints": {}},
+            symmetry_payload={"status": "skipped", "reason": "test",
+                              "detected_operations": [], "candidate_rotations": [],
+                              "little_group_check": {"status": "not_run"},
+                              "valley_preservation_check": {"status": "not_run"}},
+            symmetry_rows=[], projectors_by_kpoint={}, qcut_scan_payload={},
+            symmetry_representation_payload={}, basis_transforms={},
+            ebr_export_bundle=None,
+        )
+        assert "valley_ebr_export_bundle_json" not in outputs
+        assert not (out_dir / "valley_ebr_export_bundle.json").exists()
+
+
+def test_debug_profile_writes_all_expected_detail_files(tmp_path):
+    """Debug profile writes public files AND all debug/detail files."""
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["output"]["profile"] = "debug"
+    raw["output"].pop("write_detailed_files", None)
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    outputs = analyze_hsp(config_path)
+
+    all_written = {p.name for p in out_dir.iterdir() if p.is_file()}
+    # Public files must be present.
+    assert "valley_summary.txt" in all_written
+    assert "valley_summary.json" in all_written
+    # Debug files that are always written with this fixture must be present.
+    assert "diagnostics.h5" in all_written
+    assert "valley_subspace.json" in all_written
+    assert "symmetry_report.json" in all_written
+    # Summary must NOT mention suppression.
+    summary_text = outputs["valley_summary_txt"].read_text(encoding="utf-8")
+    assert "Debug/detail outputs suppressed" not in summary_text
