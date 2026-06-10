@@ -1641,20 +1641,68 @@ def _render_reduced_ebr_mapping(
         f"reduced EBR decomposition: "
         f"{report.get('reduced_ebr_decomposition_status', '')}"
     )
-    for sol in report.get("solutions", []):
-        if not isinstance(sol, dict):
-            continue
-        decomp = sol.get("ebr_decomposition")
-        if isinstance(decomp, list):
-            terms = [
-                f"{e.get('label', '')} x {e.get('coefficient', '')}"
-                for e in decomp
-                if isinstance(e, dict)
-            ]
-            lines.append(
-                f"  {sol.get('bundle_id', '')} {sol.get('valley', '')}: "
-                f"{' + '.join(terms) if terms else 'no exact solution'}"
-            )
+
+    solutions = report.get("solutions", [])
+    if isinstance(solutions, list) and solutions:
+        # Classification counts.
+        atomic = sum(1 for s in solutions if isinstance(s, dict)
+                     and s.get("classification") == "atomic-compatible-candidate")
+        fragile = sum(1 for s in solutions if isinstance(s, dict)
+                      and s.get("classification") == "fragile-topology-candidate")
+        stable = sum(1 for s in solutions if isinstance(s, dict)
+                     and s.get("classification") == "stable-topology-candidate")
+        truncated = sum(1 for s in solutions if isinstance(s, dict)
+                        and s.get("search_status") == "truncated_by_max_coefficient")
+        lines.append(f"classifications: atomic-compatible={atomic}, "
+                     f"fragile-topology={fragile}, "
+                     f"stable-topology={stable}"
+                     + (f", search_truncated={truncated}" if truncated else ""))
+
+        for sol in solutions:
+            if not isinstance(sol, dict):
+                continue
+            bid = sol.get("bundle_id", "?")
+            val = sol.get("valley", "")
+            label = f"  {bid} {val}"
+            classification = sol.get("classification", "")
+
+            if classification == "atomic-compatible-candidate":
+                decomp = sol.get("ebr_decomposition")
+                if isinstance(decomp, list) and decomp:
+                    terms = [
+                        f"{e.get('label', '')} x {e.get('coefficient', '')}"
+                        for e in decomp if isinstance(e, dict)
+                    ]
+                    lines.append(f"{label}: atomic-compatible [{', '.join(terms)}]")
+                else:
+                    lines.append(f"{label}: atomic-compatible (no decomposition)")
+            elif classification == "fragile-topology-candidate":
+                witness = sol.get("integer_solution")
+                if isinstance(witness, list) and witness:
+                    terms = [
+                        f"{e.get('label', '')}: {e.get('coefficient', '')}"
+                        for e in witness if isinstance(e, dict)
+                    ]
+                    lines.append(f"{label}: fragile-topology [signed witness: {', '.join(terms)}]")
+                else:
+                    lines.append(f"{label}: fragile-topology (in integer span)")
+            elif classification == "stable-topology-candidate":
+                lines.append(f"{label}: stable-topology (outside integer span)")
+            else:
+                # Legacy rows without classification.
+                decomp = sol.get("ebr_decomposition")
+                if isinstance(decomp, list) and decomp:
+                    terms = [
+                        f"{e.get('label', '')} x {e.get('coefficient', '')}"
+                        for e in decomp if isinstance(e, dict)
+                    ]
+                    lines.append(f"{label}: {' + '.join(terms)}")
+                else:
+                    lines.append(f"{label}: {sol.get('status', '?')}")
+
+            if sol.get("search_status") == "truncated_by_max_coefficient":
+                lines.append(f"         (search truncated by max_coefficient)")
+
     excluded = report.get("excluded_bundles", [])
     if isinstance(excluded, list) and excluded:
         lines.append("excluded bundles:")

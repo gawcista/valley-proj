@@ -1536,3 +1536,161 @@ def test_no_material_names_in_classifier():
     src = Path("valleyscope/analysis/reduced_ebr_mapping.py").read_text(encoding="utf-8")
     for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
         assert name not in src, f"reduced_ebr_mapping.py contains {name!r}"
+
+
+# -----------------------------------------------------------------------
+# 21. Summary text rendering of classification
+# -----------------------------------------------------------------------
+
+def _render_reduced_ebr_text(report: dict) -> str:
+    from valleyscope.reports.summary_report import _render_reduced_ebr_mapping
+    lines: list[str] = []
+    _render_reduced_ebr_mapping(lines, report)
+    return "\n".join(lines)
+
+
+def test_summary_renders_atomic_classification():
+    """Summary text shows atomic-compatible with decomposition."""
+    report = {
+        "status": "solved_exact", "mapping_status": "solved_exact",
+        "reduced_ebr_decomposition_status": "solved_exact",
+        "table_status": "loaded",
+        "solutions": [{
+            "bundle_id": "b_001", "valley": "K",
+            "status": "solved_exact",
+            "classification": "atomic-compatible-candidate",
+            "integer_span_status": "in_integer_span",
+            "nonnegative_solution_status": "solved_exact",
+            "ebr_decomposition": [
+                {"label": "EBR_A", "coefficient": 1},
+                {"label": "EBR_B", "coefficient": 2},
+            ],
+        }],
+    }
+    text = _render_reduced_ebr_text(report)
+    assert "atomic-compatible" in text
+    assert "EBR_A x 1" in text
+    assert "EBR_B x 2" in text
+
+
+def test_summary_renders_fragile_classification():
+    """Summary text shows fragile-topology with signed witness."""
+    report = {
+        "status": "no_exact_solution", "mapping_status": "no_exact_solution",
+        "reduced_ebr_decomposition_status": "no_exact_solution",
+        "table_status": "loaded",
+        "solutions": [{
+            "bundle_id": "b_001", "valley": "K",
+            "status": "no_exact_solution",
+            "classification": "fragile-topology-candidate",
+            "integer_span_status": "in_integer_span",
+            "nonnegative_solution_status": "no_nonnegative_solution",
+            "integer_solution": [
+                {"label": "EBR_A", "coefficient": -1},
+                {"label": "EBR_B", "coefficient": 1},
+            ],
+        }],
+    }
+    text = _render_reduced_ebr_text(report)
+    assert "fragile-topology" in text
+    assert "signed witness" in text
+    assert "EBR_A: -1" in text
+    assert "EBR_B: 1" in text
+
+
+def test_summary_renders_stable_classification():
+    """Summary text shows stable-topology with outside integer span."""
+    report = {
+        "status": "no_exact_solution", "mapping_status": "no_exact_solution",
+        "reduced_ebr_decomposition_status": "no_exact_solution",
+        "table_status": "loaded",
+        "solutions": [{
+            "bundle_id": "b_001", "valley": "K",
+            "status": "no_exact_solution",
+            "classification": "stable-topology-candidate",
+            "integer_span_status": "outside_integer_span",
+            "nonnegative_solution_status": "no_nonnegative_solution",
+        }],
+    }
+    text = _render_reduced_ebr_text(report)
+    assert "stable-topology" in text
+    assert "outside integer span" in text
+
+
+def test_summary_renders_truncated_search_status():
+    """Summary text shows truncated search status."""
+    report = {
+        "status": "no_exact_solution", "mapping_status": "no_exact_solution",
+        "reduced_ebr_decomposition_status": "no_exact_solution",
+        "table_status": "loaded",
+        "solutions": [{
+            "bundle_id": "b_001", "valley": "K",
+            "status": "no_exact_solution",
+            "classification": "fragile-topology-candidate",
+            "integer_span_status": "in_integer_span",
+            "nonnegative_solution_status": "no_nonnegative_solution",
+            "search_status": "truncated_by_max_coefficient",
+            "integer_solution": [
+                {"label": "EBR_A", "coefficient": -1},
+            ],
+        }],
+    }
+    text = _render_reduced_ebr_text(report)
+    assert "truncated" in text
+    assert "search_truncated=1" in text
+
+
+def test_summary_renders_classification_counts():
+    """Summary text shows classification counts when present."""
+    report = {
+        "status": "no_exact_solution", "mapping_status": "no_exact_solution",
+        "reduced_ebr_decomposition_status": "no_exact_solution",
+        "table_status": "loaded",
+        "solutions": [
+            {"bundle_id": "b_a", "valley": "A", "status": "solved_exact",
+             "classification": "atomic-compatible-candidate",
+             "integer_span_status": "in_integer_span",
+             "nonnegative_solution_status": "solved_exact",
+             "ebr_decomposition": [{"label": "X", "coefficient": 1}]},
+            {"bundle_id": "b_f", "valley": "F", "status": "no_exact_solution",
+             "classification": "fragile-topology-candidate",
+             "integer_span_status": "in_integer_span",
+             "nonnegative_solution_status": "no_nonnegative_solution"},
+            {"bundle_id": "b_s", "valley": "S", "status": "no_exact_solution",
+             "classification": "stable-topology-candidate",
+             "integer_span_status": "outside_integer_span",
+             "nonnegative_solution_status": "no_nonnegative_solution"},
+        ],
+    }
+    text = _render_reduced_ebr_text(report)
+    assert "atomic-compatible=1" in text
+    assert "fragile-topology=1" in text
+    assert "stable-topology=1" in text
+
+
+def test_summary_excluded_bundles_unchanged():
+    """Excluded bundles rendering is unchanged."""
+    report = {
+        "status": "not_evaluated", "mapping_status": "not_evaluated",
+        "reduced_ebr_decomposition_status": "not_evaluated",
+        "table_status": "loaded", "solutions": [],
+        "excluded_bundles": [
+            {"bundle_id": "b_x", "reason": "not ready for external solver"},
+        ],
+    }
+    text = _render_reduced_ebr_text(report)
+    assert "excluded bundles" in text.lower()
+    assert "not ready for external solver" in text
+
+
+def test_summary_missing_table_unchanged():
+    """Missing table rendering is unchanged."""
+    report = {
+        "status": "missing_table", "mapping_status": "missing_table",
+        "reduced_ebr_decomposition_status": "missing_table",
+        "table_status": "not_provided", "solutions": [],
+        "excluded_bundles": [],
+    }
+    text = _render_reduced_ebr_text(report)
+    assert "missing_table" in text
+    assert "classifications:" not in text  # No solutions, no counts
