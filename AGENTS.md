@@ -124,6 +124,14 @@ are produced without a user-supplied validated table. Export bundles
 (`valley_ebr_export_bundle.json`) package complete ready problem instances
 for downstream tools.
 
+Future reviewed irrep/EBR data support should follow an `irrep2`-like
+reduced-dimensional model and an `irreps`-like packaged-data architecture
+(versioned, provenance-tracked, and test-covered). Do not directly reuse
+the 3D EBR tables from `irreps` as ValleyScope output data: ValleyScope needs
+valley-resolved reduced-dimensional irreps/EBRs. "No built-in unreviewed
+tables" means no ad hoc hardcoded or unvalidated tables, not a ban on a future
+reviewed package-data layer.
+
 ## Public Output Schema
 
 The frozen public schema is defined in [`docs/schema.md`](docs/schema.md).

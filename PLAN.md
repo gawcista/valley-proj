@@ -134,5 +134,8 @@ valley-changing operations as invariance of a single label operator.
   (blocker B1 in `docs/benchmarks/tzrse2_blocker_evidence.md`).
 * Expanded-band HDF5 to test D_raw closure sensitivity for tZrSe2 M3 C2
   (blocker B2).
-* Design reviewed EBR table ingestion for trusted C3/C2 instances.
+* Design an `irrep2`-like reduced-dimensional irrep/EBR data model for trusted
+  C3/C2 instances: package data may be future reviewed/provenance-tracked
+  ValleyScope data, but not ad hoc hardcoded tables and not direct reuse of
+  3D `irreps` EBR tables as final valley-resolved reduced EBR data.
 * High-throughput database pipeline.
