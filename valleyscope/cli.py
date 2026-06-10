@@ -115,3 +115,7 @@ def _map_reduced_ebr(args) -> int:
     print(f"excluded:            {len(excluded)}")
     print(f"reduced EBR mapping: {output_path}")
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

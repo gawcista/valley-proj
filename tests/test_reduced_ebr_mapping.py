@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 import pytest
 from pathlib import Path
 import yaml
@@ -720,3 +722,17 @@ def test_cli_analyze_hsp_reduced_ebr_unchanged(tmp_path):
     assert "valley_reduced_ebr_mapping_json" in outputs, (
         "analyze-hsp must still write valley_reduced_ebr_mapping.json when enabled"
     )
+
+
+def test_cli_module_entrypoint_help_lists_map_reduced_ebr():
+    """python -m valleyscope.cli must dispatch to argparse, not silently exit."""
+    result = subprocess.run(
+        [sys.executable, "-m", "valleyscope.cli", "--help"],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    assert result.returncode == 0
+    assert "map-reduced-ebr" in result.stdout
