@@ -942,3 +942,229 @@ def test_data_init_has_no_forbidden_imports():
         assert forbidden not in src, (
             f"valleyscope/data/__init__.py must not import {forbidden}"
         )
+
+
+# -----------------------------------------------------------------------
+# 18. Loader integration — catalog manifest validation
+# -----------------------------------------------------------------------
+
+def _make_fake_catalog_root(tmp_path: Path) -> Path:
+    """Create a fake package-data root with minimal manifest."""
+    root = tmp_path / "fake_reduced_ebr"
+    root.mkdir()
+    (root / "__init__.py").write_text("")
+    (root / "manifest.json").write_text(json.dumps({
+        "schema_version": "1.0.0",
+        "description": "test catalog",
+        "tables": [],
+    }))
+    return root
+
+
+def _set_fake_root(monkeypatch, root: Path):
+    """Monkeypatch package_data_root to return a fake directory."""
+    from valleyscope.data.reduced_ebr import catalog
+    monkeypatch.setattr(catalog, "package_data_root", lambda: root)
+
+
+def test_empty_real_manifest_lists_empty(monkeypatch):
+    """Real repo manifest must still list []."""
+    from valleyscope.data.reduced_ebr.catalog import list_reviewed_reduced_ebr_tables
+    tables = list_reviewed_reduced_ebr_tables()
+    assert tables == []
+
+
+def test_valid_fake_manifest_lists_entries(monkeypatch, tmp_path):
+    """A valid fake manifest with entries returns them."""
+    root = _make_fake_catalog_root(tmp_path)
+    tbl = dict(_SAMPLE_TABLE)
+    (root / "toy.json").write_text(json.dumps(tbl))
+    (root / "manifest.json").write_text(json.dumps({
+        "schema_version": "1.0.0",
+        "tables": [{"name": "toy", "filename": "toy.json"}],
+    }))
+    _set_fake_root(monkeypatch, root)
+
+    from valleyscope.data.reduced_ebr.catalog import (
+        list_reviewed_reduced_ebr_tables,
+        load_reviewed_reduced_ebr_table,
+    )
+    entries = list_reviewed_reduced_ebr_tables()
+    assert len(entries) == 1
+    assert entries[0]["name"] == "toy"
+
+    loaded = load_reviewed_reduced_ebr_table("toy")
+    assert loaded["subspace_group_candidate"] == "C3_like"
+
+
+def test_fake_table_fails_same_validation_as_external(monkeypatch, tmp_path):
+    """Invalid fake table raises the same validation error as external path."""
+    root = _make_fake_catalog_root(tmp_path)
+    bad_table = dict(_SAMPLE_TABLE)
+    bad_table["ebrs"] = [{"label": "X", "vector": [1, 2]}]  # wrong length
+    (root / "bad.json").write_text(json.dumps(bad_table))
+    (root / "manifest.json").write_text(json.dumps({
+        "schema_version": "1.0.0",
+        "tables": [{"name": "bad", "filename": "bad.json"}],
+    }))
+    _set_fake_root(monkeypatch, root)
+
+    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
+    with pytest.raises(ValueError, match="vector length"):
+        load_reviewed_reduced_ebr_table("bad")
+
+
+def test_manifest_not_dict_raises(monkeypatch, tmp_path):
+    root = _make_fake_catalog_root(tmp_path)
+    (root / "manifest.json").write_text("[]")
+    _set_fake_root(monkeypatch, root)
+    from valleyscope.data.reduced_ebr.catalog import load_reduced_ebr_manifest
+    with pytest.raises(ValueError, match="JSON object"):
+        load_reduced_ebr_manifest()
+
+
+def test_manifest_missing_schema_version_raises(monkeypatch, tmp_path):
+    root = _make_fake_catalog_root(tmp_path)
+    (root / "manifest.json").write_text(json.dumps({"tables": []}))
+    _set_fake_root(monkeypatch, root)
+    from valleyscope.data.reduced_ebr.catalog import load_reduced_ebr_manifest
+    with pytest.raises(ValueError, match="schema_version"):
+        load_reduced_ebr_manifest()
+
+
+def test_manifest_non_list_tables_raises(monkeypatch, tmp_path):
+    root = _make_fake_catalog_root(tmp_path)
+    (root / "manifest.json").write_text(json.dumps({
+        "schema_version": "1.0.0", "tables": "not_a_list",
+    }))
+    _set_fake_root(monkeypatch, root)
+    from valleyscope.data.reduced_ebr.catalog import load_reduced_ebr_manifest
+    with pytest.raises(ValueError, match="'tables' must be a list"):
+        load_reduced_ebr_manifest()
+
+
+def test_manifest_duplicate_names_raises(monkeypatch, tmp_path):
+    root = _make_fake_catalog_root(tmp_path)
+    (root / "manifest.json").write_text(json.dumps({
+        "schema_version": "1.0.0",
+        "tables": [
+            {"name": "dup", "filename": "a.json"},
+            {"name": "dup", "filename": "b.json"},
+        ],
+    }))
+    _set_fake_root(monkeypatch, root)
+    from valleyscope.data.reduced_ebr.catalog import load_reduced_ebr_manifest
+    with pytest.raises(ValueError, match="duplicate"):
+        load_reduced_ebr_manifest()
+
+
+def test_manifest_entry_not_dict_raises(monkeypatch, tmp_path):
+    root = _make_fake_catalog_root(tmp_path)
+    (root / "manifest.json").write_text(json.dumps({
+        "schema_version": "1.0.0",
+        "tables": ["not_a_dict"],
+    }))
+    _set_fake_root(monkeypatch, root)
+    from valleyscope.data.reduced_ebr.catalog import load_reduced_ebr_manifest
+    with pytest.raises(ValueError, match="JSON object"):
+        load_reduced_ebr_manifest()
+
+
+def test_manifest_entry_missing_name_raises(monkeypatch, tmp_path):
+    root = _make_fake_catalog_root(tmp_path)
+    (root / "manifest.json").write_text(json.dumps({
+        "schema_version": "1.0.0",
+        "tables": [{"filename": "x.json"}],
+    }))
+    _set_fake_root(monkeypatch, root)
+    from valleyscope.data.reduced_ebr.catalog import load_reduced_ebr_manifest
+    with pytest.raises(ValueError, match="'name'"):
+        load_reduced_ebr_manifest()
+
+
+def test_manifest_entry_missing_filename_raises(monkeypatch, tmp_path):
+    root = _make_fake_catalog_root(tmp_path)
+    (root / "manifest.json").write_text(json.dumps({
+        "schema_version": "1.0.0",
+        "tables": [{"name": "no_file"}],
+    }))
+    _set_fake_root(monkeypatch, root)
+    from valleyscope.data.reduced_ebr.catalog import load_reduced_ebr_manifest
+    with pytest.raises(ValueError, match="'filename'"):
+        load_reduced_ebr_manifest()
+
+
+def test_manifest_absolute_filename_rejected(monkeypatch, tmp_path):
+    root = _make_fake_catalog_root(tmp_path)
+    (root / "manifest.json").write_text(json.dumps({
+        "schema_version": "1.0.0",
+        "tables": [{"name": "abs", "filename": "/etc/passwd"}],
+    }))
+    _set_fake_root(monkeypatch, root)
+    from valleyscope.data.reduced_ebr.catalog import load_reduced_ebr_manifest
+    with pytest.raises(ValueError, match="relative"):
+        load_reduced_ebr_manifest()
+
+
+def test_manifest_dotdot_filename_rejected(monkeypatch, tmp_path):
+    root = _make_fake_catalog_root(tmp_path)
+    (root / "manifest.json").write_text(json.dumps({
+        "schema_version": "1.0.0",
+        "tables": [{"name": "escape", "filename": "../secret.json"}],
+    }))
+    _set_fake_root(monkeypatch, root)
+    from valleyscope.data.reduced_ebr.catalog import load_reduced_ebr_manifest
+    with pytest.raises(ValueError, match="outside"):
+        load_reduced_ebr_manifest()
+
+
+def test_manifest_sibling_dotdot_rejected(monkeypatch, tmp_path):
+    root = _make_fake_catalog_root(tmp_path)
+    (root / "manifest.json").write_text(json.dumps({
+        "schema_version": "1.0.0",
+        "tables": [{"name": "escape", "filename": "sub/../../secret.json"}],
+    }))
+    _set_fake_root(monkeypatch, root)
+    from valleyscope.data.reduced_ebr.catalog import load_reduced_ebr_manifest
+    with pytest.raises(ValueError, match="'..'"):
+        load_reduced_ebr_manifest()
+
+
+def test_missing_table_file_raises(monkeypatch, tmp_path):
+    root = _make_fake_catalog_root(tmp_path)
+    (root / "manifest.json").write_text(json.dumps({
+        "schema_version": "1.0.0",
+        "tables": [{"name": "ghost", "filename": "ghost.json"}],
+    }))
+    _set_fake_root(monkeypatch, root)
+    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
+    with pytest.raises(FileNotFoundError):
+        load_reviewed_reduced_ebr_table("ghost")
+
+
+def test_load_nonexistent_name_raises(monkeypatch):
+    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
+    with pytest.raises(ValueError, match="no reviewed reduced EBR package table"):
+        load_reviewed_reduced_ebr_table("nonexistent")
+
+
+def test_load_empty_name_raises(monkeypatch):
+    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
+    with pytest.raises(ValueError, match="non-empty"):
+        load_reviewed_reduced_ebr_table("")
+
+
+def test_catalog_does_not_import_irrep2():
+    """catalog.py must not import irrep2 (private reference-only repo)."""
+    from valleyscope.data.reduced_ebr.catalog import package_data_root
+    src = (package_data_root() / "catalog.py").read_text(encoding="utf-8")
+    for forbidden in ["import irrep2", "from irrep2"]:
+        assert forbidden not in src, f"catalog.py must not import {forbidden}"
+
+
+def test_empty_manifest_still_lists_empty(monkeypatch, tmp_path):
+    """Even a fake root with empty manifest returns []."""
+    root = _make_fake_catalog_root(tmp_path)
+    _set_fake_root(monkeypatch, root)
+    from valleyscope.data.reduced_ebr.catalog import list_reviewed_reduced_ebr_tables
+    assert list_reviewed_reduced_ebr_tables() == []

@@ -140,6 +140,7 @@ valley-changing operations as invariance of a single label operator.
   directly reuse 3D `irrep` Python package EBR tables.
 * ~~Package-data skeleton~~ — Done. `valleyscope/data/reduced_ebr/` exists
   with empty manifest, README, and catalog module. No table data shipped.
-* Implement a reviewed reduced-dimensional EBR table loader/catalog that
-  connects the package-data skeleton to the external-table validation path.
+* ~~Loader integration~~ — Done. `catalog.py` validates manifests, routes
+  `load_reviewed_reduced_ebr_table()` through `load_reduced_ebr_table()`,
+  and rejects path traversal. No built-in tables shipped.
 * High-throughput database pipeline.
