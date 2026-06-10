@@ -78,3 +78,4 @@ rotation:
 
 output:
   directory: ./valley_analysis
+  # profile: standard        # standard (default): public outputs; debug: full diagnostics

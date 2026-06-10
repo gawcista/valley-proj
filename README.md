@@ -621,8 +621,14 @@ not the old all-valley intersection. An operation that preserves one valley whil
 
 ## Reading the Outputs
 
-The analyzer writes results under `output.directory`. The frozen public schema
-is documented in [`docs/schema.md`](docs/schema.md).
+The analyzer writes results under `output.directory`. Output is controlled
+by `output.profile`:
+
+- `standard` (default): public user-facing outputs only.
+- `debug`: full diagnostic file set.
+
+Set `output.profile: debug` to enable all detailed diagnostic files. The
+frozen public schema is documented in [`docs/schema.md`](docs/schema.md).
 
 ### Main User Entry
 
@@ -631,27 +637,15 @@ valley_summary.txt           ← read first (human-readable)
 valley_summary.json          ← machine-readable
 ```
 
-### Formal Analysis Outputs
+### Quick-Scan
 
 ```text
-symmetry_adapted_valley_analysis.json   ← symmetry-adapted valley analysis
-valley_irrep_matching.json              ← valley-preserving irrep matching
-irrep_workflow_decisions.json           ← workflow path decisions
-projector_symmetry_report.json          ← seed projector symmetry
-target_subspace_closure.json            ← D_raw closure diagnostics
+valley_weights.csv           ← per-(kpoint, band) raw valley weights
 ```
-
-`subspace_representation_quality` data remains embedded in
-`symmetry_adapted_valley_analysis.json` and `valley_summary.json`. The
-standalone `subspace_representation_quality.json` debug file is disabled by
-default and is written only when
-`analysis.symmetry_adapted_valley.write_subspace_representation_quality: true`.
 
 ### Downstream EBR Entry
 
 ```text
-valley_ebr_input_candidates.json        ← trusted irrep candidates
-valley_ebr_problem_instances.json       ← per-valley EBR problem instances
 valley_ebr_export_bundle.json           ← complete ready bundles for external tools
 ```
 
@@ -661,10 +655,11 @@ valley_ebr_export_bundle.json           ← complete ready bundles for external 
 valley_reduced_ebr_mapping.json         ← only when analysis.reduced_ebr.enabled
 ```
 
-### Debug / Detail Outputs
+### Debug / Detail Outputs (debug profile only)
+
+These files are written only when `output.profile: debug`:
 
 ```text
-valley_weights.csv          ← quick scan
 valley_subspace.json        ← multi-valley subspace data
 symmetry_eigenvalues.csv    ← symmetry eigenvalues
 symmetry_report.json        ← symmetry analysis
@@ -673,6 +668,15 @@ diagnostics.h5              ← projector masks and q-cut scan data
 hsp_star_conjugation.json   ← HSP-star conjugation graphs
 hsp_star_derived_characters.json ← derived HSP-star characters
 subspace_representation_quality.json ← optional/default-off representation quality decomposition
+symmetry_adapted_valley_analysis.json   ← symmetry-adapted valley analysis
+valley_irrep_matching.json              ← valley-preserving irrep matching
+irrep_workflow_decisions.json           ← workflow path decisions
+projector_symmetry_report.json          ← seed projector symmetry
+target_subspace_closure.json            ← D_raw closure diagnostics
+valley_ebr_input_candidates.json        ← trusted irrep candidates
+valley_ebr_problem_instances.json       ← per-valley EBR problem instances
+folded_center_report.json               ← valley-center folding
+sampled_k_coverage.json                 ← sampled k-point coverage
 ```
 
 ### `valley_weights.csv`

@@ -31,9 +31,18 @@ The repo already has:
 **Output and summary:**
 * `valley_summary.txt` / `valley_summary.json` (main user entry);
 * `valley_ebr_export_bundle.json` (downstream EBR entry);
-* debug/detail outputs: diagnostics.h5, optional/default-off
-  subspace_representation_quality.json, HSP-star conjugation/derived character
-  JSONs, raw matrices, qcut scans.
+* `valley_reduced_ebr_mapping.json` (default-off, when analysis.reduced_ebr.enabled);
+* `valley_weights.csv` (quick-scan file, standard profile);
+* Output controlled by `output.profile: standard | debug` (standard = public only,
+  debug = full diagnostics). Legacy `output.write_detailed_files` is deprecated.
+* Debug/detail outputs (debug profile only): diagnostics.h5, valley_subspace.json,
+  symmetry_report.json, symmetry_eigenvalues.csv, valley_basis_transform.h5,
+  projector_symmetry_report.json, symmetry_adapted_valley_analysis.json,
+  target_subspace_closure.json, hsp_star_conjugation.json,
+  hsp_star_derived_characters.json, subspace_representation_quality.json,
+  irrep_workflow_decisions.json, valley_irrep_matching.json,
+  valley_ebr_input_candidates.json, valley_ebr_problem_instances.json,
+  folded_center_report.json, sampled_k_coverage.json.
 
 ## Methodology
 

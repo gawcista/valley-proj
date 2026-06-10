@@ -458,7 +458,7 @@ def test_c3_valley_permuting_c3_appears_in_symmetry_consistency_report(tmp_path)
             "tolerance": {"symprec": 1e-3},
             "filters": {"rotation_order": "auto"},
         },
-        "output": {"directory": str(out_dir)},
+        "output": {"directory": str(out_dir), "profile": "debug"},
     }
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
@@ -547,7 +547,7 @@ def test_summary_json_exposes_symmetry_consistency_failure_flag(tmp_path):
             "tolerance": {"symprec": 1e-3},
             "filters": {"rotation_order": "auto"},
         },
-        "output": {"directory": str(out_dir)},
+        "output": {"directory": str(out_dir), "profile": "debug"},
     }
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
 

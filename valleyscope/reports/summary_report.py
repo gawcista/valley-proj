@@ -71,6 +71,7 @@ def build_summary_payload(
         "symmetry_characters": _symmetry_character_rows(eigen_rows),
         "rotation_readiness_thresholds": _rotation_readiness_thresholds(config),
         "warnings": warnings,
+        "output_profile": config.output.profile,
         "output_files": {name: str(path) for name, path in output_paths.items()},
         "legend": {
             "W_val": "valley-subspace weight",
@@ -573,6 +574,21 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     _section(lines, "Output files")
     for name, path in summary["output_files"].items():
         lines.append(f"{_output_file_label(name)}: {path}")
+    profile = summary.get("output_profile", "standard")
+    if profile == "standard":
+        lines.append("")
+        lines.append(
+            "Debug/detail outputs suppressed (output.profile: standard). "
+            "Set output.profile: debug in config to enable full diagnostics: "
+            "diagnostics.h5, valley_basis_transform.h5, valley_subspace.json, "
+            "symmetry_report.json, symmetry_eigenvalues.csv, "
+            "projector_symmetry_report.json, symmetry_adapted_valley_analysis.json, "
+            "target_subspace_closure.json, hsp_star_conjugation.json, "
+            "hsp_star_derived_characters.json, subspace_representation_quality.json, "
+            "irrep_workflow_decisions.json, valley_irrep_matching.json, "
+            "valley_ebr_input_candidates.json, valley_ebr_problem_instances.json, "
+            "folded_center_report.json, sampled_k_coverage.json."
+        )
     return "\n".join(lines).rstrip() + "\n"
 
 

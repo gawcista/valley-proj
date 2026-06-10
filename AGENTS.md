@@ -130,17 +130,27 @@ The frozen public schema is defined in [`docs/schema.md`](docs/schema.md).
 This section is a summary; the schema document is authoritative for field
 names, types, and stability guarantees.
 
-**Main user entry**:
+Output is controlled by `output.profile`:
+- `standard` (default): public user-facing outputs only.
+- `debug`: full diagnostic file set.
+
+The legacy `output.write_detailed_files` boolean is deprecated; use
+`output.profile` instead.
+
+**Main user entry** (always written):
 - `valley_summary.txt` / `valley_summary.json`
 
-**Downstream EBR entry**:
+**Quick-scan** (standard profile):
+- `valley_weights.csv` — per-(kpoint, band) raw valley weights
+
+**Downstream EBR entry** (always written when payload exists):
 - `valley_ebr_export_bundle.json` (ready problem instances)
 - `valley_reduced_ebr_mapping.json` (only when `analysis.reduced_ebr.enabled`)
 
-**Debug / detail outputs**:
+**Debug / detail outputs** (debug profile only):
 - `diagnostics.h5` — projector, qcut, and symmetry matrices; center_masks and
   center-resolved weights
-- `subspace_representation_quality.json` — optional/default-off standalone
+- `subspace_representation_quality.json` — optional standalone
   per-operation quality decomposition; data remains embedded in formal reports
 - `hsp_star_conjugation.json` — full conjugation graphs
 - `hsp_star_derived_characters.json` — derived character entries
@@ -150,6 +160,16 @@ names, types, and stability guarantees.
 - representative-candidate details in symmetry-adapted analysis JSON
 - `folded_center_report.json` — valley-center folding into moire BZ
 - `sampled_k_coverage.json` — branch coverage diagnostic for sampled k-points
+- `valley_subspace.json` — multi-valley subspace data
+- `symmetry_report.json` — symmetry analysis
+- `symmetry_eigenvalues.csv` — symmetry eigenvalues
+- `valley_basis_transform.h5` — basis transform
+- `projector_symmetry_report.json` — seed projector symmetry
+- `symmetry_adapted_valley_analysis.json` — symmetry-adapted valley analysis
+- `irrep_workflow_decisions.json` — per-valley workflow paths
+- `valley_irrep_matching.json` — irrep matching results
+- `valley_ebr_input_candidates.json` — EBR input candidates
+- `valley_ebr_problem_instances.json` — EBR problem instances
 
 ## Roles
 

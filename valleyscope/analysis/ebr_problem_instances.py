@@ -33,7 +33,9 @@ _EXPECTED_HSP: dict[str, dict[str, object]] = {
         "note": (
             "P2/C2_like completeness requires trusted non-identity C2 data "
             "at the relevant HSPs. No expected HSPs are declared until "
-            "trusted C2 irreps exist. tZrSe2-like data remains no_instances."
+            "trusted C2 valley-preserving irreps are available for this "
+            "subspace group candidate. Without trusted C2 irreps the "
+            "instance status is no_instances."
         ),
     },
     "C2_like": {

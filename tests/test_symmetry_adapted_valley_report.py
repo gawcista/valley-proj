@@ -526,7 +526,7 @@ def test_disabled_no_symmetry_adapted_valley_output(tmp_path):
                         "thresholds":{"W_val_min":0.5}},
         "symmetry": {"operations":{"structure_file":str(struct)},"tolerance":{"symprec":1e-3},
                       "filters":{"rotation_order":"auto"}},
-        "output": {"directory": str(out_dir)},
+        "output": {"directory": str(out_dir), "profile": "debug"},
     }
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
     outputs = analyze_hsp(config_path)
@@ -571,7 +571,7 @@ def test_default_writes_symmetry_adapted_valley_analysis(tmp_path):
                         "thresholds":{"W_val_min":0.5}},
         "symmetry": {"operations":{"structure_file":str(struct)},"tolerance":{"symprec":1e-3},
                       "filters":{"rotation_order":"auto"}},
-        "output": {"directory": str(out_dir)},
+        "output": {"directory": str(out_dir), "profile": "debug"},
     }
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
     outputs = analyze_hsp(config_path)
@@ -632,7 +632,7 @@ def test_enabled_true_without_d_raw_writes_not_evaluated_report(tmp_path):
         ],
         "projection": {"qcut_mode":"absolute","qcut_Ainv":0.3,"overlap_policy":"warn_exclude",
                         "thresholds":{"W_val_min":0.5}},
-        "output": {"directory": str(out_dir)},
+        "output": {"directory": str(out_dir), "profile": "debug"},
     }
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
     outputs = analyze_hsp(config_path)

@@ -92,16 +92,20 @@ class SymmetryConfig:
     valley_preservation_check: bool = True
 
 
+_VALID_OUTPUT_PROFILES = frozenset({"standard", "debug"})
+
+
 @dataclass(frozen=True)
 class OutputConfig:
     directory: Path
+    profile: str = "standard"
     write_json: bool = True
     write_csv: bool = True
     write_hdf5_basis_transform: bool = True
     summary_stdout: bool = True
     write_summary_txt: bool = True
     write_summary_json: bool = True
-    write_detailed_files: bool = True
+    write_detailed_files: bool = True  # deprecated — mapped to profile
 
 
 @dataclass(frozen=True)
@@ -511,6 +515,39 @@ def _parse_rotation_config(raw: dict[str, Any]) -> RotationConfig:
     )
 
 
+def _resolve_output_profile(raw: dict[str, Any]) -> str:
+    """Resolve output.profile, mapping legacy write_detailed_files when needed.
+
+    Priority: explicit profile > explicit write_detailed_files > default "standard".
+    Emits a DeprecationWarning when write_detailed_files is used without profile.
+    """
+    has_profile = "profile" in raw
+    has_wdf = "write_detailed_files" in raw
+    if has_profile:
+        profile = str(raw["profile"]).lower()
+        if profile not in _VALID_OUTPUT_PROFILES:
+            raise ValueError(
+                f"output.profile must be one of {sorted(_VALID_OUTPUT_PROFILES)}; got {profile!r}"
+            )
+        if has_wdf:
+            warnings.warn(
+                "output.write_detailed_files is deprecated; output.profile takes precedence.",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+        return profile
+    if has_wdf:
+        warnings.warn(
+            "output.write_detailed_files is deprecated; use output.profile instead. "
+            "Mapping write_detailed_files=false → profile='standard', "
+            "write_detailed_files=true → profile='debug'.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        return "debug" if bool(raw["write_detailed_files"]) else "standard"
+    return "standard"
+
+
 def _parse_reduced_ebr_config(base: Path, raw: dict[str, Any]) -> ReducedEbrConfig:
     if not isinstance(raw, dict):
         return ReducedEbrConfig()
@@ -613,6 +650,7 @@ def load_config(path: str | Path) -> AppConfig:
         reduced_ebr=_parse_reduced_ebr_config(base, analysis_raw.get("reduced_ebr", {})),
         output=OutputConfig(
             directory=resolve_config_path(base, output_raw.get("directory", "valley_analysis")),
+            profile=_resolve_output_profile(output_raw),
             write_json=bool(output_raw.get("write_json", True)),
             write_csv=bool(output_raw.get("write_csv", True)),
             write_hdf5_basis_transform=bool(output_raw.get("write_hdf5_basis_transform", True)),

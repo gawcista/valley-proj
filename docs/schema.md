@@ -1,10 +1,31 @@
 # ValleyScope Public Output Schema
 
-Version: 1.0.0 | Date: 2026-06-02
+Version: 1.1.0 | Date: 2026-06-10
 
 This document defines the **public output schema** for ValleyScope. Files not
 listed here are debug/detail or intermediate diagnostics and may change
 without a schema version bump.
+
+## Output Profile
+
+ValleyScope uses `output.profile` to control which files are written:
+
+| Profile | Behavior |
+|---------|----------|
+| `standard` (default) | Public user-facing outputs only: summary, EBR export bundle, reduced EBR mapping, valley weights CSV |
+| `debug` | Full diagnostic file set: all standard outputs plus detailed JSON/HDF5 diagnostics |
+
+The legacy `output.write_detailed_files` boolean is deprecated and mapped
+to `output.profile`: `false` → `standard`, `true` → `debug`.
+Explicit `output.profile` takes precedence.
+
+To enable full diagnostics in a config:
+
+```yaml
+output:
+  directory: ./valley_analysis
+  profile: debug
+```
 
 ## Public User Entry
 

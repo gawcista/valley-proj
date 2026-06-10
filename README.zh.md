@@ -588,7 +588,12 @@ Valley-preserving gate 为：
 
 ## 读取输出
 
-分析结果写到 `output.directory`。冻结的公共 schema 定义在
+分析结果写到 `output.directory`。输出由 `output.profile` 控制：
+
+- `standard`（默认）：仅公共用户输出。
+- `debug`：完整诊断文件集。
+
+设置 `output.profile: debug` 以启用所有详细诊断文件。冻结的公共 schema 定义在
 [`docs/schema.md`](docs/schema.md)。
 
 ### 主入口
@@ -598,27 +603,15 @@ valley_summary.txt           ← 最先看（人类可读）
 valley_summary.json          ← 机器可读
 ```
 
-### Formal Analysis 输出
+### 快速扫描
 
 ```text
-symmetry_adapted_valley_analysis.json   ← 对称适配 valley 分析
-valley_irrep_matching.json              ← valley-preserving irrep 匹配
-irrep_workflow_decisions.json           ← 工作流路径决策
-projector_symmetry_report.json          ← seed projector 对称性
-target_subspace_closure.json            ← D_raw 闭包诊断
+valley_weights.csv           ← 每 (kpoint, band) 原始谷权重
 ```
-
-`subspace_representation_quality` 数据仍嵌在
-`symmetry_adapted_valley_analysis.json` 和 `valley_summary.json` 中。单独的
-`subspace_representation_quality.json` 是 debug 文件，默认关闭；只有设置
-`analysis.symmetry_adapted_valley.write_subspace_representation_quality: true`
-时才写出。
 
 ### 下游 EBR 入口
 
 ```text
-valley_ebr_input_candidates.json        ← 受信任的 irrep 候选
-valley_ebr_problem_instances.json       ← 按 valley 归类的 EBR 问题实例
 valley_ebr_export_bundle.json           ← 供下游工具使用的完整就绪 bundle
 ```
 
@@ -628,10 +621,11 @@ valley_ebr_export_bundle.json           ← 供下游工具使用的完整就绪
 valley_reduced_ebr_mapping.json         ← 仅在 analysis.reduced_ebr.enabled 时生成
 ```
 
-### Debug / 详细输出
+### Debug / 详细输出（仅 debug profile）
+
+以下文件仅在 `output.profile: debug` 时写出：
 
 ```text
-valley_weights.csv          ← 第一眼检查
 valley_subspace.json        ← 多谷子空间数据
 symmetry_eigenvalues.csv    ← 对称本征值
 symmetry_report.json        ← 对称性分析
@@ -640,6 +634,15 @@ diagnostics.h5              ← projector mask 和 q-cut scan 数据
 hsp_star_conjugation.json   ← HSP-star 共轭图
 hsp_star_derived_characters.json ← 衍生 HSP-star character
 subspace_representation_quality.json ← 可选/默认关闭的表示质量分解
+symmetry_adapted_valley_analysis.json   ← 对称适配 valley 分析
+valley_irrep_matching.json              ← valley-preserving irrep 匹配
+irrep_workflow_decisions.json           ← 工作流路径决策
+projector_symmetry_report.json          ← seed projector 对称性
+target_subspace_closure.json            ← D_raw 闭包诊断
+valley_ebr_input_candidates.json        ← 受信任的 irrep 候选
+valley_ebr_problem_instances.json       ← 按 valley 归类的 EBR 问题实例
+folded_center_report.json               ← valley-center 折叠
+sampled_k_coverage.json                 ← 采样 k 点覆盖
 ```
 
 ### valley_weights.csv

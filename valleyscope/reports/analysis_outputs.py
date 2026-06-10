@@ -49,7 +49,31 @@ def write_analysis_outputs(
 ) -> dict[str, object]:
     output_dir = config.output.directory
     outputs: dict[str, object] = {}
-    if config.output.write_detailed_files:
+    is_debug = config.output.profile == "debug"
+
+    # --- Public / always-write outputs ---
+    # EBR export bundle is a public downstream entry (when payload exists).
+    if ebr_export_bundle is not None:
+        outputs["valley_ebr_export_bundle_json"] = write_json(
+            output_dir / "valley_ebr_export_bundle.json",
+            ebr_export_bundle,
+        )
+    # Reduced EBR mapping is public when enabled and payload exists.
+    if reduced_ebr_mapping is not None:
+        outputs["valley_reduced_ebr_mapping_json"] = write_json(
+            output_dir / "valley_reduced_ebr_mapping.json",
+            reduced_ebr_mapping,
+        )
+    # Valley weights CSV is a quick-scan file; included in standard profile.
+    if config.output.write_csv and weight_rows:
+        outputs["valley_weights_csv"] = write_valley_weights_csv(
+            output_dir / "valley_weights.csv",
+            weight_rows,
+            sector_names,
+        )
+
+    # --- Debug / detail outputs ---
+    if is_debug:
         _write_detailed_outputs(
             config=config,
             output_dir=output_dir,
@@ -77,6 +101,7 @@ def write_analysis_outputs(
             folded_center_payload=folded_center_payload,
             sampled_k_coverage=sampled_k_coverage,
         )
+    # --- Summary outputs (always written) ---
     _write_summary_outputs(
         config=config,
         qcut=qcut,
@@ -132,11 +157,6 @@ def _write_detailed_outputs(
     sampled_k_coverage: dict[str, object] | None = None,
 ) -> None:
     if config.output.write_csv:
-        outputs["valley_weights_csv"] = write_valley_weights_csv(
-            output_dir / "valley_weights.csv",
-            weight_rows,
-            sector_names,
-        )
         if symmetry_payload.get("symmetry_eigenvalue_enabled", False):
             outputs["symmetry_eigenvalues_csv"] = write_symmetry_eigenvalues_csv(
                 output_dir / "symmetry_eigenvalues.csv",
@@ -196,16 +216,6 @@ def _write_detailed_outputs(
                 output_dir / "valley_ebr_problem_instances.json",
                 ebr_problem_instances,
             )
-        if ebr_export_bundle is not None:
-            outputs["valley_ebr_export_bundle_json"] = write_json(
-                output_dir / "valley_ebr_export_bundle.json",
-                ebr_export_bundle,
-            )
-        if reduced_ebr_mapping is not None:
-            outputs["valley_reduced_ebr_mapping_json"] = write_json(
-                output_dir / "valley_reduced_ebr_mapping.json",
-                reduced_ebr_mapping,
-            )
         if folded_center_payload is not None:
             outputs["folded_center_report_json"] = write_json(
                 output_dir / "folded_center_report.json",
@@ -256,10 +266,15 @@ def _write_summary_outputs(
     folded_center_payload: dict[str, object] | None = None,
     sampled_k_coverage: dict[str, object] | None = None,
 ) -> None:
+    # valley_summary.txt/json are the main user entry.  In standard profile
+    # they are always written.  In debug profile the write_summary_* flags
+    # may suppress one format, but the default for both flags is True.
     summary_path_plan: dict[str, Path] = {}
-    if config.output.write_summary_txt or not config.output.write_detailed_files:
+    write_txt = config.output.write_summary_txt or config.output.profile == "standard"
+    write_json = config.output.write_summary_json or config.output.profile == "standard"
+    if write_txt:
         summary_path_plan["valley_summary_txt"] = output_dir / "valley_summary.txt"
-    if config.output.write_summary_json or not config.output.write_detailed_files:
+    if write_json:
         summary_path_plan["valley_summary_json"] = output_dir / "valley_summary.json"
     output_paths = {
         key: value

@@ -89,7 +89,7 @@ def write_config(path: Path, h5_path: Path, out_dir: Path):
                 "allowed_orders": [2, 3, 4, 6],
             },
         },
-        "output": {"directory": str(out_dir), "write_json": True, "write_csv": True, "write_hdf5_basis_transform": True},
+        "output": {"directory": str(out_dir), "profile": "debug", "write_json": True, "write_csv": True, "write_hdf5_basis_transform": True},
     }
     path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
@@ -201,7 +201,7 @@ def test_config_loader_accepts_simplified_schema_defaults(tmp_path):
         "rotation": {
             "irrep_weight_tol": 1.0e-4,
         },
-        "output": {"directory": str(out_dir)},
+        "output": {"directory": str(out_dir), "profile": "debug"},
     }
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
@@ -517,7 +517,7 @@ def test_config_loader_builds_layer_rotated_fractional_valley_centers(tmp_path):
             ],
         },
         "valley_subspaces": [{"name": "K_sector", "centers": ["top_K", "bottom_K"]}],
-        "output": {"directory": str(out_dir)},
+        "output": {"directory": str(out_dir), "profile": "debug"},
     }
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
@@ -551,7 +551,7 @@ def test_config_loader_derives_layer_reciprocal_from_supercell_matrix(tmp_path):
             ],
         },
         "valley_subspaces": [{"name": "K_sector", "centers": ["top_K"]}],
-        "output": {"directory": str(tmp_path / "out")},
+        "output": {"directory": str(tmp_path / "out"), "profile": "debug"},
     }
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
@@ -1038,7 +1038,7 @@ def test_symmetry_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp
             "tolerance": {"symprec": 1.0e-5, "angle_tolerance": -1.0},
             "filters": {"proper_rotations_only": True, "allowed_orders": [2, 4], "rotation_order": 2},
         },
-        "output": {"directory": str(out_dir), "write_json": True, "write_csv": True, "write_hdf5_basis_transform": True},
+        "output": {"directory": str(out_dir), "profile": "debug", "write_json": True, "write_csv": True, "write_hdf5_basis_transform": True},
     }
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
@@ -1169,14 +1169,17 @@ def test_write_detailed_files_false_writes_only_summary_files(tmp_path):
     write_fixture(h5_path)
     write_config(config_path, h5_path, out_dir)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["output"].pop("profile", None)
     raw["output"]["write_detailed_files"] = False
     config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
 
-    outputs = analyze_hsp(config_path)
+    with pytest.warns(DeprecationWarning, match="write_detailed_files"):
+        outputs = analyze_hsp(config_path)
 
     assert outputs["valley_summary_txt"].exists()
     assert outputs["valley_summary_json"].exists()
-    assert not (out_dir / "valley_weights.csv").exists()
+    # valley_weights.csv is a quick-scan file in standard profile.
+    assert outputs.get("valley_weights_csv", None) and outputs["valley_weights_csv"].exists()
     assert not (out_dir / "valley_subspace.json").exists()
     assert not (out_dir / "symmetry_report.json").exists()
     assert not (out_dir / "rotation_eigenvalues.csv").exists()
@@ -1184,6 +1187,9 @@ def test_write_detailed_files_false_writes_only_summary_files(tmp_path):
     assert not (out_dir / "little_group_representations.json").exists()
     assert not (out_dir / "symmetry_eigenvalues.csv").exists()
     assert not (out_dir / "diagnostics.h5").exists()
+    assert not (out_dir / "projector_symmetry_report.json").exists()
+    assert not (out_dir / "hsp_star_conjugation.json").exists()
+    assert not (out_dir / "hsp_star_derived_characters.json").exists()
 
 
 def test_subspace_representation_quality_standalone_json_default_off(tmp_path):
@@ -1606,7 +1612,8 @@ def test_write_analysis_outputs_plumbs_hsp_star_reports_to_summary(tmp_path):
     write_fixture(h5_path)
     write_config(config_path, h5_path, out_dir)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    raw["output"]["write_detailed_files"] = False
+    raw["output"]["profile"] = "standard"
+    raw["output"].pop("write_detailed_files", None)
     config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     out_dir.mkdir(parents=True, exist_ok=True)
     config = load_config(config_path)
@@ -2413,7 +2420,7 @@ def test_single_band_and_not_degenerate_no_subspace_valley_status_mislabel(tmp_p
                 {"name": "Kp_sector", "centers": ["Kp"]},
             ],
             "projection": {"qcut_mode": "absolute", "qcut_Ainv": 0.5, "overlap_policy": "warn_exclude"},
-            "output": {"directory": str(out_dir)},
+            "output": {"directory": str(out_dir), "profile": "debug"},
         }
         config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
@@ -3028,7 +3035,7 @@ def test_subspace_projector_unreliable_when_band_overlap_exceeds_threshold(tmp_p
             "qcut_mode": "absolute", "qcut_Ainv": 3.0, "overlap_policy": "warn_exclude",
             "thresholds": {"W_val_min": 0.8},
         },
-        "output": {"directory": str(out_dir)},
+        "output": {"directory": str(out_dir), "profile": "debug"},
     }
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
@@ -3118,7 +3125,7 @@ def test_subspace_thresholds_inherit_user_config(tmp_path):
             "qcut_mode": "absolute", "qcut_Ainv": 3.0, "overlap_policy": "warn_exclude",
             "thresholds": {"W_val_min": 0.8, "overlap_warn": 0.15},
         },
-        "output": {"directory": str(out_dir)},
+        "output": {"directory": str(out_dir), "profile": "debug"},
     }
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
@@ -3183,7 +3190,7 @@ def test_rotation_thresholds_from_config_parsed_and_applied(tmp_path):
             "filters": {"rotation_order": 2},
         },
         "rotation": {"unitarity_tol": 1.0e-4, "root_deviation_tol": 1.0e-6, "D_valley_offdiag_tol": 1.0e-6},
-        "output": {"directory": str(tmp_path / "out")},
+        "output": {"directory": str(tmp_path / "out"), "profile": "debug"},
     }
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
@@ -3332,7 +3339,7 @@ def _make_toy_config(path: Path, h5_path: Path, out_dir: Path, projector_mode: s
             "qcut_Ainv": 0.3,
             "overlap_policy": "warn_exclude",
         },
-        "output": {"directory": str(out_dir)},
+        "output": {"directory": str(out_dir), "profile": "debug"},
     }
     path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
@@ -3437,3 +3444,194 @@ def test_schema_doc_covers_public_outputs_and_reduced_ebr_statuses():
         assert phrase not in schema_text, (
             f"docs/schema.md contains stale phrase: '{phrase}'"
         )
+
+
+# --- Output profile tests ---
+
+def test_default_standard_profile_writes_only_public_outputs(tmp_path):
+    """Default output.profile=standard emits only public files."""
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["output"].pop("profile", None)
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    outputs = analyze_hsp(config_path)
+
+    # Public outputs always present.
+    assert outputs["valley_summary_txt"].exists()
+    assert outputs["valley_summary_json"].exists()
+    assert outputs.get("valley_weights_csv") and outputs["valley_weights_csv"].exists()
+
+    # Debug/detail files must NOT exist with standard profile.
+    debug_files = [
+        "valley_subspace.json", "symmetry_report.json", "symmetry_eigenvalues.csv",
+        "diagnostics.h5", "valley_basis_transform.h5",
+        "projector_symmetry_report.json", "symmetry_adapted_valley_analysis.json",
+        "target_subspace_closure.json", "hsp_star_conjugation.json",
+        "hsp_star_derived_characters.json", "subspace_representation_quality.json",
+        "irrep_workflow_decisions.json", "valley_irrep_matching.json",
+        "valley_ebr_input_candidates.json", "valley_ebr_problem_instances.json",
+        "folded_center_report.json", "sampled_k_coverage.json",
+    ]
+    for fname in debug_files:
+        assert not (out_dir / fname).exists(), f"{fname} must not exist in standard profile"
+
+    # Summary mentions debug suppression.
+    summary_text = outputs["valley_summary_txt"].read_text(encoding="utf-8")
+    assert "Debug/detail outputs suppressed" in summary_text
+    assert "output.profile: debug" in summary_text
+
+    summary_json = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    assert summary_json.get("output_profile") == "standard"
+
+
+def test_debug_profile_writes_all_detailed_files(tmp_path):
+    """output.profile=debug emits the full current detailed file set."""
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["output"]["profile"] = "debug"
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    outputs = analyze_hsp(config_path)
+
+    # Public outputs.
+    assert outputs["valley_summary_txt"].exists()
+    assert outputs["valley_summary_json"].exists()
+    assert outputs["valley_weights_csv"].exists()
+    # Detailed files.
+    assert outputs["valley_subspace_json"].exists()
+    assert outputs["symmetry_report_json"].exists()
+    assert outputs["diagnostics_h5"].exists()
+    # Summary must NOT mention suppression.
+    summary_text = outputs["valley_summary_txt"].read_text(encoding="utf-8")
+    assert "Debug/detail outputs suppressed" not in summary_text
+
+    summary_json = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    assert summary_json.get("output_profile") == "debug"
+
+
+def test_write_detailed_files_false_maps_to_standard_with_warning(tmp_path):
+    """Legacy write_detailed_files: false maps to profile=standard."""
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["output"].pop("profile", None)
+    raw["output"]["write_detailed_files"] = False
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    with pytest.warns(DeprecationWarning, match="write_detailed_files"):
+        outputs = analyze_hsp(config_path)
+
+    assert outputs["valley_summary_txt"].exists()
+    assert not (out_dir / "valley_subspace.json").exists()
+    assert not (out_dir / "diagnostics.h5").exists()
+
+
+def test_invalid_output_profile_rejected(tmp_path):
+    """Invalid output.profile raises ValueError."""
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["output"]["profile"] = "invalid_profile"
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="output.profile must be one of"):
+        load_config(config_path)
+
+
+def test_no_material_specific_strings_in_production_code():
+    """Verify no real material names appear in valleyscope/ production modules.
+
+    tMoTe2, tZrSe2, and future real materials are validation examples and
+    regression fixtures only.  They must not appear in program logic, output
+    strings, config keys, or file paths inside valleyscope/.
+
+    This test does not guard docs/benchmarks/ or real_tests/.
+    """
+    valleyscope_dir = Path("valleyscope")
+    forbidden = ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]
+    failures: list[str] = []
+    for py_file in sorted(valleyscope_dir.rglob("*.py")):
+        lines = py_file.read_text(encoding="utf-8").split("\n")
+        for i, line in enumerate(lines, start=1):
+            for name in forbidden:
+                if name in line:
+                    failures.append(f"{py_file}:{i}: {line.strip()[:120]}")
+    if failures:
+        msg = (
+            "Material names found in valleyscope/ production code:\n"
+            + "\n".join(failures)
+            + "\n\nReal materials are validation examples only; "
+            "they must not appear in program logic, output strings, "
+            "or config paths."
+        )
+        raise AssertionError(msg)
+
+
+def test_config_profiles_accepted(tmp_path):
+    """Both 'standard' and 'debug' profiles are accepted."""
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    for profile in ["standard", "debug"]:
+        config = {
+            "input": {"wavefunction_h5": str(h5_path)},
+            "analysis": {"kpoints": ["GammaM"], "iband": [101]},
+            "monolayer_lattices": {
+                "default": {"reciprocal_cart": [[10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 1.0]]}
+            },
+            "valley_centers": {
+                "coordinate_mode": "cart",
+                "centers": [
+                    {"name": "K", "cart": [0.0, 0.0, 0.0]},
+                    {"name": "Kp", "cart": [5.0, 0.0, 0.0]},
+                ],
+            },
+            "valley_subspaces": [
+                {"name": "K_valley", "centers": ["K"]},
+                {"name": "Kp_valley", "centers": ["Kp"]},
+            ],
+            "output": {"directory": str(out_dir), "profile": profile},
+        }
+        config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+        loaded = load_config(config_path)
+        assert loaded.output.profile == profile
+
+
+def test_standard_profile_always_writes_summary_even_with_flags_false(tmp_path):
+    """Standard profile writes valley_summary.txt/json even when write flags are false."""
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["output"]["profile"] = "standard"
+    raw["output"]["write_summary_txt"] = False
+    raw["output"]["write_summary_json"] = False
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    outputs = analyze_hsp(config_path)
+
+    # Main user entry must always be present in standard profile.
+    assert outputs["valley_summary_txt"].exists(), (
+        "valley_summary.txt must be written in standard profile even with write_summary_txt=false"
+    )
+    assert outputs["valley_summary_json"].exists(), (
+        "valley_summary.json must be written in standard profile even with write_summary_json=false"
+    )
