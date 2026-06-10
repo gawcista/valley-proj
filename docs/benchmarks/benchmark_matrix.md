@@ -18,14 +18,14 @@ detailed audit and blocker evidence.
 
 ## tMoTe2 P321 — K/K' Valley
 
-- **Valley family**: Two-valley K/K' (C3-preserving, P3 subspace group candidate)
+- **Valley family**: Two-valley K/K' (C3-preserving, `C3_like` EBR table label)
 - **HSP context**: GammaM, KM with full C3 little group; MM identity-only
 - **Validation role**: Clean-system benchmark for the `direct_qcut` trusted path
   and spinful C3 irrep table matching
 - **Irrep readiness**: 8 trusted EBR input candidates at GammaM and KM;
   MM blocked (no non-identity valley-preserving ops at HSP)
 - **EBR readiness**: 2 export bundles, `ready_for_external_solver`
-  (K_valley and Kp_valley, P3 group candidate)
+  (K_valley and Kp_valley, `C3_like` EBR table label)
 - **Config notes**: `spinor.convention_verified: true`,
   `readiness_preset: loose`; KM D_block_leakage ~0.0064 passes loose (1e-2)
   but not normal (1e-3)
@@ -37,8 +37,7 @@ detailed audit and blocker evidence.
 
 ## tZrSe2 P312 — M-Star Valley
 
-- **Valley family**: Three-valley M-star (C2-preserving, P2 subspace group
-  candidate)
+- **Valley family**: Three-valley M-star (C2-preserving, `C2_like` EBR table label)
 - **HSP context**: GammaM M1/M2/M3 with full C2 HSP little group;
   KM and MM M1/M2 identity-only (C2 maps to other HSP-star members);
   MM M3 has C2 HSP-little-group op

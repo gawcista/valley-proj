@@ -335,3 +335,172 @@ def test_reduced_ebr_table_file_resolves_relative_to_config(tmp_path):
     assert loaded.reduced_ebr.enabled is True
     assert loaded.reduced_ebr.max_coefficient == 2
     assert loaded.reduced_ebr.table_file == table_path
+
+
+# -----------------------------------------------------------------------
+# 9. schema_version validation
+# -----------------------------------------------------------------------
+
+def test_missing_schema_version_raises(tmp_path):
+    bad = dict(_SAMPLE_TABLE)
+    del bad["schema_version"]
+    _write_table(tmp_path / "t.json", bad)
+    with pytest.raises(ValueError, match="missing keys"):
+        load_reduced_ebr_table(tmp_path / "t.json")
+
+
+def test_empty_schema_version_raises(tmp_path):
+    bad = dict(_SAMPLE_TABLE)
+    bad["schema_version"] = ""
+    _write_table(tmp_path / "t.json", bad)
+    with pytest.raises(ValueError, match="schema_version"):
+        load_reduced_ebr_table(tmp_path / "t.json")
+
+
+def test_non_string_schema_version_raises(tmp_path):
+    bad = dict(_SAMPLE_TABLE)
+    bad["schema_version"] = 1
+    _write_table(tmp_path / "t.json", bad)
+    with pytest.raises(ValueError, match="schema_version"):
+        load_reduced_ebr_table(tmp_path / "t.json")
+
+
+# -----------------------------------------------------------------------
+# 10. expected_hsps validation
+# -----------------------------------------------------------------------
+
+def test_empty_expected_hsps_raises(tmp_path):
+    bad = dict(_SAMPLE_TABLE)
+    bad["expected_hsps"] = []
+    _write_table(tmp_path / "t.json", bad)
+    with pytest.raises(ValueError, match="expected_hsps must be a non-empty list"):
+        load_reduced_ebr_table(tmp_path / "t.json")
+
+
+def test_duplicate_expected_hsps_raises(tmp_path):
+    bad = dict(_SAMPLE_TABLE)
+    bad["expected_hsps"] = ["GammaM", "KM", "GammaM"]
+    _write_table(tmp_path / "t.json", bad)
+    with pytest.raises(ValueError, match="unique"):
+        load_reduced_ebr_table(tmp_path / "t.json")
+
+
+def test_non_string_expected_hsp_raises(tmp_path):
+    bad = dict(_SAMPLE_TABLE)
+    bad["expected_hsps"] = ["GammaM", 123]
+    _write_table(tmp_path / "t.json", bad)
+    with pytest.raises(ValueError, match="expected_hsps entries must be non-empty"):
+        load_reduced_ebr_table(tmp_path / "t.json")
+
+
+# -----------------------------------------------------------------------
+# 11. EBR label uniqueness
+# -----------------------------------------------------------------------
+
+def test_duplicate_ebr_labels_raises(tmp_path):
+    bad = dict(_SAMPLE_TABLE)
+    bad["ebrs"] = [
+        {"label": "EBR_A", "vector": [1, 0, 1]},
+        {"label": "EBR_A", "vector": [1, 1, 0]},
+    ]
+    _write_table(tmp_path / "t.json", bad)
+    with pytest.raises(ValueError, match="unique"):
+        load_reduced_ebr_table(tmp_path / "t.json")
+
+
+# -----------------------------------------------------------------------
+# 12. empty EBR vector
+# -----------------------------------------------------------------------
+
+def test_empty_ebr_vector_raises(tmp_path):
+    bad = dict(_SAMPLE_TABLE)
+    bad["ebrs"] = [
+        {"label": "EBR_A", "vector": [1, 0, 1]},
+        {"label": "EBR_B", "vector": []},
+    ]
+    _write_table(tmp_path / "t.json", bad)
+    with pytest.raises(ValueError, match="non-empty"):
+        load_reduced_ebr_table(tmp_path / "t.json")
+
+
+# -----------------------------------------------------------------------
+# 13. irrep key format validation
+# -----------------------------------------------------------------------
+
+@pytest.mark.parametrize("bad_key", [
+    "no_colon",                      # no colon separator
+    ":missing_kpoint",               # empty kpoint
+    "GammaM:",                       # empty irrep label
+    "1GammaM:C3_spinor",             # kpoint starts with digit
+    "GammaM: bad_irrep",             # space in irrep label
+])
+def test_invalid_irrep_key_format_raises(tmp_path, bad_key):
+    bad = dict(_SAMPLE_TABLE)
+    bad["irreps"] = ["GammaM:C3_spinor_phase_+1/2", bad_key]
+    bad["ebrs"] = [{"label": "X", "vector": [1, 0]}]
+    _write_table(tmp_path / "t.json", bad)
+    with pytest.raises(ValueError, match="invalid irrep key format"):
+        load_reduced_ebr_table(tmp_path / "t.json")
+
+
+@pytest.mark.parametrize("good_key", [
+    "GammaM:C3_spinor_phase_+1/2",
+    "KM:C3_spinor_phase_-1/6",
+    "MM:C2_spinor_phase_+1/4",
+    "GammaM:C3_spinor_phase_+1/2:op1",
+    "KM:C3_spinor_phase_+1/6:op2",
+])
+def test_valid_irrep_key_formats_accepted(tmp_path, good_key):
+    tbl = dict(_SAMPLE_TABLE)
+    tbl["irreps"] = [good_key]
+    tbl["ebrs"] = [{"label": "X", "vector": [1]}]
+    _write_table(tmp_path / "t.json", tbl)
+    loaded = load_reduced_ebr_table(tmp_path / "t.json")
+    assert loaded["irreps"][0] == good_key
+
+
+# -----------------------------------------------------------------------
+# 14. schema/doc contract
+# -----------------------------------------------------------------------
+
+def test_table_schema_doc_required_keys():
+    """Verify docs/reduced_ebr_table_schema.md documents all required table keys."""
+    from valleyscope.analysis.reduced_ebr_mapping import _REQUIRED_TABLE_KEYS
+    doc_path = Path("docs/reduced_ebr_table_schema.md")
+    assert doc_path.exists(), "docs/reduced_ebr_table_schema.md must exist"
+    doc_text = doc_path.read_text(encoding="utf-8")
+    for key in sorted(_REQUIRED_TABLE_KEYS):
+        assert f"`{key}`" in doc_text, (
+            f"docs/reduced_ebr_table_schema.md must document key '{key}'"
+        )
+    # Must state no built-in tables.
+    assert "No built-in EBR tables" in doc_text or "no built-in" in doc_text.lower()
+    # Must state no heuristic fits.
+    assert "heuristic" in doc_text.lower() and "no" in doc_text.lower()
+
+
+def test_table_schema_doc_status_values():
+    """Verify docs/reduced_ebr_table_schema.md documents allowed status values."""
+    doc_text = Path("docs/reduced_ebr_table_schema.md").read_text(encoding="utf-8")
+    for status in ["not_evaluated", "missing_table", "solved_exact", "no_exact_solution"]:
+        assert f"`{status}`" in doc_text, (
+            f"docs/reduced_ebr_table_schema.md must document status '{status}'"
+        )
+
+
+def test_table_schema_doc_labels_use_clike_form():
+    """Verify docs/reduced_ebr_table_schema.md uses C{order}_like for subspace_group_candidate."""
+    doc_text = Path("docs/reduced_ebr_table_schema.md").read_text(encoding="utf-8")
+    assert "C3_like" in doc_text
+    assert "C2_like" in doc_text
+    assert 'C{order}_like' in doc_text
+
+
+def test_schema_md_labels_use_clike_form():
+    """Verify docs/schema.md uses C{order}_like for subspace_group_candidate examples."""
+    schema_text = Path("docs/schema.md").read_text(encoding="utf-8")
+    assert "C3_like" in schema_text
+    assert "C2_like" in schema_text
+    # Must not use P3/P2 as subspace_group_candidate example values.
+    assert '"subspace_group_candidate": "P3"' not in schema_text
+    assert '"subspace_group_candidate": "P2"' not in schema_text
