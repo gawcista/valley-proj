@@ -3428,3 +3428,12 @@ def test_schema_doc_covers_public_outputs_and_reduced_ebr_statuses():
         assert field in schema_text, (
             f"docs/schema.md must document reduced-EBR field '{field}'"
         )
+
+    # Stale phrases must not appear.
+    stale_phrases = [
+        "enabled with valid table",   # output presence ≠ valid table
+    ]
+    for phrase in stale_phrases:
+        assert phrase not in schema_text, (
+            f"docs/schema.md contains stale phrase: '{phrase}'"
+        )

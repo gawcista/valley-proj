@@ -78,7 +78,7 @@ Conditionally present top-level fields:
 | `valley_ebr_input_candidates` | EBR input candidates collected |
 | `valley_ebr_problem_instances` | EBR problem instances built |
 | `valley_ebr_export_bundle` | EBR export bundle built |
-| `valley_reduced_ebr_mapping` | Reduced EBR mapping enabled with valid table |
+| `valley_reduced_ebr_mapping` | Reduced EBR mapping enabled (`analysis.reduced_ebr.enabled`) |
 | `folded_center_report` | Always (when moire lattice available) |
 | `sampled_k_coverage` | Always (when moire lattice available) |
 
@@ -123,8 +123,10 @@ AND `readiness_level == "trusted"`.
 
 ### `valley_reduced_ebr_mapping.json`
 
-Exact-integer reduced EBR decomposition. **Default-off**; requires
-`analysis.reduced_ebr.enabled: true` and a user-supplied validated table file.
+Exact-integer reduced EBR decomposition. **Default-off**; produced only when
+`analysis.reduced_ebr.enabled: true`. A user-supplied validated table is
+required for `solved_exact` / `no_exact_solution` decomposition attempts;
+without a table the output carries `status: missing_table`.
 
 Top-level fields (always present):
 
@@ -133,7 +135,7 @@ Top-level fields (always present):
 | `status` | string | `"not_evaluated"`, `"missing_table"`, `"solved_exact"`, `"no_exact_solution"` |
 | `mapping_status` | string | Same as `status` |
 | `reduced_ebr_decomposition_status` | string | Same as `status` |
-| `table_status` | string | `"not_applicable"` (reduced_ebr disabled or no export bundle), `"not_provided"` (enabled but no table file), `"loaded"` (table loaded and decomposition attempted) |
+| `table_status` | string | `"not_applicable"` (no export bundle available), `"not_provided"` (enabled but no table file), `"loaded"` (table loaded and decomposition attempted) |
 | `solutions` | list[object] | Per-bundle solution entries (empty list when no bundles to decompose) |
 | `excluded_bundles` | list[object] | Bundles excluded from solving |
 | `solver` | string | `"brute_force_exact_integer"` |
