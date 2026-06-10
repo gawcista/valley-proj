@@ -1,6 +1,6 @@
 # Reduced-Dimensional Irrep/EBR Data Model Design
 
-Date: 2026-06-10 | Status: Design document (no implementation)
+Date: 2026-06-10 | Status: Package-data skeleton implemented (no table data)
 
 This document proposes a future ValleyScope reviewed/provenance-tracked
 package-data layer for valley-preserving irreps and reduced-dimensional
@@ -402,11 +402,11 @@ The Python package is named `irrep` (singular).  This design document uses
 concepts.  Previous versions of this handoff incorrectly used `irreps`
 (plural); those occurrences have been corrected in `AGENTS.md` and `PLAN.md`.
 
-## 10. Implementation Roadmap (Not In This Task)
+## 10. Implementation Roadmap
 
-1. **This design document** — review and approve the data model.
-2. **Stub data directory** — create `valleyscope/data/reduced_ebr/` with a
-   `README.md` explaining provenance requirements.
+1. ~~**This design document**~~ — reviewed and approved (commit `12135c4`).
+2. ~~**Stub data directory**~~ — `valleyscope/data/reduced_ebr/` skeleton
+   created with empty manifest, README, and catalog module. No table data.
 3. **Loader** — `valleyscope/data/loader.py` with `list_available_tables()`,
    `load_table(name_or_path)`, validation against schema.
 4. **First reviewed tables** — for a generic reviewed `C3_like` (GammaM, KM)

@@ -835,3 +835,107 @@ def test_plan_md_uses_correct_package_name_irrep():
     text = Path("PLAN.md").read_text(encoding="utf-8")
     assert "`irrep`" in text, "PLAN.md must reference Python package 'irrep'"
     assert "`irreps`" not in text, "PLAN.md must not reference 'irreps' (plural)"
+
+
+# -----------------------------------------------------------------------
+# 17. Package-data skeleton
+# -----------------------------------------------------------------------
+
+def test_package_data_root_exists():
+    """Package-data directory structure must exist."""
+    from valleyscope.data.reduced_ebr.catalog import package_data_root
+    root = package_data_root()
+    assert root.is_dir()
+    assert (root / "__init__.py").exists()
+    assert (root / "manifest.json").exists()
+    assert (root / "README.md").exists()
+    assert (root / "catalog.py").exists()
+
+
+def test_manifest_has_schema_version_and_empty_tables():
+    """Manifest must have schema_version and an empty tables list."""
+    from valleyscope.data.reduced_ebr.catalog import load_reduced_ebr_manifest
+    m = load_reduced_ebr_manifest()
+    assert isinstance(m.get("schema_version"), str) and m["schema_version"], (
+        "manifest must have non-empty schema_version"
+    )
+    assert m.get("tables") == [], "manifest tables must be empty"
+
+
+def test_list_tables_returns_empty():
+    """list_reviewed_reduced_ebr_tables() must return an empty list."""
+    from valleyscope.data.reduced_ebr.catalog import list_reviewed_reduced_ebr_tables
+    tables = list_reviewed_reduced_ebr_tables()
+    assert tables == [], "no reviewed tables should exist yet"
+    assert isinstance(tables, list)
+
+
+def test_load_nonexistent_table_raises_value_error():
+    """load_reviewed_reduced_ebr_table for any name must raise ValueError."""
+    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
+    with pytest.raises(ValueError, match="no reviewed reduced EBR package table"):
+        load_reviewed_reduced_ebr_table("nonexistent_table")
+
+
+def test_no_table_json_files_except_manifest():
+    """Only manifest.json should exist; no other .json table files."""
+    from valleyscope.data.reduced_ebr.catalog import package_data_root
+    root = package_data_root()
+    json_files = sorted(root.glob("*.json"))
+    json_names = {f.name for f in json_files}
+    assert json_names == {"manifest.json"}, (
+        f"Only manifest.json should exist; found: {json_names}"
+    )
+
+
+def test_package_data_readme_states_no_tables():
+    """Package-data README must state that no reviewed tables are shipped."""
+    from valleyscope.data.reduced_ebr.catalog import package_data_root
+    readme = (package_data_root() / "README.md").read_text(encoding="utf-8")
+    assert "no reviewed tables" in readme.lower() or "currently empty" in readme.lower(), (
+        "README must state no reviewed tables are currently shipped"
+    )
+    assert "currently" in readme.lower()
+
+
+def test_catalog_does_not_import_irrep_or_ortools():
+    """Catalog source must not import irrep, irrep2, or ortools."""
+    from valleyscope.data.reduced_ebr.catalog import package_data_root
+    src = (package_data_root() / "catalog.py").read_text(encoding="utf-8")
+    for forbidden in ["import irrep", "from irrep", "import irrep2",
+                       "from irrep2", "import ortools", "from ortools"]:
+        assert forbidden not in src, (
+            f"catalog.py must not import {forbidden}"
+        )
+
+
+def test_package_data_no_material_names():
+    """Package-data files must not contain real material names."""
+    import os
+    from valleyscope.data.reduced_ebr.catalog import package_data_root
+    forbidden = ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]
+    for dirpath, _dirnames, filenames in os.walk(str(package_data_root())):
+        for fname in filenames:
+            if fname.endswith(".pyc"):
+                continue
+            fpath = Path(dirpath) / fname
+            text = fpath.read_text(encoding="utf-8") if not fname.endswith(".json") else ""
+            if fname.endswith(".json"):
+                text = fpath.read_text(encoding="utf-8")
+            for name in forbidden:
+                assert name not in text, (
+                    f"{fpath} contains forbidden material name {name!r}"
+                )
+                assert name not in fname, (
+                    f"filename {fname!r} contains forbidden material name {name!r}"
+                )
+
+
+def test_data_init_has_no_forbidden_imports():
+    """valleyscope/data/__init__.py must not import irrep, irrep2, or ortools."""
+    src = Path("valleyscope/data/__init__.py").read_text(encoding="utf-8")
+    for forbidden in ["import irrep", "from irrep", "import irrep2",
+                       "from irrep2", "import ortools", "from ortools"]:
+        assert forbidden not in src, (
+            f"valleyscope/data/__init__.py must not import {forbidden}"
+        )

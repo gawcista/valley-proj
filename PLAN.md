@@ -134,9 +134,12 @@ valley-changing operations as invariance of a single label operator.
   (blocker B1 in `docs/benchmarks/tzrse2_blocker_evidence.md`).
 * Expanded-band HDF5 to test D_raw closure sensitivity for tZrSe2 M3 C2
   (blocker B2).
-* Design an `irrep2`-like reduced-dimensional irrep/EBR data model for trusted
-  C3/C2 instances: package data may be future reviewed/provenance-tracked
-  ValleyScope data, but not ad hoc hardcoded tables and not direct reuse of
-  3D `irrep` Python package EBR tables as final valley-resolved reduced
-  EBR data.
+* ~~Design `irrep2`-like reduced-dimensional irrep/EBR data model~~ — Done.
+  `docs/reduced_dimensional_irrep_ebr_data_model.md` covers physical objects,
+  label conventions, package-data layout, and validation rules.  Does not
+  directly reuse 3D `irrep` Python package EBR tables.
+* ~~Package-data skeleton~~ — Done. `valleyscope/data/reduced_ebr/` exists
+  with empty manifest, README, and catalog module. No table data shipped.
+* Implement a reviewed reduced-dimensional EBR table loader/catalog that
+  connects the package-data skeleton to the external-table validation path.
 * High-throughput database pipeline.
