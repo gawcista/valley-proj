@@ -736,3 +736,93 @@ def test_cli_module_entrypoint_help_lists_map_reduced_ebr():
 
     assert result.returncode == 0
     assert "map-reduced-ebr" in result.stdout
+
+
+# -----------------------------------------------------------------------
+# 16. Reduced-dimensional irrep/EBR data model doc contract
+# -----------------------------------------------------------------------
+
+def test_data_model_design_doc_exists():
+    """Design doc must exist at the expected path."""
+    doc_path = Path("docs/reduced_dimensional_irrep_ebr_data_model.md")
+    assert doc_path.exists(), (
+        "docs/reduced_dimensional_irrep_ebr_data_model.md must exist"
+    )
+
+
+def test_data_model_doc_mentions_irrep2():
+    """Design doc must reference irrep2 as the reduced-dimensional inspiration."""
+    doc = Path("docs/reduced_dimensional_irrep_ebr_data_model.md").read_text(encoding="utf-8")
+    assert "irrep2" in doc, "design doc must mention irrep2"
+
+
+def test_data_model_doc_mentions_reduced_dimensional():
+    """Design doc must use the 'reduced-dimensional' terminology."""
+    doc = Path("docs/reduced_dimensional_irrep_ebr_data_model.md").read_text(encoding="utf-8")
+    assert "reduced-dimensional" in doc.lower(), (
+        "design doc must mention reduced-dimensional"
+    )
+
+
+def test_data_model_doc_mentions_provenance():
+    """Design doc must discuss provenance tracking."""
+    doc = Path("docs/reduced_dimensional_irrep_ebr_data_model.md").read_text(encoding="utf-8")
+    assert "provenance" in doc.lower(), "design doc must mention provenance"
+
+
+def test_data_model_doc_mentions_package_name_irrep():
+    """Design doc must use the correct Python package name 'irrep' (singular)."""
+    doc = Path("docs/reduced_dimensional_irrep_ebr_data_model.md").read_text(encoding="utf-8")
+    assert "`irrep`" in doc or "Python package `irrep`" in doc, (
+        "design doc must reference Python package 'irrep' (singular)"
+    )
+
+
+def test_data_model_doc_no_direct_3d_ebr_reuse():
+    """Design doc must state that 3D irrep EBR tables must not be directly reused."""
+    doc = Path("docs/reduced_dimensional_irrep_ebr_data_model.md").read_text(encoding="utf-8")
+    doc_lower = doc.lower()
+    assert any(phrase in doc_lower for phrase in [
+        "not direct reuse", "no direct reuse", "do not directly reuse",
+        "not directly reuse", "no 3d", "ebr table reuse as final",
+    ]), "design doc must state no direct 3D irrep EBR table reuse"
+
+
+def test_data_model_doc_physical_objects():
+    """Design doc must name the key physical objects."""
+    doc = Path("docs/reduced_dimensional_irrep_ebr_data_model.md").read_text(encoding="utf-8")
+    required = [
+        "HSP little group",
+        "valley-preserving subgroup",
+        "valley sewing matrix",
+        "reduced-dimensional EBR vector",
+    ]
+    for term in required:
+        assert term.lower() in doc.lower(), (
+            f"design doc must mention '{term}'"
+        )
+
+
+def test_data_model_doc_label_conventions():
+    """Design doc must document C3_like/C2_like vs crystallographic notation."""
+    doc = Path("docs/reduced_dimensional_irrep_ebr_data_model.md").read_text(encoding="utf-8")
+    assert "C3_like" in doc and "C2_like" in doc, (
+        "design doc must document C3_like and C2_like labels"
+    )
+    assert "P3" in doc and "P2" in doc, (
+        "design doc must document crystallographic P3/P2 notation"
+    )
+
+
+def test_agents_md_uses_correct_package_name_irrep():
+    """AGENTS.md must use the correct Python package name 'irrep' (singular)."""
+    text = Path("AGENTS.md").read_text(encoding="utf-8")
+    assert "`irrep`" in text, "AGENTS.md must reference Python package 'irrep'"
+    assert "`irreps`" not in text, "AGENTS.md must not reference 'irreps' (plural)"
+
+
+def test_plan_md_uses_correct_package_name_irrep():
+    """PLAN.md must use the correct Python package name 'irrep' (singular)."""
+    text = Path("PLAN.md").read_text(encoding="utf-8")
+    assert "`irrep`" in text, "PLAN.md must reference Python package 'irrep'"
+    assert "`irreps`" not in text, "PLAN.md must not reference 'irreps' (plural)"

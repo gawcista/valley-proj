@@ -137,5 +137,6 @@ valley-changing operations as invariance of a single label operator.
 * Design an `irrep2`-like reduced-dimensional irrep/EBR data model for trusted
   C3/C2 instances: package data may be future reviewed/provenance-tracked
   ValleyScope data, but not ad hoc hardcoded tables and not direct reuse of
-  3D `irreps` EBR tables as final valley-resolved reduced EBR data.
+  3D `irrep` Python package EBR tables as final valley-resolved reduced
+  EBR data.
 * High-throughput database pipeline.
