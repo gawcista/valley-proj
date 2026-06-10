@@ -1515,6 +1515,20 @@ def test_schema_fields_include_classification():
     for k in ["status", "mapping_status", "reduced_ebr_decomposition_status",
               "table_status", "solutions", "excluded_bundles", "solver"]:
         assert k in r, f"missing top-level key: {k}"
+    assert r["solver"] == "smith_normal_form_plus_bounded_nonnegative_search"
+
+
+def test_pyproject_lists_sympy_dependency_for_integer_span_classifier():
+    """Smith normal form is a runtime path, so sympy must be a project dependency."""
+    text = Path("pyproject.toml").read_text(encoding="utf-8")
+    assert '"sympy"' in text
+
+
+def test_schema_doc_uses_current_reduced_ebr_solver_name():
+    """Public schema should not document the old brute-force-only solver name."""
+    schema_text = Path("docs/schema.md").read_text(encoding="utf-8")
+    assert "smith_normal_form_plus_bounded_nonnegative_search" in schema_text
+    assert "brute_force_exact_integer" not in schema_text
 
 
 def test_no_material_names_in_classifier():

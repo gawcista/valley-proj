@@ -170,7 +170,7 @@ Top-level fields (always present):
 | `table_status` | string | `"not_applicable"` (no export bundle available), `"not_provided"` (enabled but no table file), `"loaded"` (table loaded and decomposition attempted) |
 | `solutions` | list[object] | Per-bundle solution entries (empty list when no bundles to decompose) |
 | `excluded_bundles` | list[object] | Bundles excluded from solving |
-| `solver` | string | `"brute_force_exact_integer"` |
+| `solver` | string | `"smith_normal_form_plus_bounded_nonnegative_search"` |
 | `interpretation` | string | Human-readable status message |
 
 Conditional fields:
@@ -365,6 +365,9 @@ schema version bump and are not part of the frozen public schema.
       "subspace_group_candidate": "C3_like",
       "irrep_vector": [1, 1],
       "status": "solved_exact",
+      "classification": "atomic-compatible-candidate",
+      "integer_span_status": "in_integer_span",
+      "nonnegative_solution_status": "solved_exact",
       "ebr_decomposition": [
         {"label": "(A)1a", "coefficient": 1},
         {"label": "(B)1a", "coefficient": 1}
@@ -372,7 +375,7 @@ schema version bump and are not part of the frozen public schema.
     }
   ],
   "excluded_bundles": [],
-  "solver": "brute_force_exact_integer",
+  "solver": "smith_normal_form_plus_bounded_nonnegative_search",
   "max_coefficient": 6,
   "interpretation": "Exact integer linear combination of EBR vectors ..."
 }
@@ -390,7 +393,7 @@ schema version bump and are not part of the frozen public schema.
   "excluded_bundles": [
     {"bundle_id": "bundle_K_valley", "reason": "missing_table"}
   ],
-  "solver": "brute_force_exact_integer",
+  "solver": "smith_normal_form_plus_bounded_nonnegative_search",
   "interpretation": "no reduced EBR table provided"
 }
 ```

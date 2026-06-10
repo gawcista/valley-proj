@@ -12,6 +12,7 @@ from pathlib import Path
 
 _REQUIRED_TABLE_KEYS = {"schema_version", "subspace_group_candidate",
                          "expected_hsps", "irreps", "ebrs"}
+_SOLVER_NAME = "smith_normal_form_plus_bounded_nonnegative_search"
 
 
 def load_reduced_ebr_table(path: str | Path) -> dict:
@@ -274,7 +275,7 @@ def build_reduced_ebr_mapping(
         "table_status": "loaded",
         "solutions": solutions,
         "excluded_bundles": excluded,
-        "solver": "brute_force_exact_integer",
+        "solver": _SOLVER_NAME,
         "max_coefficient": max_coefficient,
         "interpretation": (
             "Exact integer linear combination of EBR vectors matching the "
@@ -522,6 +523,6 @@ def _status(status: str, reason: str) -> dict:
         "table_status": "not_applicable",
         "solutions": [],
         "excluded_bundles": [],
-        "solver": "brute_force_exact_integer",
+        "solver": _SOLVER_NAME,
         "interpretation": reason,
     }
