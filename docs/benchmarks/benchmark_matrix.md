@@ -13,7 +13,7 @@ detailed audit and blocker evidence.
 | Fixture | Valley Family | HSP Context | Validation Role | Output Profile | Irrep/EBR Readiness |
 |---------|--------------|-------------|-----------------|----------------|---------------------|
 | tMoTe2 P321 | K/K' (C3-preserving) | GammaM, KM, MM | Clean `direct_qcut` trusted path; spinful C3 irrep benchmark | Standard (4 files) | 2 EBR bundles `ready_for_external_solver` |
-| tZrSe2 P312 | M-star (C2-preserving) | GammaM, KM, MM | `symmetry_adapted` path; blocker evidence protocol | Standard (4 files) | `no_instances` — 5 documented blockers |
+| tZrSe2 P312 | M-star (C2-preserving) | GammaM, KM, MM | `symmetry_adapted` path; blocker evidence protocol | Standard (4 files) | diagnostic-only; export bundle `no_bundles` because problem instances are `no_instances` |
 | tPdSe2 / PdSe2 | — | — | Deferred | — | No fixtures or evidence yet |
 
 ## tMoTe2 P321 — K/K' Valley
@@ -46,7 +46,8 @@ detailed audit and blocker evidence.
   HSP-star conjugation, derived characters, and blocker cascade logic
 - **Irrep readiness**: `diagnostic_only` everywhere —
   `spinor_convention_unverified` downgrades all rows
-- **EBR readiness**: `no_instances` — 5 blockers documented in
+- **EBR readiness**: public export bundle status is `no_bundles` because the
+  problem-instance layer is `no_instances`; 5 blockers are documented in
   `docs/benchmarks/tzrse2_blocker_evidence.md`:
   B1 (spinor convention), B2 (D_raw closure at MM/GammaM op=5), B3 (low
   GammaM seed overlap), B4 (M3 source trust cascade, consequential), B5
