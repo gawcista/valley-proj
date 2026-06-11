@@ -28,10 +28,18 @@ The repo already has:
 * default-off reduced EBR mapping interface (exact integer, external table only);
 * `valley_reduced_ebr_mapping.json` (only when `analysis.reduced_ebr.enabled`).
 
+**High-throughput database interface:**
+* explicit offline database ingestion record collector
+  (`valleyscope collect-database-record`);
+* `database_ingestion_record.json` is built from public outputs only and is not
+  a default `analyze-hsp` output.
+
 **Output and summary:**
 * `valley_summary.txt` / `valley_summary.json` (main user entry);
 * `valley_ebr_export_bundle.json` (downstream EBR entry);
 * `valley_reduced_ebr_mapping.json` (default-off, when analysis.reduced_ebr.enabled);
+* `database_ingestion_record.json` (explicit offline collector output for
+  high-throughput indexing; not controlled by `output.profile`);
 * `valley_weights.csv` (quick-scan file, standard profile);
 * Output controlled by `output.profile: standard | debug` (standard = public only,
   debug = full diagnostics). Legacy `output.write_detailed_files` is deprecated.
@@ -103,6 +111,7 @@ valley-changing operations as invariance of a single label operator.
 | Phase 6 | Reduced EBR mapping interface | Default-off external-table solver exists; no built-in tables |
 | Phase 7 | Parent-valley / k-resolved projector diagnostics | Done — merged to main |
 | Phase 8 | Output contract cleanup (standard/debug profiles) | Done — merged to main |
+| Phase 9 | High-throughput single-run ingestion record | Done — explicit offline collector, public-output only |
 
 ## Real Benchmarks
 
@@ -143,4 +152,6 @@ valley-changing operations as invariance of a single label operator.
 * ~~Loader integration~~ — Done. `catalog.py` validates manifests, routes
   `load_reviewed_reduced_ebr_table()` through `load_reduced_ebr_table()`,
   and rejects path traversal. No built-in tables shipped.
-* High-throughput database pipeline.
+* High-throughput database pipeline beyond single-run ingestion:
+  benchmark-generated ingestion-record regression anchors, then multi-run
+  manifest/index collection if needed.
