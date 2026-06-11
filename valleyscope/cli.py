@@ -26,6 +26,7 @@ def main(argv: list[str] | None = None) -> int:
     extract.add_argument("config", type=Path)
     _add_map_reduced_ebr_parser(subparsers)
     _add_collect_database_record_parser(subparsers)
+    _add_build_reduced_ebr_table_parser(subparsers)
     args = parser.parse_args(argv)
     if args.command == "analyze-hsp":
         outputs = analyze_hsp(args.config)
@@ -40,6 +41,8 @@ def main(argv: list[str] | None = None) -> int:
         return _map_reduced_ebr(args)
     if args.command == "collect-database-record":
         return _collect_database_record(args)
+    if args.command == "build-reduced-ebr-table":
+        return _build_reduced_ebr_table(args)
     parser.error(f"Unknown command: {args.command}")
     return 2
 
@@ -183,6 +186,58 @@ def _collect_database_record(args) -> int:
     print(f"ingestion record:       {output_path}")
     if errors:
         return 1
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# build-reduced-ebr-table
+# ---------------------------------------------------------------------------
+
+def _add_build_reduced_ebr_table_parser(subparsers) -> None:
+    p = subparsers.add_parser(
+        "build-reduced-ebr-table",
+        help="Build a ValleyScope reduced EBR table from an irreptables mapping spec",
+    )
+    p.add_argument(
+        "spec",
+        type=Path,
+        help="Path to JSON mapping spec (sg_number, spinor, source_hsp_by_irrep, etc.)",
+    )
+    p.add_argument(
+        "--output", "-o",
+        type=Path,
+        default=Path("valley_reduced_ebr_table.json"),
+        help="Output path for the reduced EBR table (default: %(default)s)",
+    )
+
+
+def _build_reduced_ebr_table(args) -> int:
+    import json
+    from valleyscope.analysis.irreptables_runtime_table_builder import (
+        build_reduced_table_from_spec_file,
+    )
+    from valleyscope.reports.json_report import write_json
+
+    spec_path = Path(args.spec)
+    output_path = Path(args.output)
+
+    if not spec_path.is_file():
+        print(f"error: spec file not found: {spec_path}", file=sys.stderr)
+        return 1
+
+    try:
+        table = build_reduced_table_from_spec_file(str(spec_path))
+    except (FileNotFoundError, json.JSONDecodeError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    write_json(output_path, table)
+
+    print(f"subspace group:     {table['subspace_group_candidate']}")
+    print(f"expected HSPs:      {table['expected_hsps']}")
+    print(f"irreps:             {len(table['irreps'])} keys")
+    print(f"EBRs:               {len(table['ebrs'])} vectors")
+    print(f"reduced EBR table:  {output_path}")
     return 0
 
 

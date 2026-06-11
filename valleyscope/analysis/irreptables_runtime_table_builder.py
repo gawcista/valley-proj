@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 import importlib.metadata
+from pathlib import Path
 from typing import Any
 
 from valleyscope.analysis.irrep_data_normalizer import (
@@ -145,6 +146,61 @@ def _builder_provenance(
     if provenance:
         payload.update(dict(provenance))
     return payload
+
+
+def build_reduced_table_from_spec_file(spec_path: str) -> dict:
+    """Build a ValleyScope reduced table from a JSON mapping spec file.
+
+    The spec must contain:
+    - ``sg_number`` (int)
+    - ``spinor`` (bool)
+    - ``source_hsp_by_irrep`` (dict)
+    - ``valleyscope_key_by_source_irrep`` (dict)
+    - ``expected_hsps`` (list[str])
+    - ``allowed_irrep_keys`` (list[str])
+    - ``subspace_group_candidate`` (str)
+
+    The output is validated through ``load_reduced_ebr_table`` before
+    being returned.
+
+    Raises ValueError if spec is missing required fields or the output
+    fails validation.
+    """
+    import json
+    from valleyscope.analysis.reduced_ebr_mapping import load_reduced_ebr_table
+
+    spec = json.loads(Path(spec_path).read_text(encoding="utf-8"))
+    required = [
+        "sg_number", "spinor",
+        "source_hsp_by_irrep", "valleyscope_key_by_source_irrep",
+        "expected_hsps", "allowed_irrep_keys", "subspace_group_candidate",
+    ]
+    missing = [k for k in required if k not in spec]
+    if missing:
+        raise ValueError(f"spec missing required keys: {missing}")
+
+    table = build_reduced_table_from_irreptables(
+        sg_number=int(spec["sg_number"]),
+        spinor=bool(spec["spinor"]),
+        source_hsp_by_irrep=spec["source_hsp_by_irrep"],
+        valleyscope_key_by_source_irrep=spec["valleyscope_key_by_source_irrep"],
+        expected_hsps=list(spec["expected_hsps"]),
+        allowed_irrep_keys=list(spec["allowed_irrep_keys"]),
+        subspace_group_candidate=str(spec["subspace_group_candidate"]),
+        provenance_extra=spec.get("provenance"),
+    )
+
+    # Validate through the standard table loader.
+    import tempfile, os
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8")
+    try:
+        json.dump(table, tmp)
+        tmp.close()
+        load_reduced_ebr_table(tmp.name)
+    finally:
+        os.unlink(tmp.name)
+
+    return table
 
 
 def _package_version(package_name: str) -> str | None:
