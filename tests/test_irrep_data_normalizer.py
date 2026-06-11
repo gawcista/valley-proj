@@ -1,6 +1,7 @@
 """Tests for package-style 3D EBR data normalization and availability probing."""
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -180,10 +181,62 @@ def test_normalizer_output_feeds_reducer_and_table_loader(tmp_path):
 def test_probe_runtime_sources_returns_structured_status_without_raising():
     info = probe_irrep_runtime_sources()
     assert set(info) >= {"irrep", "irreptables", "submodules", "errors"}
+    assert info["unsafe_native_probe_enabled"] is False
     assert "irrep.spacegroup_irreps" in info["submodules"]
     assert "irrep.ebrs" in info["submodules"]
     assert "irreptables.ebrs" in info["submodules"]
+    assert info["submodules"]["irrep.ebrs"]["available"] is False
+    assert "probe_skipped_reason" in info["submodules"]["irrep.ebrs"]
     assert "load_ebr_data_available" in info["irreptables"]
+
+
+def test_probe_skips_irrep_ebrs_native_import_by_default(monkeypatch):
+    from valleyscope.analysis import irrep_availability_probe as probe
+
+    calls = []
+
+    def fake_run(args, **kwargs):
+        script = args[2]
+        calls.append(script)
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout=json.dumps({"public_names": ["load_ebr_data"]}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(probe.subprocess, "run", fake_run)
+    info = probe.probe_irrep_runtime_sources(probe_unsafe_native=False)
+
+    assert not any("irrep.ebrs" in script for script in calls)
+    assert any("irreptables.ebrs" in script for script in calls)
+    irrep_ebrs = info["submodules"]["irrep.ebrs"]
+    assert irrep_ebrs["available"] is False
+    assert irrep_ebrs["probe_skipped_reason"].startswith("unsafe optional native")
+
+
+def test_probe_can_opt_into_irrep_ebrs_native_import(monkeypatch):
+    from valleyscope.analysis import irrep_availability_probe as probe
+
+    calls = []
+
+    def fake_run(args, **kwargs):
+        script = args[2]
+        calls.append(script)
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout=json.dumps({"public_names": ["compute_ebr_decomposition"]}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(probe.subprocess, "run", fake_run)
+    info = probe.probe_irrep_runtime_sources(probe_unsafe_native=True)
+
+    assert info["unsafe_native_probe_enabled"] is True
+    assert any("irrep.ebrs" in script for script in calls)
+    assert info["submodules"]["irrep.ebrs"]["available"] is True
+    assert info["submodules"]["irrep.ebrs"]["probe_skipped_reason"] is None
 
 
 def test_probe_compatibility_wrappers_return_expected_shapes():

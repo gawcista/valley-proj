@@ -136,6 +136,13 @@ valley-preserving irrep basis.
 "No built-in unreviewed tables" means no ad hoc hardcoded or unvalidated
 tables, not a ban on a future reviewed package-data layer.
 
+OR-Tools and `irrep.ebrs` raw 3D decomposition are not part of the portable
+ValleyScope core path. The exact-integer reduced EBR solver in
+`valleyscope.analysis.reduced_ebr_mapping` must remain pure Python / SymPy and
+must not require OR-Tools. Any diagnostic probe of optional native modules such
+as `irrep.ebrs` must be subprocess-isolated and opt-in, never a default import
+path.
+
 ## Public Output Schema
 
 The frozen public schema is defined in [`docs/schema.md`](docs/schema.md).
@@ -312,6 +319,8 @@ Current work must not implement:
   `target_bands_vasp`.
 * Do not add large WAVECAR files or large real-material outputs to the repo.
 * Do not claim reduced EBR decomposition without a user-supplied validated table.
+* Do not make OR-Tools or `irrep.ebrs` a required import path for ValleyScope
+  analysis, reduced-table construction, or reduced EBR mapping.
 * Use condensed-matter physics terminology in all output, docs, and program
   logic: HSP little group, valley mapping, valley-preserving subgroup,
   valley-preserving operation, valley-changing operation, valley sewing matrix.

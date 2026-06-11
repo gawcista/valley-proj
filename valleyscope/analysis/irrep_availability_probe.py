@@ -12,18 +12,36 @@ import importlib
 import importlib.metadata
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from typing import Any
 
+_UNSAFE_NATIVE_PROBE_ENV = "VALLEYSCOPE_PROBE_UNSAFE_NATIVE"
+_UNSAFE_NATIVE_MODULES = {
+    "irrep.ebrs": (
+        "unsafe optional native probe skipped; set "
+        f"{_UNSAFE_NATIVE_PROBE_ENV}=1 to import this module in a subprocess"
+    ),
+}
 
-def probe_irrep_runtime_sources() -> dict[str, Any]:
+
+def probe_irrep_runtime_sources(
+    *,
+    probe_unsafe_native: bool | None = None,
+) -> dict[str, Any]:
     """Return structured diagnostic status for public irrep data sources."""
+    unsafe_enabled = (
+        _env_truthy(os.environ.get(_UNSAFE_NATIVE_PROBE_ENV))
+        if probe_unsafe_native is None
+        else bool(probe_unsafe_native)
+    )
     result: dict[str, Any] = {
         "irrep": _probe_package("irrep"),
         "irreptables": _probe_package("irreptables"),
         "submodules": {},
         "errors": [],
+        "unsafe_native_probe_enabled": unsafe_enabled,
     }
 
     for module_name in (
@@ -31,7 +49,13 @@ def probe_irrep_runtime_sources() -> dict[str, Any]:
         "irrep.ebrs",
         "irreptables.ebrs",
     ):
-        status = _probe_module(module_name)
+        if module_name in _UNSAFE_NATIVE_MODULES and not unsafe_enabled:
+            status = _probe_module_metadata(
+                module_name,
+                probe_skipped_reason=_UNSAFE_NATIVE_MODULES[module_name],
+            )
+        else:
+            status = _probe_module(module_name)
         result["submodules"][module_name] = status
         if status["error"] is not None:
             result["errors"].append(f"{module_name}: {status['error']}")
@@ -97,6 +121,7 @@ def _probe_module(module_name: str) -> dict[str, Any]:
         "path": None,
         "public_names": [],
         "error": None,
+        "probe_skipped_reason": None,
     }
     try:
         spec = importlib.util.find_spec(module_name)
@@ -138,3 +163,31 @@ def _probe_module(module_name: str) -> dict[str, Any]:
         return status
     status["public_names"] = payload.get("public_names", [])
     return status
+
+
+def _probe_module_metadata(
+    module_name: str,
+    *,
+    probe_skipped_reason: str,
+) -> dict[str, Any]:
+    status: dict[str, Any] = {
+        "available": False,
+        "path": None,
+        "public_names": [],
+        "error": None,
+        "probe_skipped_reason": probe_skipped_reason,
+    }
+    try:
+        spec = importlib.util.find_spec(module_name)
+    except Exception as exc:
+        spec = None
+        status["error"] = f"find_spec {type(exc).__name__}: {exc}"
+    if spec is not None:
+        status["path"] = spec.origin
+    return status
+
+
+def _env_truthy(value: str | None) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
