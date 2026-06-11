@@ -4461,3 +4461,171 @@ def test_pipeline_contract_fixture_data_is_material_agnostic():
     ])
     for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
         assert name not in fixture_text
+
+
+# -----------------------------------------------------------------------
+# Trusted irrep export provenance tests
+# -----------------------------------------------------------------------
+
+def test_ebr_problem_instances_include_irrep_records():
+    """EBR problem instances must include irrep_records_by_kpoint for trusted candidates."""
+    from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
+
+    candidates = {
+        "status": "has_candidates",
+        "candidates": [
+            {"kpoint": "GammaM", "valley": "K_valley",
+             "subspace_group_candidate": "C3_like",
+             "workflow_path": "direct_qcut", "readiness_level": "trusted",
+             "matched_irrep": "C3_spinor_phase_+1/2", "operation_id": 1,
+             "operation_order": 3, "eigenphases": [0.5],
+             "character": {"real": -1.0, "imag": 0.0},
+             "source": "valley_irrep_matching/GammaM/K_valley",
+             "ready_for_ebr_input": True},
+            {"kpoint": "KM", "valley": "K_valley",
+             "subspace_group_candidate": "C3_like",
+             "workflow_path": "direct_qcut", "readiness_level": "trusted",
+             "matched_irrep": "C3_spinor_phase_+1/6", "operation_id": 1,
+             "operation_order": 3, "eigenphases": [0.166667],
+             "source": "valley_irrep_matching/KM/K_valley",
+             "ready_for_ebr_input": True},
+        ],
+    }
+    report = build_ebr_problem_instances(ebr_input_candidates=candidates)
+    inst = report["instances"][0]
+    assert "irrep_records_by_kpoint" in inst
+    records = inst["irrep_records_by_kpoint"]
+    assert "GammaM" in records
+    assert "KM" in records
+    gamma_rec = records["GammaM"][0]
+    assert gamma_rec["valley"] == "K_valley"
+    assert gamma_rec["operation_id"] == 1
+    assert gamma_rec["operation_order"] == 3
+    assert gamma_rec["matched_irrep"] == "C3_spinor_phase_+1/2"
+    assert gamma_rec["eigenphases"] == [0.5]
+    assert gamma_rec["workflow_path"] == "direct_qcut"
+    assert gamma_rec["readiness_level"] == "trusted"
+    assert gamma_rec["character"] is not None
+    assert gamma_rec["source"] == "valley_irrep_matching/GammaM/K_valley"
+
+
+def test_export_bundle_copies_irrep_records():
+    """Export bundles copy irrep_records_by_kpoint for complete trusted instances."""
+    from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
+
+    records = {
+        "GammaM": [{"valley": "K_valley", "operation_id": 1, "operation_order": 3,
+                     "matched_irrep": "C3_spinor_phase_+1/2", "eigenphases": [0.5],
+                     "workflow_path": "direct_qcut", "readiness_level": "trusted",
+                     "source": "valley_irrep_matching/GammaM/K_valley"}],
+        "KM": [{"valley": "K_valley", "operation_id": 1, "operation_order": 3,
+                 "matched_irrep": "C3_spinor_phase_+1/6", "eigenphases": [0.166667],
+                 "workflow_path": "direct_qcut", "readiness_level": "trusted",
+                 "source": "valley_irrep_matching/KM/K_valley"}],
+    }
+
+    problem_instances = {
+        "instances": [{
+            "instance_id": "ebr_instance_001",
+            "valley": "K_valley",
+            "subspace_group_candidate": "C3_like",
+            "workflow_path": "direct_qcut",
+            "readiness_level": "trusted",
+            "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
+            "operations_by_kpoint": {"GammaM": [1]},
+            "irrep_records_by_kpoint": records,
+            "expected_hsps": ["GammaM", "KM"],
+            "optional_hsps": [],
+            "missing_optional_hsps": [],
+            "ready_for_ebr_decomposition": True,
+            "status": "complete",
+        }],
+    }
+    report = build_ebr_export_bundle(ebr_problem_instances=problem_instances)
+    bundle = report["bundles"][0]
+    assert "irrep_records_by_kpoint" in bundle
+    assert bundle["irrep_records_by_kpoint"] == records
+
+
+def test_non_trusted_rows_excluded_from_irrep_records():
+    """Non-trusted/diagnostic-only rows must not appear in irrep_records_by_kpoint."""
+    from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
+    from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
+
+    # Mix of trusted and diagnostic_only rows
+    workflow = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {"readiness_level": "trusted", "workflow_path": "direct_qcut"},
+            },
+        },
+    }
+    matching = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "1": {"matching_status": "matched", "matched_irrep": "C3_spinor_phase_+1/2",
+                          "subspace_group_candidate": "C3_like", "operation_order": 3,
+                          "eigenphases": [0.5], "diagnostic_only": False},
+                    "2": {"matching_status": "matched", "matched_irrep": "C3_spinor_phase_+1/2",
+                          "subspace_group_candidate": "C3_like", "operation_order": 3,
+                          "eigenphases": [-0.5], "diagnostic_only": True},
+                },
+            },
+        },
+    }
+    candidates_report = build_ebr_input_candidates(
+        irrep_workflow_decisions=workflow, valley_irrep_matching=matching)
+    # Only 1 trusted candidate (op=1), op=2 is diagnostic_only -> blocked.
+    assert candidates_report["candidate_count"] == 1
+
+    instances_report = build_ebr_problem_instances(ebr_input_candidates=candidates_report)
+    inst = instances_report["instances"][0]
+    records = inst["irrep_records_by_kpoint"]
+    gamma_recs = records.get("GammaM", [])
+    # Only the trusted record appears.
+    assert len(gamma_recs) == 1
+    assert gamma_recs[0]["operation_id"] == "1"
+
+
+def test_reduced_ebr_mapping_ignores_irrep_records():
+    """reduced_ebr_mapping must remain compatible and ignore irrep_records_by_kpoint."""
+    from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
+
+    table = {
+        "schema_version": "1.0.0",
+        "subspace_group_candidate": "C3_like",
+        "expected_hsps": ["GammaM", "KM"],
+        "irreps": ["GammaM:C3_spinor_phase_+1/2", "KM:C3_spinor_phase_+1/6"],
+        "ebrs": [{"label": "EBR_A", "vector": [1, 0]}, {"label": "EBR_B", "vector": [0, 1]}],
+    }
+    records = {
+        "GammaM": [{"valley": "K_valley", "operation_id": 1, "matched_irrep": "C3_spinor_phase_+1/2"}],
+        "KM": [{"valley": "K_valley", "operation_id": 1, "matched_irrep": "C3_spinor_phase_+1/6"}],
+    }
+    bundle = {
+        "bundles": [{
+            "bundle_id": "b_001", "valley": "K",
+            "subspace_group_candidate": "C3_like",
+            "ready_for_external_solver": True,
+            "expected_hsps": ["GammaM", "KM"],
+            "irreps_by_kpoint": {
+                "GammaM": ["C3_spinor_phase_+1/2"],
+                "KM": ["C3_spinor_phase_+1/6"],
+            },
+            "irrep_records_by_kpoint": records,
+        }],
+    }
+    r = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
+    assert r["status"] == "solved_exact"  # Provenance ignored; decomposition succeeds.
+
+
+def test_schema_doc_documents_irrep_records_by_kpoint():
+    """docs/schema.md must document the new irrep_records_by_kpoint field."""
+    schema = Path("docs/schema.md").read_text(encoding="utf-8")
+    assert "irrep_records_by_kpoint" in schema, (
+        "docs/schema.md must document irrep_records_by_kpoint"
+    )
+    assert "provenance" in schema.lower(), (
+        "docs/schema.md should mention provenance for the new field"
+    )

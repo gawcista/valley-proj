@@ -134,6 +134,7 @@ Each bundle:
 | `readiness_level` | string | `"trusted"` |
 | `irreps_by_kpoint` | object | Per-kpoint irrep labels |
 | `operations_by_kpoint` | object | Per-kpoint operation IDs |
+| `irrep_records_by_kpoint` | object | Per-kpoint trusted irrep provenance records (operation, order, matched_irrep, character, eigenphases, workflow_path, readiness_level, source). Only `ready_for_ebr_input=true` rows appear. |
 | `expected_hsps` | list[string] | Required HSP labels for this group |
 | `optional_hsps` | list[string] | Optional HSP labels |
 | `missing_optional_hsps` | list[string] | Optional HSPs not in input data |
@@ -340,6 +341,16 @@ schema version bump and are not part of the frozen public schema.
       "readiness_level": "trusted",
       "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"], "KM": ["C3_spinor_phase_+1/6", "C3_spinor_phase_-1/6"]},
       "operations_by_kpoint": {"GammaM": [0, 1, 2], "KM": [0, 1, 2]},
+      "irrep_records_by_kpoint": {
+        "GammaM": [{"valley": "K_valley", "operation_id": 1, "operation_order": 3,
+                     "matched_irrep": "C3_spinor_phase_+1/2", "eigenphases": [0.5],
+                     "workflow_path": "direct_qcut", "readiness_level": "trusted",
+                     "source": "valley_irrep_matching/GammaM/K_valley"}],
+        "KM": [{"valley": "K_valley", "operation_id": 1, "operation_order": 3,
+                 "matched_irrep": "C3_spinor_phase_+1/6", "eigenphases": [0.166667],
+                 "workflow_path": "direct_qcut", "readiness_level": "trusted",
+                 "source": "valley_irrep_matching/KM/K_valley"}]
+      },
       "expected_hsps": ["GammaM", "KM"],
       "optional_hsps": ["MM"],
       "missing_optional_hsps": ["MM"],

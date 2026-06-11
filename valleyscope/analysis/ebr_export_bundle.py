@@ -53,6 +53,7 @@ def build_ebr_export_bundle(
                 "expected_hsps": inst.get("expected_hsps", []),
                 "optional_hsps": inst.get("optional_hsps", []),
                 "missing_optional_hsps": inst.get("missing_optional_hsps", []),
+                "irrep_records_by_kpoint": inst.get("irrep_records_by_kpoint", {}),
                 "ready_for_external_solver": True,
             })
             continue

@@ -86,6 +86,7 @@ def build_ebr_problem_instances(
 
         irreps_by_kpoint: dict[str, list[str]] = {}
         operations_by_kpoint: dict[str, list[object]] = {}
+        irrep_records_by_kpoint: dict[str, list[dict[str, object]]] = {}
         for c in cands:
             kp = str(c.get("kpoint", ""))
             irrep = c.get("matched_irrep")
@@ -94,6 +95,18 @@ def build_ebr_problem_instances(
                 irreps_by_kpoint.setdefault(kp, []).append(str(irrep))
             if op_id is not None:
                 operations_by_kpoint.setdefault(kp, []).append(op_id)
+            # Provenance record for trusted candidates only.
+            irrep_records_by_kpoint.setdefault(kp, []).append({
+                "valley": valley,
+                "operation_id": c.get("operation_id"),
+                "operation_order": c.get("operation_order"),
+                "matched_irrep": c.get("matched_irrep"),
+                "character": c.get("character"),
+                "eigenphases": c.get("eigenphases", []),
+                "workflow_path": workflow_path,
+                "readiness_level": readiness_level,
+                "source": c.get("source", ""),
+            })
 
         # Completeness: check expected HSPs
         policy = _EXPECTED_HSP.get(sg, {})
@@ -130,6 +143,10 @@ def build_ebr_problem_instances(
             "operations_by_kpoint": {
                 k: sorted(v, key=_sort_key)
                 for k, v in sorted(operations_by_kpoint.items())
+            },
+            "irrep_records_by_kpoint": {
+                k: sorted(v, key=lambda r: (_sort_key(r.get("operation_id"))))
+                for k, v in sorted(irrep_records_by_kpoint.items())
             },
             "candidate_count": len(cands),
             "status": status,
