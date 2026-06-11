@@ -10,12 +10,13 @@ artifact**, not a default `analyze-hsp` output.
 Run commands (from fixture directories so relative config paths resolve):
 
 ```bash
+tmpdir=$(mktemp -d)
 (cd real_tests/tMoTe2 && python -m valleyscope.cli analyze-hsp analyze.yaml)
 (cd real_tests/tMoTe2 && python -m valleyscope.cli collect-database-record \
-  output/valley_analysis_wave --output tmote2_ingestion_record.json)
+  output/valley_analysis_wave --output "$tmpdir/tmote2_ingestion_record.json")
 (cd real_tests/tZrSe2 && python -m valleyscope.cli analyze-hsp analyze.yaml)
 (cd real_tests/tZrSe2 && python -m valleyscope.cli collect-database-record \
-  output/valley_analysis --output tzrse2_ingestion_record.json)
+  output/valley_analysis --output "$tmpdir/tzrse2_ingestion_record.json")
 ```
 
 ## tMoTe2 P321 — Clean C3 `direct_qcut` Fixture
@@ -24,7 +25,7 @@ Run commands (from fixture directories so relative config paths resolve):
 record status:          has_ready_ebr_bundles
 ready bundles:          2
 trusted irrep records:  8
-ingestion record:       tmote2_ingestion_record.json
+ingestion record:       <tmpdir>/tmote2_ingestion_record.json
 ```
 
 | Field | Value |
@@ -53,7 +54,7 @@ direct_qcut`, `readiness_level: trusted`, and carry `matched_irrep`,
 record status:          no_ready_ebr_bundles
 ready bundles:          0
 trusted irrep records:  0
-ingestion record:       tzrse2_ingestion_record.json
+ingestion record:       <tmpdir>/tzrse2_ingestion_record.json
 ```
 
 | Field | Value |

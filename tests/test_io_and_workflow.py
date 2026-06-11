@@ -4986,6 +4986,8 @@ def test_benchmark_smoke_doc_mentions_ingestion_record():
     """Smoke doc must reference collect-database-record and key fields."""
     doc = Path("docs/benchmarks/database_ingestion_record_smoke.md").read_text(encoding="utf-8")
     assert "collect-database-record" in doc
+    assert "tmpdir=$(mktemp -d)" in doc
+    assert "--output \"$tmpdir/" in doc
     assert "has_ready_ebr_bundles" in doc
     assert "no_ready_ebr_bundles" in doc
     assert "P321" in doc
@@ -5012,3 +5014,4 @@ def test_benchmark_matrix_ingestion_section():
     assert "Database Ingestion Record Anchors" in matrix or "ingestion" in matrix.lower()
     assert "collect-database-record" in matrix
     assert "offline" in matrix.lower() or "not a default" in matrix.lower()
+    assert matrix.count("## Standard Output Contract") == 1

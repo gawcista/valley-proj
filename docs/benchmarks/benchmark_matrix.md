@@ -66,8 +66,6 @@ detailed audit and blocker evidence.
   same format, link to detailed audit/blocker docs, and record the
   standard-profile output file list.
 
-## Standard Output Contract
-
 ## Database Ingestion Record Anchors
 
 `valleyscope collect-database-record` is an explicit offline collector
