@@ -26,6 +26,10 @@ The repo already has:
 
 **Layer 3 — external solver interface:**
 * default-off reduced EBR mapping interface (exact integer, external table only);
+* runtime source normalizer/reducer for package-style 3D EBR data to
+  ValleyScope sampled-HSP, valley-preserving reduced tables;
+* offline `irreptables` table builder with explicit source-irrep/HSP/key maps
+  and provenance; no raw 3D decomposition call and no `analyze-hsp` wiring;
 * `valley_reduced_ebr_mapping.json` (only when `analysis.reduced_ebr.enabled`).
 
 **High-throughput database interface:**
@@ -113,6 +117,7 @@ valley-changing operations as invariance of a single label operator.
 | Phase 8 | Output contract cleanup (standard/debug profiles) | Done — merged to main |
 | Phase 9 | High-throughput single-run ingestion record | Done — explicit offline collector, public-output only |
 | Phase 10 | Valley-irrep phase table data contract | Done — spinful C3/C2 phase tables are validated package data |
+| Phase 11 | Runtime EBR source reduction adapter | Done — normalizer/reducer plus offline `irreptables` builder, external tables only |
 
 ## Real Benchmarks
 
@@ -150,10 +155,11 @@ valley-changing operations as invariance of a single label operator.
   Python package `irrep` may be used as a runtime 3D irrep/EBR data source,
   but final ValleyScope output must be reduced-dimensional and
   valley-preserving, not raw 3D `irrep` decomposition.
-* `irrep` runtime backend design: inspect the public package API and define
-  the adapter boundary from 3D space-group irreps/EBRs to ValleyScope
-  sampled-HSP, valley-preserving reduced EBR matrices. Do not implement this
-  until the reduction map and provenance fields are explicitly agreed.
+* ~~`irrep` / `irreptables` runtime source adapter boundary~~ — Done.  The
+  implemented path normalizes package-style 3D EBR data, applies explicit
+  sampled-HSP and valley-preserving key maps, filters zero reduced EBR vectors
+  with provenance, and builds ValleyScope external reduced tables.  It remains
+  offline/library-only and is not wired into `analyze-hsp`.
 * ~~Package-data skeleton~~ — Done. `valleyscope/data/reduced_ebr/` exists
   with empty manifest, README, and catalog module. No table data shipped.
 * ~~Loader integration~~ — Done. `catalog.py` validates manifests, routes
