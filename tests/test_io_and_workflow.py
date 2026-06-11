@@ -4149,3 +4149,232 @@ def test_e2e_smoke_fixture_table_is_material_agnostic():
     fixture_text = json.dumps(_E2E_SAMPLE_TABLE)
     for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
         assert name not in fixture_text
+
+
+# -----------------------------------------------------------------------
+# Valley irrep -> EBR pipeline contract tests
+# -----------------------------------------------------------------------
+
+def test_ebr_input_candidates_excludes_non_trusted():
+    """Non-trusted/diagnostic-only rows must not reach ready_for_ebr_input=true."""
+    from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
+
+    # Workflow: K_valley is trusted/direct_qcut, Kp_valley is diagnostic_only.
+    workflow = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {"readiness_level": "trusted", "workflow_path": "direct_qcut"},
+                "Kp_valley": {"readiness_level": "usable_with_caution", "workflow_path": "symmetry_adapted"},
+            },
+        },
+    }
+    # Matching: K_valley matched, Kp_valley diagnostic_only.
+    matching = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "1": {"matching_status": "matched", "matched_irrep": "C3_spinor_phase_+1/2",
+                          "subspace_group_candidate": "C3_like", "operation_order": 3,
+                          "eigenphases": [0.5], "diagnostic_only": False},
+                },
+                "Kp_valley": {
+                    "1": {"matching_status": "matched", "matched_irrep": "C3_spinor_phase_-1/2",
+                          "subspace_group_candidate": "C3_like", "operation_order": 3,
+                          "eigenphases": [-0.5], "diagnostic_only": True},
+                },
+            },
+        },
+    }
+
+    report = build_ebr_input_candidates(
+        irrep_workflow_decisions=workflow,
+        valley_irrep_matching=matching,
+    )
+
+    # Only trusted, non-diagnostic rows are candidates.
+    candidates = report["candidates"]
+    assert len(candidates) == 1
+    assert candidates[0]["valley"] == "K_valley"
+    assert candidates[0]["ready_for_ebr_input"] is True
+
+    # Diagnostic row is blocked.
+    blocked = report["blocked"]
+    assert any("diagnostic_only=true" in str(b.get("reason", "")) for b in blocked)
+    assert any(b.get("valley") == "Kp_valley" for b in blocked)
+
+
+def test_ebr_input_candidates_excludes_blocked_path():
+    """Workflow path=blocked must not produce candidates."""
+    from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
+
+    workflow = {
+        "by_kpoint": {
+            "MM": {
+                "K_valley": {"readiness_level": "blocked", "workflow_path": "blocked"},
+            },
+        },
+    }
+    matching = {
+        "by_kpoint": {
+            "MM": {
+                "K_valley": {},
+            },
+        },
+    }
+    report = build_ebr_input_candidates(
+        irrep_workflow_decisions=workflow,
+        valley_irrep_matching=matching,
+    )
+    assert report["candidate_count"] == 0
+    assert report["status"] == "no_candidates"
+
+
+def test_ebr_problem_instances_missing_hsp_blocked():
+    """Missing required HSPs block instance readiness."""
+    from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
+
+    # C3_like requires GammaM+KM. Only GammaM has data -> blocked.
+    candidates = {
+        "status": "has_candidates",
+        "candidates": [{
+            "kpoint": "GammaM", "valley": "K_valley",
+            "subspace_group_candidate": "C3_like",
+            "workflow_path": "direct_qcut",
+            "readiness_level": "trusted",
+            "matched_irrep": "C3_spinor_phase_+1/2",
+            "operation_id": 1,
+            "ready_for_ebr_input": True,
+        }],
+    }
+    report = build_ebr_problem_instances(ebr_input_candidates=candidates)
+    assert report["instance_count"] == 1
+    inst = report["instances"][0]
+    assert inst["ready_for_ebr_decomposition"] is False
+    assert "missing required HSPs" in str(inst["blocked_by"])
+
+
+def test_ebr_problem_instances_complete_hsp_is_ready():
+    """All required HSPs present -> ready_for_ebr_decomposition=true."""
+    from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
+
+    candidates = {
+        "status": "has_candidates",
+        "candidates": [
+            {"kpoint": "GammaM", "valley": "K_valley",
+             "subspace_group_candidate": "C3_like",
+             "workflow_path": "direct_qcut", "readiness_level": "trusted",
+             "matched_irrep": "C3_spinor_phase_+1/2", "operation_id": 1,
+             "ready_for_ebr_input": True},
+            {"kpoint": "KM", "valley": "K_valley",
+             "subspace_group_candidate": "C3_like",
+             "workflow_path": "direct_qcut", "readiness_level": "trusted",
+             "matched_irrep": "C3_spinor_phase_+1/6", "operation_id": 1,
+             "ready_for_ebr_input": True},
+        ],
+    }
+    report = build_ebr_problem_instances(ebr_input_candidates=candidates)
+    inst = report["instances"][0]
+    assert inst["ready_for_ebr_decomposition"] is True
+    assert inst["status"] == "complete"
+
+
+def test_ebr_export_bundle_preserves_hsp_and_irrep_fields():
+    """Export bundle must preserve expected_hsps, irreps_by_kpoint, operations_by_kpoint."""
+    from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
+
+    problem_instances = {
+        "instances": [{
+            "instance_id": "ebr_instance_001",
+            "valley": "K_valley",
+            "subspace_group_candidate": "C3_like",
+            "workflow_path": "direct_qcut",
+            "readiness_level": "trusted",
+            "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
+            "operations_by_kpoint": {"GammaM": [1]},
+            "expected_hsps": ["GammaM", "KM"],
+            "optional_hsps": ["MM"],
+            "missing_optional_hsps": ["MM"],
+            "ready_for_ebr_decomposition": True,
+            "status": "complete",
+        }],
+    }
+    report = build_ebr_export_bundle(ebr_problem_instances=problem_instances)
+    assert report["bundle_count"] == 1
+    bundle = report["bundles"][0]
+    assert bundle["ready_for_external_solver"] is True
+    assert bundle["subspace_group_candidate"] == "C3_like"
+    assert bundle["expected_hsps"] == ["GammaM", "KM"]
+    assert bundle["optional_hsps"] == ["MM"]
+    assert bundle["missing_optional_hsps"] == ["MM"]
+    assert bundle["irreps_by_kpoint"] == {"GammaM": ["C3_spinor_phase_+1/2"]}
+    assert bundle["operations_by_kpoint"] == {"GammaM": [1]}
+
+
+def test_ebr_export_bundle_excludes_non_ready():
+    """Non-ready instances are excluded, not bundled."""
+    from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
+
+    problem_instances = {
+        "instances": [{
+            "instance_id": "ebr_instance_001",
+            "valley": "K_valley",
+            "subspace_group_candidate": "C3_like",
+            "status": "partial",
+            "ready_for_ebr_decomposition": False,
+            "blocked_by": ["missing required HSPs: [KM]"],
+        }],
+    }
+    report = build_ebr_export_bundle(ebr_problem_instances=problem_instances)
+    assert report["bundle_count"] == 0
+    assert report["status"] == "no_bundles"
+    assert report["excluded_count"] == 1
+    assert "ready_for_ebr_decomposition" in str(report["excluded_instances"][0]["exclusion_reasons"])
+
+
+def test_reduced_ebr_mapping_rejects_hsp_mismatch():
+    """Reduced EBR mapping must reject bundles whose HSP basis does not match the table."""
+    from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
+
+    table = {
+        "schema_version": "1.0.0",
+        "subspace_group_candidate": "C3_like",
+        "expected_hsps": ["GammaM", "KM"],
+        "irreps": ["GammaM:C3_spinor_phase_+1/2", "KM:C3_spinor_phase_+1/6"],
+        "ebrs": [{"label": "EBR_A", "vector": [1, 0]}, {"label": "EBR_B", "vector": [0, 1]}],
+    }
+    # Bundle only has GammaM, missing KM.
+    bundle = {
+        "bundles": [{
+            "bundle_id": "b_001", "valley": "K",
+            "subspace_group_candidate": "C3_like",
+            "ready_for_external_solver": True,
+            "expected_hsps": ["GammaM"],
+            "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
+        }],
+    }
+    r = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
+    assert len(r["solutions"]) == 0
+    assert len(r["excluded_bundles"]) == 1
+    assert "expected_hsps mismatch" in r["excluded_bundles"][0]["reason"]
+
+
+def test_pipeline_no_material_names():
+    """Pipeline contract test logic must not use real material names."""
+    import subprocess, sys
+    result = subprocess.run(
+        ["git", "diff", "HEAD", "--", "tests/test_io_and_workflow.py"],
+        capture_output=True, text=True,
+    )
+    diff_lines = result.stdout.split("\n")
+    added = [l for l in diff_lines if l.startswith("+") and not l.startswith("+++")]
+    for line in added:
+        content = line[1:]
+        for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
+            # Allow in this assertion list or in existing test assertions.
+            if "for name in" in content:
+                continue
+            if "forbidden" in content and "assert" not in content:
+                continue
+            assert name not in content, (
+                f"diff must not add material name {name!r} in: {content.strip()[:120]}"
+            )
