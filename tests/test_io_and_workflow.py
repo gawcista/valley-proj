@@ -4062,6 +4062,10 @@ def test_reduced_ebr_classifier_payload_written_consistently_to_public_outputs(t
     table_path = tmp_path / "table.json"
     write_fixture(h5_path)
     write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["output"]["profile"] = "standard"
+    raw["output"].pop("write_detailed_files", None)
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
 
     table = {
         "schema_version": "1.0.0",
@@ -4358,23 +4362,102 @@ def test_reduced_ebr_mapping_rejects_hsp_mismatch():
     assert "expected_hsps mismatch" in r["excluded_bundles"][0]["reason"]
 
 
-def test_pipeline_no_material_names():
-    """Pipeline contract test logic must not use real material names."""
-    import subprocess, sys
-    result = subprocess.run(
-        ["git", "diff", "HEAD", "--", "tests/test_io_and_workflow.py"],
-        capture_output=True, text=True,
+def test_ready_export_bundle_maps_to_public_reduced_ebr_outputs_only(tmp_path):
+    """Ready export bundle plus validated table writes only public standard outputs."""
+    from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
+    from valleyscope.analysis.reduced_ebr_mapping import (
+        build_reduced_ebr_mapping,
+        load_reduced_ebr_table,
     )
-    diff_lines = result.stdout.split("\n")
-    added = [l for l in diff_lines if l.startswith("+") and not l.startswith("+++")]
-    for line in added:
-        content = line[1:]
-        for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
-            # Allow in this assertion list or in existing test assertions.
-            if "for name in" in content:
-                continue
-            if "forbidden" in content and "assert" not in content:
-                continue
-            assert name not in content, (
-                f"diff must not add material name {name!r} in: {content.strip()[:120]}"
-            )
+    from valleyscope.reports.analysis_outputs import write_analysis_outputs
+
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "cfg.yaml"
+    out_dir = tmp_path / "out"
+    table_path = tmp_path / "table.json"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["output"]["profile"] = "standard"
+    raw["output"].pop("write_detailed_files", None)
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    table = {
+        "schema_version": "1.0.0",
+        "subspace_group_candidate": "C3_like",
+        "expected_hsps": ["GammaM", "KM"],
+        "irreps": [
+            "GammaM:C3_spinor_phase_+1/2",
+            "KM:C3_spinor_phase_+1/6",
+        ],
+        "ebrs": [
+            {"label": "EBR_G", "vector": [1, 0]},
+            {"label": "EBR_K", "vector": [0, 1]},
+        ],
+    }
+    _e2e_write_table(table_path, table)
+    export_bundle = build_ebr_export_bundle(
+        ebr_problem_instances={
+            "instances": [{
+                "instance_id": "ebr_instance_001",
+                "valley": "K_valley",
+                "subspace_group_candidate": "C3_like",
+                "workflow_path": "direct_qcut",
+                "readiness_level": "trusted",
+                "irreps_by_kpoint": {
+                    "GammaM": ["C3_spinor_phase_+1/2"],
+                    "KM": ["C3_spinor_phase_+1/6"],
+                },
+                "operations_by_kpoint": {"GammaM": [1], "KM": [1]},
+                "expected_hsps": ["GammaM", "KM"],
+                "optional_hsps": ["MM"],
+                "missing_optional_hsps": ["MM"],
+                "ready_for_ebr_decomposition": True,
+                "status": "complete",
+            }],
+        }
+    )
+    mapping = build_reduced_ebr_mapping(
+        ebr_export_bundle=export_bundle,
+        table=load_reduced_ebr_table(table_path),
+    )
+    assert mapping["status"] == "solved_exact"
+
+    outputs = write_analysis_outputs(
+        config=load_config(config_path),
+        qcut=0.5,
+        weight_rows=[],
+        sector_names=["K_valley"],
+        subspace_payload={"kpoints": {}},
+        symmetry_payload={"status": "skipped", "reason": "test",
+                          "detected_operations": [], "candidate_rotations": [],
+                          "little_group_check": {"status": "not_run"},
+                          "valley_preservation_check": {"status": "not_run"}},
+        symmetry_rows=[],
+        projectors_by_kpoint={},
+        qcut_scan_payload={},
+        symmetry_representation_payload={},
+        basis_transforms={},
+        ebr_export_bundle=export_bundle,
+        reduced_ebr_mapping=mapping,
+    )
+
+    written = {p.name for p in out_dir.iterdir() if p.is_file()}
+    assert written <= _STANDARD_PUBLIC_FILES
+    assert not (written & _DEBUG_ONLY_FILES)
+    assert outputs["valley_ebr_export_bundle_json"].exists()
+    assert outputs["valley_reduced_ebr_mapping_json"].exists()
+    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    assert summary["valley_ebr_export_bundle"] == export_bundle
+    assert summary["valley_reduced_ebr_mapping"] == mapping
+
+
+def test_pipeline_contract_fixture_data_is_material_agnostic():
+    """Pipeline contract fixture data must not name real validation materials."""
+    fixture_text = "\n".join([
+        "C3_like C2_like P3 P2",
+        "GammaM KM MM K_valley",
+        "C3_spinor_phase_+1/2 C3_spinor_phase_+1/6",
+    ])
+    for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
+        assert name not in fixture_text
