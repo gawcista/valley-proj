@@ -160,10 +160,8 @@ def build_reduced_table_from_runtime_source(
         # Reduce vector to sampled HSPs only.
         reduced_vector = [vector[i] for i in reduced_indices]
         if not any(v > 0 for v in reduced_vector):
-            raise ValueError(
-                f"EBR '{label}' reduced vector is all-zero "
-                f"(no weight in sampled HSPs); consider filtering upstream"
-            )
+            # EBR contributes only to non-sampled HSPs — skip it.
+            continue
 
         entry: dict[str, Any] = {"label": label, "vector": reduced_vector}
         # Preserve optional fields if present.

@@ -175,22 +175,28 @@ def test_ebr_vector_length_mismatch_raises():
 # 5. Reduced zero-vector EBR rejected
 # -----------------------------------------------------------------------
 
-def test_reduced_zero_vector_rejected():
-    """EBR with all weight in filtered-out HSPs becomes zero-vector -> rejected."""
+def test_reduced_zero_vector_skipped():
+    """EBR with all weight in filtered-out HSPs is silently skipped."""
     basis = [
         {"source_label": "only_in_sampled", "hsp": "GammaM",
          "valleyscope_irrep_key": "GammaM:C3_spinor_phase_+1/2"},
         {"source_label": "only_in_extra", "hsp": "A",
          "valleyscope_irrep_key": "A:C1_spinor"},
     ]
-    ebrs = [{"label": "Ghost", "vector": [0, 1]}]  # Weight only at A -> reduced [0]
-    with pytest.raises(ValueError, match="all-zero"):
-        build_reduced_table_from_runtime_source(
-            source_payload=_source_payload(basis=basis, ebrs=ebrs),
-            expected_hsps=["GammaM"],
-            allowed_irrep_keys=["GammaM:C3_spinor_phase_+1/2"],
-            subspace_group_candidate="C3_like",
-        )
+    # Ghost has weight only at A (non-sampled) -> reduced [0] — skipped.
+    # Real has weight at GammaM (sampled) -> kept.
+    ebrs = [
+        {"label": "Ghost", "vector": [0, 1]},
+        {"label": "Real", "vector": [1, 0]},
+    ]
+    result = build_reduced_table_from_runtime_source(
+        source_payload=_source_payload(basis=basis, ebrs=ebrs),
+        expected_hsps=["GammaM"],
+        allowed_irrep_keys=["GammaM:C3_spinor_phase_+1/2"],
+        subspace_group_candidate="C3_like",
+    )
+    labels = {e["label"] for e in result["ebrs"]}
+    assert labels == {"Real"}
 
 
 # -----------------------------------------------------------------------

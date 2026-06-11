@@ -151,9 +151,11 @@ def _ebr_entries(
         label = ebr.get("ebr_name")
         if not isinstance(label, str) or not label:
             raise ValueError(f"ebrs[{i}] must define a non-empty ebr_name")
-        if label in labels:
-            raise ValueError(f"duplicate EBR label {label!r}")
-        labels.add(label)
+        wp = ebr.get("wyckoff_position", "")
+        qualified = f"{label} @ {wp}" if wp and label in labels else label
+        if qualified in labels:
+            raise ValueError(f"duplicate EBR label {qualified!r}")
+        labels.add(qualified)
 
         vector_raw = ebr.get("vector")
         if not isinstance(vector_raw, Sequence) or isinstance(vector_raw, (str, bytes)):
@@ -164,8 +166,8 @@ def _ebr_entries(
                 f"source basis length {source_basis_length}"
             )
         entry: dict[str, Any] = {
-            "label": label,
-            "vector": [_exact_int(v, label=label, index=j) for j, v in enumerate(vector_raw)],
+            "label": qualified,
+            "vector": [_exact_int(v, label=qualified, index=j) for j, v in enumerate(vector_raw)],
         }
         if "wyckoff_position" in ebr:
             entry["wyckoff_position"] = ebr["wyckoff_position"]
