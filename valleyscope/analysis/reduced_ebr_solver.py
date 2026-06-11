@@ -11,6 +11,72 @@ EBR tables and valley-preserving irrep vectors.  It does not import
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+from typing import Any
+
+
+def get_reduced_ebr_matrix(table: Mapping[str, Any]) -> list[list[int]]:
+    """Return reduced EBR matrix columns from a validated table-like mapping."""
+    ebrs = table.get("ebrs", [])
+    if not isinstance(ebrs, Sequence) or isinstance(ebrs, (str, bytes)):
+        raise ValueError("table['ebrs'] must be a sequence")
+    vectors: list[list[int]] = []
+    expected_length: int | None = None
+    for i, ebr in enumerate(ebrs):
+        if not isinstance(ebr, Mapping):
+            raise ValueError(f"table['ebrs'][{i}] must be a mapping")
+        vector = list(ebr.get("vector", []))
+        _validate_nonnegative_integer_vector(vector, field=f"EBR vector {i}")
+        if expected_length is None:
+            expected_length = len(vector)
+        elif len(vector) != expected_length:
+            raise ValueError("all EBR vector lengths must match")
+        vectors.append(vector)
+    if not vectors:
+        raise ValueError("table['ebrs'] must be non-empty")
+    return vectors
+
+
+def create_reduced_symmetry_vector(
+    irrep_counts: Mapping[str, int],
+    irrep_basis: Sequence[str],
+    *,
+    strict: bool = True,
+) -> list[int]:
+    """Create an ordered reduced irrep vector from multiplicity counts."""
+    basis = _validate_irrep_basis(irrep_basis)
+    index = {label: i for i, label in enumerate(basis)}
+    vector = [0 for _ in basis]
+    if not isinstance(irrep_counts, Mapping):
+        raise ValueError("irrep_counts must be a mapping")
+    for label, count in irrep_counts.items():
+        if not isinstance(label, str) or not label:
+            raise ValueError("irrep_counts keys must be non-empty strings")
+        if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+            raise ValueError(f"irrep_counts[{label!r}] must be a nonnegative integer")
+        if label not in index:
+            if strict:
+                raise ValueError(f"irrep count {label!r} is not in reduced irrep basis")
+            continue
+        vector[index[label]] = count
+    return vector
+
+
+def compute_reduced_ebr_decomposition(
+    *,
+    target_vector: Sequence[int],
+    ebr_matrix: Sequence[Sequence[int]],
+    ebr_labels: Sequence[str],
+    max_coefficient: int,
+) -> dict:
+    """Compute exact reduced EBR decomposition/classification."""
+    return classify_bundle(
+        list(target_vector),
+        [list(vector) for vector in ebr_matrix],
+        list(ebr_labels),
+        max_coefficient,
+    )
+
 
 def check_integer_span(
     target: list[int],
@@ -33,8 +99,7 @@ def check_integer_span(
         Whether the target is in the integer span, and if so, one integer
         coefficient solution (may contain negative values).
     """
-    if not ebr_vectors:
-        return False, None
+    _validate_solver_inputs(target, ebr_vectors, ebr_labels=None)
     n_rows = len(target)
     n_cols = len(ebr_vectors)
 
@@ -71,6 +136,7 @@ def derive_coefficient_bounds(
     For each EBR column j, the coefficient c_j cannot exceed
     min_i (target[i] / EBR[i][j]) over positive EBR entries.
     """
+    _validate_solver_inputs(target, ebr_vectors, ebr_labels=None)
     n_ebrs = len(ebr_vectors)
     n_rows = len(target)
     bounds: list[int | None] = []
@@ -96,8 +162,16 @@ def search_nonnegative_bounded(
     Uses pruning: aborts a branch when any component of the accumulated
     vector exceeds the target.
     """
+    _validate_solver_inputs(target, ebr_vectors, ebr_labels=None)
     n_ebrs = len(ebr_vectors)
     n_rows = len(target)
+    if len(bounds) != n_ebrs:
+        raise ValueError(
+            f"bounds length {len(bounds)} != EBR vector count {n_ebrs}"
+        )
+    for i, bound in enumerate(bounds):
+        if not isinstance(bound, int) or isinstance(bound, bool) or bound < 0:
+            raise ValueError(f"bounds[{i}] must be a nonnegative integer")
 
     def _search(idx: int, accum: list[int], coeffs: list[int]) -> list[int] | None:
         if idx == n_ebrs:
@@ -153,6 +227,7 @@ def classify_bundle(
     max_coefficient = int(max_coefficient)
     if max_coefficient < 0:
         raise ValueError("max_coefficient must be nonnegative")
+    _validate_solver_inputs(target, ebr_vectors, ebr_labels=ebr_labels)
 
     # Integer-span test.
     in_span, integer_solution = check_integer_span(target, ebr_vectors)
@@ -208,3 +283,66 @@ def classify_bundle(
         result["search_status"] = "truncated_by_max_coefficient"
 
     return result
+
+
+def _validate_solver_inputs(
+    target: Sequence[int],
+    ebr_vectors: Sequence[Sequence[int]],
+    *,
+    ebr_labels: Sequence[str] | None,
+) -> None:
+    _validate_nonnegative_integer_vector(target, field="target")
+    if not ebr_vectors:
+        raise ValueError("ebr_vectors must be non-empty")
+    target_len = len(target)
+    for i, vector in enumerate(ebr_vectors):
+        values = list(vector)
+        if len(values) != target_len:
+            raise ValueError(
+                f"EBR vector length {len(values)} != target length {target_len}"
+            )
+        _validate_nonnegative_integer_vector(values, field=f"EBR vector {i}")
+    if ebr_labels is not None:
+        if len(ebr_labels) != len(ebr_vectors):
+            raise ValueError(
+                f"ebr_labels length {len(ebr_labels)} != "
+                f"EBR vector count {len(ebr_vectors)}"
+            )
+        seen: set[str] = set()
+        for i, label in enumerate(ebr_labels):
+            if not isinstance(label, str) or not label:
+                raise ValueError(f"ebr_labels[{i}] must be a non-empty string")
+            if label in seen:
+                raise ValueError(f"duplicate EBR label {label!r}")
+            seen.add(label)
+
+
+def _validate_nonnegative_integer_vector(
+    vector: Sequence[int],
+    *,
+    field: str,
+) -> None:
+    if not isinstance(vector, Sequence) or isinstance(vector, (str, bytes)):
+        raise ValueError(f"{field} must be a sequence")
+    if not vector:
+        raise ValueError(f"{field} must be non-empty")
+    for i, value in enumerate(vector):
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ValueError(f"{field}[{i}] must be a nonnegative integer")
+
+
+def _validate_irrep_basis(irrep_basis: Sequence[str]) -> list[str]:
+    if not isinstance(irrep_basis, Sequence) or isinstance(irrep_basis, (str, bytes)):
+        raise ValueError("irrep_basis must be a sequence")
+    basis: list[str] = []
+    seen: set[str] = set()
+    for i, label in enumerate(irrep_basis):
+        if not isinstance(label, str) or not label:
+            raise ValueError(f"irrep_basis[{i}] must be a non-empty string")
+        if label in seen:
+            raise ValueError(f"duplicate reduced irrep basis label {label!r}")
+        basis.append(label)
+        seen.add(label)
+    if not basis:
+        raise ValueError("irrep_basis must be non-empty")
+    return basis

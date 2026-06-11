@@ -1,8 +1,9 @@
 """Reduced EBR mapping: exact integer decomposition from export bundles.
 
-Loads a user-supplied reduced-EBR table, validates it, and performs
-brute-force exact integer matching.  No built-in tables are provided;
-real-material EBR claims require an explicit table file.
+Loads a user-supplied reduced-EBR table, validates it, and performs exact
+integer matching via Smith normal form plus bounded nonnegative search.  No
+built-in tables are provided; real-material EBR claims require an explicit
+table file.
 """
 
 from __future__ import annotations
@@ -131,7 +132,7 @@ def build_reduced_ebr_mapping(
     table: dict | None = None,
     max_coefficient: int = 6,
 ) -> dict:
-    """Brute-force exact integer decomposition of export bundle irrep vectors.
+    """Exact reduced EBR decomposition of export bundle irrep vectors.
 
     Parameters
     ----------
