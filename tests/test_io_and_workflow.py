@@ -4896,6 +4896,11 @@ def test_ingestion_record_missing_reduced_ebr_is_not_an_error():
     record = build_database_ingestion_record(
         valley_summary=summary, valley_reduced_ebr_mapping=None)
     assert record["reduced_ebr_mapping_status"] == "not_available"
+    assert record["reduced_ebr_classification_counts"] == {
+        "atomic_compatible": 0,
+        "fragile_topology": 0,
+        "stable_topology": 0,
+    }
     assert len(record["validation_errors"]) == 0
 
 
@@ -4926,7 +4931,7 @@ def test_cli_collect_database_record(tmp_path, capsys):
                "input": {"spinor_convention_verified": False}}
     (run_dir / "valley_summary.json").write_text(json.dumps(summary))
 
-    out_path = tmp_path / "record.json"
+    out_path = tmp_path / "nested" / "record.json"
     rc = main(["collect-database-record", str(run_dir), "-o", str(out_path)])
     assert rc == 0
     assert out_path.exists()
@@ -4934,6 +4939,30 @@ def test_cli_collect_database_record(tmp_path, capsys):
     assert record["summary_status"] == "present"
     captured = capsys.readouterr().out
     assert "no_ready_ebr_bundles" in captured
+
+
+def test_cli_collect_database_record_returns_nonzero_for_invalid_record(tmp_path):
+    """CLI writes invalid record but exits nonzero when summary is missing."""
+    from valleyscope.cli import main
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    out_path = tmp_path / "record.json"
+
+    rc = main(["collect-database-record", str(run_dir), "-o", str(out_path)])
+    assert rc == 1
+    record = json.loads(out_path.read_text(encoding="utf-8"))
+    assert record["record_status"] == "invalid_missing_summary"
+    assert record["validation_errors"]
+
+
+def test_schema_doc_documents_database_ingestion_record():
+    """Public schema documents the explicit offline ingestion-record CLI."""
+    schema = Path("docs/schema.md").read_text(encoding="utf-8")
+    assert "database_ingestion_record.json" in schema
+    assert "collect-database-record" in schema
+    assert "valley_irrep_records" in schema
+    assert "not a default `analyze-hsp` output" in schema
 
 
 def test_ingestion_record_no_material_names():

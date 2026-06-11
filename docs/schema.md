@@ -1,6 +1,6 @@
 # ValleyScope Public Output Schema
 
-Version: 1.1.0 | Date: 2026-06-10
+Version: 1.2.0 | Date: 2026-06-11
 
 This document defines the **public output schema** for ValleyScope. Files not
 listed here are debug/detail or intermediate diagnostics and may change
@@ -228,6 +228,76 @@ Each excluded bundle:
 |-------|------|-------------|
 | `bundle_id` | string | Source bundle ID |
 | `reason` | string | `"missing_table"`, `"not ready for external solver"`, `"table group X != bundle group Y"`, `"expected_hsps mismatch"`, `"irrep HSP basis mismatch"`, or `"could not resolve irrep keys to table irreps"` |
+
+---
+
+## Offline Database Ingestion Entry
+
+### `database_ingestion_record.json`
+
+This file is produced only by the explicit offline collector:
+
+```bash
+valleyscope collect-database-record <analyze-hsp-output-dir> --output database_ingestion_record.json
+```
+
+It is not a default `analyze-hsp` output and is not controlled by
+`output.profile`. The collector reads only public outputs:
+`valley_summary.json`, optional `valley_ebr_export_bundle.json`, and optional
+`valley_reduced_ebr_mapping.json`. Debug/detail files are not required for
+database ingestion.
+
+Top-level fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `schema_version` | string | Ingestion-record schema version |
+| `record_status` | string | `"has_ready_ebr_bundles"`, `"no_ready_ebr_bundles"`, or `"invalid_missing_summary"` |
+| `source_files` | object | Absolute source paths for public files consumed by the collector |
+| `output_profile` | string | Profile label supplied to the collector, default `"standard"` |
+| `summary_status` | string | `"present"` or `"missing"` |
+| `target_kpoints` | list[string] | HSP labels copied from `valley_summary.json` |
+| `iband` | list[int] | VASP band indices copied from `valley_summary.json` |
+| `space_group_international` | string\|null | Space-group symbol from summary symmetry analysis |
+| `space_group_number` | int\|null | Space-group number from summary symmetry analysis |
+| `spinor_convention_verified` | bool | Spinor convention readiness copied from summary input |
+| `ready_bundle_count` | int | Number of ready export bundles indexed |
+| `excluded_bundle_count` | int | Number of non-ready or excluded EBR bundles |
+| `valley_irrep_records` | list[object] | Flattened trusted valley-preserving irrep records from ready export bundles |
+| `reduced_ebr_mapping_status` | string | Reduced EBR mapping status, or `"not_available"` |
+| `reduced_ebr_table_status` | string | Reduced EBR table status, or `"not_available"` |
+| `reduced_ebr_classification_counts` | object | Counts of exact reduced EBR classifications |
+| `validation_errors` | list[string] | Empty for valid records |
+
+Each `valley_irrep_records` entry:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `kpoint` | string | HSP label |
+| `valley` | string | Valley label |
+| `subspace_group_candidate` | string | Effective reduced EBR table label |
+| `operation_id` | string\|int | Valley-preserving operation identifier |
+| `operation_order` | int | Order of the valley-preserving operation |
+| `matched_irrep` | string | Matched valley-preserving irrep label |
+| `eigenphases` | list[number] | Symmetry eigenphases used for the match |
+| `character` | object\|number\|null | Character data used for the match |
+| `workflow_path` | string | `"direct_qcut"` or `"symmetry_adapted"` |
+| `readiness_level` | string | `"trusted"` |
+| `source` | string | Source path inside the irrep-matching payload |
+| `source_bundle_id` | string | Source export bundle ID |
+| `source_instance_id` | string | Source EBR problem instance ID |
+
+`reduced_ebr_classification_counts` has stable integer fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `atomic_compatible` | int | Count of `atomic-compatible-candidate` solutions |
+| `fragile_topology` | int | Count of `fragile-topology-candidate` solutions |
+| `stable_topology` | int | Count of `stable-topology-candidate` solutions |
+
+The ingestion record is an indexing contract. It does not introduce new EBR
+tables, compatibility relations, heuristic fits, or topology claims beyond the
+validated public reduced-EBR mapping payload it reads.
 
 ---
 

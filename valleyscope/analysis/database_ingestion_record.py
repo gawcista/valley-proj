@@ -51,6 +51,7 @@ def build_database_ingestion_record(
         "schema_version": _SCHEMA_VERSION,
         "source_files": dict(source_files) if source_files else {},
         "output_profile": output_profile,
+        "reduced_ebr_classification_counts": _empty_classification_counts(),
         "validation_errors": errors,
     }
 
@@ -213,3 +214,11 @@ def _extract_irrep_records(
                 "source_bundle_id": source_bundle_id,
                 "source_instance_id": source_instance_id,
             })
+
+
+def _empty_classification_counts() -> dict[str, int]:
+    return {
+        "atomic_compatible": 0,
+        "fragile_topology": 0,
+        "stable_topology": 0,
+    }

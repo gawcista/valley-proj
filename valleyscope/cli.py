@@ -165,6 +165,7 @@ def _collect_database_record(args) -> int:
         return 1
 
     record = load_database_ingestion_record_from_directory(str(run_dir))
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     write_json(output_path, record)
 
     status = record.get("record_status", "?")
@@ -180,6 +181,8 @@ def _collect_database_record(args) -> int:
         for e in errors:
             print(f"  - {e}")
     print(f"ingestion record:       {output_path}")
+    if errors:
+        return 1
     return 0
 
 
