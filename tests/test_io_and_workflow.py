@@ -4667,6 +4667,9 @@ def test_provenance_survives_through_output_writer_to_export_bundle(tmp_path):
                     "1": {"matching_status": "matched", "matched_irrep": "C3_spinor_phase_+1/2",
                           "subspace_group_candidate": "C3_like", "operation_order": 3,
                           "eigenphases": [0.5], "diagnostic_only": False},
+                    "2": {"matching_status": "matched", "matched_irrep": "C3_spinor_phase_+1/2",
+                          "subspace_group_candidate": "C3_like", "operation_order": 3,
+                          "eigenphases": [-0.5], "diagnostic_only": True},
                 },
             },
             "KM": {
@@ -4716,6 +4719,7 @@ def test_provenance_survives_through_output_writer_to_export_bundle(tmp_path):
         symmetry_adapted_valley_report=sa_report,
     )
     assert candidates["candidate_count"] == 2
+    assert candidates["blocked_count"] == 1
 
     instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
     assert instances["instance_count"] == 1
@@ -4760,6 +4764,7 @@ def test_provenance_survives_through_output_writer_to_export_bundle(tmp_path):
 
     gamma_rec = records["GammaM"][0]
     assert gamma_rec["valley"] == "K_valley"
+    assert gamma_rec["operation_id"] == "1"
     assert gamma_rec["operation_order"] == 3
     assert gamma_rec["matched_irrep"] == "C3_spinor_phase_+1/2"
     assert gamma_rec["eigenphases"] == [0.5]
@@ -4769,8 +4774,10 @@ def test_provenance_survives_through_output_writer_to_export_bundle(tmp_path):
     # Character preserved from SA report.
     assert gamma_rec["character"] is not None
     assert gamma_rec["character"]["real"] == -1.0
+    assert all(rec["operation_id"] != "2" for recs in records.values() for rec in recs)
 
     km_rec = records["KM"][0]
+    assert km_rec["operation_id"] == "1"
     assert km_rec["matched_irrep"] == "C3_spinor_phase_+1/6"
     assert km_rec["character"] is not None
 
@@ -4781,8 +4788,8 @@ def test_provenance_survives_through_output_writer_to_export_bundle(tmp_path):
     # Summary embeds the export bundle with provenance.
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     embedded = summary["valley_ebr_export_bundle"]["bundles"][0]
-    assert "irrep_records_by_kpoint" in embedded
+    assert embedded["irrep_records_by_kpoint"] == records
 
     # Standard profile: no debug/detail files.
-    assert not (out_dir / "valley_subspace.json").exists()
-    assert not (out_dir / "diagnostics.h5").exists()
+    written = {p.name for p in out_dir.iterdir() if p.is_file()}
+    assert not (written & _DEBUG_ONLY_FILES)
