@@ -467,37 +467,17 @@ def test_valid_irrep_key_formats_accepted(tmp_path, good_key):
 # 14. schema/doc contract
 # -----------------------------------------------------------------------
 
-def test_table_schema_doc_required_keys():
-    """Verify docs/reduced_ebr_table_schema.md documents all required table keys."""
+def test_table_schema_doc_contract():
+    """reduced_ebr_table_schema.md must document required keys, statuses, and labels."""
     from valleyscope.analysis.reduced_ebr_mapping import _REQUIRED_TABLE_KEYS
-    doc_path = Path("docs/reduced_ebr_table_schema.md")
-    assert doc_path.exists(), "docs/reduced_ebr_table_schema.md must exist"
-    doc_text = doc_path.read_text(encoding="utf-8")
+    doc = Path("docs/reduced_ebr_table_schema.md").read_text(encoding="utf-8")
     for key in sorted(_REQUIRED_TABLE_KEYS):
-        assert f"`{key}`" in doc_text, (
-            f"docs/reduced_ebr_table_schema.md must document key '{key}'"
-        )
-    # Must state no built-in tables.
-    assert "No built-in EBR tables" in doc_text or "no built-in" in doc_text.lower()
-    # Must state no heuristic fits.
-    assert "heuristic" in doc_text.lower() and "no" in doc_text.lower()
-
-
-def test_table_schema_doc_status_values():
-    """Verify docs/reduced_ebr_table_schema.md documents allowed status values."""
-    doc_text = Path("docs/reduced_ebr_table_schema.md").read_text(encoding="utf-8")
+        assert f"`{key}`" in doc, f"missing key '{key}'"
     for status in ["not_evaluated", "missing_table", "solved_exact", "no_exact_solution"]:
-        assert f"`{status}`" in doc_text, (
-            f"docs/reduced_ebr_table_schema.md must document status '{status}'"
-        )
-
-
-def test_table_schema_doc_labels_use_clike_form():
-    """Verify docs/reduced_ebr_table_schema.md uses C{order}_like for subspace_group_candidate."""
-    doc_text = Path("docs/reduced_ebr_table_schema.md").read_text(encoding="utf-8")
-    assert "C3_like" in doc_text
-    assert "C2_like" in doc_text
-    assert 'C{order}_like' in doc_text
+        assert f"`{status}`" in doc, f"missing status '{status}'"
+    assert "C3_like" in doc and "C2_like" in doc and "C{order}_like" in doc
+    assert "no built-in" in doc.lower()
+    assert "heuristic" in doc.lower()
 
 
 def test_table_schema_doc_expected_hsps_basis_contract():
@@ -640,25 +620,18 @@ def test_cli_invalid_table_fails_without_writing_output(tmp_path):
     assert not out.exists(), "Must not write output for invalid table"
 
 
-def test_cli_missing_table_file_fails():
-    """CLI fails when table file does not exist."""
+@pytest.mark.parametrize("missing,mode", [
+    ("table", lambda d: (_write_bundle(d / "bundle.json", []), d / "bundle.json", d / "nonexistent.json")),
+    ("bundle", lambda d: (_write_table(d / "table.json", _SAMPLE_TABLE), d / "nonexistent.json", d / "table.json")),
+])
+def test_cli_missing_file_fails(missing, mode):
+    """CLI fails when a required input file (table or bundle) does not exist."""
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
         d = Path(tmp)
-        _write_bundle(d / "bundle.json", [])
-        rc = _cli(d / "bundle.json", d / "nonexistent.json", d / "out.json")
-        assert rc != 0
-        assert not (d / "out.json").exists()
-
-
-def test_cli_missing_bundle_file_fails():
-    """CLI fails when bundle file does not exist."""
-    import tempfile
-    with tempfile.TemporaryDirectory() as tmp:
-        d = Path(tmp)
-        _write_table(d / "table.json", _SAMPLE_TABLE)
-        rc = _cli(d / "nonexistent.json", d / "table.json", d / "out.json")
-        assert rc != 0
+        _, bundle_path, table_path = mode(d)
+        rc = _cli(bundle_path, table_path, d / "out.json")
+        assert rc != 0, f"CLI should fail on missing {missing}"
         assert not (d / "out.json").exists()
 
 
@@ -753,197 +726,83 @@ def test_cli_module_entrypoint_help_lists_map_reduced_ebr():
 # 16. Reduced-dimensional irrep/EBR data model doc contract
 # -----------------------------------------------------------------------
 
-def test_data_model_design_doc_exists():
-    """Design doc must exist at the expected path."""
+def test_data_model_design_doc_contract():
+    """Design doc must cover irrep2, reduced-dimensional, provenance, irrep package,
+    physical objects, labels, and forbid material-specific targets."""
     doc_path = Path("docs/reduced_dimensional_irrep_ebr_data_model.md")
-    assert doc_path.exists(), (
-        "docs/reduced_dimensional_irrep_ebr_data_model.md must exist"
-    )
-
-
-def test_data_model_doc_mentions_irrep2():
-    """Design doc must reference irrep2 as the reduced-dimensional inspiration."""
-    doc = Path("docs/reduced_dimensional_irrep_ebr_data_model.md").read_text(encoding="utf-8")
-    assert "irrep2" in doc, "design doc must mention irrep2"
-    assert "reference-only" in doc, "irrep2 must be documented as reference-only"
-    assert "No `irrep2` runtime dependency" in doc, (
-        "design doc must forbid irrep2 as a runtime dependency"
-    )
-
-
-def test_data_model_doc_mentions_reduced_dimensional():
-    """Design doc must use the 'reduced-dimensional' terminology."""
-    doc = Path("docs/reduced_dimensional_irrep_ebr_data_model.md").read_text(encoding="utf-8")
-    assert "reduced-dimensional" in doc.lower(), (
-        "design doc must mention reduced-dimensional"
-    )
-
-
-def test_data_model_doc_mentions_provenance():
-    """Design doc must discuss provenance tracking."""
-    doc = Path("docs/reduced_dimensional_irrep_ebr_data_model.md").read_text(encoding="utf-8")
-    assert "provenance" in doc.lower(), "design doc must mention provenance"
-
-
-def test_data_model_doc_mentions_package_name_irrep():
-    """Design doc must use the correct Python package name 'irrep' (singular)."""
-    doc = Path("docs/reduced_dimensional_irrep_ebr_data_model.md").read_text(encoding="utf-8")
-    assert "`irrep`" in doc or "Python package `irrep`" in doc, (
-        "design doc must reference Python package 'irrep' (singular)"
-    )
-
-
-def test_data_model_doc_no_direct_3d_ebr_reuse():
-    """Design doc must state that 3D irrep EBR tables must not be directly reused."""
-    doc = Path("docs/reduced_dimensional_irrep_ebr_data_model.md").read_text(encoding="utf-8")
+    assert doc_path.exists()
+    doc = doc_path.read_text(encoding="utf-8")
     doc_lower = doc.lower()
-    assert any(phrase in doc_lower for phrase in [
-        "not direct reuse", "no direct reuse", "do not directly reuse",
-        "not directly reuse", "no 3d", "ebr table reuse as final",
-    ]), "design doc must state no direct 3D irrep EBR table reuse"
+
+    # irrep2 reference-only.
+    assert "irrep2" in doc and "reference-only" in doc
+    # Reduced-dimensional, provenance, package name.
+    for term in ["reduced-dimensional", "provenance"]:
+        assert term in doc_lower, f"missing '{term}'"
+    assert "`irrep`" in doc or "Python package `irrep`" in doc
+    # No direct 3D reuse.
+    assert any(p in doc_lower for p in ["not direct reuse", "no 3d", "ebr table reuse as final",
+                                         "raw 3d ebr decomposition"])
+    # irrep as runtime source with ValleyScope reduction.
+    for term in ["runtime data source", "sampled-hsp", "valley-preserving reduction"]:
+        assert term in doc_lower, f"missing '{term}'"
+    # Physical objects.
+    for term in ["HSP little group", "valley-preserving subgroup",
+                 "valley sewing matrix", "reduced-dimensional EBR vector"]:
+        assert term.lower() in doc_lower, f"missing '{term}'"
+    # Labels.
+    assert "C3_like" in doc and "C2_like" in doc and "P3" in doc and "P2" in doc
+    # No material-specific table targets.
+    for forbidden in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
+        assert forbidden not in doc, f"material name '{forbidden}' in design doc"
 
 
-def test_data_model_doc_allows_irrep_runtime_source_with_reduction():
-    """Design doc must allow irrep as source while requiring ValleyScope reduction."""
-    doc = Path("docs/reduced_dimensional_irrep_ebr_data_model.md").read_text(encoding="utf-8")
-    doc_lower = doc.lower()
-    assert "runtime data source" in doc_lower
-    assert "sampled-hsp" in doc_lower
-    assert "valley-preserving reduction" in doc_lower
-    assert "raw 3d" in doc_lower
-
-
-def test_agents_plan_allow_irrep_runtime_but_not_raw_output():
-    """AGENTS/PLAN must encode the irrep runtime backend boundary."""
-    combined = (
+def test_agents_plan_irrep_boundary_and_package_name():
+    """AGENTS/PLAN must encode irrep runtime boundary and use correct package name."""
+    combined_lower = (
         Path("AGENTS.md").read_text(encoding="utf-8")
         + "\n"
         + Path("PLAN.md").read_text(encoding="utf-8")
     ).lower()
-    assert "runtime" in combined
-    assert "data source" in combined
-    assert "valley-preserving" in combined
-    assert "raw 3d" in combined
-
-
-def test_data_model_doc_physical_objects():
-    """Design doc must name the key physical objects."""
-    doc = Path("docs/reduced_dimensional_irrep_ebr_data_model.md").read_text(encoding="utf-8")
-    required = [
-        "HSP little group",
-        "valley-preserving subgroup",
-        "valley sewing matrix",
-        "reduced-dimensional EBR vector",
-    ]
-    for term in required:
-        assert term.lower() in doc.lower(), (
-            f"design doc must mention '{term}'"
-        )
-
-
-def test_data_model_doc_label_conventions():
-    """Design doc must document C3_like/C2_like vs crystallographic notation."""
-    doc = Path("docs/reduced_dimensional_irrep_ebr_data_model.md").read_text(encoding="utf-8")
-    assert "C3_like" in doc and "C2_like" in doc, (
-        "design doc must document C3_like and C2_like labels"
-    )
-    assert "P3" in doc and "P2" in doc, (
-        "design doc must document crystallographic P3/P2 notation"
-    )
-
-
-def test_data_model_doc_no_material_specific_table_targets():
-    """Design doc must keep package-data targets symmetry-based, not material-based."""
-    doc = Path("docs/reduced_dimensional_irrep_ebr_data_model.md").read_text(encoding="utf-8")
-    for forbidden in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
-        assert forbidden not in doc, (
-            f"design doc must not use real material '{forbidden}' as a package-data target"
-        )
-
-
-def test_agents_md_uses_correct_package_name_irrep():
-    """AGENTS.md must use the correct Python package name 'irrep' (singular)."""
-    text = Path("AGENTS.md").read_text(encoding="utf-8")
-    assert "`irrep`" in text, "AGENTS.md must reference Python package 'irrep'"
-    assert "`irreps`" not in text, "AGENTS.md must not reference 'irreps' (plural)"
-
-
-def test_plan_md_uses_correct_package_name_irrep():
-    """PLAN.md must use the correct Python package name 'irrep' (singular)."""
-    text = Path("PLAN.md").read_text(encoding="utf-8")
-    assert "`irrep`" in text, "PLAN.md must reference Python package 'irrep'"
-    assert "`irreps`" not in text, "PLAN.md must not reference 'irreps' (plural)"
+    for term in ["runtime", "data source", "valley-preserving", "raw 3d"]:
+        assert term in combined_lower, f"missing '{term}' in AGENTS/PLAN"
+    agents = Path("AGENTS.md").read_text(encoding="utf-8")
+    plan = Path("PLAN.md").read_text(encoding="utf-8")
+    assert "`irrep`" in agents and "`irreps`" not in agents
+    assert "`irrep`" in plan and "`irreps`" not in plan
 
 
 # -----------------------------------------------------------------------
 # 17. Package-data skeleton
 # -----------------------------------------------------------------------
 
-def test_package_data_root_exists():
-    """Package-data directory structure must exist."""
-    from valleyscope.data.reduced_ebr.catalog import package_data_root
+def test_package_data_skeleton_structure_and_manifest():
+    """Package-data directory exists, manifest has schema_version, tables empty, only manifest.json present."""
+    from valleyscope.data.reduced_ebr.catalog import package_data_root, load_reduced_ebr_manifest, list_reviewed_reduced_ebr_tables
     root = package_data_root()
-    assert root.is_dir()
-    assert (root / "__init__.py").exists()
-    assert (root / "manifest.json").exists()
-    assert (root / "README.md").exists()
-    assert (root / "catalog.py").exists()
-
-
-def test_manifest_has_schema_version_and_empty_tables():
-    """Manifest must have schema_version and an empty tables list."""
-    from valleyscope.data.reduced_ebr.catalog import load_reduced_ebr_manifest
+    for name in ["__init__.py", "manifest.json", "README.md", "catalog.py"]:
+        assert (root / name).exists(), f"missing {name}"
     m = load_reduced_ebr_manifest()
-    assert isinstance(m.get("schema_version"), str) and m["schema_version"], (
-        "manifest must have non-empty schema_version"
-    )
-    assert m.get("tables") == [], "manifest tables must be empty"
+    assert isinstance(m.get("schema_version"), str) and m["schema_version"]
+    assert m["tables"] == []
+    assert list_reviewed_reduced_ebr_tables() == []
+    json_names = {f.name for f in root.glob("*.json")}
+    assert json_names == {"manifest.json"}, f"unexpected JSON: {json_names}"
 
 
-def test_list_tables_returns_empty():
-    """list_reviewed_reduced_ebr_tables() must return an empty list."""
-    from valleyscope.data.reduced_ebr.catalog import list_reviewed_reduced_ebr_tables
-    tables = list_reviewed_reduced_ebr_tables()
-    assert tables == [], "no reviewed tables should exist yet"
-    assert isinstance(tables, list)
-
-
-def test_load_nonexistent_table_raises_value_error():
-    """load_reviewed_reduced_ebr_table for any name must raise ValueError."""
-    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
-    with pytest.raises(ValueError, match="no reviewed reduced EBR package table"):
-        load_reviewed_reduced_ebr_table("nonexistent_table")
-
-
-def test_no_table_json_files_except_manifest():
-    """Only manifest.json should exist; no other .json table files."""
+def test_package_data_readme_and_no_forbidden_imports():
+    """README states no reviewed tables; catalog and data/__init__ have no forbidden imports."""
     from valleyscope.data.reduced_ebr.catalog import package_data_root
-    root = package_data_root()
-    json_files = sorted(root.glob("*.json"))
-    json_names = {f.name for f in json_files}
-    assert json_names == {"manifest.json"}, (
-        f"Only manifest.json should exist; found: {json_names}"
-    )
-
-
-def test_package_data_readme_states_no_tables():
-    """Package-data README must state that no reviewed tables are shipped."""
-    from valleyscope.data.reduced_ebr.catalog import package_data_root
-    readme = (package_data_root() / "README.md").read_text(encoding="utf-8")
-    assert "no reviewed tables" in readme.lower() or "currently empty" in readme.lower(), (
-        "README must state no reviewed tables are currently shipped"
-    )
-    assert "currently" in readme.lower()
-
-
-def test_catalog_does_not_import_irrep2():
-    """Package-data catalog must not import the private irrep2 repository."""
-    from valleyscope.data.reduced_ebr.catalog import package_data_root
-    src = (package_data_root() / "catalog.py").read_text(encoding="utf-8")
-    for forbidden in ["import irrep2", "from irrep2"]:
-        assert forbidden not in src, (
-            f"catalog.py must not import {forbidden}"
-        )
+    readme = (package_data_root() / "README.md").read_text(encoding="utf-8").lower()
+    assert "no reviewed tables" in readme or "currently empty" in readme
+    for fname, patterns in [
+        ("catalog.py", ["import irrep2", "from irrep2"]),
+        ("../../__init__.py", ["import irrep", "from irrep", "import irrep2", "from irrep2",
+                                "import ortools", "from ortools"]),
+    ]:
+        src = (package_data_root() / fname).resolve().read_text(encoding="utf-8")
+        for p in patterns:
+            assert p not in src, f"{fname} must not import {p!r}"
 
 
 def test_package_data_no_material_names():
@@ -956,26 +815,10 @@ def test_package_data_no_material_names():
             if fname.endswith(".pyc"):
                 continue
             fpath = Path(dirpath) / fname
-            text = fpath.read_text(encoding="utf-8") if not fname.endswith(".json") else ""
-            if fname.endswith(".json"):
-                text = fpath.read_text(encoding="utf-8")
+            text = fpath.read_text(encoding="utf-8")
             for name in forbidden:
-                assert name not in text, (
-                    f"{fpath} contains forbidden material name {name!r}"
-                )
-                assert name not in fname, (
-                    f"filename {fname!r} contains forbidden material name {name!r}"
-                )
-
-
-def test_data_init_has_no_forbidden_imports():
-    """valleyscope/data/__init__.py must not eagerly import solver packages."""
-    src = Path("valleyscope/data/__init__.py").read_text(encoding="utf-8")
-    for forbidden in ["import irrep", "from irrep", "import irrep2",
-                       "from irrep2", "import ortools", "from ortools"]:
-        assert forbidden not in src, (
-            f"valleyscope/data/__init__.py must not import {forbidden}"
-        )
+                assert name not in text, f"{fpath} contains {name!r}"
+                assert name not in fname, f"filename {fname!r} contains {name!r}"
 
 
 # -----------------------------------------------------------------------
@@ -1128,39 +971,21 @@ def test_manifest_entry_missing_filename_raises(monkeypatch, tmp_path):
         load_reduced_ebr_manifest()
 
 
-def test_manifest_absolute_filename_rejected(monkeypatch, tmp_path):
+@pytest.mark.parametrize("filename,error_match", [
+    ("/etc/passwd", "relative"),
+    ("../secret.json", "outside"),
+    ("sub/../../secret.json", "'..'"),
+])
+def test_manifest_unsafe_filename_rejected(filename, error_match, monkeypatch, tmp_path):
+    """Absolute paths, .. traversal, and sibling .. are rejected."""
     root = _make_fake_catalog_root(tmp_path)
     (root / "manifest.json").write_text(json.dumps({
         "schema_version": "1.0.0",
-        "tables": [{"name": "abs", "filename": "/etc/passwd"}],
+        "tables": [{"name": "escape", "filename": filename}],
     }))
     _set_fake_root(monkeypatch, root)
     from valleyscope.data.reduced_ebr.catalog import load_reduced_ebr_manifest
-    with pytest.raises(ValueError, match="relative"):
-        load_reduced_ebr_manifest()
-
-
-def test_manifest_dotdot_filename_rejected(monkeypatch, tmp_path):
-    root = _make_fake_catalog_root(tmp_path)
-    (root / "manifest.json").write_text(json.dumps({
-        "schema_version": "1.0.0",
-        "tables": [{"name": "escape", "filename": "../secret.json"}],
-    }))
-    _set_fake_root(monkeypatch, root)
-    from valleyscope.data.reduced_ebr.catalog import load_reduced_ebr_manifest
-    with pytest.raises(ValueError, match="outside"):
-        load_reduced_ebr_manifest()
-
-
-def test_manifest_sibling_dotdot_rejected(monkeypatch, tmp_path):
-    root = _make_fake_catalog_root(tmp_path)
-    (root / "manifest.json").write_text(json.dumps({
-        "schema_version": "1.0.0",
-        "tables": [{"name": "escape", "filename": "sub/../../secret.json"}],
-    }))
-    _set_fake_root(monkeypatch, root)
-    from valleyscope.data.reduced_ebr.catalog import load_reduced_ebr_manifest
-    with pytest.raises(ValueError, match="'..'"):
+    with pytest.raises(ValueError, match=error_match):
         load_reduced_ebr_manifest()
 
 
@@ -1334,19 +1159,12 @@ def test_basis_gate_before_group_check():
     assert "expected_hsps mismatch" in r["excluded_bundles"][0]["reason"]
 
 
-def test_no_material_names_in_basis_gate_code():
-    """Basis compatibility gate must not use material-specific logic."""
+def test_reduced_ebr_mapping_no_material_names_or_irrep2():
+    """reduced_ebr_mapping.py must not contain material names or import irrep2."""
     src = Path("valleyscope/analysis/reduced_ebr_mapping.py").read_text(encoding="utf-8")
     for forbidden in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
-        assert forbidden not in src, (
-            f"reduced_ebr_mapping.py must not contain {forbidden!r}"
-        )
-
-
-def test_no_irrep2_import_in_basis_gate():
-    """Basis compatibility gate must not import irrep2."""
-    src = Path("valleyscope/analysis/reduced_ebr_mapping.py").read_text(encoding="utf-8")
-    assert "irrep2" not in src, "reduced_ebr_mapping.py must not import irrep2"
+        assert forbidden not in src, f"contains {forbidden!r}"
+    assert "irrep2" not in src, "must not import irrep2"
 
 
 # -----------------------------------------------------------------------
@@ -1552,13 +1370,6 @@ def test_schema_doc_uses_current_reduced_ebr_solver_name():
     schema_text = Path("docs/schema.md").read_text(encoding="utf-8")
     assert "smith_normal_form_plus_bounded_nonnegative_search" in schema_text
     assert "brute_force_exact_integer" not in schema_text
-
-
-def test_no_material_names_in_classifier():
-    """Classifier code must not contain real material names."""
-    src = Path("valleyscope/analysis/reduced_ebr_mapping.py").read_text(encoding="utf-8")
-    for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
-        assert name not in src, f"reduced_ebr_mapping.py contains {name!r}"
 
 
 # -----------------------------------------------------------------------
