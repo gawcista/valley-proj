@@ -803,6 +803,29 @@ def test_data_model_doc_no_direct_3d_ebr_reuse():
     ]), "design doc must state no direct 3D irrep EBR table reuse"
 
 
+def test_data_model_doc_allows_irrep_runtime_source_with_reduction():
+    """Design doc must allow irrep as source while requiring ValleyScope reduction."""
+    doc = Path("docs/reduced_dimensional_irrep_ebr_data_model.md").read_text(encoding="utf-8")
+    doc_lower = doc.lower()
+    assert "runtime data source" in doc_lower
+    assert "sampled-hsp" in doc_lower
+    assert "valley-preserving reduction" in doc_lower
+    assert "raw 3d" in doc_lower
+
+
+def test_agents_plan_allow_irrep_runtime_but_not_raw_output():
+    """AGENTS/PLAN must encode the irrep runtime backend boundary."""
+    combined = (
+        Path("AGENTS.md").read_text(encoding="utf-8")
+        + "\n"
+        + Path("PLAN.md").read_text(encoding="utf-8")
+    ).lower()
+    assert "runtime" in combined
+    assert "data source" in combined
+    assert "valley-preserving" in combined
+    assert "raw 3d" in combined
+
+
 def test_data_model_doc_physical_objects():
     """Design doc must name the key physical objects."""
     doc = Path("docs/reduced_dimensional_irrep_ebr_data_model.md").read_text(encoding="utf-8")

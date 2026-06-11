@@ -20,10 +20,13 @@ validated tables with no built-in data.
 
 For high-throughput database use, a structured, versioned, provenance-tracked
 package-data layer is needed — not an accumulation of ad hoc tables, and not
-direct reuse of the 3D EBR tables from the Python package `irrep`.  ValleyScope
-needs **valley-resolved reduced-dimensional irreps/EBRs**: the HSP little
-group, valley mapping, valley-preserving subgroup, and valley-specific
-operations reduce the full 3D space-group irrep/EBR basis to a 2D subset.
+raw 3D EBR decomposition reported as ValleyScope output.  This is no direct reuse
+as final output.  The public Python package `irrep` may be used as a runtime data source
+for 3D space-group irrep/EBR data.  ValleyScope then performs the required
+**valley-resolved reduced-dimensional reduction**: sampled moire HSP set, HSP
+little group, valley mapping, valley-preserving subgroup, and valley-specific
+operations reduce the full 3D space-group irrep/EBR basis to a 2D
+valley-preserving subset.
 
 ## 2. Design Inspirations
 
@@ -55,6 +58,12 @@ Key patterns:
 Python package: `irrep` v2.6.3 (installed locally; inspected for data-model
 patterns only).  Not to be confused with ValleyScope's physical irrep objects
 or `valley_irrep_matching.py`.
+
+Current direction: `irrep` can become a runtime backend/data source for 3D
+space-group irreps and EBR vectors, but ValleyScope must own the reduction
+from that 3D basis to sampled-HSP valley-preserving reduced EBR matrices.  Do
+not call or report `irrep`'s raw 3D EBR decomposition as the final
+valley-resolved reduced EBR result.
 
 Key patterns:
 - **Versioned package data**: data files shipped inside the package's `data/`
@@ -364,9 +373,10 @@ the following must pass:
 
 ## 8. Non-Goals
 
-- **No 3D `irrep` Python package EBR table reuse as final output.**
-  ValleyScope's target is valley-resolved reduced-dimensional irreps/EBRs,
-  which are a subset of the full 3D tables.
+- **No raw 3D `irrep` decomposition as final output.** The public Python
+  package `irrep` may be a runtime source for 3D irreps/EBR vectors, but
+  ValleyScope's target is valley-resolved reduced-dimensional irreps/EBRs
+  after sampled-HSP and valley-preserving reduction.
 - **No `irrep2` runtime dependency.**  The local `irrep2` repository is useful
   as a reduced-dimensional reference implementation, but it is not public and
   must not be imported, vendored, or required by ValleyScope.

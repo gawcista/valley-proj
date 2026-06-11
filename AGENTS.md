@@ -126,9 +126,13 @@ for downstream tools.
 
 Future reviewed irrep/EBR data support should follow an `irrep2`-like
 reduced-dimensional model and an `irrep`-like packaged-data architecture
-(versioned, provenance-tracked, and test-covered). Do not directly reuse
-the 3D EBR tables from the Python package `irrep` as ValleyScope output data:
-ValleyScope needs valley-resolved reduced-dimensional irreps/EBRs.
+(versioned, provenance-tracked, and test-covered). The public Python package
+`irrep` may be used as a runtime data source for 3D space-group irrep/EBR
+data, but ValleyScope must not report raw 3D `irrep` EBR decomposition as
+valley-resolved output. ValleyScope must first perform its own
+reduced-dimensional valley-preserving reduction: sampled moire HSP set, HSP
+little group, valley mapping, valley-preserving subgroup, and
+valley-preserving irrep basis.
 "No built-in unreviewed tables" means no ad hoc hardcoded or unvalidated
 tables, not a ban on a future reviewed package-data layer.
 

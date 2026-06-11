@@ -112,6 +112,7 @@ valley-changing operations as invariance of a single label operator.
 | Phase 7 | Parent-valley / k-resolved projector diagnostics | Done — merged to main |
 | Phase 8 | Output contract cleanup (standard/debug profiles) | Done — merged to main |
 | Phase 9 | High-throughput single-run ingestion record | Done — explicit offline collector, public-output only |
+| Phase 10 | Valley-irrep phase table data contract | Done — spinful C3/C2 phase tables are validated package data |
 
 ## Real Benchmarks
 
@@ -145,8 +146,14 @@ valley-changing operations as invariance of a single label operator.
   (blocker B2).
 * ~~Design `irrep2`-like reduced-dimensional irrep/EBR data model~~ — Done.
   `docs/reduced_dimensional_irrep_ebr_data_model.md` covers physical objects,
-  label conventions, package-data layout, and validation rules.  Does not
-  directly reuse 3D `irrep` Python package EBR tables.
+  label conventions, package-data layout, and validation rules.  The public
+  Python package `irrep` may be used as a runtime 3D irrep/EBR data source,
+  but final ValleyScope output must be reduced-dimensional and
+  valley-preserving, not raw 3D `irrep` decomposition.
+* `irrep` runtime backend design: inspect the public package API and define
+  the adapter boundary from 3D space-group irreps/EBRs to ValleyScope
+  sampled-HSP, valley-preserving reduced EBR matrices. Do not implement this
+  until the reduction map and provenance fields are explicitly agreed.
 * ~~Package-data skeleton~~ — Done. `valleyscope/data/reduced_ebr/` exists
   with empty manifest, README, and catalog module. No table data shipped.
 * ~~Loader integration~~ — Done. `catalog.py` validates manifests, routes
