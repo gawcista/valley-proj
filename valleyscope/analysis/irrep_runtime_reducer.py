@@ -11,7 +11,25 @@ wiring belongs in a separate adapter module.
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
+
+
+def _unique_nonempty_strings(values: Sequence[str], *, field: str) -> list[str]:
+    if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+        raise ValueError(f"{field} must be a sequence of non-empty strings")
+    out: list[str] = []
+    seen: set[str] = set()
+    for i, value in enumerate(values):
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"{field}[{i}] must be a non-empty string")
+        if value in seen:
+            raise ValueError(f"{field} must contain unique entries")
+        seen.add(value)
+        out.append(value)
+    if not out:
+        raise ValueError(f"{field} must be non-empty")
+    return out
 
 
 def build_reduced_table_from_runtime_source(
@@ -53,8 +71,17 @@ def build_reduced_table_from_runtime_source(
         If basis mappings are missing, ambiguous, or EBR vectors are
         misaligned.
     """
-    allowed_set = set(allowed_irrep_keys)
-    hsps_set = set(expected_hsps)
+    expected_hsps_list = _unique_nonempty_strings(
+        expected_hsps, field="expected_hsps"
+    )
+    allowed_irrep_key_list = _unique_nonempty_strings(
+        allowed_irrep_keys, field="allowed_irrep_keys"
+    )
+    if not isinstance(subspace_group_candidate, str) or not subspace_group_candidate:
+        raise ValueError("subspace_group_candidate must be a non-empty string")
+
+    allowed_set = set(allowed_irrep_key_list)
+    hsps_set = set(expected_hsps_list)
     basis = list(source_payload.get("basis", []))
     ebrs = list(source_payload.get("ebrs", []))
 
@@ -64,36 +91,46 @@ def build_reduced_table_from_runtime_source(
     if not ebrs:
         raise ValueError("source_payload['ebrs'] must be a non-empty list")
 
-    # Check each basis entry and collect reduced indices.
-    reduced_indices: list[int] = []
-    seen_keys: set[str] = set()
-    reduced_irreps: list[str] = []
+    # Check each basis entry and collect the source index for each allowed
+    # ValleyScope key.  The output basis order is controlled by
+    # allowed_irrep_keys, not by the external source package's basis order.
+    key_to_source_index: dict[str, int] = {}
     for i, entry in enumerate(basis):
         if not isinstance(entry, dict):
             raise ValueError(f"basis[{i}] must be a dict")
-        hsp = str(entry.get("hsp", ""))
-        key = str(entry.get("valleyscope_irrep_key", ""))
-        if not hsp or not key:
+        hsp = entry.get("hsp")
+        key = entry.get("valleyscope_irrep_key")
+        if not isinstance(hsp, str) or not hsp:
+            raise ValueError(f"basis[{i}] must define non-empty string 'hsp'")
+        if not isinstance(key, str) or not key:
             raise ValueError(
-                f"basis[{i}] must define non-empty 'hsp' and 'valleyscope_irrep_key'"
+                f"basis[{i}] must define non-empty string 'valleyscope_irrep_key'"
             )
         if hsp not in hsps_set:
             continue  # Not in sampled HSP set — skip.
         if key not in allowed_set:
             continue  # Not an allowed valley-preserving irrep key — skip.
-        if key in seen_keys:
+        if key in key_to_source_index:
             raise ValueError(
                 f"duplicate valleyscope_irrep_key {key!r} in reduced basis "
-                f"(basis entries {seen_keys} and {i})"
+                f"(basis entries {key_to_source_index[key]} and {i})"
             )
-        seen_keys.add(key)
-        reduced_indices.append(i)
-        reduced_irreps.append(key)
+        key_to_source_index[key] = i
 
-    if not reduced_indices:
+    if not key_to_source_index:
         raise ValueError(
             "no source basis entries match expected_hsps and allowed_irrep_keys"
         )
+    missing_keys = [
+        key for key in allowed_irrep_key_list if key not in key_to_source_index
+    ]
+    if missing_keys:
+        raise ValueError(
+            "missing source basis mapping for allowed_irrep_keys: "
+            f"{missing_keys}"
+        )
+    reduced_indices = [key_to_source_index[key] for key in allowed_irrep_key_list]
+    reduced_irreps = list(allowed_irrep_key_list)
 
     # --- Validate and reduce EBR vectors ---
     n_source = len(basis)
@@ -142,11 +179,38 @@ def build_reduced_table_from_runtime_source(
     result: dict[str, Any] = {
         "schema_version": "1.0.0",
         "subspace_group_candidate": subspace_group_candidate,
-        "expected_hsps": sorted(expected_hsps),
+        "expected_hsps": expected_hsps_list,
         "irreps": reduced_irreps,
         "ebrs": reduced_ebrs,
     }
-    if provenance is not None:
-        result["provenance"] = dict(provenance)
+    result["provenance"] = _build_provenance(
+        source_payload=source_payload,
+        explicit_provenance=provenance,
+        expected_hsps=expected_hsps_list,
+        source_basis_count=n_source,
+        reduction_basis_count=len(reduced_irreps),
+    )
 
     return result
+
+
+def _build_provenance(
+    *,
+    source_payload: Mapping[str, Any],
+    explicit_provenance: Mapping[str, Any] | None,
+    expected_hsps: list[str],
+    source_basis_count: int,
+    reduction_basis_count: int,
+) -> dict[str, Any]:
+    provenance: dict[str, Any] = {}
+    source = source_payload.get("source")
+    if isinstance(source, Mapping):
+        provenance.update(source)
+    if explicit_provenance is not None:
+        provenance.update(dict(explicit_provenance))
+    provenance.update({
+        "expected_hsps": list(expected_hsps),
+        "source_basis_count": source_basis_count,
+        "reduction_basis_count": reduction_basis_count,
+    })
+    return provenance
