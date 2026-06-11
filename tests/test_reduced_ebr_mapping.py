@@ -477,7 +477,7 @@ def test_table_schema_doc_contract():
         assert f"`{status}`" in doc, f"missing status '{status}'"
     assert "C3_like" in doc and "C2_like" in doc and "C{order}_like" in doc
     assert "no built-in" in doc.lower()
-    assert "heuristic" in doc.lower()
+    assert "no heuristic" in doc.lower()
 
 
 def test_table_schema_doc_expected_hsps_basis_contract():
@@ -741,8 +741,16 @@ def test_data_model_design_doc_contract():
         assert term in doc_lower, f"missing '{term}'"
     assert "`irrep`" in doc or "Python package `irrep`" in doc
     # No direct 3D reuse.
-    assert any(p in doc_lower for p in ["not direct reuse", "no 3d", "ebr table reuse as final",
-                                         "raw 3d ebr decomposition"])
+    assert any(p in doc_lower for p in [
+        "not direct reuse",
+        "no direct reuse",
+        "do not directly reuse",
+        "not directly reuse",
+        "no raw 3d",
+        "must not directly reuse",
+        "must not be directly reused",
+    ])
+    assert "raw 3d" in doc_lower
     # irrep as runtime source with ValleyScope reduction.
     for term in ["runtime data source", "sampled-hsp", "valley-preserving reduction"]:
         assert term in doc_lower, f"missing '{term}'"
@@ -795,6 +803,7 @@ def test_package_data_readme_and_no_forbidden_imports():
     from valleyscope.data.reduced_ebr.catalog import package_data_root
     readme = (package_data_root() / "README.md").read_text(encoding="utf-8").lower()
     assert "no reviewed tables" in readme or "currently empty" in readme
+    assert "currently" in readme
     for fname, patterns in [
         ("catalog.py", ["import irrep2", "from irrep2"]),
         ("../../__init__.py", ["import irrep", "from irrep", "import irrep2", "from irrep2",

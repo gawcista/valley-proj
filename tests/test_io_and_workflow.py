@@ -4982,7 +4982,7 @@ def test_benchmark_ingestion_record_docs():
     assert smoke_path.exists()
     smoke = smoke_path.read_text(encoding="utf-8")
     for phrase in ["collect-database-record", "has_ready_ebr_bundles", "no_ready_ebr_bundles",
-                     "P321", "P312"]:
+                     "P321", "P312", "tmpdir=$(mktemp -d)", "--output \"$tmpdir/"]:
         assert phrase in smoke, f"missing '{phrase}'"
     smoke_lower = smoke.lower()
     assert ("not a default" in smoke_lower or "offline" in smoke_lower) and "explicit" in smoke_lower
