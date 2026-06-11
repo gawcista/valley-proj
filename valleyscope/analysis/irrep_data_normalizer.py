@@ -143,16 +143,29 @@ def _ebr_entries(
     if not ebrs_raw:
         raise ValueError("ebr_data['ebrs'] must be a non-empty list")
 
-    entries: list[dict[str, Any]] = []
-    labels: set[str] = set()
+    raw_label_counts: dict[str, int] = {}
     for i, ebr in enumerate(ebrs_raw):
         if not isinstance(ebr, Mapping):
             raise ValueError(f"ebrs[{i}] must be a mapping")
         label = ebr.get("ebr_name")
         if not isinstance(label, str) or not label:
             raise ValueError(f"ebrs[{i}] must define a non-empty ebr_name")
+        raw_label_counts[label] = raw_label_counts.get(label, 0) + 1
+
+    entries: list[dict[str, Any]] = []
+    labels: set[str] = set()
+    for i, ebr in enumerate(ebrs_raw):
+        label = ebr.get("ebr_name")
+        assert isinstance(label, str)
         wp = ebr.get("wyckoff_position", "")
-        qualified = f"{label} @ {wp}" if wp and label in labels else label
+        if raw_label_counts[label] > 1:
+            if not isinstance(wp, str) or not wp:
+                raise ValueError(
+                    f"duplicate EBR label {label!r} requires wyckoff_position"
+                )
+            qualified = f"{label} @ {wp}"
+        else:
+            qualified = label
         if qualified in labels:
             raise ValueError(f"duplicate EBR label {qualified!r}")
         labels.add(qualified)

@@ -175,8 +175,8 @@ def test_ebr_vector_length_mismatch_raises():
 # 5. Reduced zero-vector EBR rejected
 # -----------------------------------------------------------------------
 
-def test_reduced_zero_vector_skipped():
-    """EBR with all weight in filtered-out HSPs is silently skipped."""
+def test_reduced_zero_vector_skipped_with_provenance():
+    """EBR with all weight in filtered-out HSPs is skipped and recorded."""
     basis = [
         {"source_label": "only_in_sampled", "hsp": "GammaM",
          "valleyscope_irrep_key": "GammaM:C3_spinor_phase_+1/2"},
@@ -197,6 +197,8 @@ def test_reduced_zero_vector_skipped():
     )
     labels = {e["label"] for e in result["ebrs"]}
     assert labels == {"Real"}
+    assert result["provenance"]["filtered_zero_vector_ebr_count"] == 1
+    assert result["provenance"]["filtered_zero_vector_ebrs"] == ["Ghost"]
 
 
 # -----------------------------------------------------------------------

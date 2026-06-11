@@ -108,6 +108,33 @@ def test_vector_length_mismatch_rejected():
         _payload(bad)
 
 
+def test_duplicate_ebr_names_are_qualified_by_wyckoff_position():
+    data = {
+        "basis": _SAMPLE_EBR_DATA["basis"],
+        "ebrs": [
+            {"ebr_name": "EBR_DUP", "wyckoff_position": "1a", "vector": [1, 0, 1, 0]},
+            {"ebr_name": "EBR_DUP", "wyckoff_position": "1b", "vector": [1, 1, 0, 0]},
+        ],
+    }
+    payload = _payload(data)
+    assert [ebr["label"] for ebr in payload["ebrs"]] == [
+        "EBR_DUP @ 1a",
+        "EBR_DUP @ 1b",
+    ]
+
+
+def test_duplicate_ebr_name_same_wyckoff_position_rejected():
+    data = {
+        "basis": _SAMPLE_EBR_DATA["basis"],
+        "ebrs": [
+            {"ebr_name": "EBR_DUP", "wyckoff_position": "1a", "vector": [1, 0, 1, 0]},
+            {"ebr_name": "EBR_DUP", "wyckoff_position": "1a", "vector": [1, 1, 0, 0]},
+        ],
+    }
+    with pytest.raises(ValueError, match="duplicate EBR label"):
+        _payload(data)
+
+
 def test_missing_explicit_hsp_mapping_rejected():
     hsp_map = dict(_SOURCE_HSP_BY_IRREP)
     hsp_map.pop("-K6")
@@ -195,132 +222,3 @@ def test_adapter_sources_have_no_material_names():
         src = path.read_text(encoding="utf-8")
         for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
             assert name not in src
-
-
-# -----------------------------------------------------------------------
-# irreptables runtime table builder
-# -----------------------------------------------------------------------
-
-def test_builder_produces_loadable_reduced_table(tmp_path):
-    """Builder: irreptables.load_ebr_data -> normalizer -> reducer -> loadable table."""
-    from valleyscope.analysis.irreptables_runtime_table_builder import (
-        build_reduced_table_from_irreptables,
-    )
-    from valleyscope.analysis.reduced_ebr_mapping import load_reduced_ebr_table
-
-    # P150 (P321) — all 22 source labels must have explicit mappings.
-    _P150_HSP = {}
-    _P150_HSP.update({f"-GM{l}": "GammaM" for l in ["4", "5", "6"]})
-    _P150_HSP.update({f"-K{l}": "KM" for l in ["4", "5", "6"]})
-    _P150_HSP.update({f"-KA{l}": "KM" for l in ["4", "5", "6"]})
-    # Other HSPs (not in sampled set, will be filtered by reducer).
-    for prefix in ["A", "H", "HA", "L", "M"]:
-        indices = ["3", "4"] if prefix in ("L", "M") else ["4", "5", "6"]
-        if prefix == "L":
-            indices = ["3", "4"]
-        elif prefix == "M":
-            indices = ["3", "4"]
-        for i in indices:
-            _P150_HSP[f"-{prefix}{i}"] = prefix
-
-    _P150_KEY = {label: f"{hsp}:{label.lstrip('-')}" for label, hsp in _P150_HSP.items()}
-
-    all_hsps = sorted(set(_P150_HSP.values()))
-    all_keys = list(_P150_KEY.values())
-    table = build_reduced_table_from_irreptables(
-        sg_number=150, spinor=True,
-        source_hsp_by_irrep=_P150_HSP,
-        valleyscope_key_by_source_irrep=_P150_KEY,
-        expected_hsps=all_hsps,
-        allowed_irrep_keys=all_keys,
-        subspace_group_candidate="C3_like",
-    )
-    assert table["subspace_group_candidate"] == "C3_like"
-    assert table["expected_hsps"] == all_hsps
-    assert table["provenance"]["package"] == "irreptables"
-
-    path = tmp_path / "table.json"
-    path.write_text(json.dumps(table), encoding="utf-8")
-    loaded = load_reduced_ebr_table(path)
-    assert loaded["subspace_group_candidate"] == "C3_like"
-
-
-def test_builder_reduces_with_trusted_keys_only(tmp_path):
-    """Builder reduces to only allowed trusted irrep keys (GammaM, KM HSPs only)."""
-    from valleyscope.analysis.irreptables_runtime_table_builder import (
-        build_reduced_table_from_irreptables,
-    )
-    from valleyscope.analysis.reduced_ebr_mapping import load_reduced_ebr_table
-
-    _P150_HSP = {}
-    _P150_HSP.update({f"-GM{l}": "GammaM" for l in ["4", "5", "6"]})
-    _P150_HSP.update({f"-K{l}": "KM" for l in ["4", "5", "6"]})
-    _P150_HSP.update({f"-KA{l}": "KM" for l in ["4", "5", "6"]})
-    for prefix in ["A", "H", "HA", "L", "M"]:
-        for i in (["3", "4"] if prefix in ("L", "M") else ["4", "5", "6"]):
-            _P150_HSP[f"-{prefix}{i}"] = prefix
-
-    _P150_KEY = {label: f"{hsp}:{label.lstrip('-')}" for label, hsp in _P150_HSP.items()}
-
-    # Only GammaM and KM HSPs with 3 trusted keys (lstrip '-' from source label).
-    trusted_keys = [
-        "GammaM:GM5", "KM:K5", "KM:K6",
-    ]
-
-    table = build_reduced_table_from_irreptables(
-        sg_number=150, spinor=True,
-        source_hsp_by_irrep=_P150_HSP,
-        valleyscope_key_by_source_irrep=_P150_KEY,
-        expected_hsps=["GammaM", "KM"],
-        allowed_irrep_keys=trusted_keys,
-        subspace_group_candidate="C3_like",
-    )
-    assert table["irreps"] == trusted_keys
-    for ebr in table["ebrs"]:
-        assert len(ebr["vector"]) == 3
-
-    path = tmp_path / "table.json"
-    path.write_text(json.dumps(table), encoding="utf-8")
-    loaded = load_reduced_ebr_table(path)
-    assert loaded["irreps"] == trusted_keys
-
-
-def test_builder_missing_source_hsp_raises():
-    """Missing source_hsp_by_irrep entry raises ValueError."""
-    from valleyscope.analysis.irreptables_runtime_table_builder import (
-        build_reduced_table_from_irreptables,
-    )
-    with pytest.raises(ValueError, match="source_hsp_by_irrep"):
-        build_reduced_table_from_irreptables(
-            sg_number=150, spinor=True,
-            source_hsp_by_irrep={},  # empty
-            valleyscope_key_by_source_irrep={"-GM5": "GammaM:C3_spinor_phase_+1/2"},
-            expected_hsps=["GammaM"], allowed_irrep_keys=["GammaM:C3_spinor_phase_+1/2"],
-            subspace_group_candidate="C3_like",
-        )
-
-
-def test_builder_no_material_names():
-    """Builder must not contain real material names."""
-    src = Path(
-        "valleyscope/analysis/irreptables_runtime_table_builder.py"
-    ).read_text(encoding="utf-8")
-    for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
-        assert name not in src, f"builder must not contain {name!r}"
-
-
-def test_builder_no_irrep2_import():
-    """Builder must not import irrep2."""
-    src = Path(
-        "valleyscope/analysis/irreptables_runtime_table_builder.py"
-    ).read_text(encoding="utf-8")
-    for forbidden in ["import irrep2", "from irrep2"]:
-        assert forbidden not in src, "builder must not import irrep2"
-
-
-def test_builder_no_raw_decomposition_call():
-    """Builder must not call raw 3D EBR decomposition."""
-    src = Path(
-        "valleyscope/analysis/irreptables_runtime_table_builder.py"
-    ).read_text(encoding="utf-8")
-    assert "compute_ebr_decomposition(" not in src

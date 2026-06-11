@@ -135,6 +135,7 @@ def build_reduced_table_from_runtime_source(
     # --- Validate and reduce EBR vectors ---
     n_source = len(basis)
     reduced_ebrs: list[dict[str, Any]] = []
+    skipped_zero_vector_ebrs: list[str] = []
     ebr_labels: list[str] = []
     for j, ebr in enumerate(ebrs):
         if not isinstance(ebr, dict):
@@ -160,7 +161,7 @@ def build_reduced_table_from_runtime_source(
         # Reduce vector to sampled HSPs only.
         reduced_vector = [vector[i] for i in reduced_indices]
         if not any(v > 0 for v in reduced_vector):
-            # EBR contributes only to non-sampled HSPs — skip it.
+            skipped_zero_vector_ebrs.append(label)
             continue
 
         entry: dict[str, Any] = {"label": label, "vector": reduced_vector}
@@ -171,7 +172,7 @@ def build_reduced_table_from_runtime_source(
         reduced_ebrs.append(entry)
 
     if not reduced_ebrs:
-        raise ValueError("no EBR vectors remain after reduction")
+        raise ValueError("no nonzero EBR vectors remain after reduction")
 
     # --- Build output ---
     result: dict[str, Any] = {
@@ -187,6 +188,7 @@ def build_reduced_table_from_runtime_source(
         expected_hsps=expected_hsps_list,
         source_basis_count=n_source,
         reduction_basis_count=len(reduced_irreps),
+        filtered_zero_vector_ebrs=skipped_zero_vector_ebrs,
     )
 
     return result
@@ -199,6 +201,7 @@ def _build_provenance(
     expected_hsps: list[str],
     source_basis_count: int,
     reduction_basis_count: int,
+    filtered_zero_vector_ebrs: list[str],
 ) -> dict[str, Any]:
     provenance: dict[str, Any] = {}
     source = source_payload.get("source")
@@ -210,5 +213,8 @@ def _build_provenance(
         "expected_hsps": list(expected_hsps),
         "source_basis_count": source_basis_count,
         "reduction_basis_count": reduction_basis_count,
+        "filtered_zero_vector_ebr_count": len(filtered_zero_vector_ebrs),
     })
+    if filtered_zero_vector_ebrs:
+        provenance["filtered_zero_vector_ebrs"] = list(filtered_zero_vector_ebrs)
     return provenance
