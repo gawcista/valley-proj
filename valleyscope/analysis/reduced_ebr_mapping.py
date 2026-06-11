@@ -244,10 +244,11 @@ def build_reduced_ebr_mapping(
             })
             continue
 
-        # --- Integer-span classification ---
+        # --- Integer-span classification (delegated to solver) ---
+        from valleyscope.analysis.reduced_ebr_solver import classify_bundle
         ebr_vectors = [list(ebr["vector"]) for ebr in table_ebrs]
         ebr_labels_list = [str(ebr.get("label", "?")) for ebr in table_ebrs]
-        result = _classify_bundle(
+        result = classify_bundle(
             irrep_counts, ebr_vectors, ebr_labels_list, max_coefficient,
         )
         solutions.append({
@@ -287,171 +288,6 @@ def build_reduced_ebr_mapping(
 
 
 # ---------------------------------------------------------------------------
-# Integer-span classification
-# ---------------------------------------------------------------------------
-
-def _classify_bundle(
-    target: list[int],
-    ebr_vectors: list[list[int]],
-    ebr_labels: list[str],
-    max_coefficient: int,
-) -> dict:
-    """Classify a bundle against EBR vectors using exact integer algebra.
-
-    Returns a dict with per-solution classification fields.
-    """
-    n_irreps = len(target)
-    n_ebrs = len(ebr_vectors)
-
-    # --- Integer-span test (Smith normal form) ---
-    in_span, integer_solution = _check_integer_span(target, ebr_vectors)
-
-    if not in_span:
-        return {
-            "status": "no_exact_solution",
-            "classification": "stable-topology-candidate",
-            "integer_span_status": "outside_integer_span",
-            "nonnegative_solution_status": "no_nonnegative_solution",
-        }
-
-    # --- Nonnegative search with physical bounds ---
-    bounds = _derive_coefficient_bounds(target, ebr_vectors, max_coefficient)
-    truncated = any(
-        bounds[i] is not None and bounds[i] > max_coefficient
-        for i in range(n_ebrs)
-    )
-    effective_bounds = [
-        min(b, max_coefficient) if b is not None else max_coefficient
-        for b in bounds
-    ]
-
-    nonneg_solution = _search_nonnegative_bounded(
-        target, ebr_vectors, effective_bounds,
-    )
-
-    if nonneg_solution is not None:
-        result = {
-            "status": "solved_exact",
-            "classification": "atomic-compatible-candidate",
-            "integer_span_status": "in_integer_span",
-            "nonnegative_solution_status": "solved_exact",
-            "ebr_decomposition": [
-                {"label": ebr_labels[i], "coefficient": int(c)}
-                for i, c in enumerate(nonneg_solution) if c > 0
-            ],
-        }
-    else:
-        result = {
-            "status": "no_exact_solution",
-            "classification": "fragile-topology-candidate",
-            "integer_span_status": "in_integer_span",
-            "nonnegative_solution_status": "no_nonnegative_solution",
-        }
-        if integer_solution is not None:
-            result["integer_solution"] = [
-                {"label": ebr_labels[i], "coefficient": int(c)}
-                for i, c in enumerate(integer_solution) if c != 0
-            ]
-
-    if truncated:
-        result["search_status"] = "truncated_by_max_coefficient"
-
-    return result
-
-
-def _check_integer_span(
-    target: list[int],
-    ebr_vectors: list[list[int]],
-) -> tuple[bool, list[int] | None]:
-    """Test whether target lies in the integer span of EBR columns.
-
-    Uses Smith normal form over ZZ via sympy.  Returns (in_span, integer_solution).
-    """
-    if not ebr_vectors:
-        return False, None
-    n_rows = len(target)
-    n_cols = len(ebr_vectors)
-
-    from sympy import ZZ, Matrix
-    from sympy.matrices.normalforms import smith_normal_decomp
-    matrix = Matrix([[ebr_vectors[j][i] for j in range(n_cols)] for i in range(n_rows)])
-    diagonal, left, right = smith_normal_decomp(matrix, domain=ZZ)
-
-    y_prime = list(left * Matrix(target))
-
-    rank = sum(1 for i in range(min(diagonal.rows, diagonal.cols)) if int(diagonal[i, i]) != 0)
-
-    for i in range(rank):
-        if int(y_prime[i]) % int(diagonal[i, i]) != 0:
-            return False, None
-
-    for i in range(rank, len(y_prime)):
-        if int(y_prime[i]) != 0:
-            return False, None
-
-    # Build integer solution
-    z = [0] * n_cols
-    for i in range(rank):
-        z[i] = int(y_prime[i]) // int(diagonal[i, i])
-    solution = list(right * Matrix(z))
-    return True, [int(v) for v in solution]
-
-
-def _derive_coefficient_bounds(
-    target: list[int],
-    ebr_vectors: list[list[int]],
-    max_coefficient: int,
-) -> list[int | None]:
-    """Derive physical upper bounds per EBR column from positive entries.
-
-    For each EBR column j, the coefficient c_j cannot exceed
-    min_i (target[i] / EBR[i][j]) over positive EBR entries.
-    """
-    n_ebrs = len(ebr_vectors)
-    n_rows = len(target)
-    bounds: list[int | None] = []
-    for j in range(n_ebrs):
-        bound = None
-        for i in range(n_rows):
-            v = ebr_vectors[j][i]
-            if v > 0:
-                cap = target[i] // v
-                if bound is None or cap < bound:
-                    bound = cap
-        bounds.append(bound)
-    return bounds
-
-
-def _search_nonnegative_bounded(
-    target: list[int],
-    ebr_vectors: list[list[int]],
-    bounds: list[int],
-) -> list[int] | None:
-    """Exhaustive bounded search for nonnegative integer solution.
-
-    Uses pruning: aborts a branch when any component of the accumulated
-    vector exceeds the target.
-    """
-    n_ebrs = len(ebr_vectors)
-    n_rows = len(target)
-
-    def _search(idx: int, accum: list[int], coeffs: list[int]) -> list[int] | None:
-        if idx == n_ebrs:
-            return coeffs if accum == target else None
-        vec = ebr_vectors[idx]
-        max_c = bounds[idx]
-        for c in range(max_c + 1):
-            new_accum = [accum[i] + c * vec[i] for i in range(n_rows)]
-            # Prune if any component exceeds target
-            if any(new_accum[i] > target[i] for i in range(n_rows)):
-                continue
-            result = _search(idx + 1, new_accum, coeffs + [c])
-            if result is not None:
-                return result
-        return None
-
-    return _search(0, [0] * n_rows, [])
-
 def _count_irreps(
     bundle_irreps: dict[str, list[str]],
     table_irreps: list[str],
