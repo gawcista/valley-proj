@@ -276,6 +276,12 @@ valleyscope analyze-hsp analyze.yaml
 
 主分析流程读取 HDF5，不反复读完整 `WAVECAR`。
 
+分析后，从公共输出构建紧凑的数据库摄入记录（离线收集器，非默认 `analyze-hsp` 输出）：
+
+```bash
+valleyscope collect-database-record ./valley_analysis --output record.json
+```
+
 ### 最小可运行配置
 
 一个只含必要字段的 `analyze.yaml`：

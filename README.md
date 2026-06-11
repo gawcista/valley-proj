@@ -305,6 +305,13 @@ valleyscope analyze-hsp analyze.yaml
 
 The analyzer reads the HDF5 file, not the full `WAVECAR`. This keeps the physics workflow independent from repeated large binary reads and makes it easier to debug the selected k points and bands.
 
+After analysis, build a compact database ingestion record from the public
+outputs (an offline collector, not a default `analyze-hsp` output):
+
+```bash
+valleyscope collect-database-record ./valley_analysis --output record.json
+```
+
 ### Minimal Example
 
 A minimal `analyze.yaml` — only the required fields. All others use defaults (`qcut_mode: moire_shell`, symmetry detection skipped, etc.):

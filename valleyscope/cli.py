@@ -12,6 +12,9 @@ from valleyscope.analysis.reduced_ebr_mapping import (
     build_reduced_ebr_mapping,
 )
 from valleyscope.reports.json_report import write_json
+from valleyscope.analysis.database_ingestion_record import (
+    load_database_ingestion_record_from_directory,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -22,6 +25,7 @@ def main(argv: list[str] | None = None) -> int:
     extract = subparsers.add_parser("extract-wavecar", help="Extract selected WAVECAR coefficients to V1 HDF5")
     extract.add_argument("config", type=Path)
     _add_map_reduced_ebr_parser(subparsers)
+    _add_collect_database_record_parser(subparsers)
     args = parser.parse_args(argv)
     if args.command == "analyze-hsp":
         outputs = analyze_hsp(args.config)
@@ -34,6 +38,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "map-reduced-ebr":
         return _map_reduced_ebr(args)
+    if args.command == "collect-database-record":
+        return _collect_database_record(args)
     parser.error(f"Unknown command: {args.command}")
     return 2
 
@@ -125,6 +131,55 @@ def _map_reduced_ebr(args) -> int:
         print(f"  stable-topology:   {stable}")
     print(f"excluded:            {len(excluded)}")
     print(f"reduced EBR mapping: {output_path}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# collect-database-record
+# ---------------------------------------------------------------------------
+
+def _add_collect_database_record_parser(subparsers) -> None:
+    p = subparsers.add_parser(
+        "collect-database-record",
+        help="Build a database ingestion record from a run output directory",
+    )
+    p.add_argument(
+        "run_dir",
+        type=Path,
+        help="Path to the analyze-hsp output directory",
+    )
+    p.add_argument(
+        "--output", "-o",
+        type=Path,
+        default=Path("database_ingestion_record.json"),
+        help="Output path (default: %(default)s)",
+    )
+
+
+def _collect_database_record(args) -> int:
+    run_dir = Path(args.run_dir)
+    output_path = Path(args.output)
+
+    if not run_dir.is_dir():
+        print(f"error: not a directory: {run_dir}", file=sys.stderr)
+        return 1
+
+    record = load_database_ingestion_record_from_directory(str(run_dir))
+    write_json(output_path, record)
+
+    status = record.get("record_status", "?")
+    bundle_count = record.get("ready_bundle_count", 0)
+    irrep_count = len(record.get("valley_irrep_records", []))
+    errors = record.get("validation_errors", [])
+
+    print(f"record status:          {status}")
+    print(f"ready bundles:          {bundle_count}")
+    print(f"trusted irrep records:  {irrep_count}")
+    if errors:
+        print(f"validation errors:      {len(errors)}")
+        for e in errors:
+            print(f"  - {e}")
+    print(f"ingestion record:       {output_path}")
     return 0
 
 
