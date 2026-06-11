@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0.0",
+  "name": "spinful_C2_phase_v1",
+  "spinful": true,
+  "operation_order": 2,
+  "subspace_group_candidates": ["C2_like", "P2"],
+  "phase_convention": "eigenvalue = exp(2*pi*i*phase), phase in (-0.5, 0.5]",
+  "irreps": [
+    {"label": "C2_spinor_phase_+1/4", "phases": [0.25]},
+    {"label": "C2_spinor_phase_-1/4", "phases": [-0.25]}
+  ]
+}

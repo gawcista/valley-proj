@@ -5015,3 +5015,75 @@ def test_benchmark_matrix_ingestion_section():
     assert "collect-database-record" in matrix
     assert "offline" in matrix.lower() or "not a default" in matrix.lower()
     assert matrix.count("## Standard Output Contract") == 1
+
+
+# -----------------------------------------------------------------------
+# Valley-irrep phase table data contract tests
+# -----------------------------------------------------------------------
+
+def test_phase_table_c3_loads_labels():
+    """C3 phase table must provide exactly 3 labels that match the old hardcoded set."""
+    from valleyscope.data.valley_irreps.catalog import get_irrep_phase_list
+    irreps = get_irrep_phase_list("spinful_C3_phase_v1")
+    labels = {e["label"] for e in irreps}
+    assert labels == {"C3_spinor_phase_+1/6", "C3_spinor_phase_+1/2", "C3_spinor_phase_-1/6"}
+    assert all(len(e["phases"]) == 1 for e in irreps)
+
+
+def test_phase_table_c2_loads_labels():
+    """C2 phase table must provide exactly 2 labels that match the old hardcoded set."""
+    from valleyscope.data.valley_irreps.catalog import get_irrep_phase_list
+    irreps = get_irrep_phase_list("spinful_C2_phase_v1")
+    labels = {e["label"] for e in irreps}
+    assert labels == {"C2_spinor_phase_+1/4", "C2_spinor_phase_-1/4"}
+    assert all(len(e["phases"]) == 1 for e in irreps)
+
+
+def test_phase_table_tables_implemented_unchanged():
+    """tables_implemented must remain ['spinful_C3', 'spinful_C2']."""
+    # Construct a matching report with known table names.
+    from valleyscope.analysis.valley_irrep_matching import build_valley_irrep_matching_report
+    workflow = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {"readiness_level": "trusted", "workflow_path": "direct_qcut"},
+            },
+        },
+    }
+    report = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=workflow,
+        symmetry_adapted_valley_report=None,
+    )
+    assert report["tables_implemented"] == ["spinful_C3", "spinful_C2"]
+
+
+def test_phase_table_files_no_ebr_vectors():
+    """Phase table JSON files must not contain EBR vectors."""
+    from valleyscope.data.valley_irreps.catalog import package_data_root
+    for fname in ["spinful_C3_phase_v1.json", "spinful_C2_phase_v1.json"]:
+        data = (package_data_root() / fname).read_text(encoding="utf-8")
+        assert "ebr" not in data.lower() and "vector" not in data.lower(), (
+            f"{fname} must not contain EBR vectors"
+        )
+
+
+def test_phase_table_files_no_material_names():
+    """Phase table JSON files must not contain real material names."""
+    from valleyscope.data.valley_irreps.catalog import package_data_root
+    for fname in ["spinful_C3_phase_v1.json", "spinful_C2_phase_v1.json",
+                   "manifest.json"]:
+        data = (package_data_root() / fname).read_text(encoding="utf-8")
+        for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
+            assert name not in data, f"{fname} must not contain {name!r}"
+
+
+def test_phase_table_readme_mentions_irrep_not_ebr():
+    """README must clarify these are irrep matching tables, not EBR tables."""
+    readme = Path("valleyscope/data/valley_irreps/README.md").read_text(encoding="utf-8").lower()
+    assert "not reduced ebr" in readme or "irrep matching data" in readme
+
+
+def test_phase_table_catalog_no_irrep2_import():
+    """Phase table catalog must not import irrep2."""
+    src = Path("valleyscope/data/valley_irreps/catalog.py").read_text(encoding="utf-8")
+    assert "irrep2" not in src, "catalog.py must not import irrep2"

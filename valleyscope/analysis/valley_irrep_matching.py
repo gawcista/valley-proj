@@ -1,8 +1,8 @@
 """Minimal valley-preserving character-table matching for C3 and C2 spinful irreps.
 
 Matches already-computed valley-preserving eigenphases to named irrep labels
-using tiny internal tables.  Only ``trusted`` readiness enables matching;
-``usable_with_caution`` produces ``diagnostic_only`` output.
+using validated package-data phase tables.  Only ``trusted`` readiness enables
+matching; ``usable_with_caution`` produces ``diagnostic_only`` output.
 
 Non-goals: no reduced EBR, no compatibility relations, no full induced rep logic.
 """
@@ -11,27 +11,20 @@ from __future__ import annotations
 
 from typing import Any
 
+from valleyscope.data.valley_irreps.catalog import get_irrep_phase_list
+
 READINESS_TRUSTED = "trusted"
 READINESS_USABLE_WITH_CAUTION = "usable_with_caution"
 READINESS_BLOCKED = "blocked"
 
-# ---------------------------------------------------------------------------
-# Internal irrep tables — spinful C3 and C2 only
-# ---------------------------------------------------------------------------
 
-# Spinful C3 irreps (order 3, double group).  Each entry is a label and
-# the expected phases (sorted, each in (-0.5, 0.5]).
-_C3_SPINFUL_IRREPS: list[dict[str, object]] = [
-    {"label": "C3_spinor_phase_+1/6",  "phases": [1.0 / 6.0]},
-    {"label": "C3_spinor_phase_+1/2",  "phases": [0.5]},
-    {"label": "C3_spinor_phase_-1/6",  "phases": [-1.0 / 6.0]},
-]
-
-# Spinful C2 irreps (order 2, double group).
-_C2_SPINFUL_IRREPS: list[dict[str, object]] = [
-    {"label": "C2_spinor_phase_+1/4",  "phases": [0.25]},
-    {"label": "C2_spinor_phase_-1/4",  "phases": [-0.25]},
-]
+def _irrep_table_for_order(order: int) -> list[dict[str, object]]:
+    """Return the validated irrep phase table for a given operation order."""
+    if order == 3:
+        return get_irrep_phase_list("spinful_C3_phase_v1")
+    if order == 2:
+        return get_irrep_phase_list("spinful_C2_phase_v1")
+    return []
 
 def _canonical_phase(phase: float) -> float:
     """Wrap phase to (-0.5, 0.5]."""
@@ -184,12 +177,9 @@ def match_valley_irrep(
             ),
         }
 
-    # Select table
-    if operation_order == 3:
-        table = _C3_SPINFUL_IRREPS
-    elif operation_order == 2:
-        table = _C2_SPINFUL_IRREPS
-    else:
+    # Select table from validated package data.
+    table = _irrep_table_for_order(operation_order)
+    if not table:
         return {
             **result_base,
             "matched_irrep": None,

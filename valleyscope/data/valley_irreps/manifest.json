@@ -1,0 +1,8 @@
+{
+  "schema_version": "1.0.0",
+  "description": "Valley-preserving irrep phase tables for spinful C3 and C2",
+  "tables": [
+    {"name": "spinful_C3_phase_v1", "filename": "spinful_C3_phase_v1.json"},
+    {"name": "spinful_C2_phase_v1", "filename": "spinful_C2_phase_v1.json"}
+  ]
+}
