@@ -26,6 +26,9 @@ The repo already has:
 
 **Layer 3 — external solver interface:**
 * default-off reduced EBR mapping interface (exact integer, external table only);
+* ValleyScope-native reduced EBR solver API
+  (`valleyscope.analysis.reduced_ebr_solver`): Smith normal form integer-span
+  check plus bounded nonnegative search, with no OR-Tools dependency;
 * runtime source normalizer/reducer for package-style 3D EBR data to
   ValleyScope sampled-HSP, valley-preserving reduced tables;
 * offline `irreptables` table builder with explicit source-irrep/HSP/key maps
@@ -120,6 +123,7 @@ valley-changing operations as invariance of a single label operator.
 | Phase 9 | High-throughput single-run ingestion record | Done — explicit offline collector, public-output only |
 | Phase 10 | Valley-irrep phase table data contract | Done — spinful C3/C2 phase tables are validated package data |
 | Phase 11 | Runtime EBR source reduction adapter | Done — normalizer/reducer plus offline `irreptables` builder, external tables only |
+| Phase 12 | ValleyScope-native reduced EBR solver API | Done — extracted pure Python / SymPy solver, no OR-Tools |
 
 ## Real Benchmarks
 
