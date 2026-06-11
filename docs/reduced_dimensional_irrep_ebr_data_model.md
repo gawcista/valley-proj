@@ -10,10 +10,11 @@ dependency is added by this document.
 
 ## 1. Motivation
 
-Current ValleyScope irrep matching uses two tiny hardcoded internal tables
-(``_C3_SPINFUL_IRREPS``, ``_C2_SPINFUL_IRREPS`` in
-`valleyscope/analysis/valley_irrep_matching.py`) for spinful C3 and C2
-phase-to-label matching only.  The external-table path
+Current ValleyScope irrep matching uses two tiny versioned package data
+phase tables in `valleyscope/data/valley_irreps/` for spinful C3 and C2
+phase-to-label matching only.  These are valley-preserving irrep matching
+tables, not reduced EBR tables, and they contain no EBR vectors.  The
+external-table path
 (`valleyscope/analysis/reduced_ebr_mapping.py`) requires user-supplied
 validated tables with no built-in data.
 
@@ -193,6 +194,10 @@ valleyscope/
   data/                              # New top-level package-data directory
     __init__.py                      # (empty)
     README.md                        # Data provenance and usage notes
+    valley_irreps/                   # Minimal valley-preserving irrep phase tables
+      manifest.json
+      spinful_C3_phase_v1.json
+      spinful_C2_phase_v1.json
     reduced_ebr/                     # Reduced-dimensional EBR tables
       P321_C3_like_GammaM_KM.json
       P312_C2_like_GammaM_KM_MM.json

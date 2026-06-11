@@ -5083,6 +5083,47 @@ def test_phase_table_readme_mentions_irrep_not_ebr():
     assert "not reduced ebr" in readme or "irrep matching data" in readme
 
 
+def test_phase_table_validator_rejects_noncanonical_phase():
+    """Package phase tables must store phases in the documented convention."""
+    from valleyscope.data.valley_irreps.catalog import _validate_phase_table
+
+    raw = {
+        "schema_version": "1.0.0",
+        "name": "bad_table",
+        "spinful": True,
+        "operation_order": 3,
+        "subspace_group_candidates": ["C3_like", "P3"],
+        "phase_convention": "eigenvalue = exp(2*pi*i*phase), phase in (-0.5, 0.5]",
+        "irreps": [{"label": "bad", "phases": [1.25]}],
+    }
+    with pytest.raises(ValueError, match="canonical range"):
+        _validate_phase_table(raw, "bad_table")
+
+
+def test_phase_table_validator_rejects_ebr_vector_payload():
+    """Valley-irrep phase data must not carry EBR vectors."""
+    from valleyscope.data.valley_irreps.catalog import _validate_phase_table
+
+    raw = {
+        "schema_version": "1.0.0",
+        "name": "bad_table",
+        "spinful": True,
+        "operation_order": 2,
+        "subspace_group_candidates": ["C2_like", "P2"],
+        "phase_convention": "eigenvalue = exp(2*pi*i*phase), phase in (-0.5, 0.5]",
+        "irreps": [{"label": "bad", "phases": [0.25], "vector": [1]}],
+    }
+    with pytest.raises(ValueError, match="forbidden EBR"):
+        _validate_phase_table(raw, "bad_table")
+
+
+def test_phase_table_design_doc_updated():
+    """Design doc must reflect that minimal phase tables are package data."""
+    doc = Path("docs/reduced_dimensional_irrep_ebr_data_model.md").read_text(encoding="utf-8")
+    assert "valleyscope/data/valley_irreps" in doc
+    assert "versioned package data" in doc
+
+
 def test_phase_table_catalog_no_irrep2_import():
     """Phase table catalog must not import irrep2."""
     src = Path("valleyscope/data/valley_irreps/catalog.py").read_text(encoding="utf-8")
