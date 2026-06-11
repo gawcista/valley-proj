@@ -4970,3 +4970,45 @@ def test_ingestion_record_no_material_names():
     src = Path("valleyscope/analysis/database_ingestion_record.py").read_text(encoding="utf-8")
     for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
         assert name not in src, f"database_ingestion_record.py must not contain {name!r}"
+
+
+# -----------------------------------------------------------------------
+# Benchmark ingestion record anchor tests
+# -----------------------------------------------------------------------
+
+def test_benchmark_smoke_doc_exists():
+    """Database ingestion record smoke doc must exist."""
+    doc = Path("docs/benchmarks/database_ingestion_record_smoke.md")
+    assert doc.exists(), "docs/benchmarks/database_ingestion_record_smoke.md must exist"
+
+
+def test_benchmark_smoke_doc_mentions_ingestion_record():
+    """Smoke doc must reference collect-database-record and key fields."""
+    doc = Path("docs/benchmarks/database_ingestion_record_smoke.md").read_text(encoding="utf-8")
+    assert "collect-database-record" in doc
+    assert "has_ready_ebr_bundles" in doc
+    assert "no_ready_ebr_bundles" in doc
+    assert "P321" in doc
+    assert "P312" in doc
+
+
+def test_benchmark_smoke_doc_states_offline_only():
+    """Smoke doc must state ingestion record is offline, not default output."""
+    doc = Path("docs/benchmarks/database_ingestion_record_smoke.md").read_text(encoding="utf-8")
+    assert "not a default" in doc.lower() or "offline" in doc.lower()
+    assert "explicit" in doc.lower()
+
+
+def test_benchmark_smoke_doc_preserves_blocker_status():
+    """Smoke doc must preserve tZrSe2 physical blocker status."""
+    doc = Path("docs/benchmarks/database_ingestion_record_smoke.md").read_text(encoding="utf-8")
+    assert "spinor_convention_unverified" in doc or "spinor" in doc.lower()
+    assert "physical" in doc.lower() or "blocker" in doc.lower()
+
+
+def test_benchmark_matrix_ingestion_section():
+    """benchmark_matrix.md must have a database ingestion record anchors section."""
+    matrix = Path("docs/benchmarks/benchmark_matrix.md").read_text(encoding="utf-8")
+    assert "Database Ingestion Record Anchors" in matrix or "ingestion" in matrix.lower()
+    assert "collect-database-record" in matrix
+    assert "offline" in matrix.lower() or "not a default" in matrix.lower()

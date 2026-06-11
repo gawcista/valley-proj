@@ -68,6 +68,25 @@ detailed audit and blocker evidence.
 
 ## Standard Output Contract
 
+## Database Ingestion Record Anchors
+
+`valleyscope collect-database-record` is an explicit offline collector
+that builds a compact ingestion record from existing public outputs. It is
+not a default `analyze-hsp` output.
+
+Real-fixture smoke anchors (see `docs/benchmarks/database_ingestion_record_smoke.md`):
+
+| Fixture | record_status | ready_bundles | trusted irrep records | space group |
+|---------|--------------|---------------|----------------------|-------------|
+| tMoTe2 P321 | `has_ready_ebr_bundles` | 2 | 8 | P321 (150) |
+| tZrSe2 P312 | `no_ready_ebr_bundles` | 0 | 0 | P312 (149) |
+
+tZrSe2 trusted irrep count is zero because all rows are blocked by
+physical/readiness blockers (`spinor_convention_unverified`, D_raw closure,
+low seed overlap, HSP-star derivation), not database-ingestion errors.
+
+## Standard Output Contract
+
 All real-material fixtures use `output.profile: standard` (or the default,
 which is `standard`). The public output set for each fixture is:
 
