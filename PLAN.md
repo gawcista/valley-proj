@@ -31,6 +31,9 @@ The repo already has:
   check plus bounded nonnegative search, with no OR-Tools dependency;
 * runtime source normalizer/reducer for package-style 3D EBR data to
   ValleyScope sampled-HSP, valley-preserving reduced tables;
+* offline `valleyscope inspect-ebr-source` source-basis inspector for
+  mapping-spec authoring; it reports source irrep labels/degeneracies only and
+  does not infer moire HSPs or ValleyScope valley-preserving irrep keys;
 * offline `irreptables` table builder with explicit source-irrep/HSP/key maps
   and provenance, plus `valleyscope build-reduced-ebr-table` for canonical
   mapping-spec driven table generation; no raw 3D decomposition call and no
@@ -167,8 +170,10 @@ valley-changing operations as invariance of a single label operator.
   implemented path normalizes package-style 3D EBR data, applies explicit
   sampled-HSP and valley-preserving key maps, filters zero reduced EBR vectors
   with provenance, and builds ValleyScope external reduced tables from
-  canonical mapping specs via `valleyscope build-reduced-ebr-table`.  It
-  remains offline/library-only and is not wired into `analyze-hsp`.  The
+  canonical mapping specs via `valleyscope build-reduced-ebr-table`.
+  `valleyscope inspect-ebr-source` provides a deterministic authoring aid for
+  the public source basis but does not infer HSPs or ValleyScope irrep keys.
+  It remains offline/library-only and is not wired into `analyze-hsp`.  The
   adapter must use the `irreptables.ebrs.load_ebr_data` data path, not
   `irrep.ebrs` raw 3D decomposition or OR-Tools.
 * ~~Package-data skeleton~~ — Done. `valleyscope/data/reduced_ebr/` exists
