@@ -56,6 +56,9 @@ The repo already has:
   review-ready from package data alone; the human C3 convention decision
   packet records the required review formulas, per-label evidence needs, and
   provenance requirements;
+* read-only codebase refinement audit (`docs/codebase_refinement_audit.md`)
+  classifies cleanup candidates by physics layer and identifies
+  `test_io_and_workflow.py` splitting as the lowest-risk first cleanup step;
 * OR-Tools / `irrep.ebrs` raw 3D decomposition is not required by the portable
   ValleyScope core path; unsafe native optional probes are opt-in only;
 * `valley_reduced_ebr_mapping.json` (only when `analysis.reduced_ebr.enabled`).
@@ -207,6 +210,10 @@ valley-changing operations as invariance of a single label operator.
   character-table convention review using the decision packet in
   `docs/reduced_ebr_c3_authoring_audit.md`, not more automatic table
   generation.
+* Codebase refinement: `docs/codebase_refinement_audit.md` is complete.  The
+  first implementation pass should be a test-only split of the catch-all
+  `tests/test_io_and_workflow.py` into physics/topic modules without deleting
+  assertions or changing production code.
 * ~~Package-data skeleton~~ — Done. `valleyscope/data/reduced_ebr/` exists
   with empty manifest, README, and catalog module. No table data shipped.
 * ~~Loader integration~~ — Done. `catalog.py` validates manifests, routes
