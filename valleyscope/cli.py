@@ -27,6 +27,7 @@ def main(argv: list[str] | None = None) -> int:
     _add_map_reduced_ebr_parser(subparsers)
     _add_collect_database_record_parser(subparsers)
     _add_build_reduced_ebr_table_parser(subparsers)
+    _add_inspect_source_basis_parser(subparsers)
     args = parser.parse_args(argv)
     if args.command == "analyze-hsp":
         outputs = analyze_hsp(args.config)
@@ -43,6 +44,8 @@ def main(argv: list[str] | None = None) -> int:
         return _collect_database_record(args)
     if args.command == "build-reduced-ebr-table":
         return _build_reduced_ebr_table(args)
+    if args.command == "inspect-source-basis":
+        return _inspect_source_basis(args)
     parser.error(f"Unknown command: {args.command}")
     return 2
 
@@ -250,6 +253,61 @@ def _build_reduced_ebr_table(args) -> int:
     print(f"EBRs:               {len(table['ebrs'])} vectors")
     print(f"filtered zero EBRs: {provenance.get('filtered_zero_vector_ebr_count', 0)}")
     print(f"reduced EBR table:  {output_path}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# inspect-source-basis
+# ---------------------------------------------------------------------------
+
+def _add_inspect_source_basis_parser(subparsers) -> None:
+    p = subparsers.add_parser(
+        "inspect-source-basis",
+        help="Inspect irreptables source basis labels for authoring a reduced EBR spec",
+    )
+    p.add_argument(
+        "space_group_number",
+        type=int,
+        help="Projected-subspace / moire space group number (e.g. 150 for P321)",
+    )
+    p.add_argument(
+        "--spinful",
+        action="store_true",
+        default=True,
+        help="Load double-valued (spinor) data (default: true)",
+    )
+    p.add_argument(
+        "--spinless",
+        action="store_true",
+        default=False,
+        help="Load single-valued (spinless) data instead",
+    )
+
+
+def _inspect_source_basis(args) -> int:
+    from valleyscope.analysis.reduced_ebr_source_basis_inspector import (
+        inspect_source_basis,
+    )
+
+    spinful = not args.spinless
+    try:
+        info = inspect_source_basis(int(args.space_group_number), spinful=spinful)
+    except RuntimeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"space group number:  {info['space_group_number']}")
+    print(f"spinful:             {info['spinful']}")
+    print(f"source irrep labels: {info['irrep_count']}")
+    print(f"source EBRs:         {info['ebr_count']}")
+    print()
+    for i, label in enumerate(info["irrep_labels"]):
+        deg = info["degeneracies"][i] if i < len(info["degeneracies"]) else "?"
+        print(f"  [{i:3d}] {label}  (degeneracy={deg})")
+    print()
+    print("EBR names (first 20):")
+    for name in info["ebr_names"]:
+        print(f"  {name}")
     return 0
 
 

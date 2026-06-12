@@ -275,3 +275,107 @@ def test_adapter_sources_have_no_material_names():
         src = path.read_text(encoding="utf-8")
         for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
             assert name not in src
+
+
+# -----------------------------------------------------------------------
+# Layer 3 E2E smoke: fake package EBR data -> build table -> mapper
+# -----------------------------------------------------------------------
+
+_FAKE_EBR_DATA = {
+    "basis": {"irrep_labels": ["-GM5", "-K5", "-K6", "-A5"], "degeneracies": [1, 1, 1, 1]},
+    "ebrs": [
+        {"ebr_name": "EBR_A", "wyckoff_position": "1a", "vector": [1.0, 0.0, 1.0, 1.0]},
+        {"ebr_name": "EBR_B", "wyckoff_position": "1a", "vector": [1.0, 1.0, 0.0, 0.0]},
+    ],
+}
+
+_FAKE_SPEC = {
+    "schema_version": "1.0.0", "data_source": "irreptables",
+    "space_group_number": 150, "spinful": True,
+    "source_hsp_by_irrep": {"-GM5": "GammaM", "-K5": "KM", "-K6": "KM", "-A5": "A"},
+    "valleyscope_key_by_source_irrep": {
+        "-GM5": "GammaM:C3_spinor_phase_+1/2",
+        "-K5": "KM:C3_spinor_phase_+1/6",
+        "-K6": "KM:C3_spinor_phase_-1/6",
+        "-A5": "A:C1_spinor",
+    },
+    "expected_hsps": ["GammaM", "KM"],
+    "allowed_irrep_keys": [
+        "GammaM:C3_spinor_phase_+1/2",
+        "KM:C3_spinor_phase_+1/6",
+        "KM:C3_spinor_phase_-1/6",
+    ],
+    "subspace_group_candidate": "C3_like",
+}
+
+
+def _fake_loader(sg, spinor):
+    return dict(_FAKE_EBR_DATA)
+
+
+def test_e2e_fake_loader_to_reduced_ebr_mapping(tmp_path):
+    """Layer 3 E2E: fake EBR data -> build table -> reduced EBR mapper."""
+    from valleyscope.analysis.irreptables_runtime_table_builder import (
+        build_reduced_table_from_spec_file,
+    )
+    from valleyscope.analysis.reduced_ebr_mapping import (
+        build_reduced_ebr_mapping, load_reduced_ebr_table,
+    )
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps(_FAKE_SPEC), encoding="utf-8")
+    table = build_reduced_table_from_spec_file(str(spec_path), source_loader=_fake_loader)
+    assert table["subspace_group_candidate"] == "C3_like"
+    bundle = {
+        "bundles": [{
+            "bundle_id": "b_001", "valley": "K",
+            "subspace_group_candidate": "C3_like",
+            "ready_for_external_solver": True,
+            "expected_hsps": ["GammaM", "KM"],
+            "irreps_by_kpoint": {
+                "GammaM": ["C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"],
+                "KM": ["C3_spinor_phase_+1/6", "C3_spinor_phase_-1/6"],
+            },
+        }],
+    }
+    result = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
+    assert result["status"] == "solved_exact"
+    s = result["solutions"][0]
+    assert s["classification"] == "atomic-compatible-candidate"
+
+
+# -----------------------------------------------------------------------
+# Source-basis inspector
+# -----------------------------------------------------------------------
+
+def test_inspector_returns_labels_for_known_sg():
+    """Inspector returns source irrep labels for P150 (P321)."""
+    from valleyscope.analysis.reduced_ebr_source_basis_inspector import (
+        inspect_source_basis,
+    )
+    info = inspect_source_basis(150, spinful=True)
+    assert info["space_group_number"] == 150
+    assert len(info["irrep_labels"]) > 0
+    assert len(info["degeneracies"]) == len(info["irrep_labels"])
+    assert info["ebr_count"] > 0
+    assert info["source"]["package"] == "irreptables"
+    # No HSP inference: raw labels must include source convention like "-GM5".
+    assert any("-GM" in l for l in info["irrep_labels"])
+
+
+def test_cli_inspect_source_basis(tmp_path, capsys):
+    """CLI prints source basis labels for a known SG."""
+    from valleyscope.cli import main
+    rc = main(["inspect-source-basis", "150"])
+    assert rc == 0
+    captured = capsys.readouterr().out
+    assert "space group number:" in captured
+    assert "-GM5" in captured
+
+
+def test_inspector_no_material_names():
+    """Inspector module must not contain material names."""
+    src = Path(
+        "valleyscope/analysis/reduced_ebr_source_basis_inspector.py"
+    ).read_text(encoding="utf-8")
+    for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
+        assert name not in src
