@@ -47,7 +47,9 @@ The repo already has:
   (`docs/reduced_ebr_c3_authoring_audit.md`) documenting the source 3D irrep
   labels, HSP little group / valley-preserving subgroup boundary, valley
   sewing-matrix boundary, and pending human review decisions; no table data is
-  shipped;
+  shipped; the phase-convention audit shows public
+  `irreptables.ebrs.load_ebr_data` does not expose C3 eigenphase/character
+  data, so source labels are not review-ready from EBR data alone;
 * OR-Tools / `irrep.ebrs` raw 3D decomposition is not required by the portable
   ValleyScope core path; unsafe native optional probes are opt-in only;
 * `valley_reduced_ebr_mapping.json` (only when `analysis.reduced_ebr.enabled`).
@@ -190,8 +192,12 @@ valley-changing operations as invariance of a single label operator.
   data path, not `irrep.ebrs` raw 3D decomposition or OR-Tools.
 * First reviewed C3-like external table: pending human review of the
   source-irrep/HSP/ValleyScope-key mapping spec documented in
-  `docs/reduced_ebr_c3_authoring_audit.md`; do not ship package-data table
-  until that mapping and provenance are reviewed.
+  `docs/reduced_ebr_c3_authoring_audit.md`; `-GM5` and `-K5` currently have
+  independent ValleyScope evidence but remain `needs_human_review`, while
+  degenerate source labels such as `-K6` are blocked until the source irrep is
+  restricted/decomposed into the valley-preserving C3 subgroup. Do not ship
+  package-data table until that mapping, restriction convention, and
+  provenance are reviewed.
 * ~~Package-data skeleton~~ — Done. `valleyscope/data/reduced_ebr/` exists
   with empty manifest, README, and catalog module. No table data shipped.
 * ~~Loader integration~~ — Done. `catalog.py` validates manifests, routes
