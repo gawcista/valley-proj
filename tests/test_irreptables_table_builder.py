@@ -11,7 +11,10 @@ from valleyscope.analysis.irreptables_runtime_table_builder import (
     build_reduced_table_from_irreptables,
     build_reduced_table_from_spec_file,
 )
-from valleyscope.analysis.reduced_ebr_mapping import load_reduced_ebr_table
+from valleyscope.analysis.reduced_ebr_mapping import (
+    build_reduced_ebr_mapping,
+    load_reduced_ebr_table,
+)
 
 
 _SAMPLE_EBR_DATA = {
@@ -192,6 +195,58 @@ def test_spec_file_helper_uses_canonical_spec_with_fake_loader(tmp_path):
     assert load_reduced_ebr_table(out_path)["irreps"] == _ALLOWED_KEYS
 
 
+def test_spec_file_table_feeds_reduced_ebr_mapping_e2e(tmp_path):
+    calls = []
+    spec_path = tmp_path / "mapping_spec.json"
+    spec_path.write_text(json.dumps(_canonical_spec()), encoding="utf-8")
+
+    table = build_reduced_table_from_spec_file(
+        spec_path,
+        source_loader=_fake_loader(calls),
+    )
+    table_path = tmp_path / "reduced_table.json"
+    table_path.write_text(json.dumps(table), encoding="utf-8")
+    validated = load_reduced_ebr_table(table_path)
+
+    bundle = {
+        "bundles": [
+            {
+                "bundle_id": "synthetic_bundle",
+                "valley": "K",
+                "subspace_group_candidate": "C3_like",
+                "ready_for_external_solver": True,
+                "expected_hsps": _EXPECTED_HSPS,
+                "irreps_by_kpoint": {
+                    "GammaM": [
+                        "C3_spinor_phase_+1/2",
+                        "C3_spinor_phase_+1/2",
+                    ],
+                    "KM": [
+                        "C3_spinor_phase_+1/6",
+                        "C3_spinor_phase_-1/6",
+                    ],
+                },
+            }
+        ],
+    }
+    result = build_reduced_ebr_mapping(
+        ebr_export_bundle=bundle,
+        table=validated,
+    )
+
+    assert calls == [(150, True)]
+    provenance = validated["provenance"]
+    assert provenance["data_source"] == "irreptables"
+    assert provenance["valleyscope_reduction"] == "sampled_hsp_valley_preserving"
+    assert result["status"] == "solved_exact"
+    solution = result["solutions"][0]
+    assert solution["classification"] == "atomic-compatible-candidate"
+    assert solution["ebr_decomposition"] == [
+        {"label": "EBR_A", "coefficient": 1},
+        {"label": "EBR_B", "coefficient": 1},
+    ]
+
+
 def test_spec_file_helper_requires_canonical_keys(tmp_path):
     legacy_spec = {
         "sg_number": 150,
@@ -260,6 +315,29 @@ def test_cli_build_reduced_ebr_table_writes_validated_table_with_fake_builder(
     assert "space group number: 150" in captured
     assert "spinful:            True" in captured
     assert "filtered zero EBRs: 1" in captured
+
+
+def test_build_reduced_ebr_table_spec_doc_is_linked_and_material_free():
+    doc = Path("docs/build_reduced_ebr_table_spec.md")
+    assert doc.exists()
+    text = doc.read_text(encoding="utf-8")
+    for key in [
+        "schema_version",
+        "data_source",
+        "space_group_number",
+        "spinful",
+        "source_hsp_by_irrep",
+        "valleyscope_key_by_source_irrep",
+        "expected_hsps",
+        "allowed_irrep_keys",
+        "subspace_group_candidate",
+    ]:
+        assert key in text
+    for forbidden in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
+        assert forbidden not in text
+
+    schema = Path("docs/reduced_ebr_table_schema.md").read_text(encoding="utf-8")
+    assert "build_reduced_ebr_table_spec.md" in schema
 
 
 def test_builder_source_has_no_forbidden_dependencies_or_material_names():

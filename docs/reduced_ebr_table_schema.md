@@ -182,6 +182,12 @@ The CLI:
   `subspace_group_candidate`;
 - no decomposition claim is made without a validated external table.
 
+For offline construction of an external reduced EBR table from public
+package-style source data, see
+[`build_reduced_ebr_table_spec.md`](build_reduced_ebr_table_spec.md).  That
+mapping spec performs ValleyScope's sampled-HSP, valley-preserving reduction
+and is separate from reduced EBR decomposition.
+
 ## Explicit Non-Features
 
 - No built-in EBR tables are provided.

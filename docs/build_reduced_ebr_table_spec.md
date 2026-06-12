@@ -8,7 +8,8 @@ mapping spec and public `irreptables` data.
 
 This document defines the canonical spec format.  Every spec must pass
 `valleyscope.analysis.irreptables_runtime_table_builder.build_reduced_table_from_spec_file()`.
-The output table is validated through `load_reduced_ebr_table()`.
+The helper validates the table through `load_reduced_ebr_table()` before
+returning it, and the CLI validates the written JSON before reporting success.
 
 ## Spec Schema
 
@@ -62,10 +63,10 @@ The output table is validated through `load_reduced_ebr_table()`.
    mapping must state it explicitly.
 3. **No implicit irrep-key inference**: irrep labels from the source package
    are not assumed to be ValleyScope valley-preserving irrep labels.
-4. **Reducation is deterministic**: given the same spec + source package
+4. **Reduction is deterministic**: given the same spec + source package
    version, the output is identical.
-5. **Output validated**: the output table passes `load_reduced_ebr_table()`
-   before being written.
+5. **Output validated**: the output table passes `load_reduced_ebr_table()`;
+   the CLI also validates the file after writing it.
 
 ## Non-Features
 
