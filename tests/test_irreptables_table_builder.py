@@ -898,10 +898,14 @@ def test_c3_audit_doc_keeps_degenerate_k6_out_of_1d_phase_basis():
 
 
 def test_c3_audit_doc_blocks_public_api_phase_mapping_without_evidence():
-    """Opaque public source labels need human review, not review-ready status."""
+    """Opaque public source labels need human review, not review-ready status.
+    The doc may say "no label is review_ready" as a meta-statement, but no
+    individual label row may carry `review_ready` as its status value."""
     doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
-    assert "`review_ready`" not in doc
-    assert "needs_human_review" in doc or "`blocked`" in doc
+    # "No source irrep label is `review_ready`" is the correct meta-statement.
+    assert "No source irrep label is `review_ready`" in doc
+    assert "needs_human_review" in doc
+    assert "blocked_by_missing_restriction_data" in doc
 
 
 def test_c3_audit_doc_names_public_ebr_api_boundary_precisely():
@@ -918,3 +922,37 @@ def test_c3_convention_packet_uses_2pi_phase_character_formula():
     assert "exp(4*pi*i*phase_i)" in doc
     assert "exp(+i*pi*phase_i)" not in doc
     assert "(conjugate)" not in doc
+
+
+def test_c3_audit_has_readiness_summary_table():
+    """C3 audit doc must have a concise readiness summary table at the top."""
+    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
+    assert "C3 Convention Readiness Summary" in doc
+    assert "No source irrep label is `review_ready`" in doc
+    # Summary table must list both candidate and blocked labels.
+    for label in ["-GM5", "-K5", "-GM4", "-GM6", "-K4", "-K6"]:
+        assert label in doc
+
+
+def test_c3_audit_has_machine_checked_evidence_section():
+    """C3 audit doc must separate machine-checked from external evidence."""
+    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
+    assert "Machine-Checked vs. External Evidence" in doc
+    assert "Evidence Already Machine-Checked By Existing Tests" in doc
+    assert "Evidence Requiring External / Manual Review" in doc
+    assert "test_phase_tables.py" in doc
+    assert "test_irreptables_table_builder.py" in doc
+    assert "test_reduced_ebr_smoke.py" in doc
+
+
+def test_c3_audit_has_explicit_human_decisions_section():
+    """C3 audit doc must list exactly what human decisions are still required."""
+    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
+    assert "Human Decisions Still Required" in doc
+    assert "Confirm `-GM5`" in doc
+    assert "Confirm `-K5`" in doc
+    assert "Resolve `-K6`" in doc
+    assert "Decide whether `-GM4` and `-K4`" in doc
+    assert "Sign off on provenance record" in doc
+    assert "no C3-like reduced EBR table" in doc
+    assert "claimed as reviewed" in doc
