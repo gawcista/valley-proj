@@ -7,7 +7,7 @@ first ValleyScope reduced EBR table authoring workflow using a C3-like
 projected-subspace / moire space group.  No reduced EBR table is shipped
 or hardcoded — this audit only verifies the tooling path and source data.
 
-## Source Basis Inspection
+## Source 3D Irrep Labels From `irreptables`
 
 Command (run from the repo root):
 
@@ -38,17 +38,25 @@ Full list of 22 labels: `-GM4`, `-GM5`, `-GM6`, `-A4`, `-A5`, `-A6`,
 
 ### HSP Little Group
 
-For a hexagonal moire cell with space group P321, the HSP little groups at
-the sampled moire HSPs are:
+For a C3-like reduced EBR table, the HSP little group must be taken from the
+ValleyScope HSP little-group inventory for the sampled moire HSPs.  The
+reduced EBR vector basis does not use the full valley orbit; it uses only the
+valley-preserving subgroup for each valley.
 
-| HSP | Little Group G_k | Valley-Preserving for K | Valley-Preserving for K' |
-|-----|-----------------|------------------------|-------------------------|
-| GammaM | {E, C3, C3^2, C2, C2', C2''} | {E, C3, C3^2} | {E, C3, C3^2} |
-| KM | {E, C3, C3^2, C2, C2', C2''} | {E, C3, C3^2} | {E, C3, C3^2} |
-| MM | {E, C2} | {E} | {E} |
+Current C3-like authoring target:
 
-The C2 operations at GammaM and KM are valley-changing (swap K↔K') and do
-not enter the valley-preserving irrep matching.
+| HSP | Role In Reduced Table | Valley-Preserving Subgroup |
+|-----|-----------------------|----------------------------|
+| GammaM | required sampled HSP | {E, C3, C3^2} |
+| KM | required sampled HSP | {E, C3, C3^2} |
+| MM | optional / not in C3 reduced basis | identity-only |
+
+MM identity-only rows are not part of the required C3 reduced EBR vector
+basis.
+
+Any C2 operation that appears in a run's HSP little-group inventory and maps
+K to K' is valley-changing sewing data.  It must not enter the
+valley-preserving C3 irrep basis.
 
 ### Valley Mapping
 
@@ -61,7 +69,25 @@ For a K/K' two-valley system under P321:
 At GammaM and KM, the valley-preserving subgroup for each valley is
 {C3, C3^2, E} (order 3).  This subgroup is isomorphic to C3.  Only
 valley-preserving operations appear in the irrep character/phase table;
-valley-changing C2 operations are tracked as orbit data.
+valley-changing operations are tracked as orbit data.
+
+### Valley-Changing Operation And Valley Sewing Matrix
+
+A valley-changing operation belongs to the HSP little group for a sampled
+HSP but maps one valley label to another.  For example, a C2 operation can
+map K to K'.  This operation does not contribute a valley-preserving
+character for a single valley.
+
+The corresponding object is the valley sewing matrix:
+
+```text
+S_g: H_{k,a} -> H_{k,pi_g(a)}
+```
+
+It records how the valley-a subspace is connected to the valley-pi_g(a)
+subspace.  The valley sewing matrix is required for a full valley-orbit
+representation, but it is not an entry of the single-valley reduced EBR
+vector basis.
 
 ### Valley-Preserving Irreps
 
@@ -78,10 +104,13 @@ irrep labels are:
 These are already validated in `valleyscope/data/valley_irreps/` and tested
 in `tests/test_valley_irrep_matching.py`.
 
-### Source-Irrep to ValleyScope Mapping
+### Candidate Source-Irrep to ValleyScope Mapping Decisions
 
-The source irrep labels that correspond to C3 valley-preserving irreps at
-GammaM and KM (derived from the `irreptables` P321 spinor basis):
+The source irrep labels below are candidate rows for a C3-like mapping spec.
+They are not a reviewed reduced EBR table and do not, by themselves, justify
+shipping built-in data.  A human review must verify the source convention,
+the HSP little group convention, and the spinful C3 eigenphase convention
+before these rows can be used as packaged data.
 
 | Source Label | HSP | Degeneracy | ValleyScope Key (example) |
 |-------------|-----|-----------|--------------------------|
@@ -89,17 +118,16 @@ GammaM and KM (derived from the `irreptables` P321 spinor basis):
 | `-K5` | KM | 1 | `KM:C3_spinor_phase_+1/6` |
 | `-K6` | KM | 1 | `KM:C3_spinor_phase_-1/6` |
 
-Other source labels at GammaM and KM also map to valley-preserving irreps
-(e.g., `-GM4` → GammaM irrep GM4, `-K4` → KM irrep K4), but their
-ValleyScope valley-preserving irrep assignment requires physical review
-against benchmark data (tMoTe2 C3 irrep audit).  This audit does not
-claim or assign those labels.
+Other source labels at GammaM and KM also belong to the source 3D irrep
+basis (for example, `-GM4` and `-K4`), but their ValleyScope
+valley-preserving irrep assignment requires independent physical review.
+This audit does not claim or assign those labels.
 
-## Reduced EBR Table Shape
+## Reduced EBR Vector Basis
 
-Given the 3 trusted valley-preserving irreps above (`GammaM:C3_spinor_phase_+1/2`,
-`KM:C3_spinor_phase_+1/6`, `KM:C3_spinor_phase_-1/6`), the reduced external
-table would contain:
+If a reviewed mapping spec selects the three candidate ValleyScope keys above
+(`GammaM:C3_spinor_phase_+1/2`, `KM:C3_spinor_phase_+1/6`,
+`KM:C3_spinor_phase_-1/6`), the reduced external table would contain:
 
 ```json
 {
@@ -118,27 +146,27 @@ table would contain:
 ```
 
 The EBR vectors would be the reduced subset of the 9 source EBR columns,
-filtered to the 3 trusted irrep indices.  No EBR vectors are hardcoded in
+filtered to the reviewed irrep indices.  No EBR vectors are hardcoded in
 this audit; the actual vectors are built deterministically by
-`valleyscope build-reduced-ebr-table` from an explicit mapping spec.
+`valleyscope build-reduced-ebr-table` from an explicit mapping spec after
+that spec passes source-basis preflight.
 
-## Authoring Workflow Verified
+## Authoring Workflow Status
 
-The full tooling chain is functional and deterministic:
+The current status of the material-independent authoring workflow is:
 
 1. `inspect-ebr-source` → source basis labels ✓ (22 labels, 9 EBRs)
-2. `scaffold-spec` → non-buildable template ✓
-3. Manual fill → completed mapping spec (not done in this audit)
-4. `validate-spec` → preflight validation ✓
-5. `build-reduced-ebr-table` with `--source-basis` → reduced table ✓
-6. `map-reduced-ebr` → classification with validated external table ✓
+2. `scaffold-spec` → non-buildable template available
+3. Manual fill → pending human review of HSP and ValleyScope irrep-key maps
+4. `validate-spec` → pending completed reviewed spec
+5. `build-reduced-ebr-table --source-basis` → pending reviewed spec
+6. `map-reduced-ebr` → pending validated external table
 
 ## Non-Features
 
 - No built-in reduced EBR table is shipped.
 - No EBR vectors are hardcoded.
-- No material-specific logic or labels (tMoTe2/tZrSe2 appear only in
-  benchmark docs, not in this audit).
+- No material-specific logic or labels.
 - No HSP inference from source labels.
 - No ValleyScope irrep-key inference.
 - No raw 3D decomposition.
