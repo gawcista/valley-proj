@@ -356,3 +356,104 @@ def test_builder_source_has_no_forbidden_dependencies_or_material_names():
         "ZrSe2",
     ]:
         assert forbidden not in src
+
+
+# -----------------------------------------------------------------------
+# Source-basis inspector (fake loader, no real SG 150 dependency)
+# -----------------------------------------------------------------------
+
+_FAKE_EBR_DATA_INSPECT = {
+    "basis": {"irrep_labels": ["-GM5", "-K5", "-K6", "-A5"], "degeneracies": [1, 1, 1, 1]},
+    "ebrs": [
+        {"ebr_name": "EBR_A", "wyckoff_position": "1a",
+         "vector": [1.0, 0.0, 1.0, 1.0]},
+        {"ebr_name": "EBR_B", "wyckoff_position": "1a",
+         "vector": [1.0, 1.0, 0.0, 0.0]},
+    ],
+}
+
+
+def _fake_inspect_loader(sg, spinor):
+    return dict(_FAKE_EBR_DATA_INSPECT)
+
+
+def test_inspector_returns_canonical_payload_with_fake_loader():
+    """Inspector returns canonical payload when using fake source_loader."""
+    from valleyscope.analysis.reduced_ebr_source_basis_inspector import (
+        inspect_irreptables_source_basis,
+    )
+    info = inspect_irreptables_source_basis(
+        150, spinful=True, source_loader=_fake_inspect_loader,
+    )
+    assert info["schema_version"] == "1.0.0"
+    assert info["data_source"] == "irreptables"
+    assert info["space_group_number"] == 150
+    assert info["spinful"] is True
+    assert info["source_basis_count"] == 4
+    assert info["source_ebr_count"] == 2
+    assert info["provenance"]["package"] == "irreptables"
+    basis = info["source_basis"]
+    assert len(basis) == 4
+    assert basis[0] == {"source_label": "-GM5", "degeneracy": 1}
+
+
+def test_inspector_mismatched_degeneracies_raises():
+    """Mismatched label/degeneracy lengths raise ValueError."""
+    from valleyscope.analysis.reduced_ebr_source_basis_inspector import (
+        inspect_irreptables_source_basis,
+    )
+    bad = dict(_FAKE_EBR_DATA_INSPECT)
+    bad["basis"] = {"irrep_labels": ["-GM5"], "degeneracies": []}
+
+    def bad_loader(sg, spinor):
+        return bad
+
+    with pytest.raises(ValueError, match="degeneracies"):
+        inspect_irreptables_source_basis(150, source_loader=bad_loader)
+
+
+def test_cli_inspect_writes_json(tmp_path, capsys, monkeypatch):
+    """CLI writes canonical JSON to --output with fake loader."""
+    from valleyscope.cli import main
+    from valleyscope.analysis.reduced_ebr_source_basis_inspector import (
+        _default_irreptables_loader,
+    )
+
+    monkeypatch.setattr(
+        "valleyscope.analysis.reduced_ebr_source_basis_inspector._default_irreptables_loader",
+        staticmethod(lambda sg, spinor: dict(_FAKE_EBR_DATA_INSPECT)),
+    )
+    out_path = tmp_path / "inspect.json"
+    rc = main([
+        "inspect-ebr-source", "--space-group-number", "150",
+        "-o", str(out_path),
+    ])
+    assert rc == 0
+    assert out_path.exists()
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    assert payload["source_basis_count"] == 4
+    captured = capsys.readouterr().out
+    assert "source basis count:" in captured
+
+
+def test_inspector_module_no_material_names():
+    """Inspector module must not contain material names."""
+    src = Path(
+        "valleyscope/analysis/reduced_ebr_source_basis_inspector.py"
+    ).read_text(encoding="utf-8")
+    for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
+        assert name not in src, f"inspector must not contain {name!r}"
+
+
+def test_inspector_no_forbidden_imports():
+    """Inspector must not import irrep2, OR-Tools, or irrep.ebrs raw decomposition."""
+    src = Path(
+        "valleyscope/analysis/reduced_ebr_source_basis_inspector.py"
+    ).read_text(encoding="utf-8")
+    for forbidden in [
+        "import irrep2", "from irrep2",
+        "import ortools", "from ortools",
+        "from irrep.ebrs", "import irrep.ebrs",
+        "compute_ebr_decomposition(",
+    ]:
+        assert forbidden not in src, f"must not import {forbidden!r}"

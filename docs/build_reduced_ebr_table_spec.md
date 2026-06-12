@@ -68,6 +68,32 @@ returning it, and the CLI validates the written JSON before reporting success.
 5. **Output validated**: the output table passes `load_reduced_ebr_table()`;
    the CLI also validates the file after writing it.
 
+## Authoring Workflow
+
+1. **Inspect the source basis**:
+   ```bash
+   valleyscope inspect-ebr-source --space-group-number 150 -o source_basis.json
+   ```
+   This writes a canonical JSON payload with all source irrep labels and
+   degeneracies.  No HSP mapping or ValleyScope irrep keys are inferred.
+
+2. **Manually map source irrep labels** to sampled moire HSPs and
+   ValleyScope valley-preserving irrep keys.  Use the output of step 1
+   as the starting point for the `source_hsp_by_irrep` and
+   `valleyscope_key_by_source_irrep` sections of the spec.
+
+3. **Write the canonical mapping spec** (this document's schema above).
+
+4. **Build the reduced table**:
+   ```bash
+   valleyscope build-reduced-ebr-table spec.json -o table.json
+   ```
+
+5. **Map the reduced EBR**:
+   ```bash
+   valleyscope map-reduced-ebr bundle.json table.json -o mapping.json
+   ```
+
 ## Non-Features
 
 - No built-in unreviewed EBR tables.

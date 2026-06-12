@@ -44,8 +44,8 @@ def main(argv: list[str] | None = None) -> int:
         return _collect_database_record(args)
     if args.command == "build-reduced-ebr-table":
         return _build_reduced_ebr_table(args)
-    if args.command == "inspect-source-basis":
-        return _inspect_source_basis(args)
+    if args.command == "inspect-ebr-source":
+        return _inspect_ebr_source(args)
     parser.error(f"Unknown command: {args.command}")
     return 2
 
@@ -257,17 +257,18 @@ def _build_reduced_ebr_table(args) -> int:
 
 
 # ---------------------------------------------------------------------------
-# inspect-source-basis
+# inspect-ebr-source
 # ---------------------------------------------------------------------------
 
 def _add_inspect_source_basis_parser(subparsers) -> None:
     p = subparsers.add_parser(
-        "inspect-source-basis",
-        help="Inspect irreptables source basis labels for authoring a reduced EBR spec",
+        "inspect-ebr-source",
+        help="Inspect irreptables source basis for authoring a reduced EBR spec",
     )
     p.add_argument(
-        "space_group_number",
+        "--space-group-number",
         type=int,
+        required=True,
         help="Projected-subspace / moire space group number (e.g. 150 for P321)",
     )
     p.add_argument(
@@ -282,32 +283,36 @@ def _add_inspect_source_basis_parser(subparsers) -> None:
         default=False,
         help="Load single-valued (spinless) data instead",
     )
-
-
-def _inspect_source_basis(args) -> int:
-    from valleyscope.analysis.reduced_ebr_source_basis_inspector import (
-        inspect_source_basis,
+    p.add_argument(
+        "--output", "-o",
+        type=Path,
+        help="Write canonical inspection JSON to this path",
     )
+
+
+def _inspect_ebr_source(args) -> int:
+    from valleyscope.analysis.reduced_ebr_source_basis_inspector import (
+        inspect_irreptables_source_basis,
+    )
+    from valleyscope.reports.json_report import write_json
 
     spinful = not args.spinless
     try:
-        info = inspect_source_basis(int(args.space_group_number), spinful=spinful)
+        info = inspect_irreptables_source_basis(
+            int(args.space_group_number), spinful=spinful,
+        )
     except RuntimeError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
+    if args.output:
+        write_json(args.output, info)
+        print(f"inspection payload: {args.output}")
+
     print(f"space group number:  {info['space_group_number']}")
     print(f"spinful:             {info['spinful']}")
-    print(f"source irrep labels: {info['irrep_count']}")
-    print(f"source EBRs:         {info['ebr_count']}")
-    print()
-    for i, label in enumerate(info["irrep_labels"]):
-        deg = info["degeneracies"][i] if i < len(info["degeneracies"]) else "?"
-        print(f"  [{i:3d}] {label}  (degeneracy={deg})")
-    print()
-    print("EBR names (first 20):")
-    for name in info["ebr_names"]:
-        print(f"  {name}")
+    print(f"source basis count:  {info['source_basis_count']}")
+    print(f"source EBR count:    {info['source_ebr_count']}")
     return 0
 
 
