@@ -371,12 +371,13 @@ the representation into 1D C3 spinful irreps:
 
 ```
 chi(E) = d            (total dimension)
-chi(C3)  = sum_i n_i * exp(+i*pi*phase_i)
-chi(C3^2) = sum_i n_i * exp(-i*pi*phase_i)   (conjugate)
+chi(C3)  = sum_i n_i * exp(2*pi*i*phase_i)
+chi(C3^2) = sum_i n_i * exp(4*pi*i*phase_i)
 ```
 
-where `n_i` is the multiplicity of each 1D C3 irrep.  For a 1D source
-label (degeneracy 1), `d=1` and `chi(C3)` directly gives the C3 phase.
+where `phase_i` is measured in units of `2*pi`, and `n_i` is the
+multiplicity of each 1D C3 irrep.  For a 1D source label (degeneracy 1),
+`d=1` and `chi(C3)` directly gives the C3 phase.
 
 For a degenerate source label (`-GM6`, `-K6` with degeneracy 2), the
 character `chi(C3)` is a sum of two phase factors that must be resolved

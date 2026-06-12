@@ -909,3 +909,12 @@ def test_c3_audit_doc_names_public_ebr_api_boundary_precisely():
     doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
     assert "irreptables.ebrs.load_ebr_data" in doc
     assert "irreptables.load_ebr_data" not in doc
+
+
+def test_c3_convention_packet_uses_2pi_phase_character_formula():
+    """C3 convention packet must use phase labels in units of 2*pi."""
+    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
+    assert "exp(2*pi*i*phase_i)" in doc
+    assert "exp(4*pi*i*phase_i)" in doc
+    assert "exp(+i*pi*phase_i)" not in doc
+    assert "(conjugate)" not in doc
