@@ -268,7 +268,8 @@ cases into a single data-driven test.
 
 ## Verification
 
-Commands run on `main` at `dfe4e36` (no changes made during this audit):
+Commands run on `cc/codebase-refinement-audit` after the docs-only audit
+change.  No production code or tests were modified during this audit:
 
 ```bash
 $ python -m pytest tests/test_irreptables_table_builder.py tests/test_irrep_data_normalizer.py -q
