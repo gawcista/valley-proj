@@ -40,8 +40,9 @@ The repo already has:
   valley-preserving irrep keys;
 * offline `irreptables` table builder with explicit source-irrep/HSP/key maps
   and provenance, plus `valleyscope build-reduced-ebr-table` for canonical
-  mapping-spec driven table generation; no raw 3D decomposition call and no
-  `analyze-hsp` wiring;
+  mapping-spec driven table generation; optional `--source-basis` preflight
+  validates the human-authored mapping before build; no raw 3D decomposition
+  call and no `analyze-hsp` wiring;
 * OR-Tools / `irrep.ebrs` raw 3D decomposition is not required by the portable
   ValleyScope core path; unsafe native optional probes are opt-in only;
 * `valley_reduced_ebr_mapping.json` (only when `analysis.reduced_ebr.enabled`).
@@ -174,7 +175,8 @@ valley-changing operations as invariance of a single label operator.
   implemented path normalizes package-style 3D EBR data, applies explicit
   sampled-HSP and valley-preserving key maps, filters zero reduced EBR vectors
   with provenance, and builds ValleyScope external reduced tables from
-  canonical mapping specs via `valleyscope build-reduced-ebr-table`.
+  canonical mapping specs via `valleyscope build-reduced-ebr-table`, with
+  optional `--source-basis` preflight before table construction.
   `valleyscope inspect-ebr-source`, `valleyscope scaffold-spec`, and
   `valleyscope validate-spec` provide deterministic authoring aids for the
   public source basis and mapping specs, but do not infer HSPs or ValleyScope
