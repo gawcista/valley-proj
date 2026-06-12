@@ -519,11 +519,12 @@ _VALID_SPEC = {
         "-K6": "KM:C3_spinor_phase_-1/6",
         "-A5": "A:C1_spinor",
     },
-    "expected_hsps": ["GammaM", "KM"],
+    "expected_hsps": ["GammaM", "KM", "A"],
     "allowed_irrep_keys": [
         "GammaM:C3_spinor_phase_+1/2",
         "KM:C3_spinor_phase_+1/6",
         "KM:C3_spinor_phase_-1/6",
+        "A:C1_spinor",
     ],
     "subspace_group_candidate": "C3_like",
 }
@@ -542,7 +543,7 @@ def test_template_contains_all_source_labels():
     assert tmpl["subspace_group_candidate"] == "REQUIRED_FILL_BY_HUMAN"
 
 
-def test_template_is_not_buildable():
+def test_template_is_not_buildable(tmp_path):
     """Template contains placeholder values that will fail build."""
     from valleyscope.analysis.reduced_ebr_spec_template_validator import (
         build_mapping_spec_template,
@@ -551,6 +552,10 @@ def test_template_is_not_buildable():
     # Placeholder HSP mappings are not valid HSP labels.
     for v in tmpl["source_hsp_by_irrep"].values():
         assert v == "REQUIRED_FILL_BY_HUMAN"
+    spec_path = tmp_path / "template.json"
+    spec_path.write_text(json.dumps(tmpl), encoding="utf-8")
+    with pytest.raises(ValueError, match="REQUIRED_FILL_BY_HUMAN|placeholder"):
+        build_reduced_table_from_spec_file(spec_path, source_loader=_fake_loader([]))
 
 
 def test_validator_accepts_completed_spec():
@@ -604,6 +609,53 @@ def test_validator_rejects_extra_label():
     result = validate_mapping_spec_against_source_basis(bad, _SOURCE_BASIS_PAYLOAD)
     assert result["valid"] is False
     assert any("extra" in e.lower() for e in result["errors"])
+
+
+def test_template_rejects_nonbool_source_spinful():
+    import copy
+    from valleyscope.analysis.reduced_ebr_spec_template_validator import (
+        build_mapping_spec_template,
+    )
+    bad = copy.deepcopy(_SOURCE_BASIS_PAYLOAD)
+    bad["spinful"] = "false"
+    with pytest.raises(ValueError, match="spinful"):
+        build_mapping_spec_template(bad)
+
+
+def test_template_rejects_duplicate_source_labels():
+    import copy
+    from valleyscope.analysis.reduced_ebr_spec_template_validator import (
+        build_mapping_spec_template,
+    )
+    bad = copy.deepcopy(_SOURCE_BASIS_PAYLOAD)
+    bad["source_basis"].append({"source_label": "-GM5", "degeneracy": 1})
+    bad["source_basis_count"] = 5
+    with pytest.raises(ValueError, match="duplicate"):
+        build_mapping_spec_template(bad)
+
+
+def test_validator_rejects_hsp_mapping_not_in_expected_hsps():
+    import copy
+    from valleyscope.analysis.reduced_ebr_spec_template_validator import (
+        validate_mapping_spec_against_source_basis,
+    )
+    bad = copy.deepcopy(_VALID_SPEC)
+    bad["source_hsp_by_irrep"]["-GM5"] = "GhostHSP"
+    result = validate_mapping_spec_against_source_basis(bad, _SOURCE_BASIS_PAYLOAD)
+    assert result["valid"] is False
+    assert any("expected_hsps" in e for e in result["errors"])
+
+
+def test_validator_rejects_irrep_key_not_in_allowed_keys():
+    import copy
+    from valleyscope.analysis.reduced_ebr_spec_template_validator import (
+        validate_mapping_spec_against_source_basis,
+    )
+    bad = copy.deepcopy(_VALID_SPEC)
+    bad["valleyscope_key_by_source_irrep"]["-GM5"] = "GammaM:ghost"
+    result = validate_mapping_spec_against_source_basis(bad, _SOURCE_BASIS_PAYLOAD)
+    assert result["valid"] is False
+    assert any("allowed_irrep_keys" in e for e in result["errors"])
 
 
 def test_cli_scaffold_writes_template(tmp_path, capsys):

@@ -108,7 +108,6 @@ def validate_mapping_spec_against_source_basis(
     if spec_labels != source_labels:
         missing = sorted(source_labels - spec_labels)
         extra = sorted(spec_labels - source_labels)
-        missing_names = sorted(source_labels - {e["source_label"] for e in source_basis_payload["source_basis"]})
         if missing:
             errors.append(f"missing source labels in spec: {missing}")
         if extra:
@@ -125,6 +124,8 @@ def validate_mapping_spec_against_source_basis(
             )
 
     # --- Check expected_hsps and allowed_irrep_keys are filled ---
+    expected_hsps_set: set[str] = set()
+    allowed_irrep_key_set: set[str] = set()
     for field in ["expected_hsps", "allowed_irrep_keys"]:
         value = spec.get(field, [])
         if not isinstance(value, list) or not value:
@@ -133,6 +134,24 @@ def validate_mapping_spec_against_source_basis(
             errors.append(f"{field} must not contain placeholder values")
         elif not all(isinstance(v, str) and v for v in value):
             errors.append(f"{field} entries must be non-empty strings")
+        elif field == "expected_hsps":
+            expected_hsps_set = set(value)
+        elif field == "allowed_irrep_keys":
+            allowed_irrep_key_set = set(value)
+
+    if expected_hsps_set and allowed_irrep_key_set:
+        for label, hsp in sorted(hsp_map.items()):
+            key = key_map.get(label)
+            if hsp in expected_hsps_set and key not in allowed_irrep_key_set:
+                errors.append(
+                    f"valleyscope_key_by_source_irrep[{label!r}] must be in "
+                    "allowed_irrep_keys because its HSP is in expected_hsps"
+                )
+            if key in allowed_irrep_key_set and hsp not in expected_hsps_set:
+                errors.append(
+                    f"source_hsp_by_irrep[{label!r}] must be in expected_hsps "
+                    "because its irrep key is in allowed_irrep_keys"
+                )
 
     scg = spec.get("subspace_group_candidate")
     if scg == _PLACEHOLDER or not isinstance(scg, str) or not scg:
