@@ -221,6 +221,12 @@ def _add_build_reduced_ebr_table_parser(subparsers) -> None:
         default=Path("valley_reduced_ebr_table.json"),
         help="Output path for the reduced EBR table (default: %(default)s)",
     )
+    p.add_argument(
+        "--source-basis",
+        type=Path,
+        default=None,
+        help="Optional path to inspect-ebr-source JSON for preflight validation",
+    )
 
 
 def _build_reduced_ebr_table(args) -> int:
@@ -234,6 +240,33 @@ def _build_reduced_ebr_table(args) -> int:
     if not spec_path.is_file():
         print(f"error: spec file not found: {spec_path}", file=sys.stderr)
         return 1
+
+    # Preflight validation (optional).
+    if args.source_basis is not None:
+        source_basis_path = Path(args.source_basis)
+        if not source_basis_path.is_file():
+            print(f"error: source basis file not found: {source_basis_path}", file=sys.stderr)
+            return 1
+        try:
+            spec = json.loads(spec_path.read_text(encoding="utf-8"))
+            source_basis = json.loads(source_basis_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError) as exc:
+            print(f"error: cannot read preflight inputs: {exc}", file=sys.stderr)
+            return 1
+        from valleyscope.analysis.reduced_ebr_spec_template_validator import (
+            validate_mapping_spec_against_source_basis,
+        )
+        try:
+            result = validate_mapping_spec_against_source_basis(spec, source_basis)
+        except ValueError as exc:
+            print(f"error: preflight validation failed: {exc}", file=sys.stderr)
+            return 1
+        if not result["valid"]:
+            print("preflight validation failed:")
+            for e in result["errors"]:
+                print(f"  - {e}")
+            return 1
+        print("preflight validation passed")
 
     try:
         table = build_reduced_table_from_spec_file(str(spec_path))

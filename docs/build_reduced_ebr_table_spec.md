@@ -95,10 +95,12 @@ returning it, and the CLI validates the written JSON before reporting success.
    Checks source label coverage, placeholder completion, canonical fields,
    and HSP/key mapping consistency.  Returns nonzero on validation failure.
 
-5. **Build the reduced table**:
+5. **Build the reduced table** (with optional preflight):
    ```bash
-   valleyscope build-reduced-ebr-table spec.json -o table.json
+   valleyscope build-reduced-ebr-table spec.json --source-basis source_basis.json -o table.json
    ```
+   The `--source-basis` flag runs the preflight validator before building.
+   Omit it to build without validation.
 
 6. **Map the reduced EBR**:
    ```bash

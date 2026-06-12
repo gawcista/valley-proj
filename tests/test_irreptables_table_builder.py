@@ -713,3 +713,129 @@ def test_validator_module_no_forbidden_imports():
         "from irrep.ebrs", "import irrep.ebrs",
     ]:
         assert forbidden not in src
+
+
+# -----------------------------------------------------------------------
+# build-reduced-ebr-table --source-basis preflight E2E
+# -----------------------------------------------------------------------
+
+# Minimal EBR data matching _VALID_SPEC labels.
+_PREFLIGHT_EBR_DATA = {
+    "basis": {"irrep_labels": ["-GM5", "-K5", "-K6", "-A5"], "degeneracies": [1, 1, 1, 1]},
+    "ebrs": [
+        {"ebr_name": "EBR_A", "wyckoff_position": "1a", "vector": [1, 0, 1, 1]},
+        {"ebr_name": "EBR_B", "wyckoff_position": "1a", "vector": [1, 1, 0, 0]},
+    ],
+}
+
+_PREFLIGHT_SOURCE_BASIS = {
+    "schema_version": "1.0.0", "data_source": "irreptables",
+    "space_group_number": 150, "spinful": True,
+    "source_basis": [
+        {"source_label": "-GM5", "degeneracy": 1},
+        {"source_label": "-K5", "degeneracy": 1},
+        {"source_label": "-K6", "degeneracy": 1},
+        {"source_label": "-A5", "degeneracy": 1},
+    ],
+    "source_basis_count": 4, "source_ebr_count": 2,
+    "provenance": {"package": "irreptables", "package_version": "fake"},
+}
+
+_PREFLIGHT_VALID_SPEC = {
+    "schema_version": "1.0.0", "data_source": "irreptables",
+    "space_group_number": 150, "spinful": True,
+    "source_hsp_by_irrep": {"-GM5": "GammaM", "-K5": "KM", "-K6": "KM", "-A5": "A"},
+    "valleyscope_key_by_source_irrep": {
+        "-GM5": "GammaM:C3_spinor_phase_+1/2", "-K5": "KM:C3_spinor_phase_+1/6",
+        "-K6": "KM:C3_spinor_phase_-1/6", "-A5": "A:C1_spinor",
+    },
+    "expected_hsps": ["GammaM", "KM", "A"],
+    "allowed_irrep_keys": [
+        "GammaM:C3_spinor_phase_+1/2", "KM:C3_spinor_phase_+1/6",
+        "KM:C3_spinor_phase_-1/6", "A:C1_spinor",
+    ],
+    "subspace_group_candidate": "C3_like",
+}
+
+
+def test_build_with_source_basis_preflight_passes_for_valid_spec(
+    tmp_path, capsys, monkeypatch,
+):
+    """--source-basis validates spec before building; valid spec passes."""
+    from valleyscope.cli import main
+
+    source = tmp_path / "source.json"
+    source.write_text(json.dumps(_PREFLIGHT_SOURCE_BASIS), encoding="utf-8")
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps(_PREFLIGHT_VALID_SPEC), encoding="utf-8")
+    out = tmp_path / "table.json"
+
+    monkeypatch.setattr(
+        "valleyscope.analysis.irreptables_runtime_table_builder._load_ebr_data_from_irreptables",
+        lambda sg, spinor: dict(_PREFLIGHT_EBR_DATA),
+    )
+
+    rc = main([
+        "build-reduced-ebr-table", str(spec_path),
+        "--source-basis", str(source), "-o", str(out),
+    ])
+    assert rc == 0
+    captured = capsys.readouterr().out
+    assert "preflight validation passed" in captured
+    assert out.exists()
+
+
+def test_build_with_source_basis_fails_on_placeholder_template(
+    tmp_path, capsys,
+):
+    """--source-basis fails preflight on a template with placeholders."""
+    from valleyscope.cli import main
+    from valleyscope.analysis.reduced_ebr_spec_template_validator import (
+        build_mapping_spec_template,
+    )
+
+    source = tmp_path / "source.json"
+    source.write_text(json.dumps(_PREFLIGHT_SOURCE_BASIS), encoding="utf-8")
+    tmpl = build_mapping_spec_template(_PREFLIGHT_SOURCE_BASIS)
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps(tmpl), encoding="utf-8")
+    out = tmp_path / "table.json"
+
+    rc = main([
+        "build-reduced-ebr-table", str(spec_path),
+        "--source-basis", str(source), "-o", str(out),
+    ])
+    assert rc != 0, "should fail preflight on placeholder template"
+    assert not out.exists()
+
+
+def test_build_without_source_basis_skips_preflight(
+    tmp_path, capsys, monkeypatch,
+):
+    """Omitting --source-basis preserves existing behavior."""
+    from valleyscope.cli import main
+
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps(_PREFLIGHT_VALID_SPEC), encoding="utf-8")
+    out = tmp_path / "table.json"
+
+    monkeypatch.setattr(
+        "valleyscope.analysis.irreptables_runtime_table_builder._load_ebr_data_from_irreptables",
+        lambda sg, spinor: dict(_PREFLIGHT_EBR_DATA),
+    )
+
+    rc = main([
+        "build-reduced-ebr-table", str(spec_path), "-o", str(out),
+    ])
+    assert rc == 0
+    assert out.exists()
+    captured = capsys.readouterr().out
+    assert "preflight" not in captured
+
+
+def test_build_preflight_no_material_names():
+    """Preflight fixture data must not contain material names."""
+    for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
+        assert name not in json.dumps(_PREFLIGHT_SOURCE_BASIS)
+        assert name not in json.dumps(_PREFLIGHT_VALID_SPEC)
+        assert name not in json.dumps(_PREFLIGHT_EBR_DATA)
