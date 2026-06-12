@@ -112,11 +112,11 @@ shipping built-in data.  A human review must verify the source convention,
 the HSP little group convention, and the spinful C3 eigenphase convention
 before these rows can be used as packaged data.
 
-| Source Label | HSP | Degeneracy | ValleyScope Key (example) |
-|-------------|-----|-----------|--------------------------|
-| `-GM5` | GammaM | 1 | `GammaM:C3_spinor_phase_+1/2` |
-| `-K5` | KM | 1 | `KM:C3_spinor_phase_+1/6` |
-| `-K6` | KM | 1 | `KM:C3_spinor_phase_-1/6` |
+| Source Label | HSP | Degeneracy | Candidate ValleyScope Key | Status |
+|-------------|-----|-----------|---------------------------|--------|
+| `-GM5` | GammaM | 1 | `GammaM:C3_spinor_phase_+1/2` | `needs_human_review` |
+| `-K5` | KM | 1 | `KM:C3_spinor_phase_+1/6` | `needs_human_review` |
+| `-K6` | KM | 2 | none yet | `blocked` — requires restriction/decomposition of a degenerate source irrep before it can contribute to a 1D C3 phase basis |
 
 Other source labels at GammaM and KM also belong to the source 3D irrep
 basis (for example, `-GM4` and `-K4`), but their ValleyScope
@@ -125,9 +125,10 @@ This audit does not claim or assign those labels.
 
 ## Reduced EBR Vector Basis
 
-If a reviewed mapping spec selects the three candidate ValleyScope keys above
-(`GammaM:C3_spinor_phase_+1/2`, `KM:C3_spinor_phase_+1/6`,
-`KM:C3_spinor_phase_-1/6`), the reduced external table would contain:
+No reviewed reduced EBR vector basis is selected by this audit.  The intended
+C3-like ValleyScope basis still has the following target keys, but a buildable
+mapping spec requires reviewed source-irrep restrictions before these keys can
+be populated from public `irreptables` labels:
 
 ```json
 {
@@ -146,8 +147,8 @@ If a reviewed mapping spec selects the three candidate ValleyScope keys above
 ```
 
 The EBR vectors would be the reduced subset of the 9 source EBR columns,
-filtered to the reviewed irrep indices.  No EBR vectors are hardcoded in
-this audit; the actual vectors are built deterministically by
+filtered to reviewed source-irrep restriction data.  No EBR vectors are
+hardcoded in this audit; the actual vectors are built deterministically by
 `valleyscope build-reduced-ebr-table` from an explicit mapping spec after
 that spec passes source-basis preflight.
 
@@ -166,7 +167,7 @@ The current status of the material-independent authoring workflow is:
 
 ### Available Data From Public `irreptables` API
 
-The irreptables `load_ebr_data(150, True)` API provides:
+The public `irreptables.ebrs.load_ebr_data(150, True)` API provides:
 
 - `basis.irrep_labels`: 22 source irrep label strings (e.g. `-GM5`)
 - `basis.degeneracies`: integer degeneracy per label
@@ -186,7 +187,7 @@ string identifiers with no attached phase convention documentation.
 | Source Label | Deg | HSP Little Group | Valley-Preserving Subgroup | Known C3 Phase? | Status |
 |-------------|-----|-----------------|---------------------------|-----------------|--------|
 | `-GM4` | 1 | {E,C3,C3^2} | {E,C3,C3^2} | No | `blocked` — no phase convention evidence from irreptables API |
-| `-GM5` | 1 | {E,C3,C3^2} | {E,C3,C3^2} | Yes (ValleyScope irrep matching benchmark: P321 GammaM C3 eigenphase = +1/2 matches `C3_spinor_phase_+1/2`) | `review_ready` |
+| `-GM5` | 1 | {E,C3,C3^2} | {E,C3,C3^2} | Independent run evidence suggests +1/2, but not from public irreptables phase data | `needs_human_review` |
 | `-GM6` | 2 | {E,C3,C3^2} | {E,C3,C3^2} | No | `blocked` — degeneracy 2; not a 1D C3 irrep |
 
 ### KM Source Labels
@@ -194,7 +195,7 @@ string identifiers with no attached phase convention documentation.
 | Source Label | Deg | HSP Little Group | Valley-Preserving Subgroup | Known C3 Phase? | Status |
 |-------------|-----|-----------------|---------------------------|-----------------|--------|
 | `-K4` | 1 | {E,C3,C3^2} | {E,C3,C3^2} | No | `blocked` — no phase convention evidence from irreptables API |
-| `-K5` | 1 | {E,C3,C3^2} | {E,C3,C3^2} | Yes (phase +1/6 matches `C3_spinor_phase_+1/6`) | `review_ready` |
+| `-K5` | 1 | {E,C3,C3^2} | {E,C3,C3^2} | Independent run evidence suggests +1/6, but not from public irreptables phase data | `needs_human_review` |
 | `-K6` | 2 | {E,C3,C3^2} | {E,C3,C3^2} | No | `blocked` — degeneracy 2; not a 1D C3 irrep |
 
 ### KA Source Labels (Excluded From C3 Reduced Basis)
@@ -211,15 +212,15 @@ The public irreptables API does not expose C3 eigenphase or character
 decomposition data for individual source irrep labels.  The following
 blocks prevent fully automated C3 phase mapping:
 
-1. **No eigenphase data**: `irreptables.load_ebr_data` returns combinatorial
-   EBR data (which irreps belong to which EBR) but not the C3 rotation
-   eigenvalues of each irrep.  Source labels like `-GM5` cannot be mapped
-   to `C3_spinor_phase_+1/2` from irreptables data alone.
+1. **No eigenphase data**: `irreptables.ebrs.load_ebr_data` returns
+   combinatorial EBR data (which irreps belong to which EBR) but not the C3
+   rotation eigenvalues of each irrep.  Source labels like `-GM5` cannot be
+   mapped to `C3_spinor_phase_+1/2` from irreptables data alone.
 
-2. **Degeneracy > 1**: `-GM6` and `-K6` have degeneracy 2, which violates
-   the one-dimensional constraint of the ValleyScope spinful C3 phase
-   table.  These are not 1D C3 irreps and cannot be used for single-valley
-   valley-preserving EBR input.
+2. **Degeneracy > 1**: `-GM6` and `-K6` have degeneracy 2 in the source
+   3D irrep basis. They cannot be used directly as one-dimensional
+   ValleyScope spinful C3 phase entries without first restricting and
+   decomposing the source irrep into the valley-preserving C3 subgroup.
 
 3. **Opaque label convention**: Source irrep labels like `-GM4`, `-K4` have
    no documented phase convention in the irreptables API.  The `-4`/`-5`/`-6`
@@ -230,25 +231,23 @@ blocks prevent fully automated C3 phase mapping:
    `SpaceGroupIrreps` or character tables that could be queried for C3
    eigenvalues.
 
-### What CAN Be Mapped (With Independent Evidence)
+### Candidate Rows With Independent Evidence
 
-| Source | ValleyScope Key | Evidence |
-|--------|----------------|----------|
-| `-GM5` (deg 1) | `GammaM:C3_spinor_phase_+1/2` | ValleyScope irrep-matching benchmark: P321 GammaM C3 eigenphase = +1/2, matches C3_spinor_phase_+1/2.  This is a per-run ValleyScope diagnostic, not an irreptables API guarantee. |
-| `-K5` (deg 1) | `KM:C3_spinor_phase_+1/6` | Same benchmark: KM C3 eigenphase = +1/6. |
-| `-K6` (deg 2) | Not mappable to 1D C3 irrep | Degeneracy 2; need direct-sum decomposition beyond current matching scope. |
+| Source | Candidate ValleyScope Key | Evidence | Status |
+|--------|--------------------------|----------|--------|
+| `-GM5` (deg 1) | `GammaM:C3_spinor_phase_+1/2` | Independent ValleyScope C3 eigenphase evidence. This is per-run diagnostic evidence, not an irreptables API guarantee. | `needs_human_review` |
+| `-K5` (deg 1) | `KM:C3_spinor_phase_+1/6` | Independent ValleyScope C3 eigenphase evidence. | `needs_human_review` |
+| `-K6` (deg 2) | none yet | Degeneracy 2; requires source-irrep restriction/decomposition before it can contribute to the 1D C3 phase basis. | `blocked` |
 
 ### Conclusion
 
-Only `-GM5` and `-K5` have sufficient independent evidence (via the
-ValleyScope P321 irrep matching benchmark) to be mapped to ValleyScope spinful
-C3 phase labels.  All other GammaM/KM source labels are blocked by a
-combination of missing phase convention data, degeneracy > 1, or
-undocumented label conventions in the irreptables API.  A reviewed C3-like
-reduced EBR table authoring requires resolving these blockers — either
-through an external irrep character table source or through explicit
-human review of the `irrep.spacegroup_irreps` module (which imports
-cleanly but was not called in this audit).
+No source label is review-ready from public `irreptables` EBR data alone.
+`-GM5` and `-K5` are candidate rows with independent ValleyScope evidence,
+so they are `needs_human_review`, not final table data.  `-K6` is blocked
+until the degenerate source irrep is restricted/decomposed into the
+valley-preserving C3 basis.  A reviewed C3-like reduced EBR table authoring
+requires resolving these blockers through an external irrep character table
+source or explicit human review of the relevant source-irrep convention.
 
 ## Non-Features
 

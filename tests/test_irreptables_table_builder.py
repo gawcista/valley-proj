@@ -888,3 +888,24 @@ def test_c3_audit_doc_does_not_put_c2_in_reduced_c3_basis():
     doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
     assert "{E, C3, C3^2, C2" not in doc
     assert "MM identity-only" in doc
+
+
+def test_c3_audit_doc_keeps_degenerate_k6_out_of_1d_phase_basis():
+    """C3 audit doc must not map degenerate K6 source labels to 1D phases."""
+    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
+    assert "`-K6` | KM | 1 | `KM:C3_spinor_phase_-1/6`" not in doc
+    assert "`-K6` | 2" in doc
+
+
+def test_c3_audit_doc_blocks_public_api_phase_mapping_without_evidence():
+    """Opaque public source labels need human review, not review-ready status."""
+    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
+    assert "`review_ready`" not in doc
+    assert "needs_human_review" in doc or "`blocked`" in doc
+
+
+def test_c3_audit_doc_names_public_ebr_api_boundary_precisely():
+    """C3 audit doc must name the public irreptables EBR loader boundary."""
+    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
+    assert "irreptables.ebrs.load_ebr_data" in doc
+    assert "irreptables.load_ebr_data" not in doc
