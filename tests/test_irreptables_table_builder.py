@@ -483,3 +483,181 @@ def test_inspector_no_forbidden_imports():
         "compute_ebr_decomposition(",
     ]:
         assert forbidden not in src, f"must not import {forbidden!r}"
+
+
+# -----------------------------------------------------------------------
+# Spec template / preflight validator
+# -----------------------------------------------------------------------
+
+_SOURCE_BASIS_PAYLOAD = {
+    "schema_version": "1.0.0",
+    "data_source": "irreptables",
+    "space_group_number": 150,
+    "spinful": True,
+    "source_basis": [
+        {"source_label": "-GM5", "degeneracy": 1},
+        {"source_label": "-K5", "degeneracy": 1},
+        {"source_label": "-K6", "degeneracy": 1},
+        {"source_label": "-A5", "degeneracy": 1},
+    ],
+    "source_basis_count": 4,
+    "source_ebr_count": 2,
+    "provenance": {"package": "irreptables", "package_version": "fake"},
+}
+
+_VALID_SPEC = {
+    "schema_version": "1.0.0",
+    "data_source": "irreptables",
+    "space_group_number": 150,
+    "spinful": True,
+    "source_hsp_by_irrep": {
+        "-GM5": "GammaM", "-K5": "KM", "-K6": "KM", "-A5": "A",
+    },
+    "valleyscope_key_by_source_irrep": {
+        "-GM5": "GammaM:C3_spinor_phase_+1/2",
+        "-K5": "KM:C3_spinor_phase_+1/6",
+        "-K6": "KM:C3_spinor_phase_-1/6",
+        "-A5": "A:C1_spinor",
+    },
+    "expected_hsps": ["GammaM", "KM"],
+    "allowed_irrep_keys": [
+        "GammaM:C3_spinor_phase_+1/2",
+        "KM:C3_spinor_phase_+1/6",
+        "KM:C3_spinor_phase_-1/6",
+    ],
+    "subspace_group_candidate": "C3_like",
+}
+
+
+def test_template_contains_all_source_labels():
+    """Template has every source label with REQUIRED_ placeholder values."""
+    from valleyscope.analysis.reduced_ebr_spec_template_validator import (
+        build_mapping_spec_template,
+    )
+    tmpl = build_mapping_spec_template(_SOURCE_BASIS_PAYLOAD)
+    assert tmpl["schema_version"] == "1.0.0"
+    assert tmpl["data_source"] == "irreptables"
+    assert set(tmpl["source_hsp_by_irrep"].keys()) == {"-GM5", "-K5", "-K6", "-A5"}
+    assert set(tmpl["valleyscope_key_by_source_irrep"].keys()) == {"-GM5", "-K5", "-K6", "-A5"}
+    assert tmpl["subspace_group_candidate"] == "REQUIRED_FILL_BY_HUMAN"
+
+
+def test_template_is_not_buildable():
+    """Template contains placeholder values that will fail build."""
+    from valleyscope.analysis.reduced_ebr_spec_template_validator import (
+        build_mapping_spec_template,
+    )
+    tmpl = build_mapping_spec_template(_SOURCE_BASIS_PAYLOAD)
+    # Placeholder HSP mappings are not valid HSP labels.
+    for v in tmpl["source_hsp_by_irrep"].values():
+        assert v == "REQUIRED_FILL_BY_HUMAN"
+
+
+def test_validator_accepts_completed_spec():
+    """Validator accepts a fully filled spec."""
+    from valleyscope.analysis.reduced_ebr_spec_template_validator import (
+        validate_mapping_spec_against_source_basis,
+    )
+    result = validate_mapping_spec_against_source_basis(
+        _VALID_SPEC, _SOURCE_BASIS_PAYLOAD,
+    )
+    assert result["valid"] is True
+    assert result["errors"] == []
+
+
+def test_validator_rejects_placeholder():
+    """Validator rejects specs with placeholder values."""
+    from valleyscope.analysis.reduced_ebr_spec_template_validator import (
+        build_mapping_spec_template, validate_mapping_spec_against_source_basis,
+    )
+    tmpl = build_mapping_spec_template(_SOURCE_BASIS_PAYLOAD)
+    result = validate_mapping_spec_against_source_basis(
+        tmpl, _SOURCE_BASIS_PAYLOAD,
+    )
+    assert result["valid"] is False
+    assert any("REQUIRED_FILL_BY_HUMAN" in e or "placeholder" in e for e in result["errors"])
+
+
+def test_validator_rejects_missing_source_label():
+    """Validator rejects spec missing a source label."""
+    import copy
+    from valleyscope.analysis.reduced_ebr_spec_template_validator import (
+        validate_mapping_spec_against_source_basis,
+    )
+    bad = copy.deepcopy(_VALID_SPEC)
+    bad["source_hsp_by_irrep"] = {"-GM5": "GammaM"}
+    bad["valleyscope_key_by_source_irrep"] = {"-GM5": "GammaM:C3_spinor_phase_+1/2"}
+    result = validate_mapping_spec_against_source_basis(bad, _SOURCE_BASIS_PAYLOAD)
+    assert result["valid"] is False
+    assert any("missing" in e.lower() for e in result["errors"])
+
+
+def test_validator_rejects_extra_label():
+    """Validator rejects spec with extra label not in source basis."""
+    import copy
+    from valleyscope.analysis.reduced_ebr_spec_template_validator import (
+        validate_mapping_spec_against_source_basis,
+    )
+    bad = copy.deepcopy(_VALID_SPEC)
+    bad["source_hsp_by_irrep"]["-Z99"] = "Z"
+    bad["valleyscope_key_by_source_irrep"]["-Z99"] = "Z:irrep"
+    result = validate_mapping_spec_against_source_basis(bad, _SOURCE_BASIS_PAYLOAD)
+    assert result["valid"] is False
+    assert any("extra" in e.lower() for e in result["errors"])
+
+
+def test_cli_scaffold_writes_template(tmp_path, capsys):
+    """CLI scaffolds a template from source basis JSON."""
+    from valleyscope.cli import main
+    src = tmp_path / "source.json"
+    src.write_text(json.dumps(_SOURCE_BASIS_PAYLOAD), encoding="utf-8")
+    out = tmp_path / "template.json"
+    rc = main(["scaffold-spec", str(src), "-o", str(out)])
+    assert rc == 0
+    assert out.exists()
+    tmpl = json.loads(out.read_text(encoding="utf-8"))
+    assert "REQUIRED_FILL_BY_HUMAN" in json.dumps(tmpl)
+
+
+def test_cli_validate_spec_rejects_placeholder(tmp_path, capsys):
+    """CLI validates and returns nonzero on invalid spec."""
+    from valleyscope.cli import main
+    src = tmp_path / "source.json"
+    src.write_text(json.dumps(_SOURCE_BASIS_PAYLOAD), encoding="utf-8")
+    spec = tmp_path / "spec.json"
+    spec.write_text(json.dumps({"schema_version": "1.0.0"}), encoding="utf-8")
+    rc = main(["validate-spec", str(spec), str(src)])
+    assert rc != 0
+
+
+def test_cli_validate_spec_accepts_valid(tmp_path):
+    """CLI returns zero on valid spec."""
+    from valleyscope.cli import main
+    src = tmp_path / "source.json"
+    src.write_text(json.dumps(_SOURCE_BASIS_PAYLOAD), encoding="utf-8")
+    spec = tmp_path / "spec.json"
+    spec.write_text(json.dumps(_VALID_SPEC), encoding="utf-8")
+    rc = main(["validate-spec", str(spec), str(src)])
+    assert rc == 0
+
+
+def test_validator_module_no_material_names():
+    """Template/validator module must not contain material names."""
+    src = Path(
+        "valleyscope/analysis/reduced_ebr_spec_template_validator.py"
+    ).read_text(encoding="utf-8")
+    for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
+        assert name not in src
+
+
+def test_validator_module_no_forbidden_imports():
+    """Template/validator must not import irrep2, OR-Tools, or irrep.ebrs."""
+    src = Path(
+        "valleyscope/analysis/reduced_ebr_spec_template_validator.py"
+    ).read_text(encoding="utf-8")
+    for forbidden in [
+        "import irrep2", "from irrep2",
+        "import ortools", "from ortools",
+        "from irrep.ebrs", "import irrep.ebrs",
+    ]:
+        assert forbidden not in src

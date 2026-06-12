@@ -28,6 +28,8 @@ def main(argv: list[str] | None = None) -> int:
     _add_collect_database_record_parser(subparsers)
     _add_build_reduced_ebr_table_parser(subparsers)
     _add_inspect_source_basis_parser(subparsers)
+    _add_scaffold_spec_parser(subparsers)
+    _add_validate_spec_parser(subparsers)
     args = parser.parse_args(argv)
     if args.command == "analyze-hsp":
         outputs = analyze_hsp(args.config)
@@ -46,6 +48,10 @@ def main(argv: list[str] | None = None) -> int:
         return _build_reduced_ebr_table(args)
     if args.command == "inspect-ebr-source":
         return _inspect_ebr_source(args)
+    if args.command == "scaffold-spec":
+        return _scaffold_spec(args)
+    if args.command == "validate-spec":
+        return _validate_spec(args)
     parser.error(f"Unknown command: {args.command}")
     return 2
 
@@ -314,6 +320,107 @@ def _inspect_ebr_source(args) -> int:
     print(f"source basis count:  {info['source_basis_count']}")
     print(f"source EBR count:    {info['source_ebr_count']}")
     return 0
+
+
+# ---------------------------------------------------------------------------
+# scaffold-spec
+# ---------------------------------------------------------------------------
+
+def _add_scaffold_spec_parser(subparsers) -> None:
+    p = subparsers.add_parser(
+        "scaffold-spec",
+        help="Scaffold a mapping spec template from an inspect-ebr-source JSON",
+    )
+    p.add_argument(
+        "source_basis",
+        type=Path,
+        help="Path to inspect-ebr-source output JSON",
+    )
+    p.add_argument(
+        "--output", "-o",
+        type=Path,
+        default=Path("spec_template.json"),
+        help="Output path for the template (default: %(default)s)",
+    )
+
+
+def _scaffold_spec(args) -> int:
+    import json
+    from valleyscope.analysis.reduced_ebr_spec_template_validator import (
+        build_mapping_spec_template,
+    )
+    from valleyscope.reports.json_report import write_json
+
+    source_path = Path(args.source_basis)
+    try:
+        source = json.loads(source_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError) as exc:
+        print(f"error: cannot read source basis '{source_path}': {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        template = build_mapping_spec_template(source)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    write_json(args.output, template)
+    print(f"template spec:       {args.output}")
+    print(f"source labels:       {len(template['source_hsp_by_irrep'])}")
+    print(f"Fill all 'REQUIRED_FILL_BY_HUMAN' placeholders before building.")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# validate-spec
+# ---------------------------------------------------------------------------
+
+def _add_validate_spec_parser(subparsers) -> None:
+    p = subparsers.add_parser(
+        "validate-spec",
+        help="Preflight-validate a reduced EBR mapping spec against a source basis",
+    )
+    p.add_argument(
+        "spec",
+        type=Path,
+        help="Path to the mapping spec JSON to validate",
+    )
+    p.add_argument(
+        "source_basis",
+        type=Path,
+        help="Path to inspect-ebr-source output JSON",
+    )
+
+
+def _validate_spec(args) -> int:
+    import json
+    from valleyscope.analysis.reduced_ebr_spec_template_validator import (
+        validate_mapping_spec_against_source_basis,
+    )
+
+    try:
+        spec = json.loads(Path(args.spec).read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError) as exc:
+        print(f"error: cannot read spec '{args.spec}': {exc}", file=sys.stderr)
+        return 1
+    try:
+        source = json.loads(Path(args.source_basis).read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError) as exc:
+        print(f"error: cannot read source basis '{args.source_basis}': {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        result = validate_mapping_spec_against_source_basis(spec, source)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"valid:  {result['valid']}")
+    print(f"summary: {result['summary']}")
+    if result["errors"]:
+        for e in result["errors"]:
+            print(f"  - {e}")
+    return 0 if result["valid"] else 1
 
 
 if __name__ == "__main__":

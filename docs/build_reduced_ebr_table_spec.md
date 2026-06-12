@@ -74,22 +74,33 @@ returning it, and the CLI validates the written JSON before reporting success.
    ```bash
    valleyscope inspect-ebr-source --space-group-number 150 -o source_basis.json
    ```
-   This writes a canonical JSON payload with all source irrep labels and
-   degeneracies.  No HSP mapping or ValleyScope irrep keys are inferred.
 
-2. **Manually map source irrep labels** to sampled moire HSPs and
-   ValleyScope valley-preserving irrep keys.  Use the output of step 1
-   as the starting point for the `source_hsp_by_irrep` and
-   `valleyscope_key_by_source_irrep` sections of the spec.
+2. **Scaffold a mapping spec template**:
+   ```bash
+   valleyscope scaffold-spec source_basis.json -o spec_template.json
+   ```
+   This produces a non-buildable template with every source label and
+   `REQUIRED_FILL_BY_HUMAN` placeholders.  No HSP or ValleyScope irrep
+   keys are inferred.
 
-3. **Write the canonical mapping spec** (this document's schema above).
+3. **Manually fill the template**: map every source irrep label to a
+   sampled moire HSP and a ValleyScope valley-preserving irrep key.
+   Fill `expected_hsps`, `allowed_irrep_keys`, and
+   `subspace_group_candidate`.
 
-4. **Build the reduced table**:
+4. **Validate the completed spec**:
+   ```bash
+   valleyscope validate-spec spec.json source_basis.json
+   ```
+   Checks source label coverage, placeholder completion, canonical fields,
+   and HSP/key mapping consistency.  Returns nonzero on validation failure.
+
+5. **Build the reduced table**:
    ```bash
    valleyscope build-reduced-ebr-table spec.json -o table.json
    ```
 
-5. **Map the reduced EBR**:
+6. **Map the reduced EBR**:
    ```bash
    valleyscope map-reduced-ebr bundle.json table.json -o mapping.json
    ```
