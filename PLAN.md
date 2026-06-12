@@ -210,13 +210,14 @@ valley-changing operations as invariance of a single label operator.
   character-table convention review using the decision packet in
   `docs/reduced_ebr_c3_authoring_audit.md`, not more automatic table
   generation.
-* Codebase refinement: `docs/codebase_refinement_audit.md` is complete.  Test
-  split phases 1-2 are merged: config parsing, output-profile contracts, EBR
-  pipeline, reduced-EBR smoke, database-ingestion, benchmark-doc, and
-  phase-table tests now live in focused files, with shared fixtures in
-  `tests/helpers_io_workflow.py`.  Continue with test-only splits of the
-  remaining workflow, summary, symmetry, and irrep-readiness clusters without
-  deleting assertions or changing production code.
+* Codebase refinement: `docs/codebase_refinement_audit.md` is complete.  The
+  three-phase test-only split of the former catch-all
+  `tests/test_io_and_workflow.py` is merged.  Config parsing, output-profile
+  contracts, EBR pipeline, reduced-EBR smoke, database ingestion,
+  benchmark-doc, phase-table, workflow, summary, symmetry, parent-valley, and
+  irrep-readiness tests now live in focused files with shared fixtures in
+  `tests/helpers_io_workflow.py`.  Further refinement should return to
+  physics-layer code organization, not more test splitting.
 * ~~Package-data skeleton~~ — Done. `valleyscope/data/reduced_ebr/` exists
   with empty manifest, README, and catalog module. No table data shipped.
 * ~~Loader integration~~ — Done. `catalog.py` validates manifests, routes
