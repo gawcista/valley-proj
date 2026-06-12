@@ -262,9 +262,9 @@ def _build_reduced_ebr_table(args) -> int:
             print(f"error: preflight validation failed: {exc}", file=sys.stderr)
             return 1
         if not result["valid"]:
-            print("preflight validation failed:")
+            print("error: preflight validation failed:", file=sys.stderr)
             for e in result["errors"]:
-                print(f"  - {e}")
+                print(f"  - {e}", file=sys.stderr)
             return 1
         print("preflight validation passed")
 

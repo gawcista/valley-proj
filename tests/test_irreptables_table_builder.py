@@ -786,7 +786,7 @@ def test_build_with_source_basis_preflight_passes_for_valid_spec(
 
 
 def test_build_with_source_basis_fails_on_placeholder_template(
-    tmp_path, capsys,
+    tmp_path, capsys, monkeypatch,
 ):
     """--source-basis fails preflight on a template with placeholders."""
     from valleyscope.cli import main
@@ -800,12 +800,26 @@ def test_build_with_source_basis_fails_on_placeholder_template(
     spec_path = tmp_path / "spec.json"
     spec_path.write_text(json.dumps(tmpl), encoding="utf-8")
     out = tmp_path / "table.json"
+    source_loader_calls = []
+
+    def _source_loader_should_not_run(sg, spinor):
+        source_loader_calls.append((sg, spinor))
+        raise AssertionError("source loader should not run after preflight failure")
+
+    monkeypatch.setattr(
+        "valleyscope.analysis.irreptables_runtime_table_builder._load_ebr_data_from_irreptables",
+        _source_loader_should_not_run,
+    )
 
     rc = main([
         "build-reduced-ebr-table", str(spec_path),
         "--source-basis", str(source), "-o", str(out),
     ])
     assert rc != 0, "should fail preflight on placeholder template"
+    captured = capsys.readouterr()
+    assert "preflight validation failed" in captured.err
+    assert captured.out == ""
+    assert source_loader_calls == []
     assert not out.exists()
 
 
