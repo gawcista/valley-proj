@@ -112,3 +112,24 @@ def write_square_poscar(path: Path):
         "0.0 0.0 0.0\n",
         encoding="utf-8",
     )
+
+# Shared E2E smoke helpers.
+import json as _json
+
+_E2E_SAMPLE_TABLE = {
+    "schema_version": "1.0.0",
+    "subspace_group_candidate": "C3_like",
+    "expected_hsps": ["GammaM", "KM"],
+    "irreps": [
+        "GammaM:C3_spinor_phase_+1/2",
+        "KM:C3_spinor_phase_+1/6",
+        "KM:C3_spinor_phase_-1/6",
+    ],
+    "ebrs": [
+        {"label": "EBR_A", "vector": [1, 0, 1]},
+        {"label": "EBR_B", "vector": [1, 1, 0]},
+    ],
+}
+
+def e2e_write_table(path, data):
+    path.write_text(_json.dumps(data), encoding="utf-8")
