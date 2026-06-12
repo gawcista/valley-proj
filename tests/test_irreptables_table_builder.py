@@ -412,6 +412,32 @@ def test_inspector_mismatched_degeneracies_raises():
         inspect_irreptables_source_basis(150, source_loader=bad_loader)
 
 
+def test_inspector_missing_source_basis_raises():
+    from valleyscope.analysis.reduced_ebr_source_basis_inspector import (
+        inspect_irreptables_source_basis,
+    )
+
+    def bad_loader(sg, spinor):
+        return {"basis": {"irrep_labels": [], "degeneracies": []}, "ebrs": []}
+
+    with pytest.raises(ValueError, match="source basis"):
+        inspect_irreptables_source_basis(150, source_loader=bad_loader)
+
+
+def test_inspector_noninteger_degeneracy_raises():
+    from valleyscope.analysis.reduced_ebr_source_basis_inspector import (
+        inspect_irreptables_source_basis,
+    )
+    bad = dict(_FAKE_EBR_DATA_INSPECT)
+    bad["basis"] = {"irrep_labels": ["-GM5"], "degeneracies": [1.5]}
+
+    def bad_loader(sg, spinor):
+        return bad
+
+    with pytest.raises(ValueError, match="positive integer"):
+        inspect_irreptables_source_basis(150, source_loader=bad_loader)
+
+
 def test_cli_inspect_writes_json(tmp_path, capsys, monkeypatch):
     """CLI writes canonical JSON to --output with fake loader."""
     from valleyscope.cli import main

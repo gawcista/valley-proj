@@ -10,9 +10,7 @@ installed ``irreptables`` package or any specific space group data.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable, Mapping, Sequence
-from pathlib import Path
 from typing import Any
 
 
@@ -35,8 +33,8 @@ def inspect_irreptables_source_basis(
     spinful : bool
         Use double-valued (spinor) data.
     source_loader : callable or None
-        If None, imports and calls ``irreptables.ebrs.load_ebr_data``.
-        Inject a fake loader for testing.
+        If None, uses ValleyScope's public ``irreptables`` loader boundary.
+        Inject a fake loader for deterministic tests.
 
     Returns
     -------
@@ -67,8 +65,24 @@ def inspect_irreptables_source_basis(
         raise RuntimeError("source_loader must return a mapping")
 
     basis_raw = ebr_data.get("basis", {})
-    irrep_labels = list(basis_raw.get("irrep_labels", []))
-    degeneracies = list(basis_raw.get("degeneracies", []))
+    if not isinstance(basis_raw, Mapping):
+        raise ValueError("source basis must be a mapping")
+    irrep_labels_raw = basis_raw.get("irrep_labels")
+    degeneracies_raw = basis_raw.get("degeneracies")
+    if isinstance(irrep_labels_raw, (str, bytes)) or not isinstance(
+        irrep_labels_raw,
+        Sequence,
+    ):
+        raise ValueError("source basis irrep_labels must be a sequence")
+    if isinstance(degeneracies_raw, (str, bytes)) or not isinstance(
+        degeneracies_raw,
+        Sequence,
+    ):
+        raise ValueError("source basis degeneracies must be a sequence")
+    irrep_labels = list(irrep_labels_raw)
+    degeneracies = list(degeneracies_raw)
+    if not irrep_labels:
+        raise ValueError("source basis must contain at least one irrep label")
 
     if len(degeneracies) != len(irrep_labels):
         raise ValueError(
@@ -80,12 +94,16 @@ def inspect_irreptables_source_basis(
     for i, label in enumerate(irrep_labels):
         if not isinstance(label, str) or not label:
             raise ValueError(f"irrep_labels[{i}] must be a non-empty string")
+        degeneracy = _exact_positive_int(degeneracies[i], f"degeneracies[{i}]")
         source_basis.append({
             "source_label": label,
-            "degeneracy": int(degeneracies[i]),
+            "degeneracy": degeneracy,
         })
 
-    ebrs_raw = list(ebr_data.get("ebrs", []))
+    ebrs = ebr_data.get("ebrs", [])
+    if isinstance(ebrs, (str, bytes)) or not isinstance(ebrs, Sequence):
+        raise ValueError("source EBR entries must be a sequence")
+    ebrs_raw = list(ebrs)
     ebr_count = len(ebrs_raw)
 
     provenance: dict[str, Any] = {
@@ -124,8 +142,24 @@ def inspect_irreptables_source_basis_from_args(
 # ---------------------------------------------------------------------------
 
 def _default_irreptables_loader(sg: int, spinful: bool) -> Mapping[str, Any]:
-    from irreptables.ebrs import load_ebr_data
-    return load_ebr_data(sg, spinful)
+    from valleyscope.analysis.irreptables_runtime_table_builder import (
+        _load_ebr_data_from_irreptables,
+    )
+    return _load_ebr_data_from_irreptables(sg, spinful)
+
+
+def _exact_positive_int(value: Any, field: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{field} must be a positive integer")
+    if isinstance(value, int):
+        resolved = value
+    elif isinstance(value, float) and value.is_integer():
+        resolved = int(value)
+    else:
+        raise ValueError(f"{field} must be a positive integer")
+    if resolved <= 0:
+        raise ValueError(f"{field} must be a positive integer")
+    return resolved
 
 
 def _resolve_package_version() -> str | None:
