@@ -133,3 +133,49 @@ _E2E_SAMPLE_TABLE = {
 
 def e2e_write_table(path, data):
     path.write_text(_json.dumps(data), encoding="utf-8")
+
+
+# Shared P3 fake symmetry payload for irrep/symmetry workflow tests.
+def _p3_fake_symmetry_payload() -> dict:
+    c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]], dtype=int)
+    lattice = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [-0.5, np.sqrt(3.0) / 2.0, 0.0],
+            [0.0, 0.0, 20.0],
+        ]
+    )
+    operations = []
+    for operation_id, rotation in enumerate([np.eye(3, dtype=int), c3, c3 @ c3]):
+        operations.append(
+            {
+                "operation_id": operation_id,
+                "kind": "identity" if operation_id == 0 else "C3",
+                "order": 1 if operation_id == 0 else 3,
+                "rotation_frac": rotation,
+                "translation_frac": np.zeros(3),
+                "rotation_cart": rotation.astype(float),
+                "translation_cart": np.zeros(3),
+                "det": 1,
+                "candidate_rotation": operation_id != 0,
+                "preserved": {"K_valley": True, "Kp_valley": True},
+                "sector_mapping": {"K_valley": "K_valley", "Kp_valley": "Kp_valley"},
+            }
+        )
+    return {
+        "status": "ok",
+        "operation_detection_backend": "spglib",
+        "structure_file": "fake-CONTCAR",
+        "spacegroup_number": 143,
+        "international": "P3",
+        "symmetry_eigenvalue_enabled": True,
+        "requested_rotation_order": "auto",
+        "resolved_rotation_order": 3,
+        "detected_operation_count": len(operations),
+        "detected_operations": operations,
+        "candidate_rotations": [1, 2],
+        "symprec_scan_summary": [],
+        "lattice_direct_cart": lattice,
+        "little_group_check": {"required": True, "status": "evaluated_per_kpoint"},
+        "valley_preservation_check": {"required": True, "status": "completed"},
+    }
