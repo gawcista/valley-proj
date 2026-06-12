@@ -249,6 +249,86 @@ valley-preserving C3 basis.  A reviewed C3-like reduced EBR table authoring
 requires resolving these blockers through an external irrep character table
 source or explicit human review of the relevant source-irrep convention.
 
+## Source-Irrep Restriction Feasibility Audit
+
+### APIs Inspected
+
+| Package | Module | Key Classes | Can Query SG 150 C3 Characters? |
+|---------|--------|-------------|-------------------------------|
+| `irrep` v2.6.3 | `irrep.spacegroup_irreps` | `SpaceGroupIrreps`, `SpaceGroup`, `IrrepTable` | Partial — requires explicit lattice + symmetry operations + spinor rotations; no `from_sg_number` factory |
+| `irreptables` | `irreptables.irreps` | `IrrepTable`, `Irrep`, `KPoint` | No — `IrrepTable(SGnumber, spinor)` parses data files; no data files for SG 150 in `irreptables/data/` |
+| `irreptables` | `irreptables.ebrs` | `load_ebr_data` | No — returns combinatorial EBR data only; no character/eigenphase information |
+
+### Inspection Commands
+
+```python
+# irrep.spacegroup_irreps: requires lattice + rotations + spinor_rotations
+from irrep.spacegroup_irreps import SpaceGroupIrreps
+# No simple from_sg_number factory available.
+
+# irreptables.irreps: IrrepTable parser, no SG 150 data files
+import irreptables.irreps as ir
+# ir.IrrepTable(150, True) -> AssertionError (no data file)
+
+# irreptables.ebrs: EBR-only, no character data
+from irreptables.ebrs import load_ebr_data
+# load_ebr_data(150, True) -> basis + EBR vectors + Smith form only
+```
+
+### Findings
+
+1. **No `from_sg_number` query endpoint**: neither `irrep.spacegroup_irreps`
+   nor `irreptables.irreps` provides a simple query-by-space-group-number
+   API for C3 eigenphase/character data.
+
+2. **`irreptables.irreps` cannot load SG 150**: the `IrrepTable` constructor
+   parses irrep output data files, but `irreptables/data/` does not contain
+   SG 150 data files.
+
+3. **`irrep.spacegroup_irreps` is computationally accessible but heavy**:
+   it can be constructed from a lattice + spglib symmetry operations, but:
+   - requires explicit crystal structure (not just SG number)
+   - requires spinor rotation matching via `match_spinor_rotations`
+   - outputs full-space-group irreps, not per-HSP valley-preserving restrictions
+   - no built-in C3 subgroup restriction function
+
+4. **Character/restriction decomposition not automated**: the API provides
+   full space-group irreps, not the C3 subgroup restriction that would
+   tell us that `-GM5` decomposes as `C3_spinor_phase_+1/2`.
+
+### Updated Per-Label Status
+
+| Source Label | Deg | Status | Reason |
+|-------------|-----|--------|--------|
+| `-GM4` | 1 | `blocked` | No public API gives C3 character for this label |
+| `-GM5` | 1 | `needs_human_review` | ValleyScope run evidence suggests +1/2; cannot be verified from public package APIs alone |
+| `-GM6` | 2 | `blocked` | Degeneracy 2; requires C3 restriction decomposition; no public API provides this |
+| `-K4` | 1 | `blocked` | No public API gives C3 character for this label |
+| `-K5` | 1 | `needs_human_review` | ValleyScope run evidence suggests +1/6; cannot be verified from public package APIs alone |
+| `-K6` | 2 | `blocked` | Degeneracy 2; requires C3 restriction decomposition |
+| `-KA4/-KA5/-KA6` | 1/1/2 | `blocked` | Not in sampled HSP set {GammaM, KM} |
+
+### Conclusion
+
+The public `irrep` / `irreptables` APIs do not provide a simple, queryable
+C3 character/eigenphase table for SG 150 spinful source irreps.  Source-irrep
+to ValleyScope C3 phase mapping requires:
+
+1. Explicit crystal structure + lattice for `SpaceGroupIrreps` construction,
+   then manual C3 subgroup restriction — computationally feasible but not
+   automated.
+2. Or external physics reference (literature-reviewed C3 character tables).
+
+The `irrep.spacegroup_irreps` module is the closest candidate for a future
+runtime adapter, but it requires:
+- a moire/projected-subspace crystal structure (not just a space group
+  number);
+- spinor rotation matching (already built into the module);
+- explicit C3 subgroup restriction logic (not provided by the module).
+
+This blocker should be resolved before a reviewed C3-like reduced EBR
+table can be packaged.
+
 ## Non-Features
 
 - No built-in reduced EBR table is shipped.
