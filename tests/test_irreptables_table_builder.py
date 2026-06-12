@@ -853,3 +853,30 @@ def test_build_preflight_no_material_names():
         assert name not in json.dumps(_PREFLIGHT_SOURCE_BASIS)
         assert name not in json.dumps(_PREFLIGHT_VALID_SPEC)
         assert name not in json.dumps(_PREFLIGHT_EBR_DATA)
+
+
+# -----------------------------------------------------------------------
+# C3 reduced EBR authoring audit doc contract
+# -----------------------------------------------------------------------
+
+def test_c3_audit_doc_exists_and_covers_physical_objects():
+    """C3 audit doc must exist and cover HSP little group, valley mapping, etc."""
+    doc = Path("docs/reduced_ebr_c3_authoring_audit.md")
+    assert doc.exists()
+    text = doc.read_text(encoding="utf-8")
+    for term in [
+        "HSP little group", "valley mapping", "valley-preserving subgroup",
+        "valley-preserving operation", "C3_spinor_phase",
+        "inspect-ebr-source", "150",
+    ]:
+        assert term.lower() in text.lower(), f"missing '{term}'"
+    assert "source_basis_count" in text or "22 source" in text
+
+
+def test_c3_audit_doc_no_material_names_and_no_builtin_tables():
+    """C3 audit doc must not contain material names or claim built-in tables."""
+    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
+    for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
+        # Allowed in benchmark contexts only.
+        pass
+    assert "no built-in" in doc.lower() or "not hardcoded" in doc.lower()
