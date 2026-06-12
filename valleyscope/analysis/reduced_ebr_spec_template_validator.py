@@ -32,7 +32,7 @@ def build_mapping_spec_template(source_basis_payload: Mapping[str, Any]) -> dict
 
     sg = source_basis_payload["space_group_number"]
     spinful = source_basis_payload["spinful"]
-    source_basis = list(source_basis_payload["source_basis"])
+    source_basis = _source_basis_entries(source_basis_payload)
 
     source_hsp: dict[str, str] = {}
     valleyscope_key: dict[str, str] = {}
@@ -95,7 +95,7 @@ def validate_mapping_spec_against_source_basis(
         errors.append("spinful must be a boolean")
 
     # --- Check source label coverage ---
-    source_labels = {e["source_label"] for e in source_basis_payload["source_basis"]}
+    source_labels = {e["source_label"] for e in _source_basis_entries(source_basis_payload)}
     hsp_map = spec.get("source_hsp_by_irrep", {})
     key_map = spec.get("valleyscope_key_by_source_irrep", {})
     spec_labels = set(hsp_map.keys())
@@ -169,11 +169,43 @@ def _validate_source_basis_payload(payload: Mapping[str, Any]) -> None:
         raise ValueError("source_basis_payload must be a mapping")
     if payload.get("schema_version") != _SCHEMA_VERSION:
         raise ValueError(f"source basis schema_version must be {_SCHEMA_VERSION!r}")
+    if payload.get("data_source") != _DATA_SOURCE:
+        raise ValueError(f"source basis data_source must be {_DATA_SOURCE!r}")
+    space_group_number = payload.get("space_group_number")
+    if not isinstance(space_group_number, int) or isinstance(space_group_number, bool):
+        raise ValueError("source basis space_group_number must be an integer")
+    if not isinstance(payload.get("spinful"), bool):
+        raise ValueError("source basis spinful must be a boolean")
     source_basis = payload.get("source_basis")
     if not isinstance(source_basis, Sequence) or isinstance(source_basis, (str, bytes)):
         raise ValueError("source_basis_payload must contain a 'source_basis' list")
     if not source_basis:
         raise ValueError("source_basis_payload source_basis must be non-empty")
+    _source_basis_entries(payload)
+
+
+def _source_basis_entries(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    entries_raw = payload.get("source_basis")
+    if not isinstance(entries_raw, Sequence) or isinstance(entries_raw, (str, bytes)):
+        raise ValueError("source_basis_payload must contain a 'source_basis' list")
+    entries: list[Mapping[str, Any]] = []
+    seen: set[str] = set()
+    for idx, entry in enumerate(entries_raw):
+        if not isinstance(entry, Mapping):
+            raise ValueError(f"source_basis[{idx}] must be a mapping")
+        label = entry.get("source_label")
+        if not isinstance(label, str) or not label:
+            raise ValueError(f"source_basis[{idx}].source_label must be a non-empty string")
+        if label in seen:
+            raise ValueError(f"duplicate source_label in source_basis: {label!r}")
+        seen.add(label)
+        degeneracy = entry.get("degeneracy")
+        if not isinstance(degeneracy, int) or isinstance(degeneracy, bool) or degeneracy <= 0:
+            raise ValueError(
+                f"source_basis[{idx}].degeneracy must be a positive integer"
+            )
+        entries.append(entry)
+    return entries
 
 
 def _result(valid: bool, errors: list[str]) -> dict[str, Any]:
