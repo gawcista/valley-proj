@@ -32,7 +32,9 @@ The repo already has:
 * runtime source normalizer/reducer for package-style 3D EBR data to
   ValleyScope sampled-HSP, valley-preserving reduced tables;
 * offline `irreptables` table builder with explicit source-irrep/HSP/key maps
-  and provenance; no raw 3D decomposition call and no `analyze-hsp` wiring;
+  and provenance, plus `valleyscope build-reduced-ebr-table` for canonical
+  mapping-spec driven table generation; no raw 3D decomposition call and no
+  `analyze-hsp` wiring;
 * OR-Tools / `irrep.ebrs` raw 3D decomposition is not required by the portable
   ValleyScope core path; unsafe native optional probes are opt-in only;
 * `valley_reduced_ebr_mapping.json` (only when `analysis.reduced_ebr.enabled`).
@@ -164,10 +166,11 @@ valley-changing operations as invariance of a single label operator.
 * ~~`irrep` / `irreptables` runtime source adapter boundary~~ — Done.  The
   implemented path normalizes package-style 3D EBR data, applies explicit
   sampled-HSP and valley-preserving key maps, filters zero reduced EBR vectors
-  with provenance, and builds ValleyScope external reduced tables.  It remains
-  offline/library-only and is not wired into `analyze-hsp`.  The adapter must
-  use the `irreptables.ebrs.load_ebr_data` data path, not `irrep.ebrs` raw 3D
-  decomposition or OR-Tools.
+  with provenance, and builds ValleyScope external reduced tables from
+  canonical mapping specs via `valleyscope build-reduced-ebr-table`.  It
+  remains offline/library-only and is not wired into `analyze-hsp`.  The
+  adapter must use the `irreptables.ebrs.load_ebr_data` data path, not
+  `irrep.ebrs` raw 3D decomposition or OR-Tools.
 * ~~Package-data skeleton~~ — Done. `valleyscope/data/reduced_ebr/` exists
   with empty manifest, README, and catalog module. No table data shipped.
 * ~~Loader integration~~ — Done. `catalog.py` validates manifests, routes
