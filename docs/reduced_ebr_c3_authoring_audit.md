@@ -329,6 +329,88 @@ runtime adapter, but it requires:
 This blocker should be resolved before a reviewed C3-like reduced EBR
 table can be packaged.
 
+## Human C3 Convention Review Packet
+
+This section is a structured decision packet for human physics review.
+It does not claim any mapping, ship any table data, or implement any
+automatic convention inference.  The reviewer must decide each row
+explicitly.
+
+### Physics Decision Needed
+
+Choose, for each SG 150 spinful source label below, whether it can be
+mapped to a ValleyScope spinful C3 phase label.  The mapping is:
+
+```
+source_label  ->  ValleyScope C3 phase label
+                    (C3_spinor_phase_+1/6, C3_spinor_phase_+1/2, C3_spinor_phase_-1/6)
+```
+
+A decision of "none" means the label is blocked and cannot enter a
+reviewed C3-like reduced EBR table.
+
+### Review Formulas
+
+The valley-preserving subgroup for the C3 valley at GammaM and KM is:
+
+```
+G_k^{(a)} = { g in G_k | pi_g(a) = a }   (C3-preserving only)
+```
+
+For spinful C3 (double group, C3^3 = -1), the allowed 1D eigenvalues are:
+
+```
+exp(+i*pi/3)  ->  phase +1/6  ->  C3_spinor_phase_+1/6
+exp(+i*pi)    ->  phase +1/2  ->  C3_spinor_phase_+1/2
+exp(-i*pi/3)  ->  phase -1/6  ->  C3_spinor_phase_-1/6
+```
+
+For a source representation restricted to the C3 valley-preserving
+subgroup, the characters `chi(E)`, `chi(C3)`, `chi(C3^2)` decompose
+the representation into 1D C3 spinful irreps:
+
+```
+chi(E) = d            (total dimension)
+chi(C3)  = sum_i n_i * exp(+i*pi*phase_i)
+chi(C3^2) = sum_i n_i * exp(-i*pi*phase_i)   (conjugate)
+```
+
+where `n_i` is the multiplicity of each 1D C3 irrep.  For a 1D source
+label (degeneracy 1), `d=1` and `chi(C3)` directly gives the C3 phase.
+
+For a degenerate source label (`-GM6`, `-K6` with degeneracy 2), the
+character `chi(C3)` is a sum of two phase factors that must be resolved
+into individual 1D C3 irreps through character decomposition.
+
+### Decision Table
+
+| Source Label | Deg | Current Status | Needed Evidence | Acceptable Provenance | Can Enter Table Without Review? |
+|-------------|-----|---------------|-----------------|----------------------|-------------------------------|
+| `-GM4` | 1 | `blocked` | `chi(C3)` eigenvalue for this source irrep | Literature C3 character table for P321 spinor; or explicit `SpaceGroupIrreps` computation with documented lattice | No — evidence required |
+| `-GM5` | 1 | `needs_human_review` | Confirmation that `chi(C3)=exp(+i*pi)` (=phase +1/2) | Same as above; or independent ValleyScope P321 irrep-matching benchmark run showing GammaM C3 eigenphase = +1/2 | No — evidence required |
+| `-GM6` | 2 | `blocked` | C3 restriction decomposition: `chi(C3)` for this 2D irrep; verify it decomposes to two 1D C3 irreps | Same as above; requires explicit character decomposition | No — requires restriction + decomposition |
+| `-K4` | 1 | `blocked` | `chi(C3)` eigenvalue for this source irrep | Literature C3 character table for P321 spinor | No — evidence required |
+| `-K5` | 1 | `needs_human_review` | Confirmation that `chi(C3)=exp(+i*pi/3)` (=phase +1/6) | Same as `-GM5`; independent ValleyScope P321 KM C3 eigenphase benchmark | No — evidence required |
+| `-K6` | 2 | `blocked` | C3 restriction decomposition: `chi(C3)` for this 2D irrep | Same as `-GM6`; requires explicit character decomposition | No — requires restriction + decomposition |
+
+### Provenance Requirements For Reviewed External Table
+
+If any row is promoted to a reviewed status by the human reviewer, the
+accompanying provenance must record:
+
+1. **Source**: space group number, spinor convention, data source package
+   name/version.
+2. **Review method**: how the C3 character/eigenphase evidence was obtained
+   (literature reference, explicit computation, benchmark run).
+3. **Reviewer**: initials and date.
+4. **Schema version**: `1.0.0`.
+5. **Reduction contract**: expected HSPs ({GammaM, KM}), valley-preserving
+   subgroup (C3), allowed ValleyScope irrep keys, and the explicit
+   `source_hsp_by_irrep` / `valleyscope_key_by_source_irrep` maps.
+
+Until at least one row has this provenance, no C3-like reduced EBR table
+may be claimed as reviewed.
+
 ## Non-Features
 
 - No built-in reduced EBR table is shipped.
