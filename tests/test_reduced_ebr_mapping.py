@@ -860,14 +860,46 @@ def test_empty_real_manifest_lists_empty(monkeypatch):
     assert tables == []
 
 
+def _reviewed_table_entry(name: str, filename: str) -> dict:
+    """Return a manifest entry with full reviewed provenance."""
+    return {
+        "name": name, "filename": filename,
+        "review_status": "reviewed",
+        "reviewer": "JD",
+        "review_date": "2026-06-12",
+        "review_method": "literature C3 character table",
+        "source_reference": "P321 spinful character table",
+    }
+
+
+def _reviewed_table_provenance() -> dict:
+    """Return a provenance block for a reviewed table."""
+    return {
+        "review_status": "reviewed",
+        "reviewer": "JD",
+        "review_date": "2026-06-12",
+        "review_method": "literature C3 character table",
+        "source_reference": "P321 spinful character table",
+        "valleyscope_reduction": "sampled_hsp_valley_preserving",
+        "data_source": "irreptables",
+        "package": "irreptables",
+        "package_version": "fake",
+        "space_group_number": 150,
+        "spinful": True,
+        "expected_hsps": ["GammaM", "KM"],
+        "subspace_group_candidate": "C3_like",
+    }
+
+
 def test_valid_fake_manifest_lists_entries(monkeypatch, tmp_path):
-    """A valid fake manifest with entries returns them."""
+    """A valid fake manifest with reviewed entries returns them."""
     root = _make_fake_catalog_root(tmp_path)
     tbl = dict(_SAMPLE_TABLE)
+    tbl["provenance"] = _reviewed_table_provenance()
     (root / "toy.json").write_text(json.dumps(tbl))
     (root / "manifest.json").write_text(json.dumps({
         "schema_version": "1.0.0",
-        "tables": [{"name": "toy", "filename": "toy.json"}],
+        "tables": [_reviewed_table_entry("toy", "toy.json")],
     }))
     _set_fake_root(monkeypatch, root)
 
@@ -888,10 +920,11 @@ def test_fake_table_fails_same_validation_as_external(monkeypatch, tmp_path):
     root = _make_fake_catalog_root(tmp_path)
     bad_table = dict(_SAMPLE_TABLE)
     bad_table["ebrs"] = [{"label": "X", "vector": [1, 2]}]  # wrong length
+    bad_table["provenance"] = _reviewed_table_provenance()
     (root / "bad.json").write_text(json.dumps(bad_table))
     (root / "manifest.json").write_text(json.dumps({
         "schema_version": "1.0.0",
-        "tables": [{"name": "bad", "filename": "bad.json"}],
+        "tables": [_reviewed_table_entry("bad", "bad.json")],
     }))
     _set_fake_root(monkeypatch, root)
 
@@ -931,11 +964,12 @@ def test_manifest_non_list_tables_raises(monkeypatch, tmp_path):
 
 def test_manifest_duplicate_names_raises(monkeypatch, tmp_path):
     root = _make_fake_catalog_root(tmp_path)
+    entry_base = _reviewed_table_entry("dup", "a.json")
     (root / "manifest.json").write_text(json.dumps({
         "schema_version": "1.0.0",
         "tables": [
-            {"name": "dup", "filename": "a.json"},
-            {"name": "dup", "filename": "b.json"},
+            entry_base,
+            {**entry_base, "filename": "b.json"},
         ],
     }))
     _set_fake_root(monkeypatch, root)
@@ -990,7 +1024,10 @@ def test_manifest_unsafe_filename_rejected(filename, error_match, monkeypatch, t
     root = _make_fake_catalog_root(tmp_path)
     (root / "manifest.json").write_text(json.dumps({
         "schema_version": "1.0.0",
-        "tables": [{"name": "escape", "filename": filename}],
+        "tables": [{
+            **_reviewed_table_entry("escape", filename),
+            "filename": filename,
+        }],
     }))
     _set_fake_root(monkeypatch, root)
     from valleyscope.data.reduced_ebr.catalog import load_reduced_ebr_manifest
@@ -1002,7 +1039,7 @@ def test_missing_table_file_raises(monkeypatch, tmp_path):
     root = _make_fake_catalog_root(tmp_path)
     (root / "manifest.json").write_text(json.dumps({
         "schema_version": "1.0.0",
-        "tables": [{"name": "ghost", "filename": "ghost.json"}],
+        "tables": [_reviewed_table_entry("ghost", "ghost.json")],
     }))
     _set_fake_root(monkeypatch, root)
     from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
@@ -1537,3 +1574,202 @@ def test_summary_missing_table_unchanged():
     text = _render_reduced_ebr_text(report)
     assert "missing_table" in text
     assert "classifications:" not in text  # No solutions, no counts
+
+
+# -----------------------------------------------------------------------
+# 22. Reviewed package-data provenance gate
+# -----------------------------------------------------------------------
+
+def _write_reviewed_entry(root: Path, name: str, filename: str,
+                          table: dict | None = None,
+                          manifest_override: dict | None = None) -> None:
+    """Write a fake manifest entry and optional table file under *root*."""
+    entry = {
+        "name": name, "filename": filename,
+        "review_status": "reviewed",
+        "reviewer": "JD",
+        "review_date": "2026-06-12",
+        "review_method": "literature C3 character table",
+        "source_reference": "P321 spinful character table",
+    }
+    if manifest_override is not None:
+        entry.update(manifest_override)
+    (root / "manifest.json").write_text(json.dumps({
+        "schema_version": "1.0.0",
+        "tables": [entry],
+    }))
+    if table is not None:
+        (root / filename).write_text(json.dumps(table))
+
+
+def _reviewed_table_with_provenance(provenance_override=None) -> dict:
+    """Return a minimal reviewed table with required provenance."""
+    p = _reviewed_table_provenance()
+    if provenance_override is not None:
+        p.update(provenance_override)
+    tbl = dict(_SAMPLE_TABLE)
+    tbl["provenance"] = p
+    return tbl
+
+
+# --- success path ---
+
+def test_reviewed_package_table_passes_provenance_gate(monkeypatch, tmp_path):
+    """Reviewed manifest entry + reviewed table provenance -> loads successfully."""
+    root = _make_fake_catalog_root(tmp_path)
+    _write_reviewed_entry(root, "c3", "c3.json",
+                          table=_reviewed_table_with_provenance())
+    _set_fake_root(monkeypatch, root)
+
+    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
+    loaded = load_reviewed_reduced_ebr_table("c3")
+    assert loaded["provenance"]["review_status"] == "reviewed"
+    assert loaded["provenance"]["valleyscope_reduction"] == "sampled_hsp_valley_preserving"
+
+
+# --- manifest entry provenance failures ---
+
+def test_manifest_entry_missing_review_status_raises(monkeypatch, tmp_path):
+    root = _make_fake_catalog_root(tmp_path)
+    _write_reviewed_entry(root, "c3", "c3.json",
+                          manifest_override={"review_status": None},
+                          table=_reviewed_table_with_provenance())
+    _set_fake_root(monkeypatch, root)
+    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
+    with pytest.raises(ValueError, match="review_status"):
+        load_reviewed_reduced_ebr_table("c3")
+
+
+def test_manifest_entry_non_reviewed_status_raises(monkeypatch, tmp_path):
+    root = _make_fake_catalog_root(tmp_path)
+    _write_reviewed_entry(root, "c3", "c3.json",
+                          manifest_override={"review_status": "draft"},
+                          table=_reviewed_table_with_provenance())
+    _set_fake_root(monkeypatch, root)
+    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
+    with pytest.raises(ValueError, match="review_status"):
+        load_reviewed_reduced_ebr_table("c3")
+
+
+def test_manifest_entry_missing_reviewer_raises(monkeypatch, tmp_path):
+    root = _make_fake_catalog_root(tmp_path)
+    _write_reviewed_entry(root, "c3", "c3.json",
+                          manifest_override={"reviewer": ""},
+                          table=_reviewed_table_with_provenance())
+    _set_fake_root(monkeypatch, root)
+    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
+    with pytest.raises(ValueError, match="reviewer"):
+        load_reviewed_reduced_ebr_table("c3")
+
+
+def test_manifest_entry_missing_review_date_raises(monkeypatch, tmp_path):
+    root = _make_fake_catalog_root(tmp_path)
+    _write_reviewed_entry(root, "c3", "c3.json",
+                          manifest_override={"review_date": "  "},
+                          table=_reviewed_table_with_provenance())
+    _set_fake_root(monkeypatch, root)
+    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
+    with pytest.raises(ValueError, match="review_date"):
+        load_reviewed_reduced_ebr_table("c3")
+
+
+def test_manifest_entry_missing_review_method_raises(monkeypatch, tmp_path):
+    root = _make_fake_catalog_root(tmp_path)
+    _write_reviewed_entry(root, "c3", "c3.json",
+                          manifest_override={"review_method": None},
+                          table=_reviewed_table_with_provenance())
+    _set_fake_root(monkeypatch, root)
+    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
+    with pytest.raises(ValueError, match="review_method"):
+        load_reviewed_reduced_ebr_table("c3")
+
+
+def test_manifest_entry_missing_source_reference_raises(monkeypatch, tmp_path):
+    root = _make_fake_catalog_root(tmp_path)
+    _write_reviewed_entry(root, "c3", "c3.json",
+                          manifest_override={"source_reference": ""},
+                          table=_reviewed_table_with_provenance())
+    _set_fake_root(monkeypatch, root)
+    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
+    with pytest.raises(ValueError, match="source_reference"):
+        load_reviewed_reduced_ebr_table("c3")
+
+
+# --- table provenance failures ---
+
+def test_table_missing_provenance_object_raises(monkeypatch, tmp_path):
+    root = _make_fake_catalog_root(tmp_path)
+    tbl = dict(_SAMPLE_TABLE)
+    # no provenance key
+    _write_reviewed_entry(root, "c3", "c3.json", table=tbl)
+    _set_fake_root(monkeypatch, root)
+    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
+    with pytest.raises(ValueError, match="provenance"):
+        load_reviewed_reduced_ebr_table("c3")
+
+
+def test_table_provenance_wrong_review_status_raises(monkeypatch, tmp_path):
+    root = _make_fake_catalog_root(tmp_path)
+    _write_reviewed_entry(root, "c3", "c3.json",
+                          table=_reviewed_table_with_provenance(
+                              provenance_override={"review_status": "fixture-only"}))
+    _set_fake_root(monkeypatch, root)
+    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
+    with pytest.raises(ValueError, match="review_status"):
+        load_reviewed_reduced_ebr_table("c3")
+
+
+def test_table_provenance_missing_reviewer_raises(monkeypatch, tmp_path):
+    root = _make_fake_catalog_root(tmp_path)
+    _write_reviewed_entry(root, "c3", "c3.json",
+                          table=_reviewed_table_with_provenance(
+                              provenance_override={"reviewer": ""}))
+    _set_fake_root(monkeypatch, root)
+    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
+    with pytest.raises(ValueError, match="provenance.reviewer"):
+        load_reviewed_reduced_ebr_table("c3")
+
+
+def test_table_provenance_wrong_valleyscope_reduction_raises(monkeypatch, tmp_path):
+    root = _make_fake_catalog_root(tmp_path)
+    _write_reviewed_entry(root, "c3", "c3.json",
+                          table=_reviewed_table_with_provenance(
+                              provenance_override={
+                                  "valleyscope_reduction": "raw_3d_ebr"}))
+    _set_fake_root(monkeypatch, root)
+    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
+    with pytest.raises(ValueError, match="valleyscope_reduction"):
+        load_reviewed_reduced_ebr_table("c3")
+
+
+def test_table_provenance_missing_valleyscope_reduction_raises(monkeypatch, tmp_path):
+    root = _make_fake_catalog_root(tmp_path)
+    p = _reviewed_table_provenance()
+    del p["valleyscope_reduction"]
+    _write_reviewed_entry(root, "c3", "c3.json",
+                          table=_reviewed_table_with_provenance(
+                              provenance_override={"valleyscope_reduction": None}))
+    _set_fake_root(monkeypatch, root)
+    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
+    with pytest.raises(ValueError, match="valleyscope_reduction"):
+        load_reviewed_reduced_ebr_table("c3")
+
+
+# --- external table path unchanged ---
+
+def test_external_load_reduced_ebr_table_accepts_sample_without_provenance(tmp_path):
+    """Ordinary load_reduced_ebr_table() still accepts _SAMPLE_TABLE
+    without any provenance block."""
+    _write_table(tmp_path / "t.json", _SAMPLE_TABLE)
+    loaded = load_reduced_ebr_table(tmp_path / "t.json")
+    assert loaded["subspace_group_candidate"] == "C3_like"
+    assert "provenance" not in loaded
+
+
+def test_external_load_reduced_ebr_table_accepts_table_with_unreviewed_provenance(tmp_path):
+    """load_reduced_ebr_table() does NOT enforce reviewed provenance."""
+    tbl = dict(_SAMPLE_TABLE)
+    tbl["provenance"] = {"review_status": "fixture-only", "valleyscope_reduction": "none"}
+    _write_table(tmp_path / "t.json", tbl)
+    loaded = load_reduced_ebr_table(tmp_path / "t.json")
+    assert loaded["provenance"]["review_status"] == "fixture-only"

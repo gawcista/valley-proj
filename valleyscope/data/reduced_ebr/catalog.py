@@ -4,10 +4,17 @@ Currently contains no reviewed tables.  All accessor functions are typed
 and will raise clear errors for missing data rather than returning
 heuristic or fallback results.
 
-The manifest is validated at load time.  Individual tables are validated
-through ``load_reduced_ebr_table`` from ``valleyscope.analysis.reduced_ebr_mapping``
-so that packaged tables and user-supplied external tables pass through the
-same validation path.
+The manifest is validated at load time and requires explicit review
+metadata for every table entry.  Individual tables are validated through
+``load_reduced_ebr_table`` from ``valleyscope.analysis.reduced_ebr_mapping``
+for the basic schema contract; the catalog layer additionally requires
+reviewed provenance on both the manifest entry and the loaded table's
+``provenance`` block.
+
+External tables loaded through
+``valleyscope.analysis.reduced_ebr_mapping.load_reduced_ebr_table()`` are
+NOT subject to reviewed-provenance checks.  Only the package-data catalog
+path enforces reviewed provenance.
 """
 
 from __future__ import annotations
@@ -91,8 +98,11 @@ def load_reviewed_reduced_ebr_table(name: str) -> dict:
                 raise FileNotFoundError(
                     f"reviewed table file not found: {table_path}"
                 )
-            # Route through the same validation as external tables.
-            return load_reduced_ebr_table(table_path)
+            # Route through the same basic schema validation as external tables.
+            table = load_reduced_ebr_table(table_path)
+            # --- reviewed provenance gate (table content) ---
+            _validate_table_reviewed_provenance(table, name)
+            return table
 
     available_names = [e.get("name", "?") for e in available]
     raise ValueError(
@@ -143,6 +153,9 @@ def _validate_manifest(manifest: object) -> None:
             raise ValueError(
                 f"manifest tables[{i}] ({name!r}) must have a non-empty 'filename'"
             )
+        # --- reviewed provenance gate (manifest entry) ---
+        _validate_entry_review_metadata(entry, i, name)
+
         # Reject absolute paths and parent-directory traversal.
         _validate_filename_safe(filename, name)
 
@@ -164,6 +177,72 @@ def _validate_filename_safe(filename: str, name: str) -> None:
         raise ValueError(
             f"manifest table {name!r} filename must not contain '..', "
             f"got {filename!r}"
+        )
+
+
+_REQUIRED_MANIFEST_REVIEW_KEYS = frozenset({
+    "review_status", "reviewer", "review_date", "review_method",
+    "source_reference",
+})
+
+
+def _validate_entry_review_metadata(entry: dict, index: int, name: str) -> None:
+    """Validate that a manifest table entry carries reviewed provenance.
+
+    Every reviewed package-data table entry must carry explicit review
+    metadata.  Missing keys, empty values, or a non-"reviewed" status
+    raise ValueError.
+    """
+    for key in sorted(_REQUIRED_MANIFEST_REVIEW_KEYS):
+        value = entry.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(
+                f"manifest tables[{index}] ({name!r}) must have a non-empty "
+                f"'{key}' string"
+            )
+    if entry["review_status"] != "reviewed":
+        raise ValueError(
+            f"manifest tables[{index}] ({name!r}) review_status must be "
+            f"'reviewed', got {entry['review_status']!r}"
+        )
+
+
+_REQUIRED_TABLE_PROVENANCE_KEYS = frozenset({
+    "review_status", "reviewer", "review_date", "review_method",
+    "source_reference",
+})
+
+
+def _validate_table_reviewed_provenance(table: dict, name: str) -> None:
+    """Validate that a loaded reviewed table carries explicit provenance.
+
+    The table's top-level ``provenance`` block must be a dict with
+    non-empty review metadata and ``valleyscope_reduction ==
+    "sampled_hsp_valley_preserving"``.
+    """
+    provenance = table.get("provenance")
+    if not isinstance(provenance, dict):
+        raise ValueError(
+            f"reviewed table {name!r} must have a 'provenance' object "
+            f"(dict), got {type(provenance).__name__}"
+        )
+    for key in sorted(_REQUIRED_TABLE_PROVENANCE_KEYS):
+        value = provenance.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(
+                f"reviewed table {name!r} provenance.{key} must be a "
+                f"non-empty string"
+            )
+    if provenance["review_status"] != "reviewed":
+        raise ValueError(
+            f"reviewed table {name!r} provenance.review_status must be "
+            f"'reviewed', got {provenance['review_status']!r}"
+        )
+    reduction = provenance.get("valleyscope_reduction")
+    if reduction != "sampled_hsp_valley_preserving":
+        raise ValueError(
+            f"reviewed table {name!r} provenance.valleyscope_reduction "
+            f"must be 'sampled_hsp_valley_preserving', got {reduction!r}"
         )
 
 
