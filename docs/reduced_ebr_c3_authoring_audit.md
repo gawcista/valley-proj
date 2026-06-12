@@ -162,6 +162,94 @@ The current status of the material-independent authoring workflow is:
 5. `build-reduced-ebr-table --source-basis` → pending reviewed spec
 6. `map-reduced-ebr` → pending validated external table
 
+## C3 Phase Convention Evidence
+
+### Available Data From Public `irreptables` API
+
+The irreptables `load_ebr_data(150, True)` API provides:
+
+- `basis.irrep_labels`: 22 source irrep label strings (e.g. `-GM5`)
+- `basis.degeneracies`: integer degeneracy per label
+- `ebrs[].ebr_name`: EBR label
+- `ebrs[].wyckoff_position`: Wyckoff position
+- `ebrs[].irrep_list`: which source irreps each EBR contributes to
+- `ebrs[].vector`: integer multiplicity vector aligned to `irrep_labels`
+- `smith_form.u/r/v`: precomputed Smith normal form matrices
+
+**No C3 eigenphase/character data is exposed.** The irreptables API does
+not provide irrep character tables, eigenphase decompositions, or C3
+rotation eigenvalue data.  Source irrep labels like `-GM5` are opaque
+string identifiers with no attached phase convention documentation.
+
+### GammaM Source Labels
+
+| Source Label | Deg | HSP Little Group | Valley-Preserving Subgroup | Known C3 Phase? | Status |
+|-------------|-----|-----------------|---------------------------|-----------------|--------|
+| `-GM4` | 1 | {E,C3,C3^2} | {E,C3,C3^2} | No | `blocked` — no phase convention evidence from irreptables API |
+| `-GM5` | 1 | {E,C3,C3^2} | {E,C3,C3^2} | Yes (ValleyScope irrep matching benchmark: P321 GammaM C3 eigenphase = +1/2 matches `C3_spinor_phase_+1/2`) | `review_ready` |
+| `-GM6` | 2 | {E,C3,C3^2} | {E,C3,C3^2} | No | `blocked` — degeneracy 2; not a 1D C3 irrep |
+
+### KM Source Labels
+
+| Source Label | Deg | HSP Little Group | Valley-Preserving Subgroup | Known C3 Phase? | Status |
+|-------------|-----|-----------------|---------------------------|-----------------|--------|
+| `-K4` | 1 | {E,C3,C3^2} | {E,C3,C3^2} | No | `blocked` — no phase convention evidence from irreptables API |
+| `-K5` | 1 | {E,C3,C3^2} | {E,C3,C3^2} | Yes (phase +1/6 matches `C3_spinor_phase_+1/6`) | `review_ready` |
+| `-K6` | 2 | {E,C3,C3^2} | {E,C3,C3^2} | No | `blocked` — degeneracy 2; not a 1D C3 irrep |
+
+### KA Source Labels (Excluded From C3 Reduced Basis)
+
+| Source Label | Deg | HSP Resolution | Status |
+|-------------|-----|---------------|--------|
+| `-KA4` | 1 | Maps to HSP KA, not in {GammaM, KM} | `blocked` — not in sampled HSP set for C3 reduced basis |
+| `-KA5` | 1 | Same | `blocked` |
+| `-KA6` | 2 | Same | `blocked` |
+
+### Blocker Summary
+
+The public irreptables API does not expose C3 eigenphase or character
+decomposition data for individual source irrep labels.  The following
+blocks prevent fully automated C3 phase mapping:
+
+1. **No eigenphase data**: `irreptables.load_ebr_data` returns combinatorial
+   EBR data (which irreps belong to which EBR) but not the C3 rotation
+   eigenvalues of each irrep.  Source labels like `-GM5` cannot be mapped
+   to `C3_spinor_phase_+1/2` from irreptables data alone.
+
+2. **Degeneracy > 1**: `-GM6` and `-K6` have degeneracy 2, which violates
+   the one-dimensional constraint of the ValleyScope spinful C3 phase
+   table.  These are not 1D C3 irreps and cannot be used for single-valley
+   valley-preserving EBR input.
+
+3. **Opaque label convention**: Source irrep labels like `-GM4`, `-K4` have
+   no documented phase convention in the irreptables API.  The `-4`/`-5`/`-6`
+   numbering convention is not a published C3 eigenphase key.
+
+4. **No irrep character table in API**: The irreptables public API provides
+   only EBR combinatorial data and Smith normal form; it does not expose
+   `SpaceGroupIrreps` or character tables that could be queried for C3
+   eigenvalues.
+
+### What CAN Be Mapped (With Independent Evidence)
+
+| Source | ValleyScope Key | Evidence |
+|--------|----------------|----------|
+| `-GM5` (deg 1) | `GammaM:C3_spinor_phase_+1/2` | ValleyScope irrep-matching benchmark: P321 GammaM C3 eigenphase = +1/2, matches C3_spinor_phase_+1/2.  This is a per-run ValleyScope diagnostic, not an irreptables API guarantee. |
+| `-K5` (deg 1) | `KM:C3_spinor_phase_+1/6` | Same benchmark: KM C3 eigenphase = +1/6. |
+| `-K6` (deg 2) | Not mappable to 1D C3 irrep | Degeneracy 2; need direct-sum decomposition beyond current matching scope. |
+
+### Conclusion
+
+Only `-GM5` and `-K5` have sufficient independent evidence (via the
+ValleyScope P321 irrep matching benchmark) to be mapped to ValleyScope spinful
+C3 phase labels.  All other GammaM/KM source labels are blocked by a
+combination of missing phase convention data, degeneracy > 1, or
+undocumented label conventions in the irreptables API.  A reviewed C3-like
+reduced EBR table authoring requires resolving these blockers — either
+through an external irrep character table source or through explicit
+human review of the `irrep.spacegroup_irreps` module (which imports
+cleanly but was not called in this audit).
+
 ## Non-Features
 
 - No built-in reduced EBR table is shipped.
