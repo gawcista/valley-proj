@@ -201,7 +201,9 @@ valley-changing operations as invariance of a single label operator.
   data path, not `irrep.ebrs` raw 3D decomposition or OR-Tools.
 * First reviewed C3-like external table: pending human review of the
   source-irrep/HSP/ValleyScope-key mapping spec documented in
-  `docs/reduced_ebr_c3_authoring_audit.md`; `-GM5` and `-K5` currently have
+  `docs/reduced_ebr_c3_authoring_audit.md`; the audit now includes a C3
+  convention readiness summary, machine-checked vs external-evidence split,
+  and explicit human-decision checklist. `-GM5` and `-K5` currently have
   independent ValleyScope evidence but remain `needs_human_review`, while
   degenerate source labels such as `-K6` are blocked until the source irrep is
   restricted/decomposed into the valley-preserving C3 subgroup. Do not ship
