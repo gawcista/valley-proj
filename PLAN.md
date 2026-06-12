@@ -211,12 +211,12 @@ valley-changing operations as invariance of a single label operator.
   `docs/reduced_ebr_c3_authoring_audit.md`, not more automatic table
   generation.
 * Codebase refinement: `docs/codebase_refinement_audit.md` is complete.  Test
-  split phase 1 is merged: config parsing and output-profile contract tests now
-  live in `tests/test_config.py` and `tests/test_output_profile.py`, with shared
-  fixtures in `tests/helpers_io_workflow.py`.  Continue with test-only splits of
-  the remaining EBR pipeline, reduced-EBR smoke, database-ingestion, benchmark
-  docs, provenance, and phase-table clusters without deleting assertions or
-  changing production code.
+  split phases 1-2 are merged: config parsing, output-profile contracts, EBR
+  pipeline, reduced-EBR smoke, database-ingestion, benchmark-doc, and
+  phase-table tests now live in focused files, with shared fixtures in
+  `tests/helpers_io_workflow.py`.  Continue with test-only splits of the
+  remaining workflow, summary, symmetry, and irrep-readiness clusters without
+  deleting assertions or changing production code.
 * ~~Package-data skeleton~~ — Done. `valleyscope/data/reduced_ebr/` exists
   with empty manifest, README, and catalog module. No table data shipped.
 * ~~Loader integration~~ — Done. `catalog.py` validates manifests, routes
