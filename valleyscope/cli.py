@@ -201,7 +201,10 @@ def _add_build_reduced_ebr_table_parser(subparsers) -> None:
     p.add_argument(
         "spec",
         type=Path,
-        help="Path to JSON mapping spec (sg_number, spinor, source_hsp_by_irrep, etc.)",
+        help=(
+            "Path to JSON mapping spec "
+            "(space_group_number, spinful, source_hsp_by_irrep, etc.)"
+        ),
     )
     p.add_argument(
         "--output", "-o",
@@ -212,11 +215,9 @@ def _add_build_reduced_ebr_table_parser(subparsers) -> None:
 
 
 def _build_reduced_ebr_table(args) -> int:
-    import json
     from valleyscope.analysis.irreptables_runtime_table_builder import (
         build_reduced_table_from_spec_file,
     )
-    from valleyscope.reports.json_report import write_json
 
     spec_path = Path(args.spec)
     output_path = Path(args.output)
@@ -227,16 +228,27 @@ def _build_reduced_ebr_table(args) -> int:
 
     try:
         table = build_reduced_table_from_spec_file(str(spec_path))
-    except (FileNotFoundError, json.JSONDecodeError, ValueError) as exc:
+    except (FileNotFoundError, json.JSONDecodeError, RuntimeError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
     write_json(output_path, table)
+    try:
+        load_reduced_ebr_table(output_path)
+    except (FileNotFoundError, json.JSONDecodeError, ValueError) as exc:
+        print(f"error: wrote invalid reduced EBR table '{output_path}': {exc}", file=sys.stderr)
+        return 1
 
+    provenance = table.get("provenance", {})
+    if not isinstance(provenance, dict):
+        provenance = {}
+    print(f"space group number: {provenance.get('space_group_number', '?')}")
+    print(f"spinful:            {provenance.get('spinful', '?')}")
     print(f"subspace group:     {table['subspace_group_candidate']}")
     print(f"expected HSPs:      {table['expected_hsps']}")
     print(f"irreps:             {len(table['irreps'])} keys")
     print(f"EBRs:               {len(table['ebrs'])} vectors")
+    print(f"filtered zero EBRs: {provenance.get('filtered_zero_vector_ebr_count', 0)}")
     print(f"reduced EBR table:  {output_path}")
     return 0
 

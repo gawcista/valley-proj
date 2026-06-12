@@ -9,6 +9,7 @@ import pytest
 from valleyscope.analysis.irreptables_runtime_table_builder import (
     _load_ebr_data_from_irreptables,
     build_reduced_table_from_irreptables,
+    build_reduced_table_from_spec_file,
 )
 from valleyscope.analysis.reduced_ebr_mapping import load_reduced_ebr_table
 
@@ -69,6 +70,23 @@ def _build_with_fake_loader(**overrides):
     }
     kwargs.update(overrides)
     return build_reduced_table_from_irreptables(**kwargs), calls
+
+
+def _canonical_spec(**overrides):
+    spec = {
+        "schema_version": "1.0.0",
+        "data_source": "irreptables",
+        "space_group_number": 150,
+        "spinful": True,
+        "source_hsp_by_irrep": _SOURCE_HSP_BY_IRREP,
+        "valleyscope_key_by_source_irrep": _VALLEYSCOPE_KEY_BY_SOURCE_IRREP,
+        "expected_hsps": _EXPECTED_HSPS,
+        "allowed_irrep_keys": _ALLOWED_KEYS,
+        "subspace_group_candidate": "C3_like",
+        "provenance": {"review_status": "fixture-only"},
+    }
+    spec.update(overrides)
+    return spec
 
 
 def test_builder_fake_loader_produces_loadable_reduced_table(tmp_path):
@@ -153,6 +171,95 @@ def test_default_loader_missing_import_reports_clear_runtimeerror(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", guarded_import)
     with pytest.raises(RuntimeError, match="cannot import public irreptables"):
         _load_ebr_data_from_irreptables(150, True)
+
+
+def test_spec_file_helper_uses_canonical_spec_with_fake_loader(tmp_path):
+    calls = []
+    spec_path = tmp_path / "mapping_spec.json"
+    spec_path.write_text(json.dumps(_canonical_spec()), encoding="utf-8")
+
+    table = build_reduced_table_from_spec_file(
+        spec_path,
+        source_loader=_fake_loader(calls),
+    )
+
+    assert calls == [(150, True)]
+    assert table["irreps"] == _ALLOWED_KEYS
+    assert table["provenance"]["data_source"] == "irreptables"
+    assert table["provenance"]["review_status"] == "fixture-only"
+    out_path = tmp_path / "table.json"
+    out_path.write_text(json.dumps(table), encoding="utf-8")
+    assert load_reduced_ebr_table(out_path)["irreps"] == _ALLOWED_KEYS
+
+
+def test_spec_file_helper_requires_canonical_keys(tmp_path):
+    legacy_spec = {
+        "sg_number": 150,
+        "spinor": True,
+        "source_hsp_by_irrep": _SOURCE_HSP_BY_IRREP,
+        "valleyscope_key_by_source_irrep": _VALLEYSCOPE_KEY_BY_SOURCE_IRREP,
+        "expected_hsps": _EXPECTED_HSPS,
+        "allowed_irrep_keys": _ALLOWED_KEYS,
+        "subspace_group_candidate": "C3_like",
+    }
+    spec_path = tmp_path / "legacy_spec.json"
+    spec_path.write_text(json.dumps(legacy_spec), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="schema_version"):
+        build_reduced_table_from_spec_file(spec_path, source_loader=_fake_loader([]))
+
+
+def test_spec_file_helper_rejects_wrong_data_source(tmp_path):
+    spec_path = tmp_path / "mapping_spec.json"
+    spec_path.write_text(
+        json.dumps(_canonical_spec(data_source="irrep")),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="data_source"):
+        build_reduced_table_from_spec_file(spec_path, source_loader=_fake_loader([]))
+
+
+def test_spec_file_helper_requires_bool_spinful(tmp_path):
+    spec_path = tmp_path / "mapping_spec.json"
+    spec_path.write_text(
+        json.dumps(_canonical_spec(spinful="false")),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="spinful"):
+        build_reduced_table_from_spec_file(spec_path, source_loader=_fake_loader([]))
+
+
+def test_cli_build_reduced_ebr_table_writes_validated_table_with_fake_builder(
+    tmp_path, capsys, monkeypatch
+):
+    from valleyscope.analysis import irreptables_runtime_table_builder as builder
+    from valleyscope.cli import main
+
+    def fake_build_from_spec_file(spec_path):
+        assert Path(spec_path).name == "mapping_spec.json"
+        table, _calls = _build_with_fake_loader()
+        return table
+
+    monkeypatch.setattr(
+        builder,
+        "build_reduced_table_from_spec_file",
+        fake_build_from_spec_file,
+    )
+    spec_path = tmp_path / "mapping_spec.json"
+    spec_path.write_text(json.dumps(_canonical_spec()), encoding="utf-8")
+    out_path = tmp_path / "table.json"
+
+    rc = main(["build-reduced-ebr-table", str(spec_path), "-o", str(out_path)])
+
+    assert rc == 0
+    loaded = load_reduced_ebr_table(out_path)
+    assert loaded["irreps"] == _ALLOWED_KEYS
+    captured = capsys.readouterr().out
+    assert "space group number: 150" in captured
+    assert "spinful:            True" in captured
+    assert "filtered zero EBRs: 1" in captured
 
 
 def test_builder_source_has_no_forbidden_dependencies_or_material_names():
