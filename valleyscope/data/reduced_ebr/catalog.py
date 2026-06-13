@@ -245,6 +245,85 @@ def _validate_table_reviewed_provenance(table: dict, name: str) -> None:
             f"must be 'sampled_hsp_valley_preserving', got {reduction!r}"
         )
 
+    # --- Physical identity provenance ---
+    _validate_provenance_identity(table, provenance, name)
+
+
+def _validate_provenance_identity(
+    table: dict, provenance: dict, name: str,
+) -> None:
+    """Validate physical identity fields in the provenance block and
+    cross-check against the table's top-level fields."""
+    # data_source: non-empty string.
+    ds = provenance.get("data_source")
+    if not isinstance(ds, str) or not ds.strip():
+        raise ValueError(
+            f"reviewed table {name!r} provenance.data_source must be "
+            f"a non-empty string"
+        )
+
+    # space_group_number: int or non-empty string.
+    sg = provenance.get("space_group_number")
+    if isinstance(sg, bool) or not isinstance(sg, (int, str)) or (
+        isinstance(sg, str) and not sg.strip()
+    ):
+        raise ValueError(
+            f"reviewed table {name!r} provenance.space_group_number must "
+            f"be an int or non-empty string, got {sg!r}"
+        )
+
+    # spinful: bool.
+    spinful = provenance.get("spinful")
+    if not isinstance(spinful, bool):
+        raise ValueError(
+            f"reviewed table {name!r} provenance.spinful must be "
+            f"a bool, got {spinful!r}"
+        )
+
+    # subspace_group_candidate: non-empty string matching table top-level.
+    prov_sgc = provenance.get("subspace_group_candidate")
+    if not isinstance(prov_sgc, str) or not prov_sgc.strip():
+        raise ValueError(
+            f"reviewed table {name!r} provenance.subspace_group_candidate "
+            f"must be a non-empty string"
+        )
+    table_sgc = table.get("subspace_group_candidate")
+    if prov_sgc != table_sgc:
+        raise ValueError(
+            f"reviewed table {name!r} provenance.subspace_group_candidate "
+            f"({prov_sgc!r}) must match table top-level "
+            f"subspace_group_candidate ({table_sgc!r})"
+        )
+
+    # expected_hsps: non-empty list of non-empty strings matching table.
+    prov_hsps = provenance.get("expected_hsps")
+    if not isinstance(prov_hsps, list) or not prov_hsps:
+        raise ValueError(
+            f"reviewed table {name!r} provenance.expected_hsps must be "
+            f"a non-empty list"
+        )
+    for i, h in enumerate(prov_hsps):
+        if not isinstance(h, str) or not h.strip():
+            raise ValueError(
+                f"reviewed table {name!r} provenance.expected_hsps[{i}] "
+                f"must be a non-empty string"
+            )
+    table_hsps = table.get("expected_hsps")
+    if prov_hsps != table_hsps:
+        raise ValueError(
+            f"reviewed table {name!r} provenance.expected_hsps "
+            f"({prov_hsps!r}) must match table top-level "
+            f"expected_hsps ({table_hsps!r})"
+        )
+
+    # central_sign_convention: non-empty string.
+    csc = provenance.get("central_sign_convention")
+    if not isinstance(csc, str) or not csc.strip():
+        raise ValueError(
+            f"reviewed table {name!r} provenance.central_sign_convention "
+            f"must be a non-empty string"
+        )
+
 
 def _resolve_table_path(filename: str) -> Path:
     """Resolve a manifest filename to an absolute path inside the package-data dir."""

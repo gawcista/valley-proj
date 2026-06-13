@@ -907,6 +907,7 @@ def _reviewed_table_provenance() -> dict:
         "spinful": True,
         "expected_hsps": ["GammaM", "KM"],
         "subspace_group_candidate": "C3_like",
+        "central_sign_convention": "chi(C3)=chi(op2), chi(C3^2)=-chi(op3)",
     }
 
 
@@ -1798,14 +1799,15 @@ def test_external_load_reduced_ebr_table_accepts_table_with_unreviewed_provenanc
 # 23. Reviewed table name loader plumbing
 # -----------------------------------------------------------------------
 
-def _fake_catalog_with_reviewed_table(tmp_path, monkeypatch, name="c3_reviewed"):
+def _fake_catalog_with_reviewed_table(tmp_path, monkeypatch, name="c3_reviewed",
+                                      provenance_overrides=None):
     """Set up a fake catalog root with one reviewed table entry."""
     from valleyscope.data.reduced_ebr import catalog
     root = tmp_path / "fake_catalog"
     root.mkdir()
     (root / "__init__.py").write_text("")
     tbl = dict(_SAMPLE_TABLE)
-    tbl["provenance"] = {
+    prov = {
         "review_status": "reviewed",
         "reviewer": "JD",
         "review_date": "2026-06-13",
@@ -1813,13 +1815,15 @@ def _fake_catalog_with_reviewed_table(tmp_path, monkeypatch, name="c3_reviewed")
         "source_reference": "test",
         "valleyscope_reduction": "sampled_hsp_valley_preserving",
         "data_source": "irreptables",
-        "package": "irreptables",
-        "package_version": "fake",
         "space_group_number": 150,
         "spinful": True,
-        "expected_hsps": ["GammaM", "KM"],
         "subspace_group_candidate": "C3_like",
+        "expected_hsps": ["GammaM", "KM"],
+        "central_sign_convention": "chi(C3)=chi(op2), chi(C3^2)=-chi(op3)",
     }
+    if provenance_overrides is not None:
+        prov.update(provenance_overrides)
+    tbl["provenance"] = prov
     (root / f"{name}.json").write_text(json.dumps(tbl))
     (root / "manifest.json").write_text(json.dumps({
         "schema_version": "1.0.0",
@@ -1989,3 +1993,123 @@ def test_real_manifest_still_lists_no_reviewed_tables():
     """Real manifest must still list [] (no tables added)."""
     from valleyscope.data.reduced_ebr.catalog import list_reviewed_reduced_ebr_tables
     assert list_reviewed_reduced_ebr_tables() == []
+
+
+# -----------------------------------------------------------------------
+# 24. Reviewed provenance identity gate
+# -----------------------------------------------------------------------
+
+def test_identity_provenance_all_fields_loads(tmp_path, monkeypatch):
+    """Reviewed table with all identity provenance fields loads."""
+    _fake_catalog_with_reviewed_table(tmp_path, monkeypatch, name="c3")
+    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
+    tbl = load_reviewed_reduced_ebr_table("c3")
+    assert tbl["provenance"]["data_source"] == "irreptables"
+
+
+@pytest.mark.parametrize("override,error_match", [
+    ({"data_source": ""},        "data_source"),
+    ({"data_source": None},      "data_source"),
+    ({"space_group_number": True}, "space_group_number"),
+    ({"space_group_number": ""},  "space_group_number"),
+    ({"spinful": "True"},         "spinful"),
+    ({"spinful": None},           "spinful"),
+])
+def test_identity_provenance_malformed_field_fails(
+    tmp_path, monkeypatch, override, error_match,
+):
+    """Missing or malformed identity provenance fields raise ValueError."""
+    _fake_catalog_with_reviewed_table(
+        tmp_path, monkeypatch, name="c3",
+        provenance_overrides=override,
+    )
+    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
+    with pytest.raises(ValueError, match=error_match):
+        load_reviewed_reduced_ebr_table("c3")
+
+
+def test_identity_provenance_mismatched_subspace_group_fails(
+    tmp_path, monkeypatch,
+):
+    """provenance.subspace_group_candidate must match table top-level."""
+    _fake_catalog_with_reviewed_table(
+        tmp_path, monkeypatch, name="c3",
+        provenance_overrides={"subspace_group_candidate": "C2_like"},
+    )
+    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
+    with pytest.raises(ValueError, match="subspace_group_candidate"):
+        load_reviewed_reduced_ebr_table("c3")
+
+
+def test_identity_provenance_mismatched_expected_hsps_fails(
+    tmp_path, monkeypatch,
+):
+    """provenance.expected_hsps must match table top-level exactly."""
+    _fake_catalog_with_reviewed_table(
+        tmp_path, monkeypatch, name="c3",
+        provenance_overrides={"expected_hsps": ["GammaM"]},
+    )
+    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
+    with pytest.raises(ValueError, match="expected_hsps"):
+        load_reviewed_reduced_ebr_table("c3")
+
+
+def test_identity_provenance_missing_central_sign_convention_fails(
+    tmp_path, monkeypatch,
+):
+    """Missing central_sign_convention raises ValueError."""
+    from valleyscope.data.reduced_ebr import catalog
+    root = tmp_path / "fake_catalog"
+    root.mkdir()
+    (root / "__init__.py").write_text("")
+    tbl = dict(_SAMPLE_TABLE)
+    prov = {
+        "review_status": "reviewed",
+        "reviewer": "JD",
+        "review_date": "2026-06-13",
+        "review_method": "test",
+        "source_reference": "test",
+        "valleyscope_reduction": "sampled_hsp_valley_preserving",
+        "data_source": "irreptables",
+        "space_group_number": 150,
+        "spinful": True,
+        "subspace_group_candidate": "C3_like",
+        "expected_hsps": ["GammaM", "KM"],
+        # central_sign_convention intentionally omitted
+    }
+    tbl["provenance"] = prov
+    (root / "c3.json").write_text(json.dumps(tbl))
+    (root / "manifest.json").write_text(json.dumps({
+        "schema_version": "1.0.0",
+        "tables": [{
+            "name": "c3", "filename": "c3.json",
+            "review_status": "reviewed",
+            "reviewer": "JD",
+            "review_date": "2026-06-13",
+            "review_method": "test",
+            "source_reference": "test",
+        }],
+    }))
+    monkeypatch.setattr(catalog, "package_data_root", lambda: root)
+    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
+    with pytest.raises(ValueError, match="central_sign_convention"):
+        load_reviewed_reduced_ebr_table("c3")
+
+
+def test_identity_provenance_external_table_still_permissive(tmp_path):
+    """External load_reduced_ebr_table still accepts tables without provenance."""
+    _write_table(tmp_path / "t.json", _SAMPLE_TABLE)
+    t = load_reduced_ebr_table(tmp_path / "t.json")
+    assert t["subspace_group_candidate"] == "C3_like"
+
+
+def test_catalog_module_no_forbidden_imports():
+    """catalog.py must not import irrep2, OR-Tools, etc."""
+    from valleyscope.data.reduced_ebr.catalog import package_data_root
+    src = (package_data_root() / "catalog.py").read_text(encoding="utf-8")
+    for forbidden in [
+        "import irrep2", "from irrep2",
+        "import ortools", "from ortools",
+        "from irrep.ebrs", "import irrep.ebrs",
+    ]:
+        assert forbidden not in src
