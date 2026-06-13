@@ -57,11 +57,13 @@ The repo already has:
   C3 eigenphase/character data directly.  The corrected feasibility audit
   verifies that `irreptables.irreps.IrrepTable("150", True)` can access
   Bilbao-derived SG 150 spinful irrep character tables when called with a
-  string space-group number: in-scope 1D labels have C3 character -1
-  (phase +1/2), while `-GM6`/`-K6` need explicit C3 restriction
-  decomposition.  ValleyScope still must perform its own sampled-HSP,
-  valley-preserving subgroup restriction before any reduced EBR table is
-  considered reviewed; raw 3D table data is only the input layer.
+  string space-group number: in-scope 1D labels have op2 C3 character -1
+  (candidate phase +1/2 after convention review), while `-GM6`/`-K6` have
+  op2/op3 character evidence `(+1,+1)` and still need explicit C3
+  restriction decomposition plus double-group lift convention review.
+  ValleyScope still must perform its own sampled-HSP, valley-preserving
+  subgroup restriction before any reduced EBR table is considered reviewed;
+  raw 3D table data is only the input layer.
 * read-only codebase refinement audit (`docs/codebase_refinement_audit.md`)
   classifies cleanup candidates by physics layer and identifies
   `test_io_and_workflow.py` splitting as the lowest-risk first cleanup step;
@@ -211,8 +213,8 @@ valley-changing operations as invariance of a single label operator.
   Bilbao character source, but ValleyScope must still perform its own
   sampled-HSP and valley-preserving subgroup reduction. The next physics step
   is to review and sign off the source-irrep restriction convention,
-  degenerate-irrep decomposition, reduced-basis label selection, and
-  provenance before any package-data table is shipped.
+  double-group lift convention, degenerate-irrep decomposition, reduced-basis
+  label selection, and provenance before any package-data table is shipped.
 * Codebase refinement: `docs/codebase_refinement_audit.md` is complete.  The
   three-phase test-only split of the former catch-all
   `tests/test_io_and_workflow.py` is merged.  Config parsing, output-profile
