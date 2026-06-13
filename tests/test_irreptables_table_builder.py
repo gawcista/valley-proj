@@ -1908,6 +1908,34 @@ def test_validator_v1_1_rejects_key_not_in_allowed():
     assert any("allowed_irrep_keys" in e for e in result["errors"])
 
 
+def test_validator_rejects_non_object_spec_without_crashing():
+    """Validator should report invalid JSON shape instead of raising AttributeError."""
+    result = validate_mapping_spec_against_source_basis([], _SOURCE_BASIS_PAYLOAD)
+    assert result["valid"] is False
+    assert any("json object" in e.lower() or "mapping" in e.lower()
+               for e in result["errors"])
+
+
+def test_validator_rejects_non_mapping_source_hsp_map_without_crashing():
+    """Validator should reject malformed source_hsp_by_irrep values cleanly."""
+    import copy
+    bad = copy.deepcopy(_V1_1_VALID_SPEC)
+    bad["source_hsp_by_irrep"] = []
+    result = validate_mapping_spec_against_source_basis(bad, _SOURCE_BASIS_PAYLOAD)
+    assert result["valid"] is False
+    assert any("source_hsp_by_irrep" in e for e in result["errors"])
+
+
+def test_validator_v1_0_rejects_non_mapping_key_map_without_crashing():
+    """Legacy validator should reject malformed valleyscope_key_by_source_irrep."""
+    import copy
+    bad = copy.deepcopy(_VALID_SPEC)
+    bad["valleyscope_key_by_source_irrep"] = []
+    result = validate_mapping_spec_against_source_basis(bad, _SOURCE_BASIS_PAYLOAD)
+    assert result["valid"] is False
+    assert any("valleyscope_key_by_source_irrep" in e for e in result["errors"])
+
+
 # --- CLI scaffold v1.1 ---
 
 def test_cli_scaffold_v1_1(tmp_path, capsys):

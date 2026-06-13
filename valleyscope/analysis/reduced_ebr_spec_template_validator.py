@@ -104,6 +104,8 @@ def validate_mapping_spec_against_source_basis(
     """
     errors: list[str] = []
     _validate_source_basis_payload(source_basis_payload)
+    if not isinstance(spec, Mapping):
+        return _result(False, ["spec must be a JSON object / mapping"])
 
     # --- Identify schema version ---
     sv = spec.get("schema_version")
@@ -141,7 +143,11 @@ def validate_mapping_spec_against_source_basis(
 
     # --- Check source label coverage ---
     source_labels = {e["source_label"] for e in _source_basis_entries(source_basis_payload)}
-    hsp_map = spec.get("source_hsp_by_irrep", {})
+    hsp_map_raw = spec.get("source_hsp_by_irrep", {})
+    if not isinstance(hsp_map_raw, Mapping):
+        errors.append("source_hsp_by_irrep must be a mapping")
+        return _result(False, errors)
+    hsp_map = dict(hsp_map_raw)
     spec_labels = set(hsp_map.keys())
 
     if spec_labels != source_labels:
@@ -199,6 +205,9 @@ def _validate_v1_0_key_map(
     allowed_irrep_key_set: set[str],
 ) -> None:
     key_map = spec.get("valleyscope_key_by_source_irrep", {})
+    if not isinstance(key_map, Mapping):
+        errors.append("valleyscope_key_by_source_irrep must be a mapping")
+        return
     spec_labels = set(hsp_map.keys())
     if spec_labels != set(key_map.keys()):
         errors.append(
