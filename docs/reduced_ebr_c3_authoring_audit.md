@@ -10,11 +10,10 @@ or hardcoded — this audit only verifies the tooling path and source data.
 ## C3 Convention Readiness Summary
 
 No source irrep label is `review_ready` from public package data alone.
-Every label is either `needs_human_review` (machine-readable Bilbao-derived
-C3 character evidence exists but the ValleyScope reduction convention has not
-been signed off) or `blocked_by_missing_restriction_data` (the label requires
-decomposition of a degenerate source irrep before it can enter the 1D C3
-phase basis).
+Every in-scope GammaM/KM label is `needs_human_review`: machine-readable
+Bilbao-derived C3 character evidence exists, but the ValleyScope reduction
+convention and provenance have not been signed off.  Out-of-scope labels
+remain `blocked_by_missing_restriction_data`.
 
 | Source Label | Deg | HSP | Candidate ValleyScope Key | Status |
 |-------------|-----|-----|---------------------------|--------|
@@ -22,8 +21,8 @@ phase basis).
 | `-GM5` | 1 | GammaM | `GammaM:C3_spinor_phase_+1/2` | `needs_human_review` |
 | `-K4` | 1 | KM | `KM:C3_spinor_phase_+1/2` | `needs_human_review` |
 | `-K5` | 1 | KM | `KM:C3_spinor_phase_+1/2` | `needs_human_review` |
-| `-GM6` | 2 | GammaM | none — degeneracy 2; requires C3 restriction decomposition | `blocked_by_missing_restriction_data` |
-| `-K6` | 2 | KM | none — degeneracy 2; requires C3 restriction decomposition | `blocked_by_missing_restriction_data` |
+| `-GM6` | 2 | GammaM | candidate multiplicity `{+1/6: 1, -1/6: 1}` | `needs_human_review` |
+| `-K6` | 2 | KM | candidate multiplicity `{+1/6: 1, -1/6: 1}` | `needs_human_review` |
 | `-KA4`, `-KA5`, `-KA6` | 1/1/2 | KA | none — not in sampled HSP set {GammaM, KM} | `blocked_by_missing_restriction_data` |
 
 The ValleyScope irrep basis keys for a C3-like reduced table are:
@@ -149,8 +148,8 @@ before these rows can be used as packaged data.
 | `-GM5` | GammaM | 1 | `GammaM:C3_spinor_phase_+1/2` | `needs_human_review` |
 | `-K4` | KM | 1 | `KM:C3_spinor_phase_+1/2` | `needs_human_review` |
 | `-K5` | KM | 1 | `KM:C3_spinor_phase_+1/2` | `needs_human_review` |
-| `-GM6` | GammaM | 2 | none yet | `blocked_by_missing_restriction_data` — requires restriction/decomposition of a degenerate source irrep before it can contribute to a 1D C3 phase basis |
-| `-K6` | KM | 2 | none yet | `blocked_by_missing_restriction_data` — requires restriction/decomposition of a degenerate source irrep before it can contribute to a 1D C3 phase basis |
+| `-GM6` | GammaM | 2 | candidate multiplicity `{+1/6: 1, -1/6: 1}` | `needs_human_review` |
+| `-K6` | KM | 2 | candidate multiplicity `{+1/6: 1, -1/6: 1}` | `needs_human_review` |
 
 The `-4`/`-5` distinction at GammaM and KM is in C2 characters, not C3
 characters.  Those C2 operations are valley sewing data for a single-valley
@@ -234,7 +233,7 @@ identifier stored in the table file.
 |-------------|-----|-----------------|---------------------------|-----------------|--------|
 | `-GM4` | 1 | {E,C3,C3^2} | {E,C3,C3^2} | `+1/2` from `IrrepTable("150", True)` | `needs_human_review` |
 | `-GM5` | 1 | {E,C3,C3^2} | {E,C3,C3^2} | `+1/2` from `IrrepTable("150", True)` | `needs_human_review` |
-| `-GM6` | 2 | {E,C3,C3^2} | {E,C3,C3^2} | op2/op3 chars `(+1,+1)`; needs 2D restriction decomposition | `blocked_by_missing_restriction_data` — degeneracy 2; not a 1D C3 irrep |
+| `-GM6` | 2 | {E,C3,C3^2} | {E,C3,C3^2} | candidate `{+1/6: 1, -1/6: 1}` after central-sign conversion | `needs_human_review` |
 
 ### KM Source Labels
 
@@ -242,7 +241,7 @@ identifier stored in the table file.
 |-------------|-----|-----------------|---------------------------|-----------------|--------|
 | `-K4` | 1 | {E,C3,C3^2} | {E,C3,C3^2} | `+1/2` from `IrrepTable("150", True)` | `needs_human_review` |
 | `-K5` | 1 | {E,C3,C3^2} | {E,C3,C3^2} | `+1/2` from `IrrepTable("150", True)` | `needs_human_review` |
-| `-K6` | 2 | {E,C3,C3^2} | {E,C3,C3^2} | op2/op3 chars `(+1,+1)`; needs 2D restriction decomposition | `blocked_by_missing_restriction_data` — degeneracy 2; not a 1D C3 irrep |
+| `-K6` | 2 | {E,C3,C3^2} | {E,C3,C3^2} | candidate `{+1/6: 1, -1/6: 1}` after central-sign conversion | `needs_human_review` |
 
 ### KA Source Labels (Excluded From C3 Reduced Basis)
 
@@ -278,10 +277,10 @@ the following blocks still prevent shipping a reviewed reduced EBR table:
 |--------|-----------------------|---------------------|-----------------|--------|
 | `-GM4` (deg 1) | op2=-1, op3=-1 | +1/2 from op2 | `GammaM:C3_spinor_phase_+1/2` | `needs_human_review` |
 | `-GM5` (deg 1) | op2=-1, op3=-1 | +1/2 from op2 | `GammaM:C3_spinor_phase_+1/2` | `needs_human_review` |
-| `-GM6` (deg 2) | op2=+1, op3=+1 | unresolved | none yet | `blocked_by_missing_restriction_data` |
+| `-GM6` (deg 2) | op2=+1, op3=+1; op3 is `-g^2` | `{+1/6: 1, -1/6: 1}` | candidate multiplicity | `needs_human_review` |
 | `-K4` (deg 1) | op2=-1, op3=-1 | +1/2 from op2 | `KM:C3_spinor_phase_+1/2` | `needs_human_review` |
 | `-K5` (deg 1) | op2=-1, op3=-1 | +1/2 from op2 | `KM:C3_spinor_phase_+1/2` | `needs_human_review` |
-| `-K6` (deg 2) | op2=+1, op3=+1 | unresolved | none yet | `blocked_by_missing_restriction_data` |
+| `-K6` (deg 2) | op2=+1, op3=+1; op3 is `-g^2` | `{+1/6: 1, -1/6: 1}` | candidate multiplicity | `needs_human_review` |
 
 **Note corrected 2026-06-13**: The earlier audit incorrectly mapped `-K5`
 to `KM:C3_spinor_phase_+1/6` based on independent ValleyScope eigenphase
@@ -359,10 +358,10 @@ from irreptables.ebrs import load_ebr_data
 |-------------|-----|-----------------------|--------------------------|-----------------|--------|
 | `-GM4` | 1 | op2=-1, op3=-1 | +1/2 from op2 | `GammaM:C3_spinor_phase_+1/2` | `needs_human_review` |
 | `-GM5` | 1 | op2=-1, op3=-1 | +1/2 from op2 | `GammaM:C3_spinor_phase_+1/2` | `needs_human_review` |
-| `-GM6` | 2 | op2=+1, op3=+1 | unresolved | none yet | `blocked_by_missing_restriction_data` — needs C3 restriction decomposition |
+| `-GM6` | 2 | op2=+1, op3=+1; op3 is `-g^2` | `{+1/6: 1, -1/6: 1}` | candidate multiplicity | `needs_human_review` |
 | `-K4` | 1 | op2=-1, op3=-1 | +1/2 from op2 | `KM:C3_spinor_phase_+1/2` | `needs_human_review` |
 | `-K5` | 1 | op2=-1, op3=-1 | +1/2 from op2 | `KM:C3_spinor_phase_+1/2` | `needs_human_review` |
-| `-K6` | 2 | op2=+1, op3=+1 | unresolved | none yet | `blocked_by_missing_restriction_data` — needs C3 restriction decomposition |
+| `-K6` | 2 | op2=+1, op3=+1; op3 is `-g^2` | `{+1/6: 1, -1/6: 1}` | candidate multiplicity | `needs_human_review` |
 | `-KA4/-KA5/-KA6` | 1/1/2 | n/a | n/a | out of scope | `blocked_by_missing_restriction_data` — not in sampled HSP set {GammaM, KM} |
 
 **Key finding corrected 2026-06-13**: The distinction between `-GM4`/`-GM5`
@@ -373,8 +372,8 @@ The earlier audit incorrectly mapped `-K5` to phase +1/6 based on
 independent ValleyScope eigenphase runs; the Bilbao character table
 shows `-K5` has op2 C3 character -1, giving candidate phase +1/2.  The
 +1/6 and -1/6 phases do not come from any 1D source label identified here;
-whether they appear in the degenerate-label restrictions remains an explicit
-blocker.
+they appear as the candidate multiplicities of the degenerate labels after
+central-sign conversion of op3.
 
 ### Conclusion
 
@@ -445,10 +444,10 @@ into individual 1D C3 irreps through character decomposition.
 |-------------|-----|---------------|-----------------|----------------------|-------------------------------|
 | `-GM4` | 1 | `needs_human_review` | Confirm op2 `chi(C3)=-1` (=candidate phase +1/2) from `IrrepTable("150", True)` and approve the source-label convention | Bilbao-derived `irreptables.irreps` plus optional literature cross-check | No — review required |
 | `-GM5` | 1 | `needs_human_review` | Confirm op2 `chi(C3)=-1` (=candidate phase +1/2) from `IrrepTable("150", True)` and approve the source-label convention | Bilbao-derived `irreptables.irreps` plus optional literature cross-check | No — review required |
-| `-GM6` | 2 | `blocked_by_missing_restriction_data` | C3 restriction decomposition: use `chi(C3)` and `chi(C3^2)` for this 2D irrep; determine whether it decomposes into 1D C3 irreps under the reviewed double-group convention | Same as above; requires explicit character decomposition | No — requires restriction + decomposition |
+| `-GM6` | 2 | `needs_human_review` | Confirm candidate `{+1/6: 1, -1/6: 1}` from `chi(C3)=chi(op2)` and `chi(C3^2)=-chi(op3)` | Bilbao-derived `irreptables.irreps` plus optional multiplication-table cross-check | No — review required |
 | `-K4` | 1 | `needs_human_review` | Confirm op2 `chi(C3)=-1` (=candidate phase +1/2) from `IrrepTable("150", True)` and approve the source-label convention | Bilbao-derived `irreptables.irreps` plus optional literature cross-check | No — review required |
 | `-K5` | 1 | `needs_human_review` | Confirm op2 `chi(C3)=-1` (=candidate phase +1/2) from `IrrepTable("150", True)` and approve the source-label convention | Bilbao-derived `irreptables.irreps` plus optional literature cross-check | No — review required |
-| `-K6` | 2 | `blocked_by_missing_restriction_data` | C3 restriction decomposition: use `chi(C3)` and `chi(C3^2)` for this 2D irrep | Same as `-GM6`; requires explicit character decomposition | No — requires restriction + decomposition |
+| `-K6` | 2 | `needs_human_review` | Confirm candidate `{+1/6: 1, -1/6: 1}` from `chi(C3)=chi(op2)` and `chi(C3^2)=-chi(op3)` | Same as `-GM6` | No — review required |
 
 ### Provenance Requirements For Reviewed External Table
 
@@ -487,7 +486,7 @@ may be claimed as reviewed.
 
 | Evidence Gap | Why Still Requires Review | Required Resolution |
 |-------------|--------------------------|-------------------|
-| C3 restriction decomposition for `-GM6` (deg 2) | Characters `chi(op2)=+1` and `chi(op3)=+1` are known, but the 2D source irrep must be decomposed into 1D spinful C3 irreps under a reviewed double-group convention | Explicit subgroup-character decomposition and reviewer sign-off |
+| C3 restriction decomposition for `-GM6` (deg 2) | Candidate `{+1/6: 1, -1/6: 1}` follows from `chi(op2)=+1` and `chi(C3^2)=-chi(op3)=-1`, but package data still needs reviewed provenance | Reviewer sign-off and optional external multiplication-table cross-check |
 | C3 restriction decomposition for `-K6` (deg 2) | Same | Same |
 | Source-irrep label convention documentation (`-4`/`-5`/`-6` numbering) | Character data are machine-readable, but the reduced-table mapping still needs provenance and convention sign-off | Record `irreptables` package/version, operation IDs, phase convention, reviewer, and date |
 
@@ -501,10 +500,10 @@ data, the following explicit human decisions are required:
    `-K4`, and `-K5`, corresponding to phase +1/2.  The reviewer must
    approve the source-label convention and record provenance.
 
-2. **Resolve `-GM6` and `-K6` C3 restriction decomposition.**
-   These are 2D source irreps.  Before either can contribute to the 1D
-   C3 phase basis, its op2/op3 C3 characters and double-group lift
-   convention must be decomposed into individual 1D C3 spinful irreps.
+2. **Confirm `-GM6` and `-K6` C3 restriction decomposition.**
+   These are 2D source irreps.  The candidate decomposition is
+   `{+1/6: 1, -1/6: 1}` after using `chi(C3^2)=-chi(op3)`, but a
+   reviewer must sign off the double-group lift convention and provenance.
 
 3. **Decide which labels enter the first reduced basis.**
    The reviewer may include all confirmed 1D labels, a minimal subset, or
@@ -558,10 +557,10 @@ The evidence required at each step:
 |-------------|-----|-------------|--------------|----------------------------------------------------------|
 | `-GM4` | 1 | GammaM | C3 eigenphase `exp(2*pi*i*phase)` | Machine-readable via `IrrepTable("150", True)`; needs human convention review |
 | `-GM5` | 1 | GammaM | C3 eigenphase `exp(2*pi*i*phase)` | Machine-readable via `IrrepTable("150", True)`; needs human convention review |
-| `-GM6` | 2 | GammaM | C3 restriction decomposition → two 1D phases | No — requires character decomposition of 2D irrep |
+| `-GM6` | 2 | GammaM | C3 restriction decomposition → two 1D phases | Candidate `{+1/6: 1, -1/6: 1}`; needs human provenance review |
 | `-K4` | 1 | KM | C3 eigenphase `exp(2*pi*i*phase)` | Machine-readable via `IrrepTable("150", True)`; needs human convention review |
 | `-K5` | 1 | KM | C3 eigenphase `exp(2*pi*i*phase)` | Machine-readable via `IrrepTable("150", True)`; needs human convention review |
-| `-K6` | 2 | KM | C3 restriction decomposition → two 1D phases | No — requires character decomposition of 2D irrep |
+| `-K6` | 2 | KM | C3 restriction decomposition → two 1D phases | Candidate `{+1/6: 1, -1/6: 1}`; needs human provenance review |
 | `-KA4/-KA5/-KA6` | 1/1/2 | KA | (out of scope) | Out of scope — KA not in sampled `{GammaM, KM}` set |
 
 ### API Feasibility Audit
@@ -698,8 +697,9 @@ These facts are verified by existing tests and require no human review:
 These facts cannot be promoted to reviewed package data without human
 convention review:
 
-1. **C3 restriction decomposition for each 2D source irrep**
-   (`-GM6`, `-K6`): requires explicit subgroup-character decomposition.
+1. **C3 restriction decomposition provenance for each 2D source irrep**
+   (`-GM6`, `-K6`): candidate multiplicities are machine-derived, but
+   reviewed package data still needs provenance sign-off.
 2. **Phase convention alignment**: the Bilbao-derived phase convention must be
    recorded against ValleyScope's `exp(2*pi*i*phase)` with
    `phase in (-0.5, 0.5]`.
@@ -726,13 +726,13 @@ package data as reviewed, the human reviewer must complete each item:
   `C3_spinor_phase_+1/2`.
   Verified source/version: _______________
 
-- [ ] **3. Resolve `-K6` C3 restriction.**
-  2D source irrep at KM; decompose under C3 into 1D spinful phases using
-  both op2/op3 characters and the reviewed double-group lift convention.
+- [ ] **3. Confirm `-K6` C3 restriction.**
+  Candidate: `{+1/6: 1, -1/6: 1}` using
+  `chi(C3^2)=-chi(op3)`.  Confirm the double-group lift convention.
   Decomposition: _______________
   Source: _______________
 
-- [ ] **4. Resolve `-GM6` C3 restriction (if needed).**
+- [ ] **4. Confirm `-GM6` C3 restriction (if needed).**
   Decomposition: _______________ Source: _______________
 
 - [ ] **5. Decide the first C3 reduced-basis source labels.**
@@ -763,18 +763,19 @@ piece identified in the earlier audit and is now verified by
 
 The 1D labels (`-GM4`, `-GM5`, `-K4`, `-K5`) all have op2 C3 character = -1,
 giving candidate phase +1/2 after convention review.  The degenerate labels
-(`-GM6`, `-K6`) have op2/op3 character evidence `(+1, +1)`, but this audit
-does not assign them 1D C3 phase multiplicities.  The `-4`/`-5` distinction
-at each HSP is in the C2 characters, not C3; those C2 characters are valley
-sewing data for the single-valley reduced C3 basis.
+(`-GM6`, `-K6`) have op2/op3 character evidence `(+1, +1)` and the
+double-group lift audit below identifies op3 as the central-negative `-g^2`
+representative.  This gives candidate multiplicities `{+1/6: 1, -1/6: 1}`
+for the degenerate labels, pending human provenance sign-off.  The `-4`/`-5`
+distinction at each HSP is in the C2 characters, not C3; those C2 characters
+are valley sewing data for the single-valley reduced C3 basis.
 
 **Remaining blockers:**
 
-1. **C3 restriction decomposition** for `-GM6` and `-K6`: the Bilbao
-   data gives op2/op3 C3 characters (+1,+1), but extracting individual
-   1D C3 spinful eigenphases requires explicit subgroup restriction and a
-   reviewed double-group lift convention.  No `{+1/6, -1/6}` multiplicity
-   assignment is claimed by this audit.
+1. **C3 restriction decomposition provenance** for `-GM6` and `-K6`: the
+   candidate `{+1/6: 1, -1/6: 1}` multiplicities follow from the
+   double-group lift audit, but they are not reviewed package data until a
+   human signs off the source convention and provenance.
 
 2. **Human review of the mapping convention**: the C3 character values
    are now machine-verified, but the mapping from source labels to
@@ -806,7 +807,7 @@ This section audits the double-group (spinor) lift convention used by
 determines whether the Bilbao character-table operation indexing maps
 directly to ValleyScope's C3 valley-preserving subgroup phase formula.
 
-### Bilbao Convention: Independent Spinor Lifts Per Spatial Operation
+### Bilbao Convention: Central-Negative Lift For Spatial C3^2
 
 The Bilbao data file (`irreps-SG=150-spin.dat`) encodes each symmetry
 operation with:
@@ -823,11 +824,11 @@ For SG 150 (P321), the relevant valley-preserving operations are:
 |-------|----------|---------|-------------------|
 | 1 | Identity | I | E |
 | 2 | C3 | diag(exp(+iπ/3), exp(-iπ/3)) | C3 generator g |
-| 3 | C3^2 | diag(exp(-iπ/3), exp(+iπ/3)) | NOT g^2 — see below |
+| 3 | C3^2 | diag(exp(-iπ/3), exp(+iπ/3)) | central-negative lift `-g^2` |
 
 Spatially, `R3 = R2 @ R2` (C3^2 = C3²).  This is verified.
 
-### Key Finding: op3 ≠ op2² in the Double Group
+### Key Finding: op3 = -op2² In The Double Group
 
 The double-group product of op2 with itself is:
 
@@ -836,9 +837,17 @@ S2 @ S2 = diag(exp(+2iπ/3), exp(-2iπ/3))
 S3      = diag(exp(-iπ/3), exp(+iπ/3))
 ```
 
-`S2 @ S2 ≠ S3` and also `S2 @ S2 ≠ -S3`.  The two spinor matrices
-differ by more than a sign — they represent **different double-group
-elements**.
+Within the numerical precision of the installed `irreptables` data file,
+
+```text
+S2 @ S2 = -S3
+```
+
+The raw Bilbao op3 lift is therefore the central-negative representative
+of the group-theoretic square of the op2 C3 generator.  The earlier
+`S2 @ S2 != -S3` conclusion was a numerical tolerance artifact: the
+data-file roundoff gives `max(abs(S2 @ S2 + S3)) ≈ 3.1e-5`, the same
+order as `max(abs(S2^3 + I))`.
 
 The double-group relation `g³ = -E` is correctly satisfied:
 `S2³ = diag(-1, -1) = -I`.
@@ -851,18 +860,24 @@ For all four 1D irreps at GammaM and KM (`-GM4`, `-GM5`, `-K4`, `-K5`):
 |-------|------------|----------------|--------|
 | chi(C3) = chi(op2) | -1 | -1 = exp(+iπ) | ✓ |
 | chi(op3) from table | -1 | — | — |
-| chi(C3²) = chi(op2)² | — | +1 = exp(+2iπ) | **✗ chi(op3) ≠ chi(op2)²** |
+| chi(C3²) = chi(op2)² = -chi(op3) | — | +1 = exp(+2iπ) | ✓ after central-sign conversion |
 
-Bilbao's `chi(op3) = -1` is NOT the group-theoretic `chi(C3²)`.
-The raw Bilbao op3 character must not be used in ValleyScope's
-`chi(C3²)` phase formula for 1D irreps.
+Bilbao's raw `chi(op3) = -1` is the character of the central-negative
+lift `-g²`, not of `g²` itself.  Since the spinful central element `-E`
+acts with character sign `-1`, ValleyScope should use:
+
+```text
+chi(C3²) = -chi(op3)
+```
+
+Equivalently for 1D irreps, `chi(C3²) = chi(C3)²`.
 
 For the 2D irreps (`-GM6`, `-K6`):
 
 | Value | Bilbao Table | Group-Theoretic (from eigenvalues) | Match? |
 |-------|------------|-----------------------------------|--------|
 | chi(op2) | +1 | +1 = exp(+iπ/3) + exp(-iπ/3) | ✓ |
-| chi(op3) | +1 | −1 = exp(+2iπ/3) + exp(-2iπ/3) | **✗** |
+| -chi(op3) | −1 | −1 = exp(+2iπ/3) + exp(-2iπ/3) | ✓ after central-sign conversion |
 
 ### ValleyScope Phase Convention Implications
 
@@ -872,13 +887,13 @@ is the C3 generator and `g²` is its double-group square:
 
 ```text
 chi(g)  = Σ_i n_i * exp(2πi * phase_i)       (from Bilbao op2)
-chi(g²) = Σ_i n_i * exp(4πi * phase_i)       (NOT Bilbao op3!)
+chi(g²) = Σ_i n_i * exp(4πi * phase_i)       (-Bilbao op3, or derived from op2)
 ```
 
-For 1D irreps: `chi(g²) = chi(g)²` (group-theoretic square).
+For 1D irreps: `chi(g²) = chi(g)² = -chi(op3)`.
 
 For degenerate irreps: `chi(g²)` must be computed from the C3 eigenvalue
-decomposition, not read from the Bilbao op3 character.
+decomposition and checked against `-chi(op3)`, not against raw `chi(op3)`.
 
 ### Verified Convention Mapping
 
@@ -888,13 +903,16 @@ ValleyScope's C3 valley-preserving subgroup as follows:
 1. **`chi(C3) = chi(op2)`** from the Bilbao table.  This is the C3
    generator character.  ✓ Direct read.
 
-2. **`chi(C3²) = chi(C3)²`** for 1D irreps.  Compute from op2 alone.
-   Do NOT use `chi(op3)` from the Bilbao table.
+2. **`chi(C3²) = chi(C3)² = -chi(op3)`** for 1D irreps.  The raw
+   Bilbao op3 character must be central-sign converted before use.
 
 3. **For degenerate irreps**, decompose `chi(op2)` into spinful C3
    eigenphases, then compute `chi(C3²)` from the eigenvalue expansion
-   `Σ_i n_i * exp(4πi * phase_i)`.  The Bilbao op3 character is not
-   usable for this calculation.
+   `Σ_i n_i * exp(4πi * phase_i)` and verify it equals `-chi(op3)`.
+   For `-GM6` and `-K6`, the candidate decomposition is uniquely
+   `{+1/6: 1, -1/6: 1}` under the ValleyScope spinful C3 phase basis,
+   but it still requires human provenance sign-off before package data
+   can be shipped.
 
 4. **The C2 characters (op4-6)** are valley-changing sewing data and
    must not enter the C3 valley-preserving reduced EBR vector basis.
@@ -904,13 +922,11 @@ This convention is machine-verified by
 
 ### Remaining Ambiguity
 
-The mapping `chi(C3²) = chi(C3)²` is mathematically correct for 1D
-representations but should be cross-verified with an explicit P321
-spinful double-group multiplication table (e.g., from Bradley &
-Cracknell or the Bilbao Crystallographic Server).  The independent
-spinor lifts in the Bilbao convention are a specific gauge choice;
-a different gauge would give different op3 characters but the same
-group-theoretic `chi(C3²)`.
+The central-sign conversion `chi(C3²) = -chi(op3)` should be cross-verified
+with an explicit P321 spinful double-group multiplication table (e.g.,
+from Bradley & Cracknell or the Bilbao Crystallographic Server).  The
+installed `irreptables` SU(2) matrices are stored at finite precision, so
+tests use the same `1e-4` scale that verifies `S2³ = -I`.
 
 ## Non-Features
 

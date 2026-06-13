@@ -952,7 +952,7 @@ def test_c3_audit_has_explicit_human_decisions_section():
     assert "Confirm the 1D labels with Bilbao character evidence" in doc
     assert "`-GM4`, `-GM5`" in doc
     assert "`-K4`, and `-K5`" in doc
-    assert "Resolve `-GM6` and `-K6`" in doc
+    assert "Confirm `-GM6` and `-K6`" in doc
     assert "Decide which labels enter the first reduced basis" in doc
     assert "Sign off on provenance record" in doc
     assert "no C3-like reduced EBR table" in doc
@@ -996,8 +996,8 @@ def test_c3_feasibility_has_checklist():
     for item in [
         "Select evidence source",
         "Confirm the 1D C3 eigenphases",
-        "Resolve `-K6`",
-        "Resolve `-GM6`",
+        "Confirm `-K6`",
+        "Confirm `-GM6`",
         "Decide the first C3 reduced-basis source labels",
         "Verify phase convention",
         "Sign off",
@@ -1052,8 +1052,8 @@ def test_c3_audit_has_no_stale_irreptables_character_claims():
         "`-K5` | 1 | op2=-1, op3=-1 | +1/2 from op2 | `KM:C3_spinor_phase_+1/2`",
         "`-GM4` | 1 | op2=-1, op3=-1 | +1/2 from op2 | `GammaM:C3_spinor_phase_+1/2`",
         "`-K4` | 1 | op2=-1, op3=-1 | +1/2 from op2 | `KM:C3_spinor_phase_+1/2`",
-        "No `{+1/6, -1/6}` multiplicity",
-        "assignment is claimed by this audit",
+        "candidate multiplicity `{+1/6: 1, -1/6: 1}`",
+        "pending human provenance sign-off",
     ]
     for current in current_claims:
         assert current in doc, f"missing corrected C3 audit claim: {current}"
@@ -1115,7 +1115,7 @@ def test_irreptables_sg150_1d_labels_have_c3_character_minus_one():
 
 
 def test_irreptables_sg150_2d_labels_need_explicit_c3_restriction():
-    """-GM6 and -K6 have op2/op3 characters +1/+1 and remain unresolved."""
+    """-GM6 and -K6 have op2/op3 characters +1/+1 and need provenance review."""
     _require_irreptables_irreps()
     import irreptables.irreps as ir
     tbl = ir.IrrepTable("150", True)
@@ -1196,9 +1196,12 @@ def test_double_group_s2_cubed_is_minus_identity():
     )
 
 
-def test_double_group_op3_is_not_op2_squared():
-    """S2 @ S2 ≠ S3: the Bilbao convention uses independent spinor lifts
-    for each spatial operation.  op3 is NOT the double-group square of op2."""
+def test_double_group_op3_is_central_negative_op2_squared():
+    """S2 @ S2 = -S3 within data precision.
+
+    The Bilbao op3 lift is the central-negative representative of the
+    group-theoretic square of the op2 C3 generator.
+    """
     _require_irreptables_irreps()
     import irreptables.irreps as ir
     import numpy as np
@@ -1209,8 +1212,8 @@ def test_double_group_op3_is_not_op2_squared():
     assert not np.allclose(S3, S22, atol=1e-6), (
         "S3 should not equal S2 @ S2"
     )
-    assert not np.allclose(S3, -S22, atol=1e-6), (
-        "S3 should not equal -(S2 @ S2)"
+    assert np.allclose(S22, -S3, atol=1e-4), (
+        "S2 @ S2 should equal -S3 within irreptables data precision"
     )
 
 
@@ -1225,10 +1228,12 @@ def test_double_group_r3_is_r2_squared():
     assert np.allclose(R3, R2 @ R2)
 
 
-def test_double_group_chi_op3_not_chi_op2_squared():
-    """For all four 1D irreps at GM/K, chi(op3) ≠ chi(op2)².
-    ValleyScope must compute chi(C3²) = chi(C3)² from op2 alone,
-    NOT read chi(op3) from the Bilbao table."""
+def test_double_group_chi_op3_is_central_negative_chi_op2_squared():
+    """For all four 1D irreps at GM/K, -chi(op3) = chi(op2)^2.
+
+    ValleyScope may compute chi(C3^2) from op2 alone or by flipping the
+    central-negative Bilbao op3 character.
+    """
     _require_irreptables_irreps()
     import irreptables.irreps as ir
     tbl = ir.IrrepTable("150", True)
@@ -1237,9 +1242,9 @@ def test_double_group_chi_op3_not_chi_op2_squared():
             chi2 = irrep.characters.get(2)
             chi3 = irrep.characters.get(3)
             chi2_sq = chi2 * chi2
-            assert not abs(chi3 - chi2_sq) < 1e-10, (
-                f"{irrep.name}: chi(op3)={chi3} should NOT equal "
-                f"chi(op2)²={chi2_sq}"
+            assert abs((-chi3) - chi2_sq) < 1e-10, (
+                f"{irrep.name}: -chi(op3)={-chi3} should equal "
+                f"chi(op2)^2={chi2_sq}"
             )
 
 
@@ -1259,9 +1264,7 @@ def test_double_group_chi_op2_squared_is_positive_unity():
 
 
 def test_double_group_2d_chi_op3_not_minus_one():
-    """For -GM6/-K6 (2D), the Bilbao chi(op3) = +1, but group-theoretic
-    chi(C3²) should be -1 from the {+1/6, -1/6} eigenvalue decomposition.
-    This confirms the 2D labels also cannot use raw Bilbao op3 characters."""
+    """For -GM6/-K6 (2D), -chi(op3) gives the group-theoretic C3^2 trace."""
     _require_irreptables_irreps()
     import irreptables.irreps as ir
     tbl = ir.IrrepTable("150", True)
@@ -1272,12 +1275,14 @@ def test_double_group_2d_chi_op3_not_minus_one():
                 f"{irrep.name}: Bilbao chi(op3) is {chi3}, not the "
                 f"group-theoretic -1"
             )
+            assert abs((-chi3) - (-1.0)) < 1e-10
 
 
 def test_double_group_audit_doc_covers_lift_convention():
     """C3 audit doc must cover the double-group lift convention finding."""
     doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
     assert "C3 Double-Group Lift Convention Audit" in doc
-    assert "op3 ≠ op2²" in doc or "op3 is NOT the double-group square" in doc
-    assert 'chi(C3²) = chi(C3)²' in doc or 'chi(C3^2) = chi(C3)^2' in doc
+    assert "S2 @ S2 = -S3" in doc
+    assert "central-negative" in doc
+    assert "chi(C3²) = -chi(op3)" in doc or "chi(C3^2) = -chi(op3)" in doc
     assert "diag(exp(+2iπ/3), exp(-2iπ/3))" in doc or "diag(exp(+2i" in doc

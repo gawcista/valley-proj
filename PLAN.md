@@ -59,8 +59,9 @@ The repo already has:
   Bilbao-derived SG 150 spinful irrep character tables when called with a
   string space-group number: in-scope 1D labels have op2 C3 character -1
   (candidate phase +1/2 after convention review), while `-GM6`/`-K6` have
-  op2/op3 character evidence `(+1,+1)` and still need explicit C3
-  restriction decomposition plus double-group lift convention review.
+  op2/op3 character evidence `(+1,+1)`. The double-group lift audit shows
+  op3 is the central-negative `-g^2` representative, giving candidate
+  multiplicities `{+1/6: 1, -1/6: 1}` after central-sign conversion.
   ValleyScope still must perform its own sampled-HSP, valley-preserving
   subgroup restriction before any reduced EBR table is considered reviewed;
   raw 3D table data is only the input layer.
@@ -213,8 +214,9 @@ valley-changing operations as invariance of a single label operator.
   Bilbao character source, but ValleyScope must still perform its own
   sampled-HSP and valley-preserving subgroup reduction. The next physics step
   is to review and sign off the source-irrep restriction convention,
-  double-group lift convention, degenerate-irrep decomposition, reduced-basis
-  label selection, and provenance before any package-data table is shipped.
+  double-group lift convention, candidate degenerate-irrep decomposition,
+  reduced-basis label selection, and provenance before any package-data table
+  is shipped.
 * Codebase refinement: `docs/codebase_refinement_audit.md` is complete.  The
   three-phase test-only split of the former catch-all
   `tests/test_io_and_workflow.py` is merged.  Config parsing, output-profile
