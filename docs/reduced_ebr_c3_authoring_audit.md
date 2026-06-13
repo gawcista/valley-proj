@@ -796,6 +796,122 @@ evidence source.
 Until human review is complete, no C3-like reduced EBR table may be
 shipped as reviewed ValleyScope package data.
 
+## C3 Double-Group Lift Convention Audit
+
+Date: 2026-06-13 | Status: Audit (evidence verified by
+`tests/test_irreptables_table_builder.py`)
+
+This section audits the double-group (spinor) lift convention used by
+`irreptables.irreps.IrrepTable("150", True)` for SG 150 (P321) and
+determines whether the Bilbao character-table operation indexing maps
+directly to ValleyScope's C3 valley-preserving subgroup phase formula.
+
+### Bilbao Convention: Independent Spinor Lifts Per Spatial Operation
+
+The Bilbao data file (`irreps-SG=150-spin.dat`) encodes each symmetry
+operation with:
+
+1. A spatial rotation matrix `R` (3×3 integer).
+2. A translation vector `t`.
+3. An SU(2) spinor rotation matrix `S` (2×2 complex), computed from
+   four real absolute values and four phase/π values via
+   `S_ij = abs_ij * exp(i*π*phase_ij)`.
+
+For SG 150 (P321), the relevant valley-preserving operations are:
+
+| Op ID | Spatial R | SU(2) S | Double-Group Role |
+|-------|----------|---------|-------------------|
+| 1 | Identity | I | E |
+| 2 | C3 | diag(exp(+iπ/3), exp(-iπ/3)) | C3 generator g |
+| 3 | C3^2 | diag(exp(-iπ/3), exp(+iπ/3)) | NOT g^2 — see below |
+
+Spatially, `R3 = R2 @ R2` (C3^2 = C3²).  This is verified.
+
+### Key Finding: op3 ≠ op2² in the Double Group
+
+The double-group product of op2 with itself is:
+
+```text
+S2 @ S2 = diag(exp(+2iπ/3), exp(-2iπ/3))
+S3      = diag(exp(-iπ/3), exp(+iπ/3))
+```
+
+`S2 @ S2 ≠ S3` and also `S2 @ S2 ≠ -S3`.  The two spinor matrices
+differ by more than a sign — they represent **different double-group
+elements**.
+
+The double-group relation `g³ = -E` is correctly satisfied:
+`S2³ = diag(-1, -1) = -I`.
+
+### Character-Level Consequence
+
+For all four 1D irreps at GammaM and KM (`-GM4`, `-GM5`, `-K4`, `-K5`):
+
+| Value | Bilbao Table | Group-Theoretic | Match? |
+|-------|------------|----------------|--------|
+| chi(C3) = chi(op2) | -1 | -1 = exp(+iπ) | ✓ |
+| chi(op3) from table | -1 | — | — |
+| chi(C3²) = chi(op2)² | — | +1 = exp(+2iπ) | **✗ chi(op3) ≠ chi(op2)²** |
+
+Bilbao's `chi(op3) = -1` is NOT the group-theoretic `chi(C3²)`.
+The raw Bilbao op3 character must not be used in ValleyScope's
+`chi(C3²)` phase formula for 1D irreps.
+
+For the 2D irreps (`-GM6`, `-K6`):
+
+| Value | Bilbao Table | Group-Theoretic (from eigenvalues) | Match? |
+|-------|------------|-----------------------------------|--------|
+| chi(op2) | +1 | +1 = exp(+iπ/3) + exp(-iπ/3) | ✓ |
+| chi(op3) | +1 | −1 = exp(+2iπ/3) + exp(-2iπ/3) | **✗** |
+
+### ValleyScope Phase Convention Implications
+
+ValleyScope's spinful C3 phase formula requires **group-theoretic**
+characters for the valley-preserving subgroup `{E, g, g²}` where `g`
+is the C3 generator and `g²` is its double-group square:
+
+```text
+chi(g)  = Σ_i n_i * exp(2πi * phase_i)       (from Bilbao op2)
+chi(g²) = Σ_i n_i * exp(4πi * phase_i)       (NOT Bilbao op3!)
+```
+
+For 1D irreps: `chi(g²) = chi(g)²` (group-theoretic square).
+
+For degenerate irreps: `chi(g²)` must be computed from the C3 eigenvalue
+decomposition, not read from the Bilbao op3 character.
+
+### Verified Convention Mapping
+
+The Bilbao `IrrepTable("150", True)` characters can be used for
+ValleyScope's C3 valley-preserving subgroup as follows:
+
+1. **`chi(C3) = chi(op2)`** from the Bilbao table.  This is the C3
+   generator character.  ✓ Direct read.
+
+2. **`chi(C3²) = chi(C3)²`** for 1D irreps.  Compute from op2 alone.
+   Do NOT use `chi(op3)` from the Bilbao table.
+
+3. **For degenerate irreps**, decompose `chi(op2)` into spinful C3
+   eigenphases, then compute `chi(C3²)` from the eigenvalue expansion
+   `Σ_i n_i * exp(4πi * phase_i)`.  The Bilbao op3 character is not
+   usable for this calculation.
+
+4. **The C2 characters (op4-6)** are valley-changing sewing data and
+   must not enter the C3 valley-preserving reduced EBR vector basis.
+
+This convention is machine-verified by
+`tests/test_irreptables_table_builder.py`.
+
+### Remaining Ambiguity
+
+The mapping `chi(C3²) = chi(C3)²` is mathematically correct for 1D
+representations but should be cross-verified with an explicit P321
+spinful double-group multiplication table (e.g., from Bradley &
+Cracknell or the Bilbao Crystallographic Server).  The independent
+spinor lifts in the Bilbao convention are a specific gauge choice;
+a different gauge would give different op3 characters but the same
+group-theoretic `chi(C3²)`.
+
 ## Non-Features
 
 - No built-in reduced EBR table is shipped.

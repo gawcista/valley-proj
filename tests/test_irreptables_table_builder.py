@@ -1176,3 +1176,108 @@ def test_irreptables_sg150_no_kA_labels():
     # But -A4, -A5, -A6 do exist (at A HSP, not KA)
     for label in ["-A4", "-A5", "-A6"]:
         assert label in names, f"missing {label}"
+
+
+# -----------------------------------------------------------------------
+# C3 double-group lift convention audit
+# -----------------------------------------------------------------------
+
+def test_double_group_s2_cubed_is_minus_identity():
+    """S2³ = -I confirms the Bilbao convention satisfies
+    the spinful double-group relation g³ = -E for the C3 generator."""
+    _require_irreptables_irreps()
+    import irreptables.irreps as ir
+    import numpy as np
+    tbl = ir.IrrepTable("150", True)
+    S2 = tbl.symmetries[1].S  # op2 = C3 generator
+    S2_cubed = S2 @ S2 @ S2
+    assert np.allclose(S2_cubed, -np.eye(2), atol=1e-4), (
+        f"S2³ should be -I, got {S2_cubed}"
+    )
+
+
+def test_double_group_op3_is_not_op2_squared():
+    """S2 @ S2 ≠ S3: the Bilbao convention uses independent spinor lifts
+    for each spatial operation.  op3 is NOT the double-group square of op2."""
+    _require_irreptables_irreps()
+    import irreptables.irreps as ir
+    import numpy as np
+    tbl = ir.IrrepTable("150", True)
+    S2 = tbl.symmetries[1].S
+    S3 = tbl.symmetries[2].S
+    S22 = S2 @ S2
+    assert not np.allclose(S3, S22, atol=1e-6), (
+        "S3 should not equal S2 @ S2"
+    )
+    assert not np.allclose(S3, -S22, atol=1e-6), (
+        "S3 should not equal -(S2 @ S2)"
+    )
+
+
+def test_double_group_r3_is_r2_squared():
+    """R3 = R2 @ R2: spatial rotations satisfy C3^2 = C3²."""
+    _require_irreptables_irreps()
+    import irreptables.irreps as ir
+    import numpy as np
+    tbl = ir.IrrepTable("150", True)
+    R2 = tbl.symmetries[1].R
+    R3 = tbl.symmetries[2].R
+    assert np.allclose(R3, R2 @ R2)
+
+
+def test_double_group_chi_op3_not_chi_op2_squared():
+    """For all four 1D irreps at GM/K, chi(op3) ≠ chi(op2)².
+    ValleyScope must compute chi(C3²) = chi(C3)² from op2 alone,
+    NOT read chi(op3) from the Bilbao table."""
+    _require_irreptables_irreps()
+    import irreptables.irreps as ir
+    tbl = ir.IrrepTable("150", True)
+    for irrep in tbl.irreps:
+        if irrep.name in ("-GM4", "-GM5", "-K4", "-K5") and irrep.dim == 1:
+            chi2 = irrep.characters.get(2)
+            chi3 = irrep.characters.get(3)
+            chi2_sq = chi2 * chi2
+            assert not abs(chi3 - chi2_sq) < 1e-10, (
+                f"{irrep.name}: chi(op3)={chi3} should NOT equal "
+                f"chi(op2)²={chi2_sq}"
+            )
+
+
+def test_double_group_chi_op2_squared_is_positive_unity():
+    """chi(op2)² = +1 for all four 1D labels at GM/K.
+    This is the correct group-theoretic chi(C3²) for the +1/2 phase."""
+    _require_irreptables_irreps()
+    import irreptables.irreps as ir
+    tbl = ir.IrrepTable("150", True)
+    for irrep in tbl.irreps:
+        if irrep.name in ("-GM4", "-GM5", "-K4", "-K5") and irrep.dim == 1:
+            chi2 = irrep.characters.get(2)
+            chi2_sq = chi2 * chi2
+            assert abs(chi2_sq - 1.0) < 1e-10, (
+                f"{irrep.name}: chi(op2)² should be +1, got {chi2_sq}"
+            )
+
+
+def test_double_group_2d_chi_op3_not_minus_one():
+    """For -GM6/-K6 (2D), the Bilbao chi(op3) = +1, but group-theoretic
+    chi(C3²) should be -1 from the {+1/6, -1/6} eigenvalue decomposition.
+    This confirms the 2D labels also cannot use raw Bilbao op3 characters."""
+    _require_irreptables_irreps()
+    import irreptables.irreps as ir
+    tbl = ir.IrrepTable("150", True)
+    for irrep in tbl.irreps:
+        if irrep.name in ("-GM6", "-K6") and irrep.dim == 2:
+            chi3 = irrep.characters.get(3)
+            assert abs(chi3 - 1.0) < 1e-10, (
+                f"{irrep.name}: Bilbao chi(op3) is {chi3}, not the "
+                f"group-theoretic -1"
+            )
+
+
+def test_double_group_audit_doc_covers_lift_convention():
+    """C3 audit doc must cover the double-group lift convention finding."""
+    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
+    assert "C3 Double-Group Lift Convention Audit" in doc
+    assert "op3 ≠ op2²" in doc or "op3 is NOT the double-group square" in doc
+    assert 'chi(C3²) = chi(C3)²' in doc or 'chi(C3^2) = chi(C3)^2' in doc
+    assert "diag(exp(+2iπ/3), exp(-2iπ/3))" in doc or "diag(exp(+2i" in doc
