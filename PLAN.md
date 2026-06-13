@@ -53,14 +53,13 @@ The repo already has:
   labels, HSP little group / valley-preserving subgroup boundary, valley
   sewing-matrix boundary, and pending human review decisions; no table data is
   shipped; the phase-convention audit shows public
-  `irreptables.ebrs.load_ebr_data` does not expose C3 eigenphase/character
-  data, and the source-irrep restriction feasibility audit shows public
-  `irreptables.irreps` has no SG 150 character-table data while
-  `irrep.spacegroup_irreps` requires explicit structure/symmetry inputs and
-  manual valley-preserving C3 subgroup restriction; source labels are not
-  review-ready from package data alone; the human C3 convention decision
-  packet records the required review formulas, per-label evidence needs, and
-  provenance requirements;
+  `irreptables.ebrs.load_ebr_data` exposes Bilbao-derived EBR vectors but not
+  C3 eigenphase/character data directly.  The follow-up feasibility correction
+  must audit `irreptables.irreps.IrrepTable("150", True)`, which can access
+  Bilbao-derived SG 150 spinful irrep character tables when called with a
+  string space-group number.  ValleyScope still must perform its own
+  sampled-HSP, valley-preserving subgroup restriction before any reduced EBR
+  table is considered reviewed; raw 3D table data is only the input layer.
 * read-only codebase refinement audit (`docs/codebase_refinement_audit.md`)
   classifies cleanup candidates by physics layer and identifies
   `test_io_and_workflow.py` splitting as the lowest-risk first cleanup step;
@@ -204,19 +203,16 @@ valley-changing operations as invariance of a single label operator.
   irrep keys.  It remains offline/library-only and is not wired into
   `analyze-hsp`.  The adapter must use the `irreptables.ebrs.load_ebr_data`
   data path, not `irrep.ebrs` raw 3D decomposition or OR-Tools.
-* First reviewed C3-like external table: pending human review of the
-  source-irrep/HSP/ValleyScope-key mapping spec documented in
-  `docs/reduced_ebr_c3_authoring_audit.md`; the audit now includes a C3
-  convention readiness summary, machine-checked vs external-evidence split,
-  and explicit human-decision checklist. `-GM5` and `-K5` currently have
-  independent ValleyScope evidence but remain `needs_human_review`, while
-  degenerate source labels such as `-K6` are blocked until the source irrep is
-  restricted/decomposed into the valley-preserving C3 subgroup. Do not ship
-  package-data table until that mapping, restriction convention, and
-  provenance are reviewed. The next physics step is an external/manual C3
-  character-table convention review using the decision packet in
-  `docs/reduced_ebr_c3_authoring_audit.md`, not more automatic table
-  generation.
+* First reviewed C3-like external table: pending correction and extension of
+  `docs/reduced_ebr_c3_authoring_audit.md` using `irreptables` Bilbao-derived
+  irrep tables. The next physics/software step is a read-only audit of
+  `irreptables.irreps.IrrepTable("150", True)`: identify SG 150 spinful HSP
+  labels, little-group operation indices, C3/C3^2 characters, and the phase
+  convention needed to map source irreps to ValleyScope spinful C3 phase keys.
+  `irreptables` may provide the raw Bilbao data source, but ValleyScope must
+  still perform its own sampled-HSP and valley-preserving subgroup reduction.
+  Do not ship package-data table until the source-irrep restriction convention,
+  degenerate-irrep decomposition, and provenance are reviewed.
 * Codebase refinement: `docs/codebase_refinement_audit.md` is complete.  The
   three-phase test-only split of the former catch-all
   `tests/test_io_and_workflow.py` is merged.  Config parsing, output-profile
