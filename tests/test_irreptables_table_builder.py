@@ -328,11 +328,15 @@ def test_build_reduced_ebr_table_spec_doc_is_linked_and_material_free():
         "spinful",
         "source_hsp_by_irrep",
         "valleyscope_key_by_source_irrep",
+        "valleyscope_irrep_multiplicity_by_source_irrep",
         "expected_hsps",
         "allowed_irrep_keys",
         "subspace_group_candidate",
     ]:
         assert key in text
+    assert "1.1.0" in text
+    assert "many-to-one" in text
+    assert "one-to-many" in text
     for forbidden in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
         assert forbidden not in text
 
