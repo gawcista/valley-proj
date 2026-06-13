@@ -11,6 +11,16 @@ floating-point decomposition are provided. Reduced EBR decomposition
 requires a user-supplied validated table in the format below.
 Without a table, the interface reports `status: missing_table`.
 
+External user tables are validated by
+`valleyscope.analysis.reduced_ebr_mapping.load_reduced_ebr_table()` and do
+not need package-data review metadata. Reviewed package-data tables are a
+stricter path loaded by
+`valleyscope.data.reduced_ebr.catalog.load_reviewed_reduced_ebr_table()`;
+that path requires reviewed metadata in both `manifest.json` and the table's
+top-level `provenance` object, including `review_status: "reviewed"`,
+`reviewer`, `review_date`, `review_method`, `source_reference`, and
+`valleyscope_reduction: "sampled_hsp_valley_preserving"`.
+
 ## Required Table Keys
 
 | Key | Type | Description |

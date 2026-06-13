@@ -804,6 +804,11 @@ def test_package_data_readme_and_no_forbidden_imports():
     readme = (package_data_root() / "README.md").read_text(encoding="utf-8").lower()
     assert "no reviewed tables" in readme or "currently empty" in readme
     assert "currently" in readme
+    assert "load_reviewed_reduced_ebr_table" in readme
+    assert "load_reduced_ebr_table" in readme
+    assert "review_status" in readme
+    assert "source_reference" in readme
+    assert "external" in readme
     for fname, patterns in [
         ("catalog.py", ["import irrep2", "from irrep2"]),
         ("../../__init__.py", ["import irrep", "from irrep", "import irrep2", "from irrep2",
