@@ -1286,3 +1286,87 @@ def test_double_group_audit_doc_covers_lift_convention():
     assert "central-negative" in doc
     assert "chi(C3²) = -chi(op3)" in doc or "chi(C3^2) = -chi(op3)" in doc
     assert "diag(exp(+2iπ/3), exp(-2iπ/3))" in doc or "diag(exp(+2i" in doc
+
+
+# -----------------------------------------------------------------------
+# C3 mapping signoff packet doc-contract tests
+# -----------------------------------------------------------------------
+
+def test_signoff_packet_exists():
+    """docs/reduced_ebr_c3_mapping_signoff_packet.md must exist."""
+    path = Path("docs/reduced_ebr_c3_mapping_signoff_packet.md")
+    assert path.exists(), "signoff packet file missing"
+
+
+def test_signoff_packet_contains_all_six_source_labels():
+    """Signoff packet must list all six in-scope source labels with
+    their accepted ValleyScope keys."""
+    doc = Path("docs/reduced_ebr_c3_mapping_signoff_packet.md").read_text(encoding="utf-8")
+    assert "-GM4" in doc
+    assert "-GM5" in doc
+    assert "-GM6" in doc
+    assert "-K4" in doc
+    assert "-K5" in doc
+    assert "-K6" in doc
+    # 1D labels -> +1/2
+    for label in ["-GM4", "-GM5", "-K4", "-K5"]:
+        assert "C3_spinor_phase_+1/2" in doc
+    # degenerate labels -> multiplicity
+    assert "{+1/6: 1, -1/6: 1}" in doc
+
+
+def test_signoff_packet_states_central_sign_convention():
+    """Signoff packet must state chi(C3)=chi(op2) and chi(C3^2)=-chi(op3)."""
+    doc = Path("docs/reduced_ebr_c3_mapping_signoff_packet.md").read_text(encoding="utf-8")
+    assert "chi(C3) = chi(op2)" in doc or "chi(C3)=chi(op2)" in doc
+    assert "chi(C3²) = -chi(op3)" in doc or "chi(C3^2) = -chi(op3)" in doc
+
+
+def test_signoff_packet_excludes_c2_from_c3_basis():
+    """Signoff packet must state C2/op4-6 are valley sewing data and
+    must not enter the C3 reduced EBR vector basis."""
+    doc = Path("docs/reduced_ebr_c3_mapping_signoff_packet.md").read_text(encoding="utf-8")
+    assert "valley sewing data" in doc.lower()
+    assert "must not enter" in doc.lower() and "c3 reduced ebr vector basis" in doc.lower()
+
+
+def test_signoff_packet_states_no_builtin_table_shipped():
+    """Signoff packet must state it is not a reduced EBR table, not a
+    decomposition report, and no JSON is shipped."""
+    doc = Path("docs/reduced_ebr_c3_mapping_signoff_packet.md").read_text(encoding="utf-8")
+    assert "not a reduced ebr table" in doc.lower()
+    assert "not a reduced ebr decomposition report" in doc.lower()
+    assert "does not ship any" in doc.lower() and "reduced ebr table" in doc.lower()
+    assert "does not ship any json" in doc.lower()
+
+
+def test_signoff_packet_has_checklist():
+    """Signoff packet must include a signoff checklist with at least 8 items."""
+    doc = Path("docs/reduced_ebr_c3_mapping_signoff_packet.md").read_text(encoding="utf-8")
+    assert "Signoff Checklist" in doc
+    assert "Source data accepted" in doc
+    assert "HSP set confirmed" in doc
+    assert "Valley-preserving subgroup confirmed" in doc
+    assert "Central-sign convention confirmed" in doc
+    assert "Six source labels mapped" in doc
+    assert "C2 valley sewing data excluded" in doc
+    assert "Reviewer signoff" in doc
+
+
+def test_signoff_packet_records_provenance_fields():
+    """Signoff packet must list required provenance fields for a future
+    mapping spec/table."""
+    doc = Path("docs/reduced_ebr_c3_mapping_signoff_packet.md").read_text(encoding="utf-8")
+    for field in ["data_source", "space_group_number", "spinful",
+                  "subspace_group_candidate", "expected_hsps",
+                  "valleyscope_reduction", "review_status",
+                  "reviewer", "review_date", "review_method",
+                  "source_reference", "central_sign_convention"]:
+        assert field in doc, f"missing provenance field: {field}"
+
+
+def test_signoff_packet_no_material_names():
+    """Signoff packet must not contain real material names."""
+    doc = Path("docs/reduced_ebr_c3_mapping_signoff_packet.md").read_text(encoding="utf-8")
+    for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
+        assert name not in doc, f"signoff packet contains {name!r}"
