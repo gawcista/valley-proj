@@ -43,6 +43,11 @@ The repo already has:
   mapping-spec driven table generation; optional `--source-basis` preflight
   validates the human-authored mapping before build; no raw 3D decomposition
   call and no `analyze-hsp` wiring;
+* reviewed reduced EBR package-data catalog gate:
+  `load_reviewed_reduced_ebr_table()` now requires reviewed metadata in both
+  `manifest.json` and the table `provenance` block, while external
+  `load_reduced_ebr_table()` remains the permissive user-table schema
+  validator;
 * material-independent C3-like reduced EBR authoring audit
   (`docs/reduced_ebr_c3_authoring_audit.md`) documenting the source 3D irrep
   labels, HSP little group / valley-preserving subgroup boundary, valley
@@ -224,7 +229,10 @@ valley-changing operations as invariance of a single label operator.
   with empty manifest, README, and catalog module. No table data shipped.
 * ~~Loader integration~~ — Done. `catalog.py` validates manifests, routes
   `load_reviewed_reduced_ebr_table()` through `load_reduced_ebr_table()`,
-  and rejects path traversal. No built-in tables shipped.
+  rejects path traversal, and enforces reviewed package-data provenance on
+  manifest entries plus table `provenance`. External user tables still use
+  `load_reduced_ebr_table()` without reviewed provenance requirements. No
+  built-in tables shipped.
 * High-throughput database pipeline beyond single-run ingestion:
   benchmark-generated ingestion-record regression anchors, then multi-run
   manifest/index collection if needed.
