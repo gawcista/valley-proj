@@ -3,6 +3,7 @@ import subprocess
 import sys
 import pytest
 from pathlib import Path
+import numpy as np
 import yaml
 
 from valleyscope.analysis.reduced_ebr_mapping import (
@@ -1778,3 +1779,198 @@ def test_external_load_reduced_ebr_table_accepts_table_with_unreviewed_provenanc
     _write_table(tmp_path / "t.json", tbl)
     loaded = load_reduced_ebr_table(tmp_path / "t.json")
     assert loaded["provenance"]["review_status"] == "fixture-only"
+
+
+# -----------------------------------------------------------------------
+# 23. Reviewed table name loader plumbing
+# -----------------------------------------------------------------------
+
+def _fake_catalog_with_reviewed_table(tmp_path, monkeypatch, name="c3_reviewed"):
+    """Set up a fake catalog root with one reviewed table entry."""
+    from valleyscope.data.reduced_ebr import catalog
+    root = tmp_path / "fake_catalog"
+    root.mkdir()
+    (root / "__init__.py").write_text("")
+    tbl = dict(_SAMPLE_TABLE)
+    tbl["provenance"] = {
+        "review_status": "reviewed",
+        "reviewer": "JD",
+        "review_date": "2026-06-13",
+        "review_method": "test",
+        "source_reference": "test",
+        "valleyscope_reduction": "sampled_hsp_valley_preserving",
+        "data_source": "irreptables",
+        "package": "irreptables",
+        "package_version": "fake",
+        "space_group_number": 150,
+        "spinful": True,
+        "expected_hsps": ["GammaM", "KM"],
+        "subspace_group_candidate": "C3_like",
+    }
+    (root / f"{name}.json").write_text(json.dumps(tbl))
+    (root / "manifest.json").write_text(json.dumps({
+        "schema_version": "1.0.0",
+        "tables": [{
+            "name": name, "filename": f"{name}.json",
+            "review_status": "reviewed",
+            "reviewer": "JD",
+            "review_date": "2026-06-13",
+            "review_method": "test",
+            "source_reference": "test",
+        }],
+    }))
+    monkeypatch.setattr(catalog, "package_data_root", lambda: root)
+    return root
+
+
+def test_config_parses_table_name(tmp_path):
+    """config parses table_name string."""
+    from valleyscope.io.config import load_config
+    config_path = tmp_path / "cfg.yaml"
+    config_path.write_text(yaml.safe_dump({
+        "input": {"wavefunction_h5": "wave.h5"},
+        "analysis": {
+            "kpoints": ["GammaM"], "iband": [1],
+            "reduced_ebr": {"enabled": True, "table_name": "c3_table"},
+        },
+        "monolayer_lattices": {"default": {"reciprocal_cart": np.eye(3).tolist()}},
+        "valley_centers": {"coordinate_mode": "cart", "centers": [{"name": "K", "cart": [0, 0, 0]}]},
+        "valley_subspaces": [{"name": "K_valley", "centers": ["K"]}],
+        "output": {"directory": "out"},
+    }))
+    cfg = load_config(config_path)
+    assert cfg.reduced_ebr.table_name == "c3_table"
+    assert cfg.reduced_ebr.table_file is None
+
+
+def test_config_rejects_both_table_file_and_name(tmp_path):
+    """config rejects both table_file and table_name."""
+    from valleyscope.io.config import load_config
+    config_path = tmp_path / "cfg.yaml"
+    config_path.write_text(yaml.safe_dump({
+        "input": {"wavefunction_h5": "wave.h5"},
+        "analysis": {
+            "kpoints": ["GammaM"], "iband": [1],
+            "reduced_ebr": {
+                "enabled": True,
+                "table_file": "t.json",
+                "table_name": "c3_table",
+            },
+        },
+        "monolayer_lattices": {"default": {"reciprocal_cart": np.eye(3).tolist()}},
+        "valley_centers": {"coordinate_mode": "cart", "centers": [{"name": "K", "cart": [0, 0, 0]}]},
+        "valley_subspaces": [{"name": "K_valley", "centers": ["K"]}],
+        "output": {"directory": "out"},
+    }))
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        load_config(config_path)
+
+
+def test_config_rejects_empty_table_name(tmp_path):
+    """config rejects whitespace-only table_name."""
+    from valleyscope.io.config import load_config
+    config_path = tmp_path / "cfg.yaml"
+    config_path.write_text(yaml.safe_dump({
+        "input": {"wavefunction_h5": "wave.h5"},
+        "analysis": {
+            "kpoints": ["GammaM"], "iband": [1],
+            "reduced_ebr": {"enabled": True, "table_name": "  "},
+        },
+        "monolayer_lattices": {"default": {"reciprocal_cart": np.eye(3).tolist()}},
+        "valley_centers": {"coordinate_mode": "cart", "centers": [{"name": "K", "cart": [0, 0, 0]}]},
+        "valley_subspaces": [{"name": "K_valley", "centers": ["K"]}],
+        "output": {"directory": "out"},
+    }))
+    with pytest.raises(ValueError, match="non-empty"):
+        load_config(config_path)
+
+
+def test_analyze_hsp_uses_table_name_with_fake_catalog(tmp_path, monkeypatch):
+    """analyze_hsp loads table via catalog when table_name is set."""
+    _fake_catalog_with_reviewed_table(tmp_path, monkeypatch, name="c3")
+    import h5py as _h5
+    h5_path = tmp_path / "wf.h5"
+    with _h5.File(h5_path, "w") as h5:
+        meta = h5.create_group("metadata")
+        lat = meta.create_group("lattice")
+        lat["direct_cart"] = np.eye(3)
+        lat["reciprocal_cart"] = np.eye(3) * 10.0
+        meta["spinor"] = False; meta["source"] = "toy"; meta["vasp_band_index_base"] = 1
+        kp = h5.create_group("kpoints").create_group("0")
+        kp["name"] = "GammaM"; kp["frac"] = np.zeros(3); kp["cart"] = np.zeros(3)
+        kp["g_vectors_frac"] = np.array([[0, 0, 0], [1, 0, 0]])
+        kp["g_vectors_cart"] = np.array([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]])
+        kp["coefficients"] = np.array([[[1.0 + 0.0j, 0.0 + 0.0j]]])
+        kp["energies_eV"] = np.array([0.1]); kp["band_indices_vasp"] = np.array([101])
+    config_path = tmp_path / "cfg.yaml"
+    config_path.write_text(yaml.safe_dump({
+        "input": {"wavefunction_h5": str(h5_path)},
+        "analysis": {
+            "kpoints": ["GammaM"], "iband": [101],
+            "reduced_ebr": {"enabled": True, "table_name": "c3"},
+        },
+        "monolayer_lattices": {"default": {"reciprocal_cart": np.eye(3).tolist()}},
+        "valley_centers": {"coordinate_mode": "cart", "centers": [
+            {"name": "K", "cart": [0, 0, 0]},
+            {"name": "Kp", "cart": [5, 0, 0]},
+        ]},
+        "valley_subspaces": [
+            {"name": "K_valley", "centers": ["K"]},
+            {"name": "Kp_valley", "centers": ["Kp"]},
+        ],
+        "output": {"directory": str(tmp_path / "out")},
+    }))
+    from valleyscope.workflows.analyze_hsp import analyze_hsp
+    outputs = analyze_hsp(config_path)
+    assert "valley_reduced_ebr_mapping_json" in outputs
+
+
+def test_cli_map_reduced_ebr_accepts_table_name(tmp_path, monkeypatch):
+    """CLI --table-name loads reviewed package-data table via fake catalog."""
+    from valleyscope.cli import main
+    _fake_catalog_with_reviewed_table(tmp_path, monkeypatch, name="c3")
+    bundle_path = tmp_path / "bundle.json"
+    _write_bundle(bundle_path, [{
+        "bundle_id": "b", "valley": "K",
+        "subspace_group_candidate": "C3_like",
+        "ready_for_external_solver": True,
+        "irreps_by_kpoint": {
+            "GammaM": ["C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"],
+            "KM": ["C3_spinor_phase_+1/6", "C3_spinor_phase_-1/6"],
+        },
+    }])
+    out = tmp_path / "out.json"
+    rc = main(["map-reduced-ebr", str(bundle_path), "--table-name", "c3", "-o", str(out)])
+    assert rc == 0
+    assert out.exists()
+    mapping = json.loads(out.read_text())
+    assert mapping["status"] == "solved_exact"
+
+
+def test_cli_map_reduced_ebr_rejects_both_table_and_table_name(tmp_path):
+    """CLI rejects both positional table and --table-name."""
+    from valleyscope.cli import main
+    bundle_path = tmp_path / "bundle.json"
+    table_path = tmp_path / "table.json"
+    _write_bundle(bundle_path, [])
+    _write_table(table_path, _SAMPLE_TABLE)
+    out = tmp_path / "out.json"
+    rc = main(["map-reduced-ebr", str(bundle_path), str(table_path),
+               "--table-name", "c3", "-o", str(out)])
+    assert rc != 0
+
+
+def test_cli_map_reduced_ebr_requires_table_or_name(tmp_path):
+    """CLI requires either positional table or --table-name."""
+    from valleyscope.cli import main
+    bundle_path = tmp_path / "bundle.json"
+    _write_bundle(bundle_path, [])
+    out = tmp_path / "out.json"
+    rc = main(["map-reduced-ebr", str(bundle_path), "-o", str(out)])
+    assert rc != 0
+
+
+def test_real_manifest_still_lists_no_reviewed_tables():
+    """Real manifest must still list [] (no tables added)."""
+    from valleyscope.data.reduced_ebr.catalog import list_reviewed_reduced_ebr_tables
+    assert list_reviewed_reduced_ebr_tables() == []

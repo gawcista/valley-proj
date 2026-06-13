@@ -63,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
 def _add_map_reduced_ebr_parser(subparsers) -> None:
     p = subparsers.add_parser(
         "map-reduced-ebr",
-        help="Offline exact-integer reduced EBR mapping from export bundle + external table",
+        help="Offline exact-integer reduced EBR mapping from export bundle + external/reviewed table",
     )
     p.add_argument(
         "bundle",
@@ -72,8 +72,16 @@ def _add_map_reduced_ebr_parser(subparsers) -> None:
     )
     p.add_argument(
         "table",
+        nargs="?",
         type=Path,
-        help="Path to external reduced EBR table JSON (required; no built-in tables)",
+        default=None,
+        help="Path to external reduced EBR table JSON (use --table-name for reviewed package-data tables)",
+    )
+    p.add_argument(
+        "--table-name",
+        type=str,
+        default=None,
+        help="Name of a reviewed package-data table (loads via catalog; mutually exclusive with positional table)",
     )
     p.add_argument(
         "--output", "-o",
@@ -91,9 +99,25 @@ def _add_map_reduced_ebr_parser(subparsers) -> None:
 
 def _map_reduced_ebr(args) -> int:
     bundle_path = Path(args.bundle)
-    table_path = Path(args.table)
     output_path = Path(args.output)
     max_coeff = int(args.max_coefficient)
+
+    # --- Resolve table source ---
+    table_path = args.table
+    table_name = args.table_name
+    if table_path is not None and table_name is not None:
+        print(
+            "error: positional table and --table-name are mutually exclusive",
+            file=sys.stderr,
+        )
+        return 1
+    if table_path is None and table_name is None:
+        print(
+            "error: either a positional external table path or "
+            "--table-name is required",
+            file=sys.stderr,
+        )
+        return 1
 
     # Load export bundle.
     try:
@@ -102,12 +126,24 @@ def _map_reduced_ebr(args) -> int:
         print(f"error: cannot read export bundle '{bundle_path}': {exc}", file=sys.stderr)
         return 1
 
-    # Load and validate external table.
-    try:
-        table = load_reduced_ebr_table(table_path)
-    except (FileNotFoundError, json.JSONDecodeError, ValueError) as exc:
-        print(f"error: cannot load reduced EBR table '{table_path}': {exc}", file=sys.stderr)
-        return 1
+    # Load table.
+    if table_path is not None:
+        try:
+            table = load_reduced_ebr_table(table_path)
+        except (FileNotFoundError, json.JSONDecodeError, ValueError) as exc:
+            print(f"error: cannot load external reduced EBR table "
+                  f"'{table_path}': {exc}", file=sys.stderr)
+            return 1
+    else:
+        try:
+            from valleyscope.data.reduced_ebr.catalog import (
+                load_reviewed_reduced_ebr_table,
+            )
+            table = load_reviewed_reduced_ebr_table(table_name)
+        except (FileNotFoundError, ValueError) as exc:
+            print(f"error: cannot load reviewed package-data table "
+                  f"{table_name!r}: {exc}", file=sys.stderr)
+            return 1
 
     # Compute mapping.
     mapping = build_reduced_ebr_mapping(

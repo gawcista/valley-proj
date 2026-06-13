@@ -128,6 +128,7 @@ class RotationConfig:
 class ReducedEbrConfig:
     enabled: bool = False
     table_file: Path | None = None
+    table_name: str | None = None
     max_coefficient: int = 6
 
 
@@ -554,9 +555,23 @@ def _parse_reduced_ebr_config(base: Path, raw: dict[str, Any]) -> ReducedEbrConf
     max_coefficient = int(raw.get("max_coefficient", 6))
     if max_coefficient < 0:
         raise ValueError("analysis.reduced_ebr.max_coefficient must be nonnegative")
+    table_file_raw = raw.get("table_file")
+    table_name_raw = raw.get("table_name")
+    if table_file_raw is not None and table_name_raw is not None:
+        raise ValueError(
+            "analysis.reduced_ebr.table_file and table_name are mutually exclusive"
+        )
+    table_name: str | None = None
+    if table_name_raw is not None:
+        if not isinstance(table_name_raw, str) or not table_name_raw.strip():
+            raise ValueError(
+                "analysis.reduced_ebr.table_name must be a non-empty string"
+            )
+        table_name = table_name_raw.strip()
     return ReducedEbrConfig(
         enabled=bool(raw.get("enabled", False)),
-        table_file=resolve_config_path(base, raw.get("table_file")),
+        table_file=resolve_config_path(base, table_file_raw),
+        table_name=table_name,
         max_coefficient=max_coefficient,
     )
 
