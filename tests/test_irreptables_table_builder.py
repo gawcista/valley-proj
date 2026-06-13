@@ -2075,3 +2075,181 @@ def test_validator_module_no_material_names_v1_1():
     src = Path("valleyscope/analysis/reduced_ebr_spec_template_validator.py").read_text(encoding="utf-8")
     for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
         assert name not in src
+
+
+# -----------------------------------------------------------------------
+# C3 real-source v1.1 workflow smoke
+# -----------------------------------------------------------------------
+
+_REAL_SG150_LABELS = [
+    "-GM4", "-GM5", "-GM6",
+    "-A4", "-A5", "-A6",
+    "-H4", "-H5", "-H6",
+    "-HA4", "-HA5", "-HA6",
+    "-K4", "-K5", "-K6",
+    "-KA4", "-KA5", "-KA6",
+    "-L3", "-L4",
+    "-M3", "-M4",
+]
+
+_REAL_HSP_MAP = {
+    # GammaM HSP
+    "-GM4": "GammaM", "-GM5": "GammaM", "-GM6": "GammaM",
+    # K HSP -> KM in ValleyScope
+    "-K4": "KM", "-K5": "KM", "-K6": "KM",
+    # Non-sampled HSPs
+    "-A4": "A", "-A5": "A", "-A6": "A",
+    "-H4": "H", "-H5": "H", "-H6": "H",
+    "-HA4": "HA", "-HA5": "HA", "-HA6": "HA",
+    "-KA4": "KA", "-KA5": "KA", "-KA6": "KA",
+    "-L3": "L", "-L4": "L",
+    "-M3": "M", "-M4": "M",
+}
+
+_REAL_C3_MULT = {
+    "-GM4": {"GammaM:C3_spinor_phase_+1/2": 1},
+    "-GM5": {"GammaM:C3_spinor_phase_+1/2": 1},
+    "-GM6": {
+        "GammaM:C3_spinor_phase_+1/6": 1,
+        "GammaM:C3_spinor_phase_-1/6": 1,
+    },
+    "-K4": {"KM:C3_spinor_phase_+1/2": 1},
+    "-K5": {"KM:C3_spinor_phase_+1/2": 1},
+    "-K6": {
+        "KM:C3_spinor_phase_+1/6": 1,
+        "KM:C3_spinor_phase_-1/6": 1,
+    },
+}
+
+_REAL_C3_KEYS = [
+    "GammaM:C3_spinor_phase_+1/6",
+    "GammaM:C3_spinor_phase_+1/2",
+    "GammaM:C3_spinor_phase_-1/6",
+    "KM:C3_spinor_phase_+1/6",
+    "KM:C3_spinor_phase_+1/2",
+    "KM:C3_spinor_phase_-1/6",
+]
+
+
+def _require_real_irreptables_data():
+    """Skip if irreptables.ebrs.load_ebr_data is unavailable or SG150
+    spinful EBR data cannot be loaded."""
+    try:
+        from irreptables.ebrs import load_ebr_data
+        load_ebr_data(150, True)
+    except Exception as exc:
+        pytest.skip(f"real irreptables SG150 spinful data unavailable: {exc}")
+
+
+def test_c3_real_source_v1_1_workflow_smoke(tmp_path):
+    """Full v1.1 workflow smoke using real irreptables SG150 spinful data:
+    inspect source basis, validate spec, build reduced table, verify output."""
+    _require_real_irreptables_data()
+    from valleyscope.analysis.reduced_ebr_source_basis_inspector import (
+        inspect_irreptables_source_basis,
+    )
+    from valleyscope.analysis.reduced_ebr_spec_template_validator import (
+        validate_mapping_spec_against_source_basis,
+    )
+    from valleyscope.analysis.irreptables_runtime_table_builder import (
+        build_reduced_table_from_spec_file,
+    )
+
+    # 1. Inspect real source basis.
+    source_info = inspect_irreptables_source_basis(150, spinful=True)
+    assert source_info["source_basis_count"] == 22
+    assert source_info["source_ebr_count"] == 9
+    source_labels = [e["source_label"] for e in source_info["source_basis"]]
+    assert source_labels == _REAL_SG150_LABELS, (
+        f"real source labels changed — update _REAL_SG150_LABELS"
+    )
+
+    # 2. Build v1.1 spec.
+    spec = {
+        "schema_version": "1.1.0",
+        "data_source": "irreptables",
+        "space_group_number": 150,
+        "spinful": True,
+        "source_hsp_by_irrep": _REAL_HSP_MAP,
+        "valleyscope_irrep_multiplicity_by_source_irrep": _REAL_C3_MULT,
+        "expected_hsps": ["GammaM", "KM"],
+        "allowed_irrep_keys": _REAL_C3_KEYS,
+        "subspace_group_candidate": "C3_like",
+    }
+
+    # 3. Validate spec against source basis.
+    result = validate_mapping_spec_against_source_basis(spec, source_info)
+    assert result["valid"] is True, f"validation errors: {result['errors']}"
+
+    # 4. Build reduced table.
+    spec_path = tmp_path / "spec_v11.json"
+    spec_path.write_text(json.dumps(spec))
+    table = build_reduced_table_from_spec_file(str(spec_path))
+
+    # 5. Assert table properties.
+    assert table["schema_version"] == "1.0.0"  # table output format, not spec version
+    assert table["subspace_group_candidate"] == "C3_like"
+    assert table["expected_hsps"] == ["GammaM", "KM"]
+    assert table["irreps"] == _REAL_C3_KEYS
+    assert len(table["irreps"]) == 6
+
+    for ebr in table["ebrs"]:
+        vec = ebr["vector"]
+        assert len(vec) == 6, f"vector length {len(vec)} != 6"
+        assert all(isinstance(v, int) and v >= 0 for v in vec), (
+            f"non-integer or negative vector: {vec}"
+        )
+        # Positivity: at least one entry must be > 0 after reduction
+        assert any(v > 0 for v in vec), f"zero vector: {vec}"
+
+    # No C2/valley sewing data keys in the reduced irrep list.
+    for key in table["irreps"]:
+        assert "C2" not in key, f"C2 key leaked into C3 reduced basis: {key}"
+
+    provenance = table["provenance"]
+    assert provenance["data_source"] == "irreptables"
+    assert provenance["space_group_number"] == 150
+    assert provenance["spinful"] is True
+    assert provenance["subspace_group_candidate"] == "C3_like"
+    assert provenance["valleyscope_reduction"] == "sampled_hsp_valley_preserving"
+
+    # Table is valid per load_reduced_ebr_table.
+    table_path = tmp_path / "table.json"
+    table_path.write_text(json.dumps(table))
+    validated = load_reduced_ebr_table(table_path)
+    assert validated["irreps"] == _REAL_C3_KEYS
+
+
+# -----------------------------------------------------------------------
+# C3 v1.1 workflow smoke audit doc contract
+# -----------------------------------------------------------------------
+
+def test_c3_smoke_audit_doc_exists():
+    """Smoke audit doc must exist."""
+    path = Path("docs/reduced_ebr_c3_v1_1_real_source_workflow_smoke.md")
+    assert path.exists()
+
+
+def test_c3_smoke_audit_covers_physical_objects():
+    """Smoke audit doc must cover HSP little group, valley mapping, etc."""
+    doc = Path("docs/reduced_ebr_c3_v1_1_real_source_workflow_smoke.md").read_text(encoding="utf-8")
+    for term in [
+        "HSP little group", "valley mapping", "valley-preserving subgroup",
+        "valley-changing", "valley sewing matrix",
+    ]:
+        assert term.lower() in doc.lower(), f"missing '{term}'"
+    assert "22 source" in doc
+
+
+def test_c3_smoke_audit_states_no_table_shipped():
+    """Smoke audit doc must state no table JSON is shipped."""
+    doc = Path("docs/reduced_ebr_c3_v1_1_real_source_workflow_smoke.md").read_text(encoding="utf-8")
+    assert "no reduced EBR table JSON" in doc.lower() or "does not ship" in doc.lower()
+    assert "temporary" in doc.lower() or "not committed" in doc.lower()
+
+
+def test_c3_smoke_audit_no_material_names():
+    """Smoke audit doc must not contain real material names."""
+    doc = Path("docs/reduced_ebr_c3_v1_1_real_source_workflow_smoke.md").read_text(encoding="utf-8")
+    for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
+        assert name not in doc
