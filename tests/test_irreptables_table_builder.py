@@ -1403,31 +1403,36 @@ def test_spec_draft_status_is_draft_not_builder_compatible():
 
 
 def test_spec_draft_has_all_six_source_labels():
-    """source_hsp_by_irrep must contain all six in-scope labels."""
+    """source_hsp_by_irrep must contain exactly the six in-scope labels."""
     spec = _load_spec_draft()
-    for label in ["-GM4", "-GM5", "-GM6", "-K4", "-K5", "-K6"]:
-        assert label in spec["source_hsp_by_irrep"]
-        assert spec["source_hsp_by_irrep"][label] in ("GammaM", "KM")
+    assert spec["source_hsp_by_irrep"] == {
+        "-GM4": "GammaM",
+        "-GM5": "GammaM",
+        "-GM6": "GammaM",
+        "-K4": "KM",
+        "-K5": "KM",
+        "-K6": "KM",
+    }
 
 
 def test_spec_draft_allowed_irrep_keys_has_all_six_c3_keys():
-    """allowed_irrep_keys must contain all six C3 phase keys."""
+    """allowed_irrep_keys must contain exactly the six C3 phase keys."""
     spec = _load_spec_draft()
-    for key in [
+    assert set(spec["allowed_irrep_keys"]) == {
         "GammaM:C3_spinor_phase_+1/6",
         "GammaM:C3_spinor_phase_+1/2",
         "GammaM:C3_spinor_phase_-1/6",
         "KM:C3_spinor_phase_+1/6",
         "KM:C3_spinor_phase_+1/2",
-        "KM:C3_spinor_phase_-1/6",
-    ]:
-        assert key in spec["allowed_irrep_keys"]
+        "KM:C3_spinor_phase_-1/6"
+    }
 
 
 def test_spec_draft_multiplicity_maps_1d_labels_to_plus_half():
     """GM4/GM5/K4/K5 must each map to +1/2 with multiplicity 1."""
     spec = _load_spec_draft()
     m = spec["valleyscope_irrep_multiplicity_by_source_irrep"]
+    assert set(m) == {"-GM4", "-GM5", "-GM6", "-K4", "-K5", "-K6"}
     assert m["-GM4"] == {"GammaM:C3_spinor_phase_+1/2": 1}
     assert m["-GM5"] == {"GammaM:C3_spinor_phase_+1/2": 1}
     assert m["-K4"] == {"KM:C3_spinor_phase_+1/2": 1}
@@ -1455,8 +1460,10 @@ def test_spec_draft_builder_compatibility_is_false_with_reason():
     bc = spec["builder_compatibility"]
     assert bc["compatible_with_build_reduced_table_from_spec_file"] is False
     reason = bc["reason"].lower()
-    assert "many-to-one" in reason or "many-to-one" in reason
+    assert "many-to-one" in reason
+    assert "aggregation" in reason
     assert "one-to-many" in reason
+    assert "decomposition" in reason
 
 
 def test_spec_draft_not_under_package_data():
