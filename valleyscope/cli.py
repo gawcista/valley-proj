@@ -375,6 +375,12 @@ def _add_scaffold_spec_parser(subparsers) -> None:
         default=Path("spec_template.json"),
         help="Output path for the template (default: %(default)s)",
     )
+    p.add_argument(
+        "--schema-version",
+        choices=["1.0.0", "1.1.0"],
+        default="1.0.0",
+        help="Schema version for the template (default: 1.0.0)",
+    )
 
 
 def _scaffold_spec(args) -> int:
@@ -392,7 +398,7 @@ def _scaffold_spec(args) -> int:
         return 1
 
     try:
-        template = build_mapping_spec_template(source)
+        template = build_mapping_spec_template(source, schema_version=args.schema_version)
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -400,6 +406,7 @@ def _scaffold_spec(args) -> int:
     write_json(args.output, template)
     print(f"template spec:       {args.output}")
     print(f"source labels:       {len(template['source_hsp_by_irrep'])}")
+    print(f"schema version:      {template['schema_version']}")
     print(f"Fill all 'REQUIRED_FILL_BY_HUMAN' placeholders before building.")
     return 0
 

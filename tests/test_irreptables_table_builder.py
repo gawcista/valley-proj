@@ -1775,3 +1775,275 @@ def test_no_material_names_in_production_files():
         src = Path(fname).read_text(encoding="utf-8")
         for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
             assert name not in src, f"{fname} contains {name!r}"
+
+
+# -----------------------------------------------------------------------
+# v1.1 mapping-spec authoring aids
+# -----------------------------------------------------------------------
+
+from valleyscope.analysis.reduced_ebr_spec_template_validator import (
+    build_mapping_spec_template,
+    validate_mapping_spec_against_source_basis,
+)
+
+
+_V1_1_VALID_SPEC = {
+    "schema_version": "1.1.0",
+    "data_source": "irreptables",
+    "space_group_number": 150,
+    "spinful": True,
+    "source_hsp_by_irrep": {
+        "-GM5": "GammaM", "-K5": "KM", "-K6": "KM", "-A5": "A",
+    },
+    "valleyscope_irrep_multiplicity_by_source_irrep": {
+        "-GM5": {"GammaM:C3_spinor_phase_+1/2": 1},
+        "-K5": {"KM:C3_spinor_phase_+1/6": 1},
+        "-K6": {
+            "KM:C3_spinor_phase_+1/6": 1,
+            "KM:C3_spinor_phase_-1/6": 1,
+        },
+    },
+    "expected_hsps": ["GammaM", "KM"],
+    "allowed_irrep_keys": [
+        "GammaM:C3_spinor_phase_+1/2",
+        "KM:C3_spinor_phase_+1/6",
+        "KM:C3_spinor_phase_-1/6",
+    ],
+    "subspace_group_candidate": "C3_like",
+}
+
+
+# --- Template v1.1 ---
+
+def test_template_v1_1_contains_multiplicity_map():
+    """v1.1 template must contain valleyscope_irrep_multiplicity_by_source_irrep."""
+    tmpl = build_mapping_spec_template(_SOURCE_BASIS_PAYLOAD, schema_version="1.1.0")
+    assert tmpl["schema_version"] == "1.1.0"
+    assert "valleyscope_irrep_multiplicity_by_source_irrep" in tmpl
+    assert "valleyscope_key_by_source_irrep" not in tmpl
+    mult = tmpl["valleyscope_irrep_multiplicity_by_source_irrep"]
+    assert set(mult.keys()) == {"-GM5", "-K5", "-K6", "-A5"}
+
+
+def test_template_v1_1_is_not_buildable(tmp_path):
+    """v1.1 template with placeholder multiplicities fails builder."""
+    tmpl = build_mapping_spec_template(_SOURCE_BASIS_PAYLOAD, schema_version="1.1.0")
+    spec_path = tmp_path / "template_v11.json"
+    spec_path.write_text(json.dumps(tmpl))
+    with pytest.raises(ValueError, match="REQUIRED_FILL_BY_HUMAN|placeholder|must be"):
+        build_reduced_table_from_spec_file(spec_path, source_loader=_fake_loader([]))
+
+
+# --- Validator v1.1 ---
+
+def test_validator_v1_1_accepts_completed_spec():
+    """Validator accepts a fully filled v1.1 spec with multiplicity maps."""
+    result = validate_mapping_spec_against_source_basis(
+        _V1_1_VALID_SPEC, _SOURCE_BASIS_PAYLOAD,
+    )
+    assert result["valid"] is True
+    assert result["errors"] == []
+
+
+def test_validator_v1_1_rejects_placeholder_mult():
+    """Validator rejects placeholder in multiplicity map."""
+    tmpl = build_mapping_spec_template(_SOURCE_BASIS_PAYLOAD, schema_version="1.1.0")
+    result = validate_mapping_spec_against_source_basis(tmpl, _SOURCE_BASIS_PAYLOAD)
+    assert result["valid"] is False
+    assert any("REQUIRED_FILL_BY_HUMAN" in e or "placeholder" in e for e in result["errors"])
+
+
+def test_validator_v1_1_rejects_missing_mult_for_sampled_hsp():
+    """Validator rejects spec that omits multiplicity for a sampled-HSP label."""
+    import copy
+    bad = copy.deepcopy(_V1_1_VALID_SPEC)
+    del bad["valleyscope_irrep_multiplicity_by_source_irrep"]["-K5"]
+    result = validate_mapping_spec_against_source_basis(bad, _SOURCE_BASIS_PAYLOAD)
+    assert result["valid"] is False
+    assert any("missing" in e.lower() for e in result["errors"])
+
+
+def test_validator_v1_1_rejects_mult_for_nonsampled_hsp():
+    """Validator rejects multiplicity entries for non-sampled-HSP labels."""
+    import copy
+    bad = copy.deepcopy(_V1_1_VALID_SPEC)
+    # -A5 is at HSP A, which is not in expected_hsps
+    bad["valleyscope_irrep_multiplicity_by_source_irrep"]["-A5"] = {"A:C1_spinor": 1}
+    result = validate_mapping_spec_against_source_basis(bad, _SOURCE_BASIS_PAYLOAD)
+    assert result["valid"] is False
+    assert any("non-sampled" in e.lower() or "outside" in e.lower()
+               for e in result["errors"])
+
+
+def test_validator_v1_1_rejects_zero_mult():
+    """Validator rejects zero or negative multiplicity."""
+    import copy
+    bad = copy.deepcopy(_V1_1_VALID_SPEC)
+    bad["valleyscope_irrep_multiplicity_by_source_irrep"]["-GM5"] = {
+        "GammaM:C3_spinor_phase_+1/2": 0}
+    result = validate_mapping_spec_against_source_basis(bad, _SOURCE_BASIS_PAYLOAD)
+    assert result["valid"] is False
+    assert any("positive" in e for e in result["errors"])
+
+
+def test_validator_v1_1_rejects_bool_mult():
+    """Validator rejects bool multiplicity."""
+    import copy
+    bad = copy.deepcopy(_V1_1_VALID_SPEC)
+    bad["valleyscope_irrep_multiplicity_by_source_irrep"]["-GM5"] = {
+        "GammaM:C3_spinor_phase_+1/2": True}
+    result = validate_mapping_spec_against_source_basis(bad, _SOURCE_BASIS_PAYLOAD)
+    assert result["valid"] is False
+    assert any("integer" in e for e in result["errors"])
+
+
+def test_validator_v1_1_rejects_key_not_in_allowed():
+    """Validator rejects multiplicity key outside allowed_irrep_keys."""
+    import copy
+    bad = copy.deepcopy(_V1_1_VALID_SPEC)
+    bad["valleyscope_irrep_multiplicity_by_source_irrep"]["-GM5"] = {
+        "GammaM:ghost": 1}
+    result = validate_mapping_spec_against_source_basis(bad, _SOURCE_BASIS_PAYLOAD)
+    assert result["valid"] is False
+    assert any("allowed_irrep_keys" in e for e in result["errors"])
+
+
+# --- CLI scaffold v1.1 ---
+
+def test_cli_scaffold_v1_1(tmp_path, capsys):
+    """CLI scaffold-spec --schema-version 1.1.0 works."""
+    from valleyscope.cli import main
+    src = tmp_path / "source.json"
+    src.write_text(json.dumps(_SOURCE_BASIS_PAYLOAD))
+    out = tmp_path / "template.json"
+    rc = main(["scaffold-spec", str(src), "--schema-version", "1.1.0", "-o", str(out)])
+    assert rc == 0
+    tmpl = json.loads(out.read_text())
+    assert tmpl["schema_version"] == "1.1.0"
+    assert "valleyscope_irrep_multiplicity_by_source_irrep" in tmpl
+    captured = capsys.readouterr().out
+    assert "1.1.0" in captured
+
+
+# --- CLI validate v1.1 ---
+
+def test_cli_validate_v1_1_accepts_valid(tmp_path):
+    """CLI validate-spec accepts a valid v1.1 spec."""
+    from valleyscope.cli import main
+    src = tmp_path / "source.json"
+    src.write_text(json.dumps(_SOURCE_BASIS_PAYLOAD))
+    spec = tmp_path / "spec.json"
+    spec.write_text(json.dumps(_V1_1_VALID_SPEC))
+    rc = main(["validate-spec", str(spec), str(src)])
+    assert rc == 0
+
+
+def test_cli_validate_v1_1_rejects_placeholder(tmp_path):
+    """CLI validate-spec rejects v1.1 spec with placeholder."""
+    from valleyscope.cli import main
+    src = tmp_path / "source.json"
+    src.write_text(json.dumps(_SOURCE_BASIS_PAYLOAD))
+    tmpl = build_mapping_spec_template(_SOURCE_BASIS_PAYLOAD, schema_version="1.1.0")
+    spec = tmp_path / "spec.json"
+    spec.write_text(json.dumps(tmpl))
+    rc = main(["validate-spec", str(spec), str(src)])
+    assert rc != 0
+
+
+# --- Preflight v1.1 ---
+
+def test_build_preflight_v1_1_passes_for_valid_spec(tmp_path, capsys, monkeypatch):
+    """build-reduced-ebr-table --source-basis preflight passes valid v1.1 spec."""
+    from valleyscope.cli import main
+    source = tmp_path / "source.json"
+    source.write_text(json.dumps(_PREFLIGHT_SOURCE_BASIS))
+
+    v1_1_preflight_spec = {
+        "schema_version": "1.1.0",
+        "data_source": "irreptables",
+        "space_group_number": 150,
+        "spinful": True,
+        "source_hsp_by_irrep": {
+            "-GM5": "GammaM", "-K5": "KM", "-K6": "KM", "-A5": "A",
+        },
+        "valleyscope_irrep_multiplicity_by_source_irrep": {
+            "-GM5": {"GammaM:C3_spinor_phase_+1/2": 1},
+            "-K5": {"KM:C3_spinor_phase_+1/6": 1},
+            "-K6": {
+                "KM:C3_spinor_phase_+1/6": 1,
+                "KM:C3_spinor_phase_-1/6": 1,
+            },
+        },
+        "expected_hsps": ["GammaM", "KM"],
+        "allowed_irrep_keys": [
+            "GammaM:C3_spinor_phase_+1/2",
+            "KM:C3_spinor_phase_+1/6",
+            "KM:C3_spinor_phase_-1/6",
+        ],
+        "subspace_group_candidate": "C3_like",
+    }
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps(v1_1_preflight_spec))
+    out = tmp_path / "table.json"
+
+    monkeypatch.setattr(
+        "valleyscope.analysis.irreptables_runtime_table_builder._load_ebr_data_from_irreptables",
+        lambda sg, spinor: dict(_PREFLIGHT_EBR_DATA),
+    )
+    rc = main([
+        "build-reduced-ebr-table", str(spec_path),
+        "--source-basis", str(source), "-o", str(out),
+    ])
+    assert rc == 0
+    captured = capsys.readouterr().out
+    assert "preflight validation passed" in captured
+    assert out.exists()
+
+
+def test_build_preflight_v1_1_fails_on_placeholder(tmp_path, capsys, monkeypatch):
+    """build-reduced-ebr-table --source-basis fails on v1.1 template."""
+    from valleyscope.cli import main
+
+    source = tmp_path / "source.json"
+    source.write_text(json.dumps(_PREFLIGHT_SOURCE_BASIS))
+    tmpl = build_mapping_spec_template(_PREFLIGHT_SOURCE_BASIS, schema_version="1.1.0")
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps(tmpl))
+    out = tmp_path / "table.json"
+
+    source_loader_calls = []
+
+    def _source_loader_should_not_run(sg, spinor):
+        source_loader_calls.append((sg, spinor))
+        raise AssertionError("source loader should not run after preflight failure")
+
+    monkeypatch.setattr(
+        "valleyscope.analysis.irreptables_runtime_table_builder._load_ebr_data_from_irreptables",
+        _source_loader_should_not_run,
+    )
+    rc = main([
+        "build-reduced-ebr-table", str(spec_path),
+        "--source-basis", str(source), "-o", str(out),
+    ])
+    assert rc != 0
+    captured = capsys.readouterr()
+    assert "preflight validation failed" in captured.err
+    assert source_loader_calls == []
+
+
+def test_validator_module_no_forbidden_imports_v1_1():
+    """Template/validator must not import irrep2, OR-Tools, etc."""
+    src = Path("valleyscope/analysis/reduced_ebr_spec_template_validator.py").read_text(encoding="utf-8")
+    for forbidden in [
+        "import irrep2", "from irrep2",
+        "import ortools", "from ortools",
+        "from irrep.ebrs", "import irrep.ebrs",
+    ]:
+        assert forbidden not in src
+
+
+def test_validator_module_no_material_names_v1_1():
+    """Validator must not contain material names."""
+    src = Path("valleyscope/analysis/reduced_ebr_spec_template_validator.py").read_text(encoding="utf-8")
+    for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
+        assert name not in src
