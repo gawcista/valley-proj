@@ -1041,15 +1041,19 @@ def test_c3_audit_has_no_stale_irreptables_character_claims():
         "Confirm `-K5` → `C3_spinor_phase_+1/6`",
         "Expected: `exp(+i*pi/3)` = phase +1/6",
         "`IrrepTable(150, True)`\n   fails because `irreptables/data/` lacks SG 150 files",
+        "decomposes to {+1/6, -1/6}",
+        "and decompose as `{+1/6, -1/6}`",
     ]
     for stale in stale_claims:
         assert stale not in doc, f"stale C3 audit claim remains: {stale}"
 
     current_claims = [
         'IrrepTable("150", True)',
-        "`-K5` | 1 | -1 | +1/2 | `KM:C3_spinor_phase_+1/2`",
-        "`-GM4` | 1 | -1 | +1/2 | `GammaM:C3_spinor_phase_+1/2`",
-        "`-K4` | 1 | -1 | +1/2 | `KM:C3_spinor_phase_+1/2`",
+        "`-K5` | 1 | op2=-1, op3=-1 | +1/2 from op2 | `KM:C3_spinor_phase_+1/2`",
+        "`-GM4` | 1 | op2=-1, op3=-1 | +1/2 from op2 | `GammaM:C3_spinor_phase_+1/2`",
+        "`-K4` | 1 | op2=-1, op3=-1 | +1/2 from op2 | `KM:C3_spinor_phase_+1/2`",
+        "No `{+1/6, -1/6}` multiplicity",
+        "assignment is claimed by this audit",
     ]
     for current in current_claims:
         assert current in doc, f"missing corrected C3 audit claim: {current}"
@@ -1089,10 +1093,10 @@ def test_irreptables_sg150_contains_all_6_target_source_labels():
 
 
 def test_irreptables_sg150_1d_labels_have_c3_character_minus_one():
-    """All four 1D labels at GM and K have C3 character = -1 (phase +1/2).
+    """All four 1D labels at GM and K have op2 C3 character = -1.
 
-    This means they all map to ValleyScope C3_spinor_phase_+1/2.
-    The -4/-5 distinction is from C2 characters, not C3.
+    This gives a candidate ValleyScope C3_spinor_phase_+1/2 after human
+    convention review.  The -4/-5 distinction is from C2 characters, not C3.
     """
     _require_irreptables_irreps()
     import irreptables.irreps as ir
@@ -1110,8 +1114,8 @@ def test_irreptables_sg150_1d_labels_have_c3_character_minus_one():
             assert abs(c32_char.real + 1) < 1e-10
 
 
-def test_irreptables_sg150_2d_labels_decompose_under_c3():
-    """-GM6 and -K6 have C3 character = +1, decomposing to {+1/6, -1/6}."""
+def test_irreptables_sg150_2d_labels_need_explicit_c3_restriction():
+    """-GM6 and -K6 have op2/op3 characters +1/+1 and remain unresolved."""
     _require_irreptables_irreps()
     import irreptables.irreps as ir
     tbl = ir.IrrepTable("150", True)
@@ -1119,9 +1123,13 @@ def test_irreptables_sg150_2d_labels_decompose_under_c3():
         if irrep.name in ("-GM6", "-K6"):
             assert irrep.dim == 2, f"{irrep.name} should be 2D"
             c3_char = irrep.characters.get(2)
+            c32_char = irrep.characters.get(3)
             assert c3_char is not None, f"{irrep.name} missing C3 character"
+            assert c32_char is not None, f"{irrep.name} missing C3^2 character"
             assert abs(c3_char.real - 1) < 1e-10
             assert abs(c3_char.imag) < 1e-10
+            assert abs(c32_char.real - 1) < 1e-10
+            assert abs(c32_char.imag) < 1e-10
 
 
 def test_irreptables_sg150_c3_operations_are_indices_2_and_3():
