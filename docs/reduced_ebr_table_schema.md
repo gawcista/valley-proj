@@ -21,6 +21,16 @@ that path requires reviewed metadata in both `manifest.json` and the table's
 top-level `provenance` object, including `review_status: "reviewed"`,
 `reviewer`, `review_date`, `review_method`, `source_reference`, and
 `valleyscope_reduction: "sampled_hsp_valley_preserving"`.
+Reviewed package-data tables also require physical identity provenance in the
+table `provenance` block: `data_source`, `space_group_number`, `spinful`,
+`subspace_group_candidate`, `expected_hsps`, and
+`central_sign_convention`. The `subspace_group_candidate` and `expected_hsps`
+provenance values must match the table top-level fields exactly, so the table
+identity stays tied to the sampled HSP little group and valley-preserving
+subgroup reduction rather than to a material name. Valley-changing operation
+and valley sewing matrix data must remain outside the reduced EBR vector basis
+unless a future reviewed table explicitly defines a different valley mapping
+problem.
 `analysis.reduced_ebr.table_file` and `analysis.reduced_ebr.table_name` are
 mutually exclusive.
 

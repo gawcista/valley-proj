@@ -513,6 +513,28 @@ def test_schema_docs_describe_reviewed_table_name_config():
         assert "mutually exclusive" in doc
 
 
+def test_reviewed_table_docs_describe_identity_provenance_gate():
+    """Reviewed package-data docs must describe physical identity provenance."""
+    paths = [
+        Path("docs/reduced_ebr_table_schema.md"),
+        Path("docs/reduced_dimensional_irrep_ebr_data_model.md"),
+        Path("valleyscope/data/reduced_ebr/README.md"),
+    ]
+    required = [
+        "physical identity provenance",
+        "data_source",
+        "space_group_number",
+        "spinful",
+        "subspace_group_candidate",
+        "expected_hsps",
+        "central_sign_convention",
+    ]
+    for path in paths:
+        doc = path.read_text(encoding="utf-8")
+        for term in required:
+            assert term in doc, f"{path} missing {term}"
+
+
 # -----------------------------------------------------------------------
 # 15. map-reduced-ebr CLI
 # -----------------------------------------------------------------------

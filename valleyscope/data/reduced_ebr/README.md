@@ -25,13 +25,22 @@ When a table is ready for shipment:
    and `source_reference`.
 4. Add a top-level table `provenance` object with the same reviewed-table
    fields and `valleyscope_reduction: "sampled_hsp_valley_preserving"`.
-5. Run the package-data validation tests.
-6. The table must satisfy the schema defined in
+5. Add physical identity provenance to the table `provenance` object:
+   `data_source`, `space_group_number`, `spinful`,
+   `subspace_group_candidate`, `expected_hsps`, and
+   `central_sign_convention`.  `subspace_group_candidate` and
+   `expected_hsps` must match the table top-level fields exactly.
+6. Run the package-data validation tests.
+7. The table must satisfy the schema defined in
    `docs/reduced_ebr_table_schema.md`.
 
 Reviewed package-data tables are loaded with
 `load_reviewed_reduced_ebr_table()`.  This catalog path enforces both the
-manifest review metadata and the table `provenance` gate.
+manifest review metadata and the table `provenance` gate. The physical
+identity provenance records the HSP little group, valley mapping, and
+valley-preserving subgroup context for the reduced-dimensional table.
+Valley-changing operation information remains valley sewing matrix data unless
+a future reviewed table explicitly defines a different reduced basis.
 
 External reduced EBR tables supplied by users through
 `analysis.reduced_ebr.table_file` are loaded with `load_reduced_ebr_table()`.

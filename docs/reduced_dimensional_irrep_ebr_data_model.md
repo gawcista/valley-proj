@@ -292,8 +292,14 @@ Each table file is a versioned JSON document.  Proposed schema:
 | Field | Type | Description |
 |-------|------|-------------|
 | `schema_version` | string | Data format version |
-| `provenance` | object | Source, reference, reviewer, date, git commit |
+| `provenance` | object | Source, reference, reviewer, date, git commit, and physical identity provenance |
 | `provenance.source` | string | `"reviewed_literature"`, `"benchmark_verified"`, etc. |
+| `provenance.data_source` | string | Source data package or table family |
+| `provenance.space_group_number` | int or string | Source space-group number |
+| `provenance.spinful` | bool | Whether double-group irreps are used |
+| `provenance.subspace_group_candidate` | string | Must match table `subspace_group_candidate` |
+| `provenance.expected_hsps` | list[string] | Must match table `expected_hsps` |
+| `provenance.central_sign_convention` | string | Spinor lift / central-sign convention, or `"not_applicable"` |
 | `subspace_group_candidate` | string | `C{order}_like` label matching export bundles |
 | `space_group_international` | string | Hermann-Mauguin symbol |
 | `space_group_number` | int | International Tables number |
@@ -301,6 +307,12 @@ Each table file is a versioned JSON document.  Proposed schema:
 | `expected_hsps` | list[string] | HSP labels covered by this table |
 | `irreps` | list[string] | Irrep keys in `kpoint:label[:opN]` format |
 | `ebrs` | list[object] | EBR definitions with `label`, `vector` |
+
+The physical identity provenance is part of the reviewed package-data gate.
+It records the HSP little group, valley mapping, and valley-preserving subgroup
+context that defines the reduced-dimensional table. It also records when
+valley-changing operation information is excluded as valley sewing matrix data
+rather than included in the reduced EBR basis.
 
 ### 5.4 Optional Fields
 
