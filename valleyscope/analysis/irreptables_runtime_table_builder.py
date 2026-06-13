@@ -28,7 +28,10 @@ def build_reduced_table_from_irreptables(
     space_group_number: int | str | None = None,
     spinful: bool | None = None,
     source_hsp_by_irrep: Mapping[str, str],
-    valleyscope_key_by_source_irrep: Mapping[str, str],
+    valleyscope_key_by_source_irrep: Mapping[str, str] | None = None,
+    valleyscope_irrep_multiplicity_by_source_irrep: (
+        Mapping[str, Mapping[str, int]] | None
+    ) = None,
     expected_hsps: Sequence[str],
     allowed_irrep_keys: Sequence[str],
     subspace_group_candidate: str,
@@ -43,6 +46,11 @@ def build_reduced_table_from_irreptables(
     ``sg_number`` / ``spinor`` and ``provenance_extra`` are accepted as legacy
     aliases for the first implementation pass.  New callers should use
     ``space_group_number``, ``spinful``, and ``provenance``.
+
+    ``valleyscope_irrep_multiplicity_by_source_ir`` accepts the new
+    multiplicity-aware mapping alongside the legacy one-to-one
+    ``valleyscope_key_by_source_irrep``.  Only one of the two may be
+    provided.
     """
     resolved_sg = _resolve_space_group_number(space_group_number, sg_number)
     resolved_spinful = _resolve_spinful(spinful, spinor)
@@ -71,6 +79,9 @@ def build_reduced_table_from_irreptables(
         ebr_data=ebr_data,
         source_hsp_by_irrep=source_hsp_by_irrep,
         valleyscope_key_by_source_irrep=valleyscope_key_by_source_irrep,
+        valleyscope_irrep_multiplicity_by_source_irrep=(
+            valleyscope_irrep_multiplicity_by_source_irrep
+        ),
         source=source_provenance,
     )
 
@@ -150,8 +161,25 @@ def _builder_provenance(
     return payload
 
 
-_SPEC_SCHEMA_VERSION = "1.0.0"
+_SPEC_V1_SCHEMA_VERSION = "1.0.0"
+_SPEC_V1_1_SCHEMA_VERSION = "1.1.0"
+_SUPPORTED_SCHEMA_VERSIONS = frozenset([
+    _SPEC_V1_SCHEMA_VERSION,
+    _SPEC_V1_1_SCHEMA_VERSION,
+])
 _SPEC_DATA_SOURCE = "irreptables"
+
+_V1_REQUIRED = [
+    "schema_version", "data_source", "space_group_number", "spinful",
+    "source_hsp_by_irrep", "valleyscope_key_by_source_irrep",
+    "expected_hsps", "allowed_irrep_keys", "subspace_group_candidate",
+]
+
+_V1_1_REQUIRED = [
+    "schema_version", "data_source", "space_group_number", "spinful",
+    "source_hsp_by_irrep", "valleyscope_irrep_multiplicity_by_source_irrep",
+    "expected_hsps", "allowed_irrep_keys", "subspace_group_candidate",
+]
 
 
 def build_reduced_table_from_spec_file(
@@ -161,70 +189,116 @@ def build_reduced_table_from_spec_file(
 ) -> dict[str, Any]:
     """Build a ValleyScope reduced table from a JSON mapping spec file.
 
-    The spec must contain:
-    - ``schema_version`` (``"1.0.0"``)
-    - ``data_source`` (``"irreptables"``)
-    - ``space_group_number`` (int or non-empty string)
-    - ``spinful`` (bool)
-    - ``source_hsp_by_irrep`` (dict)
-    - ``valleyscope_key_by_source_irrep`` (dict)
-    - ``expected_hsps`` (list[str])
-    - ``allowed_irrep_keys`` (list[str])
-    - ``subspace_group_candidate`` (str)
+    Supports two schema versions:
+
+    - ``"1.0.0"`` (legacy): uses ``valleyscope_key_by_source_irrep``
+      (dict[str, str]) for one-to-one mapping.
+    - ``"1.1.0"`` (multiplicity-aware): uses
+      ``valleyscope_irrep_multiplicity_by_source_irrep``
+      (dict[str, dict[str, int]]) for many-to-one aggregation and
+      one-to-many decomposition.
 
     The output is validated through ``load_reduced_ebr_table`` before
     being returned.
-
-    Raises ValueError if spec is missing required fields or the output
-    fails validation.
     """
     spec = json.loads(Path(spec_path).read_text(encoding="utf-8"))
     if not isinstance(spec, Mapping):
         raise ValueError("spec must be a JSON object")
-    required = [
-        "schema_version",
-        "data_source",
-        "space_group_number",
-        "spinful",
-        "source_hsp_by_irrep",
-        "valleyscope_key_by_source_irrep",
-        "expected_hsps",
-        "allowed_irrep_keys",
-        "subspace_group_candidate",
-    ]
-    missing = [k for k in required if k not in spec]
-    if missing:
-        raise ValueError(f"spec missing required keys: {missing}")
-    if spec["schema_version"] != _SPEC_SCHEMA_VERSION:
+
+    schema_version = spec.get("schema_version")
+    if schema_version not in _SUPPORTED_SCHEMA_VERSIONS:
         raise ValueError(
-            "schema_version must be "
-            f"{_SPEC_SCHEMA_VERSION!r}, got {spec['schema_version']!r}"
+            "Unsupported schema_version "
+            f"{schema_version!r}; supported: "
+            f"{sorted(_SUPPORTED_SCHEMA_VERSIONS)}"
         )
+
     if spec["data_source"] != _SPEC_DATA_SOURCE:
         raise ValueError(
             "data_source must be "
             f"{_SPEC_DATA_SOURCE!r}, got {spec['data_source']!r}"
         )
 
+    if schema_version == _SPEC_V1_SCHEMA_VERSION:
+        return _build_from_v1_spec(spec, source_loader=source_loader)
+    else:
+        return _build_from_v1_1_spec(spec, source_loader=source_loader)
+
+
+def _build_from_v1_spec(spec: Mapping[str, object], **kwargs: Any) -> dict[str, Any]:
+    missing = [k for k in _V1_REQUIRED if k not in spec]
+    if missing:
+        raise ValueError(f"spec missing required keys: {missing}")
+    return _build_common(
+        spec=spec,
+        valleyscope_key_by_source_irrep=_required_string_mapping(
+            spec, "valleyscope_key_by_source_irrep",
+        ),
+        valleyscope_irrep_multiplicity_by_source_irrep=None,
+        **kwargs,
+    )
+
+
+def _build_from_v1_1_spec(spec: Mapping[str, object], **kwargs: Any) -> dict[str, Any]:
+    missing = [k for k in _V1_1_REQUIRED if k not in spec]
+    if missing:
+        raise ValueError(f"spec missing required keys: {missing}")
+    mult_raw = spec["valleyscope_irrep_multiplicity_by_source_irrep"]
+    if not isinstance(mult_raw, Mapping):
+        raise ValueError(
+            "valleyscope_irrep_multiplicity_by_source_irrep must be a mapping"
+        )
+    mult_map: dict[str, dict[str, int]] = {}
+    for k, v in mult_raw.items():
+        if not isinstance(k, str) or not isinstance(v, Mapping):
+            raise ValueError(
+                "valleyscope_irrep_multiplicity_by_source_irrep must be "
+                "dict[str, dict[str, int]]"
+            )
+        sub: dict[str, int] = {}
+        for sk, sv in v.items():
+            if not isinstance(sv, int) or isinstance(sv, bool):
+                raise ValueError(
+                    f"multiplicities must be integers, got {sv!r} "
+                    f"for {k!r}[{sk!r}]"
+                )
+            sub[sk] = sv
+        mult_map[k] = sub
+    return _build_common(
+        spec=spec,
+        valleyscope_key_by_source_irrep=None,
+        valleyscope_irrep_multiplicity_by_source_irrep=mult_map,
+        **kwargs,
+    )
+
+
+def _build_common(
+    *,
+    spec: Mapping[str, object],
+    valleyscope_key_by_source_irrep: Mapping[str, str] | None,
+    valleyscope_irrep_multiplicity_by_source_irrep: (
+        Mapping[str, Mapping[str, int]] | None
+    ),
+    source_loader: Callable[[int | str, bool], Mapping[str, object]] | None = None,
+) -> dict[str, Any]:
     space_group_number = _resolve_space_group_number(spec["space_group_number"], None)
     spinful = _resolve_spinful(spec["spinful"], None)
-    subspace_group_candidate = _required_nonempty_string(
-        spec,
-        "subspace_group_candidate",
-    )
+    subspace_group_candidate = _required_nonempty_string(spec, "subspace_group_candidate")
     provenance = _optional_mapping(spec, "provenance")
+    expected_hsps = _required_string_sequence(spec, "expected_hsps")
+    allowed_irrep_keys = _required_string_sequence(spec, "allowed_irrep_keys")
 
     table = build_reduced_table_from_irreptables(
         space_group_number=space_group_number,
         spinful=spinful,
         source_loader=source_loader,
         source_hsp_by_irrep=_required_string_mapping(spec, "source_hsp_by_irrep"),
-        valleyscope_key_by_source_irrep=_required_string_mapping(
-            spec,
-            "valleyscope_key_by_source_irrep",
+        valleyscope_key_by_source_irrep=valleyscope_key_by_source_irrep,
+        valleyscope_irrep_multiplicity_by_source_irrep=(
+            valleyscope_irrep_multiplicity_by_source_irrep
         ),
-        expected_hsps=_required_string_sequence(spec, "expected_hsps"),
-        allowed_irrep_keys=_required_string_sequence(spec, "allowed_irrep_keys"),
+        expected_hsps=expected_hsps,
+        allowed_irrep_keys=allowed_irrep_keys,
         subspace_group_candidate=subspace_group_candidate,
         provenance=provenance,
     )

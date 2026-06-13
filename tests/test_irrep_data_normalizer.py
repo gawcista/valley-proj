@@ -66,7 +66,15 @@ def _payload(ebr_data=_SAMPLE_EBR_DATA):
 
 def test_package_ebr_data_normalizes_to_runtime_source_payload():
     payload = _payload()
-    assert payload["basis"] == [
+    # Legacy one-to-one normalizer output now includes source_index and
+    # multiplicity=1 for reducer backward compat.
+    for i, entry in enumerate(payload["basis"]):
+        assert entry["source_index"] == i
+        assert entry["multiplicity"] == 1
+    # Verify the essential fields excluding auto-generated ones.
+    core = [{k: v for k, v in e.items() if k not in ("source_index", "multiplicity")}
+            for e in payload["basis"]]
+    assert core == [
         {
             "source_label": "-GM5",
             "hsp": "GammaM",

@@ -91,10 +91,21 @@ def build_reduced_table_from_runtime_source(
     if not ebrs:
         raise ValueError("source_payload['ebrs'] must be a non-empty list")
 
-    # Check each basis entry and collect the source index for each allowed
-    # ValleyScope key.  The output basis order is controlled by
+    # Source basis size is determined from EBR vector lengths, not from
+    # the expanded basis entry count (which may be larger when
+    # one-to-many decomposition is used).
+    n_source = len(ebrs[0].get("vector", []))
+    if n_source == 0:
+        raise ValueError("first EBR vector is empty — cannot determine "
+                         "source basis size")
+
+    # Collect multiplicity-weighted source-index contributions for each
+    # allowed ValleyScope key.  The output basis order is controlled by
     # allowed_irrep_keys, not by the external source package's basis order.
-    key_to_source_index: dict[str, int] = {}
+    # Many source entries can contribute to the same key (many-to-one
+    # aggregation) and one source label can contribute to multiple keys
+    # (one-to-many decomposition).
+    key_to_contributions: dict[str, list[dict[str, int]]] = {}
     for i, entry in enumerate(basis):
         if not isinstance(entry, dict):
             raise ValueError(f"basis[{i}] must be a dict")
@@ -107,33 +118,54 @@ def build_reduced_table_from_runtime_source(
                 f"basis[{i}] must define non-empty string 'valleyscope_irrep_key'"
             )
         if hsp not in hsps_set:
-            continue  # Not in sampled HSP set — skip.
+            continue
         if key not in allowed_set:
-            continue  # Not an allowed valley-preserving irrep key — skip.
-        if key in key_to_source_index:
+            continue
+        # source_index: use explicit field if present, else fall back to
+        # the basis entry index (backward compat with legacy one-to-one
+        # normalizer output).
+        source_index_raw = entry.get("source_index", i)
+        if not isinstance(source_index_raw, int) or isinstance(source_index_raw, bool):
             raise ValueError(
-                f"duplicate valleyscope_irrep_key {key!r} in reduced basis "
-                f"(basis entries {key_to_source_index[key]} and {i})"
+                f"basis[{i}] 'source_index' must be an integer, "
+                f"got {source_index_raw!r}"
             )
-        key_to_source_index[key] = i
+        mult_raw = entry.get("multiplicity", 1)
+        if not isinstance(mult_raw, int) or isinstance(mult_raw, bool):
+            raise ValueError(f"basis[{i}] multiplicity must be an integer")
+        if mult_raw <= 0:
+            raise ValueError(f"basis[{i}] multiplicity must be positive")
+        if source_index_raw < 0 or source_index_raw >= n_source:
+            raise ValueError(
+                f"basis[{i}] source_index {source_index_raw} out of range "
+                f"[0, {n_source})"
+            )
+        key_to_contributions.setdefault(key, []).append({
+            "source_index": source_index_raw,
+            "multiplicity": mult_raw,
+        })
 
-    if not key_to_source_index:
+    if not key_to_contributions:
         raise ValueError(
             "no source basis entries match expected_hsps and allowed_irrep_keys"
         )
     missing_keys = [
-        key for key in allowed_irrep_key_list if key not in key_to_source_index
+        key for key in allowed_irrep_key_list if key not in key_to_contributions
     ]
     if missing_keys:
         raise ValueError(
             "missing source basis mapping for allowed_irrep_keys: "
             f"{missing_keys}"
         )
-    reduced_indices = [key_to_source_index[key] for key in allowed_irrep_key_list]
+
+    # Build per-key reduction: for each allowed key, collect all
+    # (source_index, multiplicity) contributions.
+    reduced_indices: list[list[dict[str, int]]] = [
+        list(key_to_contributions[key]) for key in allowed_irrep_key_list
+    ]
     reduced_irreps = list(allowed_irrep_key_list)
 
     # --- Validate and reduce EBR vectors ---
-    n_source = len(basis)
     reduced_ebrs: list[dict[str, Any]] = []
     skipped_zero_vector_ebrs: list[str] = []
     ebr_labels: list[str] = []
@@ -158,8 +190,15 @@ def build_reduced_table_from_runtime_source(
                 f"EBR '{label}' vector must be nonnegative integers"
             )
 
-        # Reduce vector to sampled HSPs only.
-        reduced_vector = [vector[i] for i in reduced_indices]
+        # Reduce vector to sampled HSPs with multiplicity-weighted aggregation.
+        reduced_vector: list[int] = []
+        for contributions in reduced_indices:
+            val: int = 0
+            for contrib in contributions:
+                si = contrib["source_index"]
+                mult = contrib["multiplicity"]
+                val += vector[si] * mult
+            reduced_vector.append(val)
         if not any(v > 0 for v in reduced_vector):
             skipped_zero_vector_ebrs.append(label)
             continue

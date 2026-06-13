@@ -17,7 +17,10 @@ def build_runtime_source_payload_from_ebr_data(
     *,
     ebr_data: Mapping[str, object],
     source_hsp_by_irrep: Mapping[str, str],
-    valleyscope_key_by_source_irrep: Mapping[str, str],
+    valleyscope_key_by_source_irrep: Mapping[str, str] | None = None,
+    valleyscope_irrep_multiplicity_by_source_irrep: (
+        Mapping[str, Mapping[str, int]] | None
+    ) = None,
     source: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     """Convert package-style 3D EBR data to a runtime source payload.
@@ -26,15 +29,77 @@ def build_runtime_source_payload_from_ebr_data(
     ValleyScope valley-preserving irrep key must be supplied explicitly.  This
     prevents hidden assumptions such as deriving ``GammaM`` from ``GM`` or
     inferring spinful valley phases from source irrep labels.
+
+    Two mapping styles are supported (mutually exclusive):
+
+    - **legacy one-to-one**: ``valleyscope_key_by_source_irrep`` is a
+      ``dict[str, str]`` mapping each source label to a single ValleyScope irrep
+      key.  Internally converted to multiplicity 1.
+    - **multiplicity-aware**: ``valleyscope_irrep_multiplicity_by_source_irrep``
+      is a ``dict[str, dict[str, int]]`` mapping each source label to one or more
+      ValleyScope irrep keys with positive integer multiplicities.  Supports
+      many-to-one aggregation and one-to-many decomposition.
     """
     basis_labels = _basis_irrep_labels(ebr_data)
     hsp_map = _string_mapping(source_hsp_by_irrep, field="source_hsp_by_irrep")
-    key_map = _string_mapping(
-        valleyscope_key_by_source_irrep,
-        field="valleyscope_key_by_source_irrep",
-    )
 
-    basis_entries: list[dict[str, str]] = []
+    legacy_key_map = valleyscope_key_by_source_irrep
+    mult_map = valleyscope_irrep_multiplicity_by_source_irrep
+
+    _has_legacy = legacy_key_map is not None
+    _has_mult = mult_map is not None
+
+    if _has_legacy and _has_mult:
+        raise ValueError(
+            "provide only one of valleyscope_key_by_source_irrep or "
+            "valleyscope_irrep_multiplicity_by_source_irrep"
+        )
+    if not _has_legacy and not _has_mult:
+        raise ValueError(
+            "either valleyscope_key_by_source_irrep or "
+            "valleyscope_irrep_multiplicity_by_source_irrep is required"
+        )
+
+    # Build a source-label -> source-index lookup.
+    label_to_index: dict[str, int] = {
+        label: idx for idx, label in enumerate(basis_labels)
+    }
+
+    basis_entries: list[dict[str, object]] = []
+    if _has_mult:
+        basis_entries = _basis_from_multiplicities(
+            basis_labels=basis_labels,
+            hsp_map=hsp_map,
+            mult_map=mult_map,
+            label_to_index=label_to_index,
+        )
+    else:
+        basis_entries = _basis_from_legacy_key_map(
+            basis_labels=basis_labels,
+            hsp_map=hsp_map,
+            key_map=_string_mapping(
+                legacy_key_map, field="valleyscope_key_by_source_irrep",
+            ),
+            label_to_index=label_to_index,
+        )
+
+    ebr_entries = _ebr_entries(ebr_data, source_basis_length=len(basis_labels))
+    payload: dict[str, Any] = {"basis": basis_entries, "ebrs": ebr_entries}
+    if source is not None:
+        payload["source"] = dict(source)
+    elif isinstance(ebr_data.get("source"), Mapping):
+        payload["source"] = dict(ebr_data["source"])
+    return payload
+
+
+def _basis_from_legacy_key_map(
+    *,
+    basis_labels: list[str],
+    hsp_map: dict[str, str],
+    key_map: dict[str, str],
+    label_to_index: dict[str, int],
+) -> list[dict[str, object]]:
+    entries: list[dict[str, object]] = []
     for label in basis_labels:
         if label not in hsp_map:
             raise ValueError(f"missing source_hsp_by_irrep entry for {label!r}")
@@ -42,19 +107,82 @@ def build_runtime_source_payload_from_ebr_data(
             raise ValueError(
                 f"missing valleyscope_key_by_source_irrep entry for {label!r}"
             )
-        basis_entries.append({
+        entries.append({
             "source_label": label,
+            "source_index": label_to_index[label],
             "hsp": hsp_map[label],
             "valleyscope_irrep_key": key_map[label],
+            "multiplicity": 1,
         })
+    return entries
 
-    ebr_entries = _ebr_entries(ebr_data, source_basis_length=len(basis_labels))
-    payload: dict[str, Any] = {"basis": basis_entries, "ebrs": ebr_entries}
-    if source is not None:
-        payload["source"] = dict(source)
-    elif isinstance(ebr_data.get("source"), Mapping):
-        payload["source"] = dict(ebr_data["source"])  # type: ignore[index]
-    return payload
+
+def _basis_from_multiplicities(
+    *,
+    basis_labels: list[str],
+    hsp_map: dict[str, str],
+    mult_map: Mapping[str, Mapping[str, int]],
+    label_to_index: dict[str, int],
+) -> list[dict[str, object]]:
+    _validate_mult_map(mult_map)
+    entries: list[dict[str, object]] = []
+    for label in basis_labels:
+        if label not in hsp_map:
+            raise ValueError(f"missing source_hsp_by_irrep entry for {label!r}")
+        if label not in mult_map:
+            raise ValueError(
+                f"missing valleyscope_irrep_multiplicity_by_source_irrep entry "
+                f"for {label!r}"
+            )
+        key_mult_map = mult_map[label]
+        if not key_mult_map:
+            raise ValueError(
+                f"valleyscope_irrep_multiplicity_by_source_irrep[{label!r}] "
+                f"must be a non-empty dict"
+            )
+        for key, mult in sorted(key_mult_map.items()):
+            entries.append({
+                "source_label": label,
+                "source_index": label_to_index[label],
+                "hsp": hsp_map[label],
+                "valleyscope_irrep_key": key,
+                "multiplicity": mult,
+            })
+    return entries
+
+
+def _validate_mult_map(mult_map: object) -> None:
+    if not isinstance(mult_map, Mapping):
+        raise ValueError(
+            "valleyscope_irrep_multiplicity_by_source_irrep must be a mapping"
+        )
+    for key, submap in mult_map.items():
+        if not isinstance(key, str) or not key:
+            raise ValueError(
+                "valleyscope_irrep_multiplicity_by_source_irrep keys must be "
+                "non-empty strings"
+            )
+        if not isinstance(submap, Mapping):
+            raise ValueError(
+                f"valleyscope_irrep_multiplicity_by_source_irrep[{key!r}] "
+                f"must be a mapping (dict[str, int])"
+            )
+        for irrep_key, mult_val in submap.items():
+            if not isinstance(irrep_key, str) or not irrep_key:
+                raise ValueError(
+                    f"valleyscope_irrep_multiplicity_by_source_irrep[{key!r}] "
+                    f"keys must be non-empty strings"
+                )
+            if not isinstance(mult_val, int) or isinstance(mult_val, bool):
+                raise ValueError(
+                    f"valleyscope_irrep_multiplicity_by_source_irrep[{key!r}]"
+                    f"[{irrep_key!r}] must be an integer, got {mult_val!r}"
+                )
+            if mult_val <= 0:
+                raise ValueError(
+                    f"valleyscope_irrep_multiplicity_by_source_irrep[{key!r}]"
+                    f"[{irrep_key!r}] must be a positive integer"
+                )
 
 
 def normalize_irrep_ebr_data_to_source_payload(

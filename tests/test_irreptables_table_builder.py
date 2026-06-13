@@ -1488,3 +1488,248 @@ def test_spec_draft_provenance_has_required_fields():
     assert p["valleyscope_reduction"] == "sampled_hsp_valley_preserving"
     assert "central_sign_convention" in p
     assert "chi(C3)=chi(op2)" in p["central_sign_convention"]
+
+
+# -----------------------------------------------------------------------
+# Multiplicity-aware reducer / builder tests
+# -----------------------------------------------------------------------
+
+# C3-like test data: 6 source labels, fake EBR vectors of all ones.
+_C3_SOURCE_LABELS = ["-GM4", "-GM5", "-GM6", "-K4", "-K5", "-K6"]
+_C3_HSPS = {
+    "-GM4": "GammaM", "-GM5": "GammaM", "-GM6": "GammaM",
+    "-K4": "KM", "-K5": "KM", "-K6": "KM",
+}
+_C3_MULTIPLICITIES = {
+    "-GM4": {"GammaM:C3_spinor_phase_+1/2": 1},
+    "-GM5": {"GammaM:C3_spinor_phase_+1/2": 1},
+    "-GM6": {
+        "GammaM:C3_spinor_phase_+1/6": 1,
+        "GammaM:C3_spinor_phase_-1/6": 1,
+    },
+    "-K4": {"KM:C3_spinor_phase_+1/2": 1},
+    "-K5": {"KM:C3_spinor_phase_+1/2": 1},
+    "-K6": {
+        "KM:C3_spinor_phase_+1/6": 1,
+        "KM:C3_spinor_phase_-1/6": 1,
+    },
+}
+_C3_EXPECTED_HSPS = ["GammaM", "KM"]
+_C3_ALLOWED_KEYS = [
+    "GammaM:C3_spinor_phase_+1/6",
+    "GammaM:C3_spinor_phase_+1/2",
+    "GammaM:C3_spinor_phase_-1/6",
+    "KM:C3_spinor_phase_+1/6",
+    "KM:C3_spinor_phase_+1/2",
+    "KM:C3_spinor_phase_-1/6",
+]
+
+_C3_FAKE_EBR_DATA = {
+    "basis": {
+        "irrep_labels": _C3_SOURCE_LABELS,
+        "degeneracies": [1, 1, 2, 1, 1, 2],
+    },
+    "ebrs": [
+        {"ebr_name": "EBR_A", "vector": [1, 1, 1, 1, 1, 1]},
+    ],
+}
+
+
+def test_multiplicity_aware_normalizer_expands_degenerate_labels():
+    """Normalizer produces multiple basis entries for degenerate source labels."""
+    from valleyscope.analysis.irrep_data_normalizer import (
+        build_runtime_source_payload_from_ebr_data,
+    )
+    payload = build_runtime_source_payload_from_ebr_data(
+        ebr_data=_C3_FAKE_EBR_DATA,
+        source_hsp_by_irrep=_C3_HSPS,
+        valleyscope_irrep_multiplicity_by_source_irrep=_C3_MULTIPLICITIES,
+    )
+    basis = payload["basis"]
+    # -GM6 contributes 2 entries (+1/6 and -1/6)
+    gm6_entries = [e for e in basis if e["source_label"] == "-GM6"]
+    assert len(gm6_entries) == 2
+    gm6_keys = {e["valleyscope_irrep_key"] for e in gm6_entries}
+    assert gm6_keys == {
+        "GammaM:C3_spinor_phase_+1/6",
+        "GammaM:C3_spinor_phase_-1/6",
+    }
+    # All source_index values point to the -GM6 index (2)
+    for e in gm6_entries:
+        assert e["source_index"] == 2
+
+
+def test_multiplicity_aware_reducer_produces_correct_vector():
+    """C3-like all-ones source vector reduced with multiplicities gives
+    [1, 2, 1, 1, 2, 1] in allowed_irrep_keys order."""
+    from valleyscope.analysis.irrep_data_normalizer import (
+        build_runtime_source_payload_from_ebr_data,
+    )
+    from valleyscope.analysis.irrep_runtime_reducer import (
+        build_reduced_table_from_runtime_source,
+    )
+    payload = build_runtime_source_payload_from_ebr_data(
+        ebr_data=_C3_FAKE_EBR_DATA,
+        source_hsp_by_irrep=_C3_HSPS,
+        valleyscope_irrep_multiplicity_by_source_irrep=_C3_MULTIPLICITIES,
+    )
+    table = build_reduced_table_from_runtime_source(
+        source_payload=payload,
+        expected_hsps=_C3_EXPECTED_HSPS,
+        allowed_irrep_keys=_C3_ALLOWED_KEYS,
+        subspace_group_candidate="C3_like",
+    )
+    assert table["irreps"] == _C3_ALLOWED_KEYS
+    # Source vector: all ones over [-GM4,-GM5,-GM6,-K4,-K5,-K6]
+    # Reduced:
+    #   GM +1/6: -GM6 x mul=1    => 1
+    #   GM +1/2: -GM4 x mul=1 + -GM5 x mul=1  => 2
+    #   GM -1/6: -GM6 x mul=1    => 1
+    #   KM +1/6: -K6 x mul=1     => 1
+    #   KM +1/2: -K4 x mul=1 + -K5 x mul=1   => 2
+    #   KM -1/6: -K6 x mul=1     => 1
+    assert table["ebrs"][0]["vector"] == [1, 2, 1, 1, 2, 1]
+
+
+def test_multiplicity_aware_builder_v1_1_spec(tmp_path):
+    """build_reduced_table_from_spec_file accepts v1.1 multiplicity spec."""
+    from valleyscope.analysis.irreptables_runtime_table_builder import (
+        build_reduced_table_from_spec_file,
+    )
+    spec = {
+        "schema_version": "1.1.0",
+        "data_source": "irreptables",
+        "space_group_number": 150,
+        "spinful": True,
+        "source_hsp_by_irrep": _C3_HSPS,
+        "valleyscope_irrep_multiplicity_by_source_irrep": _C3_MULTIPLICITIES,
+        "expected_hsps": _C3_EXPECTED_HSPS,
+        "allowed_irrep_keys": _C3_ALLOWED_KEYS,
+        "subspace_group_candidate": "C3_like",
+    }
+    spec_path = tmp_path / "spec_v11.json"
+    spec_path.write_text(json.dumps(spec))
+
+    def fake_loader(sg, spinor):
+        return dict(_C3_FAKE_EBR_DATA)
+
+    table = build_reduced_table_from_spec_file(
+        spec_path, source_loader=fake_loader,
+    )
+    assert table["irreps"] == _C3_ALLOWED_KEYS
+    assert table["ebrs"][0]["vector"] == [1, 2, 1, 1, 2, 1]
+
+
+def test_multiplicity_aware_builder_still_accepts_v1_0_spec(tmp_path):
+    """build_reduced_table_from_spec_file still accepts v1.0 one-to-one spec."""
+    from valleyscope.analysis.irreptables_runtime_table_builder import (
+        build_reduced_table_from_spec_file,
+    )
+    spec = _canonical_spec()
+    spec_path = tmp_path / "spec_v10.json"
+    spec_path.write_text(json.dumps(spec))
+    calls = []
+    table = build_reduced_table_from_spec_file(
+        spec_path, source_loader=_fake_loader(calls),
+    )
+    assert calls == [(150, True)]
+    assert table["irreps"] == _ALLOWED_KEYS
+
+
+def test_multiplicity_aware_normalizer_rejects_both_maps():
+    """Providing both legacy and multiplicity maps raises ValueError."""
+    from valleyscope.analysis.irrep_data_normalizer import (
+        build_runtime_source_payload_from_ebr_data,
+    )
+    with pytest.raises(ValueError, match="only one"):
+        build_runtime_source_payload_from_ebr_data(
+            ebr_data=_C3_FAKE_EBR_DATA,
+            source_hsp_by_irrep=_C3_HSPS,
+            valleyscope_key_by_source_irrep={"-GM4": "GammaM:C3_spinor_phase_+1/2"},
+            valleyscope_irrep_multiplicity_by_source_irrep={"-GM4": {"GammaM:C3_spinor_phase_+1/2": 1}},
+        )
+
+
+def test_multiplicity_aware_normalizer_rejects_neither_map():
+    """Providing neither legacy nor multiplicity map raises ValueError."""
+    from valleyscope.analysis.irrep_data_normalizer import (
+        build_runtime_source_payload_from_ebr_data,
+    )
+    with pytest.raises(ValueError, match="either"):
+        build_runtime_source_payload_from_ebr_data(
+            ebr_data=_C3_FAKE_EBR_DATA,
+            source_hsp_by_irrep=_C3_HSPS,
+        )
+
+
+def test_multiplicity_aware_normalizer_rejects_non_integer_mult():
+    """Non-integer multiplicity raises ValueError."""
+    from valleyscope.analysis.irrep_data_normalizer import (
+        build_runtime_source_payload_from_ebr_data,
+    )
+    bad_mult = dict(_C3_MULTIPLICITIES)
+    bad_mult["-GM4"] = {"GammaM:C3_spinor_phase_+1/2": 1.5}
+    with pytest.raises(ValueError, match="integer"):
+        build_runtime_source_payload_from_ebr_data(
+            ebr_data=_C3_FAKE_EBR_DATA,
+            source_hsp_by_irrep=_C3_HSPS,
+            valleyscope_irrep_multiplicity_by_source_irrep=bad_mult,
+        )
+
+
+def test_multiplicity_aware_normalizer_rejects_zero_mult():
+    """Zero or negative multiplicity raises ValueError."""
+    from valleyscope.analysis.irrep_data_normalizer import (
+        build_runtime_source_payload_from_ebr_data,
+    )
+    bad_mult = dict(_C3_MULTIPLICITIES)
+    bad_mult["-GM4"] = {"GammaM:C3_spinor_phase_+1/2": 0}
+    with pytest.raises(ValueError, match="positive"):
+        build_runtime_source_payload_from_ebr_data(
+            ebr_data=_C3_FAKE_EBR_DATA,
+            source_hsp_by_irrep=_C3_HSPS,
+            valleyscope_irrep_multiplicity_by_source_irrep=bad_mult,
+        )
+
+
+def test_multiplicity_aware_normalizer_rejects_missing_source_label():
+    """Missing source label in multiplicity map raises ValueError."""
+    from valleyscope.analysis.irrep_data_normalizer import (
+        build_runtime_source_payload_from_ebr_data,
+    )
+    bad_mult = dict(_C3_MULTIPLICITIES)
+    bad_mult.pop("-GM6")
+    with pytest.raises(ValueError, match="missing"):
+        build_runtime_source_payload_from_ebr_data(
+            ebr_data=_C3_FAKE_EBR_DATA,
+            source_hsp_by_irrep=_C3_HSPS,
+            valleyscope_irrep_multiplicity_by_source_irrep=bad_mult,
+        )
+
+
+def test_no_forbidden_imports_in_production_files():
+    """No production file may import irrep2, OR-Tools, or irrep.ebrs."""
+    for fname in [
+        "valleyscope/analysis/irrep_data_normalizer.py",
+        "valleyscope/analysis/irrep_runtime_reducer.py",
+        "valleyscope/analysis/irreptables_runtime_table_builder.py",
+    ]:
+        src = Path(fname).read_text(encoding="utf-8")
+        for forbidden in [
+            "import irrep2", "from irrep2",
+            "import ortools", "from ortools",
+            "from irrep.ebrs", "import irrep.ebrs",
+        ]:
+            assert forbidden not in src, f"{fname} must not import {forbidden!r}"
+
+
+def test_no_material_names_in_production_files():
+    """No material names in production code."""
+    for fname in [
+        "valleyscope/analysis/irrep_data_normalizer.py",
+        "valleyscope/analysis/irrep_runtime_reducer.py",
+        "valleyscope/analysis/irreptables_runtime_table_builder.py",
+    ]:
+        src = Path(fname).read_text(encoding="utf-8")
+        for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
+            assert name not in src, f"{fname} contains {name!r}"

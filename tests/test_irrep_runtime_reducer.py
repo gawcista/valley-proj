@@ -141,20 +141,26 @@ def test_allowed_irrep_key_order_controls_reduced_basis_order():
 # 3. Duplicate basis keys rejected
 # -----------------------------------------------------------------------
 
-def test_duplicate_basis_key_rejected():
+def test_duplicate_basis_key_aggregated():
+    """Multiple source labels mapping to the same key are now aggregated
+    (many-to-one), not rejected."""
     dup_basis = [
         {"source_label": "l1", "hsp": "GammaM",
          "valleyscope_irrep_key": "GammaM:C3_spinor_phase_+1/2"},
         {"source_label": "l2", "hsp": "GammaM",
          "valleyscope_irrep_key": "GammaM:C3_spinor_phase_+1/2"},
     ]
-    with pytest.raises(ValueError, match="duplicate"):
-        build_reduced_table_from_runtime_source(
-            source_payload=_source_payload(basis=dup_basis, ebrs=[{"label": "X", "vector": [1, 0]}]),
-            expected_hsps=["GammaM"],
-            allowed_irrep_keys=["GammaM:C3_spinor_phase_+1/2"],
-            subspace_group_candidate="C3_like",
-        )
+    # Both l1 (vec[0]=1) and l2 (vec[1]=1) map to +1/2 -> sum = 2
+    result = build_reduced_table_from_runtime_source(
+        source_payload=_source_payload(
+            basis=dup_basis,
+            ebrs=[{"label": "X", "vector": [1, 1]}],
+        ),
+        expected_hsps=["GammaM"],
+        allowed_irrep_keys=["GammaM:C3_spinor_phase_+1/2"],
+        subspace_group_candidate="C3_like",
+    )
+    assert result["ebrs"][0]["vector"] == [2]
 
 
 # -----------------------------------------------------------------------
@@ -162,8 +168,9 @@ def test_duplicate_basis_key_rejected():
 # -----------------------------------------------------------------------
 
 def test_ebr_vector_length_mismatch_raises():
+    """Vector shorter than source basis causes source_index out of range."""
     bad_ebrs = [{"label": "X", "vector": [1]}]
-    with pytest.raises(ValueError, match="vector length"):
+    with pytest.raises(ValueError, match="out of range"):
         build_reduced_table_from_runtime_source(
             source_payload=_source_payload(ebrs=bad_ebrs),
             expected_hsps=_HSP, allowed_irrep_keys=_KEYS,
