@@ -128,9 +128,9 @@ Vectors are in the canonical key order:
 | 1b(32,32) | `[0, 1, 0, 0, 1, 0]` | Yes |
 | 1b(32,32) | `[0, 1, 0, 0, 1, 0]` | Yes |
 | 1b(32,32) | `[1, 0, 1, 1, 0, 1]` | Yes |
-| — | `[1, 0, 1, 1, 0, 1]` | Yes |
-| — | `[1, 0, 1, 0, 2, 0]` | Yes |
-| — | `[0, 2, 0, 1, 0, 1]` | Yes |
+| 2d(3,3) | `[1, 0, 1, 1, 0, 1]` | Yes |
+| 2d(3,3) | `[1, 0, 1, 0, 2, 0]` | Yes |
+| 2d(3,3) | `[0, 2, 0, 1, 0, 1]` | Yes |
 
 These vectors are pinned by `test_c3_real_source_pins_vector_reference`
 in `tests/test_irreptables_table_builder.py`.  A change in the public
