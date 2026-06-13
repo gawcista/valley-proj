@@ -1365,6 +1365,15 @@ def test_signoff_packet_records_provenance_fields():
         assert field in doc, f"missing provenance field: {field}"
 
 
+def test_signoff_packet_distinguishes_catalog_enforced_provenance():
+    """Signoff packet must not claim every reviewer-required field is
+    currently enforced by the package-data catalog gate."""
+    doc = Path("docs/reduced_ebr_c3_mapping_signoff_packet.md").read_text(encoding="utf-8")
+    assert "All provenance fields are enforced" not in doc
+    assert "Catalog-enforced provenance fields" in doc
+    assert "Reviewer-required signoff fields" in doc
+
+
 def test_signoff_packet_no_material_names():
     """Signoff packet must not contain real material names."""
     doc = Path("docs/reduced_ebr_c3_mapping_signoff_packet.md").read_text(encoding="utf-8")

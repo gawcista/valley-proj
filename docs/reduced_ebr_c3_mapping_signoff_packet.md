@@ -129,7 +129,9 @@ but that is outside this signoff packet's scope.
 
 When a reviewed mapping spec or reduced EBR table is built from this
 packet, the following provenance fields must carry non-empty,
-reviewer-verified values:
+reviewer-verified values.  They include both fields currently enforced
+by the package-data catalog gate and additional reviewer-required fields
+needed to keep the C3 reduction physically auditable.
 
 | Field | Required Value | Example |
 |-------|---------------|---------|
@@ -146,8 +148,16 @@ reviewer-verified values:
 | `source_reference` | external reference for character data | `"Bilbao Crystallographic Server, SG 150 spinful irreps (via irreptables)"` |
 | `central_sign_convention` | `"chi(C3)=chi(op2), chi(C3^2)=-chi(op3)"` | — |
 
-All provenance fields are enforced by the reviewed package-data gate in
-`valleyscope.data.reduced_ebr.catalog`.
+Catalog-enforced provenance fields in
+`valleyscope.data.reduced_ebr.catalog` are `review_status`, `reviewer`,
+`review_date`, `review_method`, `source_reference`, and
+`valleyscope_reduction` for the reviewed package-data table path.
+
+Reviewer-required signoff fields in this packet additionally include
+`data_source`, `space_group_number`, `spinful`, `subspace_group_candidate`,
+`expected_hsps`, and `central_sign_convention`.  A future mapping spec should
+carry these fields even if the current catalog gate does not enforce each one
+individually.
 
 ## 8. Statement Of Non-Delivery
 
