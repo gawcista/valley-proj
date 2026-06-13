@@ -91,13 +91,12 @@ def build_reduced_table_from_runtime_source(
     if not ebrs:
         raise ValueError("source_payload['ebrs'] must be a non-empty list")
 
-    # Source basis size is determined from EBR vector lengths, not from
-    # the expanded basis entry count (which may be larger when
-    # one-to-many decomposition is used).
-    n_source = len(ebrs[0].get("vector", []))
-    if n_source == 0:
-        raise ValueError("first EBR vector is empty — cannot determine "
-                         "source basis size")
+    n_source = _source_basis_count(
+        source_payload=source_payload,
+        basis=basis,
+        ebrs=ebrs,
+    )
+    _validate_ebr_vector_lengths(ebrs=ebrs, source_basis_count=n_source)
 
     # Collect multiplicity-weighted source-index contributions for each
     # allowed ValleyScope key.  The output basis order is controlled by
@@ -257,3 +256,60 @@ def _build_provenance(
     if filtered_zero_vector_ebrs:
         provenance["filtered_zero_vector_ebrs"] = list(filtered_zero_vector_ebrs)
     return provenance
+
+
+def _source_basis_count(
+    *,
+    source_payload: Mapping[str, Any],
+    basis: list[Any],
+    ebrs: list[Any],
+) -> int:
+    raw_count = source_payload.get("source_basis_count")
+    if raw_count is not None:
+        if (
+            not isinstance(raw_count, int)
+            or isinstance(raw_count, bool)
+            or raw_count <= 0
+        ):
+            raise ValueError(
+                "source_payload['source_basis_count'] must be a positive integer"
+            )
+        return raw_count
+
+    if not any(
+        isinstance(entry, Mapping) and "source_index" in entry
+        for entry in basis
+    ):
+        return len(basis)
+
+    first = ebrs[0]
+    if not isinstance(first, Mapping):
+        raise ValueError("ebrs[0] must be a dict")
+    vector = first.get("vector", [])
+    if isinstance(vector, (str, bytes)) or not isinstance(vector, Sequence):
+        raise ValueError("EBR vector must be a sequence")
+    if len(vector) == 0:
+        raise ValueError(
+            "first EBR vector is empty — cannot determine source basis size"
+        )
+    return len(vector)
+
+
+def _validate_ebr_vector_lengths(
+    *,
+    ebrs: list[Any],
+    source_basis_count: int,
+) -> None:
+    for j, ebr in enumerate(ebrs):
+        if not isinstance(ebr, Mapping):
+            raise ValueError(f"ebrs[{j}] must be a dict")
+        label = ebr.get("label")
+        display_label = label if isinstance(label, str) and label else f"#{j}"
+        vector = ebr.get("vector", [])
+        if isinstance(vector, (str, bytes)) or not isinstance(vector, Sequence):
+            raise ValueError(f"EBR '{display_label}' vector must be a sequence")
+        if len(vector) != source_basis_count:
+            raise ValueError(
+                f"EBR '{display_label}' vector length {len(vector)} != "
+                f"source basis length {source_basis_count}"
+            )

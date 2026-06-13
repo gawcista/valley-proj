@@ -21,6 +21,7 @@ def build_runtime_source_payload_from_ebr_data(
     valleyscope_irrep_multiplicity_by_source_irrep: (
         Mapping[str, Mapping[str, int]] | None
     ) = None,
+    expected_hsps: Sequence[str] | None = None,
     source: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     """Convert package-style 3D EBR data to a runtime source payload.
@@ -39,9 +40,14 @@ def build_runtime_source_payload_from_ebr_data(
       is a ``dict[str, dict[str, int]]`` mapping each source label to one or more
       ValleyScope irrep keys with positive integer multiplicities.  Supports
       many-to-one aggregation and one-to-many decomposition.
+
+    When ``expected_hsps`` is provided with multiplicity-aware maps, source
+    labels outside those sampled HSPs may omit multiplicity entries because they
+    are filtered out before the valley-preserving reduced basis is formed.
     """
     basis_labels = _basis_irrep_labels(ebr_data)
     hsp_map = _string_mapping(source_hsp_by_irrep, field="source_hsp_by_irrep")
+    expected_hsp_set = _optional_string_set(expected_hsps, field="expected_hsps")
 
     legacy_key_map = valleyscope_key_by_source_irrep
     mult_map = valleyscope_irrep_multiplicity_by_source_irrep
@@ -72,6 +78,7 @@ def build_runtime_source_payload_from_ebr_data(
             hsp_map=hsp_map,
             mult_map=mult_map,
             label_to_index=label_to_index,
+            expected_hsp_set=expected_hsp_set,
         )
     else:
         basis_entries = _basis_from_legacy_key_map(
@@ -84,7 +91,11 @@ def build_runtime_source_payload_from_ebr_data(
         )
 
     ebr_entries = _ebr_entries(ebr_data, source_basis_length=len(basis_labels))
-    payload: dict[str, Any] = {"basis": basis_entries, "ebrs": ebr_entries}
+    payload: dict[str, Any] = {
+        "basis": basis_entries,
+        "ebrs": ebr_entries,
+        "source_basis_count": len(basis_labels),
+    }
     if source is not None:
         payload["source"] = dict(source)
     elif isinstance(ebr_data.get("source"), Mapping):
@@ -123,13 +134,17 @@ def _basis_from_multiplicities(
     hsp_map: dict[str, str],
     mult_map: Mapping[str, Mapping[str, int]],
     label_to_index: dict[str, int],
+    expected_hsp_set: set[str] | None,
 ) -> list[dict[str, object]]:
     _validate_mult_map(mult_map)
     entries: list[dict[str, object]] = []
     for label in basis_labels:
         if label not in hsp_map:
             raise ValueError(f"missing source_hsp_by_irrep entry for {label!r}")
+        hsp = hsp_map[label]
         if label not in mult_map:
+            if expected_hsp_set is not None and hsp not in expected_hsp_set:
+                continue
             raise ValueError(
                 f"missing valleyscope_irrep_multiplicity_by_source_irrep entry "
                 f"for {label!r}"
@@ -144,7 +159,7 @@ def _basis_from_multiplicities(
             entries.append({
                 "source_label": label,
                 "source_index": label_to_index[label],
-                "hsp": hsp_map[label],
+                "hsp": hsp,
                 "valleyscope_irrep_key": key,
                 "multiplicity": mult,
             })
@@ -183,6 +198,23 @@ def _validate_mult_map(mult_map: object) -> None:
                     f"valleyscope_irrep_multiplicity_by_source_irrep[{key!r}]"
                     f"[{irrep_key!r}] must be a positive integer"
                 )
+
+
+def _optional_string_set(
+    values: Sequence[str] | None,
+    *,
+    field: str,
+) -> set[str] | None:
+    if values is None:
+        return None
+    if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+        raise ValueError(f"{field} must be a sequence of non-empty strings")
+    out: set[str] = set()
+    for i, value in enumerate(values):
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"{field}[{i}] must be a non-empty string")
+        out.add(value)
+    return out
 
 
 def normalize_irrep_ebr_data_to_source_payload(

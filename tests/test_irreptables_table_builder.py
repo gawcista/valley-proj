@@ -1620,6 +1620,44 @@ def test_multiplicity_aware_builder_v1_1_spec(tmp_path):
     assert table["ebrs"][0]["vector"] == [1, 2, 1, 1, 2, 1]
 
 
+def test_multiplicity_aware_builder_filters_unmapped_nonsampled_source_labels(tmp_path):
+    """v1.1 specs need multiplicities only for sampled-HSP source labels."""
+    from valleyscope.analysis.irreptables_runtime_table_builder import (
+        build_reduced_table_from_spec_file,
+    )
+    labels = [*_C3_SOURCE_LABELS, "-A5"]
+    hsp_by_irrep = {**_C3_HSPS, "-A5": "A"}
+    ebr_data = {
+        "basis": {
+            "irrep_labels": labels,
+            "degeneracies": [1, 1, 2, 1, 1, 2, 1],
+        },
+        "ebrs": [
+            {"ebr_name": "EBR_A", "vector": [1, 1, 1, 1, 1, 1, 1]},
+        ],
+    }
+    spec = {
+        "schema_version": "1.1.0",
+        "data_source": "irreptables",
+        "space_group_number": 150,
+        "spinful": True,
+        "source_hsp_by_irrep": hsp_by_irrep,
+        "valleyscope_irrep_multiplicity_by_source_irrep": _C3_MULTIPLICITIES,
+        "expected_hsps": _C3_EXPECTED_HSPS,
+        "allowed_irrep_keys": _C3_ALLOWED_KEYS,
+        "subspace_group_candidate": "C3_like",
+    }
+    spec_path = tmp_path / "spec_v11_partial.json"
+    spec_path.write_text(json.dumps(spec))
+
+    table = build_reduced_table_from_spec_file(
+        spec_path, source_loader=lambda sg, spinor: ebr_data,
+    )
+
+    assert table["ebrs"][0]["vector"] == [1, 2, 1, 1, 2, 1]
+    assert table["provenance"]["source_basis_count"] == 7
+
+
 def test_multiplicity_aware_builder_still_accepts_v1_0_spec(tmp_path):
     """build_reduced_table_from_spec_file still accepts v1.0 one-to-one spec."""
     from valleyscope.analysis.irreptables_runtime_table_builder import (

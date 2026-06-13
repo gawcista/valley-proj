@@ -98,9 +98,11 @@ def test_no_basis_matches_hsp_and_keys_raises():
 
 def test_partial_missing_allowed_irrep_key_mapping_raises():
     """Every trusted valley-preserving irrep key must map to a source basis row."""
+    partial_ebrs = [{"label": ebr["label"], "vector": ebr["vector"][:2]}
+                    for ebr in _SAMPLE_EBRS]
     with pytest.raises(ValueError, match="missing source basis mapping"):
         build_reduced_table_from_runtime_source(
-            source_payload=_source_payload(basis=_SAMPLE_BASIS[:-2]),
+            source_payload=_source_payload(basis=_SAMPLE_BASIS[:-2], ebrs=partial_ebrs),
             expected_hsps=_HSP,
             allowed_irrep_keys=_KEYS,
             subspace_group_candidate="C3_like",
@@ -168,9 +170,9 @@ def test_duplicate_basis_key_aggregated():
 # -----------------------------------------------------------------------
 
 def test_ebr_vector_length_mismatch_raises():
-    """Vector shorter than source basis causes source_index out of range."""
+    """Vector shorter than source basis raises a direct vector length error."""
     bad_ebrs = [{"label": "X", "vector": [1]}]
-    with pytest.raises(ValueError, match="out of range"):
+    with pytest.raises(ValueError, match="vector length"):
         build_reduced_table_from_runtime_source(
             source_payload=_source_payload(ebrs=bad_ebrs),
             expected_hsps=_HSP, allowed_irrep_keys=_KEYS,

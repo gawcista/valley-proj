@@ -47,7 +47,7 @@ def build_reduced_table_from_irreptables(
     aliases for the first implementation pass.  New callers should use
     ``space_group_number``, ``spinful``, and ``provenance``.
 
-    ``valleyscope_irrep_multiplicity_by_source_ir`` accepts the new
+    ``valleyscope_irrep_multiplicity_by_source_irrep`` accepts the new
     multiplicity-aware mapping alongside the legacy one-to-one
     ``valleyscope_key_by_source_irrep``.  Only one of the two may be
     provided.
@@ -82,6 +82,7 @@ def build_reduced_table_from_irreptables(
         valleyscope_irrep_multiplicity_by_source_irrep=(
             valleyscope_irrep_multiplicity_by_source_irrep
         ),
+        expected_hsps=expected_hsps,
         source=source_provenance,
     )
 
@@ -212,6 +213,14 @@ def build_reduced_table_from_spec_file(
             f"{schema_version!r}; supported: "
             f"{sorted(_SUPPORTED_SCHEMA_VERSIONS)}"
         )
+    required = (
+        _V1_REQUIRED
+        if schema_version == _SPEC_V1_SCHEMA_VERSION
+        else _V1_1_REQUIRED
+    )
+    missing = [k for k in required if k not in spec]
+    if missing:
+        raise ValueError(f"spec missing required keys: {missing}")
 
     if spec["data_source"] != _SPEC_DATA_SOURCE:
         raise ValueError(
@@ -226,9 +235,6 @@ def build_reduced_table_from_spec_file(
 
 
 def _build_from_v1_spec(spec: Mapping[str, object], **kwargs: Any) -> dict[str, Any]:
-    missing = [k for k in _V1_REQUIRED if k not in spec]
-    if missing:
-        raise ValueError(f"spec missing required keys: {missing}")
     return _build_common(
         spec=spec,
         valleyscope_key_by_source_irrep=_required_string_mapping(
@@ -240,9 +246,6 @@ def _build_from_v1_spec(spec: Mapping[str, object], **kwargs: Any) -> dict[str, 
 
 
 def _build_from_v1_1_spec(spec: Mapping[str, object], **kwargs: Any) -> dict[str, Any]:
-    missing = [k for k in _V1_1_REQUIRED if k not in spec]
-    if missing:
-        raise ValueError(f"spec missing required keys: {missing}")
     mult_raw = spec["valleyscope_irrep_multiplicity_by_source_irrep"]
     if not isinstance(mult_raw, Mapping):
         raise ValueError(
