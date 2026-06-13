@@ -501,6 +501,255 @@ Until decisions 1–5 are complete, no C3-like reduced EBR table may be
 claimed as reviewed, and no such table may be shipped as ValleyScope
 package data.
 
+## C3 Character Evidence Feasibility Assessment
+
+Date: 2026-06-13 | Status: Feasibility audit (no implementation)
+
+This section assesses whether reproducible, machine-checkable C3
+character/eigenphase evidence exists for each SG 150 (P321) spinful
+source irrep label in scope.  It does not generate or ship any table
+data.  It is written for a human reviewer who must decide which
+evidence source to accept before a reviewed C3-like package-data
+reduced EBR table can be shipped.
+
+### Target Physical Mapping Chain
+
+```
+source SG 150 spinful irrep label
+  -> sampled moire HSP (GammaM or KM)
+  -> HSP little group G_k
+  -> valley mapping pi_g(a)
+  -> valley-preserving subgroup G_k^{(a)} = {C3, C3^2, E}
+  -> ValleyScope spinful C3 irrep phase key
+       (C3_spinor_phase_+1/6, +1/2, -1/6)
+```
+
+The evidence required at each step:
+
+1. **HSP assignment**: which 3D BZ HSP the source label belongs to
+   (GammaM, K, KA, etc.).
+2. **C3 eigenphase/character**: for 1D labels, the C3 rotation eigenvalue
+   `chi(C3)` = `exp(2*pi*i*phase)` with `phase in (-0.5, 0.5]`.
+3. **C3 restriction decomposition** (degenerate labels only): for labels
+   with degeneracy > 1, the decomposition of the source irrep under the
+   C3 valley-preserving subgroup into 1D spinful C3 irreps, giving
+   multiplicities `n_{+1/6}`, `n_{+1/2}`, `n_{-1/6}`.
+
+### Per-Label Evidence Requirements
+
+| Source Label | Deg | Sampled HSP | Evidence Type | Can ValleyScope Key Be Assigned Without External Evidence? |
+|-------------|-----|-------------|--------------|----------------------------------------------------------|
+| `-GM4` | 1 | GammaM | C3 eigenphase `exp(2*pi*i*phase)` | No — `irreptables` has no phase data; `irrep` requires explicit computation |
+| `-GM5` | 1 | GammaM | C3 eigenphase `exp(2*pi*i*phase)` | Independent ValleyScope run evidence suggests +1/2, but unverified |
+| `-GM6` | 2 | GammaM | C3 restriction decomposition → two 1D phases | No — requires character decomposition of 2D irrep |
+| `-K4` | 1 | KM | C3 eigenphase `exp(2*pi*i*phase)` | No — same as `-GM4` |
+| `-K5` | 1 | KM | C3 eigenphase `exp(2*pi*i*phase)` | Independent ValleyScope run evidence suggests +1/6, but unverified |
+| `-K6` | 2 | KM | C3 restriction decomposition → two 1D phases | No — requires character decomposition of 2D irrep |
+| `-KA4/-KA5/-KA6` | 1/1/2 | KA | (out of scope) | Out of scope — KA not in sampled `{GammaM, KM}` set |
+
+### API Feasibility Audit
+
+#### Path 1: `irreptables.ebrs.load_ebr_data(150, True)`
+
+**Status: INSUFFICIENT.**  Provides EBR combinatorial data only:
+source irrep labels, degeneracies, EBR names, Wyckoff positions,
+EBR vectors, and precomputed Smith normal form.  No C3
+character/eigenphase data is exposed.  This is already machine-checked
+by `tests/test_irreptables_table_builder.py`.
+
+#### Path 2: `irreptables.irreps.IrrepTable(150, True)`
+
+**Status: UNAVAILABLE.**  The `IrrepTable` constructor parses irrep
+output data files from `irreptables/data/`.  No data file for SG 150
+exists in the installed `irreptables` package.  Attempts raise
+`AssertionError`.  This path cannot provide C3 evidence for any
+source label.
+
+#### Path 3: `irrep.spacegroup_irreps.SpaceGroupIrreps`
+
+**Status: FEASIBLE BUT HEAVY.**  This is the only public Python API
+that can produce SG 150 spinful irreps with full character/eigenphase
+data.  It requires:
+
+- Explicit hexagonal lattice vectors.
+- Symmetry operations (rotations + translations) from spglib
+  `get_symmetry_from_database(hall_number=458)` for P321.
+- The constructor handles spinor rotation computation internally
+  via `SymmetryOperation` when `spinor=True`.
+- Time-reversal symmetry must be provided explicitly (standard for
+  non-magnetic systems: `[True] * len(rotations)`).
+
+Caveats:
+- No `from_sg_number(150, spinful=True)` factory exists.
+- After construction, HSP irreps are accessible through the object's
+  internal structures, but extracting per-label C3 characters requires
+  navigating the API's irrep/kpoint/character hierarchy.
+- The `SpaceGroupIrreps` object produces **full 3D space-group irreps**,
+  not valley-preserving C3-restricted irreps.  A manual C3 subgroup
+  restriction step is required to extract individual C3 eigenphases
+  from a 2D irrep (for `-GM6`, `-K6`).
+- The computation is reproducible given the same lattice + spglib
+  symmetry operations, but the output format is API-dependent and
+  not a simple lookup table.
+
+#### Path 4: External Literature / Physics Reference
+
+**Status: REQUIRED FOR HUMAN REVIEW.**  Published C3 character tables
+for P321 spinful double group irreps from standard references
+(e.g., Bradley & Cracknell, Bilbao Crystallographic Server).  This
+is the standard physics approach and is independent of any Python
+package API.  A human reviewer would:
+1. Look up the C3 character for each source irrep label at GammaM
+   and K in the published table.
+2. Verify the phase convention matches ValleyScope's
+   `phase in (-0.5, 0.5]`.
+3. For degenerate labels, perform the C3 subgroup restriction
+   decomposition.
+4. Record the mapping and provenance.
+
+#### Path 5: Independent ValleyScope Benchmark Run (P321-like clean system)
+
+**Status: SUPPORTING EVIDENCE ONLY.**  A ValleyScope `analyze-hsp` run
+on a trusted P321 benchmark system produces
+valley-preserving C3 eigenphases at GammaM and KM.  These are
+per-sample eigenphases, not source irrep label assignments.  They
+can corroborate a mapping but cannot establish it independently — a
+ValleyScope run does not know which source irrep label `-GM5`
+corresponds to without an external convention reference.
+
+### Per-Label Feasibility Summary
+
+| Source Label | Deg | Public API Evidence | External Evidence Needed | Feasibility Verdict |
+|-------------|-----|--------------------|--------------------------|--------------------|
+| `-GM4` | 1 | None — no phase data from irreptables; irrep requires construction | C3 character table lookup at GammaM | Feasible through literature + irrep computation |
+| `-GM5` | 1 | None — same as `-GM4` | C3 character table lookup at GammaM; ValleyScope run evidence suggests +1/2 | Feasible through literature; supporting evidence available |
+| `-GM6` | 2 | None — same; additionally requires C3 restriction decomposition | C3 character table + subgroup restriction at GammaM | Feasible through literature; heavier than 1D labels |
+| `-K4` | 1 | None — same | C3 character table lookup at K | Feasible through literature |
+| `-K5` | 1 | None — same | C3 character table lookup at K; ValleyScope run evidence suggests +1/6 | Feasible through literature; supporting evidence available |
+| `-K6` | 2 | None — same; requires restriction decomposition | C3 character table + subgroup restriction at K | Feasible through literature; heavier than 1D labels |
+| `-KA4/-KA5/-KA6` | 1/1/2 | None | (out of scope) | Out of scope — KA not in C3 reduced basis |
+
+Key: **None** = no public Python API provides this evidence without
+explicit SpaceGroupIrreps construction + subgroup restriction.
+**Literature** = requires external physics reference (Bradley &
+Cracknell, Bilbao server, or equivalent).
+
+### Machine-Checkable Facts
+
+These facts are verified by existing tests and require no human review:
+
+1. **irreptables EBR data**: 22 source labels, 9 EBRs, degeneracies
+   match `irreptables.ebrs.load_ebr_data(150, True)` output.
+   Tested: `test_irreptables_table_builder.py`.
+2. **ValleyScope C3 phase table**: 3 spinful C3 phase keys with
+   phases in `(-0.5, 0.5]` canonical range.
+   Tested: `test_phase_tables.py`.
+3. **irreptables has no SG 150 character data**: `IrrepTable(150, True)`
+   fails because `irreptables/data/` lacks SG 150 files.
+   Manually verified; no programmatic test (the import failure is
+   the evidence).
+4. **No `from_sg_number` factory in public irrep API**.
+   Verified by source inspection of `irrep.spacegroup_irreps`.
+5. **`irrep.spacegroup_irreps.SpaceGroupIrreps` constructor accepts
+   lattice + spglib rotations + translations**: requires explicit
+   inputs; spinor rotations handled internally; no simple lookup API.
+   Verified by source inspection.
+
+### External / Human-Required Facts
+
+These facts cannot be machine-checked by ValleyScope's existing test
+suite and require an external physics reference or explicit
+computation:
+
+1. **C3 character/eigenphase for each 1D source irrep** (`-GM4`,
+   `-GM5`, `-K4`, `-K5`): requires published P321 spinful double
+   group character table or explicit `SpaceGroupIrreps` computation.
+2. **C3 restriction decomposition for each 2D source irrep**
+   (`-GM6`, `-K6`): requires the same character table plus manual
+   subgroup restriction.
+3. **Phase convention alignment**: the published table's phase
+   convention must be verified to match ValleyScope's
+   `exp(2*pi*i*phase)` with `phase in (-0.5, 0.5]`.
+4. **HSP label correspondence**: source labels like `-GM5` refer to
+   specific irreps at the GammaM 3D HSP; this correspondence must be
+   confirmed against the published table's HSP labeling.
+
+### Human Decision Checklist
+
+Before any C3-like reduced EBR table may enter ValleyScope
+package data as reviewed, the human reviewer must complete each item:
+
+- [ ] **1. Select evidence source.**
+  Options: (a) published literature character table for P321 spinful;
+  (b) explicit `SpaceGroupIrreps` computation with documented
+  lattice + symmetry inputs; (c) both, with cross-verification.
+  Source: _______________
+
+- [ ] **2. Confirm `-GM5` C3 eigenphase.**
+  Expected: `exp(+i*pi)` = phase +1/2 = ValleyScope
+  `C3_spinor_phase_+1/2`.
+  Verified value: _______________ Source: _______________
+
+- [ ] **3. Confirm `-K5` C3 eigenphase.**
+  Expected: `exp(+i*pi/3)` = phase +1/6 = ValleyScope
+  `C3_spinor_phase_+1/6`.
+  Verified value: _______________ Source: _______________
+
+- [ ] **4. Resolve `-K6` C3 restriction.**
+  2D source irrep at KM; decomposes under C3 into two 1D spinful
+  phases.
+  Decomposition: _______________ (e.g., `{+1/6: 1, -1/6: 1}`)
+  Source: _______________
+
+- [ ] **5. Resolve `-GM6` C3 restriction (if needed).**
+  Decomposition: _______________ Source: _______________
+
+- [ ] **6. Decide on `-GM4` and `-K4`.**
+  Are these labels needed for the C3 reduced EBR basis?  If yes,
+  provide their C3 eigenphases.
+  Decision: [ ] include / [ ] exclude
+  If included: `-GM4` phase: _______, `-K4` phase: _______
+  Source: _______________
+
+- [ ] **7. Verify phase convention.**
+  Confirm the evidence source uses `exp(2*pi*i*phase)` with
+  `phase in (-0.5, 0.5]`.
+  [ ] Verified
+
+- [ ] **8. Sign off.**
+  Reviewer: _______________ Date: _______________
+
+Items 2, 3, 4 are the minimum required for a minimal C3-like
+reduced EBR table with the `{GammaM, KM}` HSP set.  Items 5 and 6
+are optional depending on whether the reviewer wants to include
+all 1D source labels in the basis.
+
+### Feasibility Conclusion
+
+**Machine-only evidence is insufficient.** No public Python API
+provides a simple, reproducible C3 character/eigenphase lookup for
+SG 150 spinful source irrep labels.  The `irrep.spacegroup_irreps`
+module can produce the required data but requires explicit
+construction with lattice + symmetry inputs, manual C3 subgroup
+restriction, and per-label extraction — a multi-step computational
+procedure, not a publishable reference table.
+
+**A human-reviewed external character table is the intended path.**
+The most practical approach is:
+1. Obtain the P321 spinful double group C3 character table from a
+   standard physics reference (Bradley & Cracknell, Bilbao
+   Crystallographic Server, or equivalent).
+2. Map the source irrep labels (`-GM5`, `-K5`, etc.) to their C3
+   eigenphases using the published convention.
+3. Decompose degenerate labels (`-GM6`, `-K6`) under the C3 subgroup.
+4. Fill out the checklist above and record provenance.
+5. Use the completed checklist to populate a reviewed mapping spec,
+   which can then be built into a reviewed reduced EBR table via
+   `valleyscope build-reduced-ebr-table`.
+
+Until this human review is complete, no C3-like reduced EBR table
+may be shipped as reviewed ValleyScope package data.
+
 ## Non-Features
 
 - No built-in reduced EBR table is shipped.

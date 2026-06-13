@@ -956,3 +956,72 @@ def test_c3_audit_has_explicit_human_decisions_section():
     assert "Sign off on provenance record" in doc
     assert "no C3-like reduced EBR table" in doc
     assert "claimed as reviewed" in doc
+
+
+def test_c3_audit_has_feasibility_assessment_section():
+    """C3 audit doc must have a feasibility assessment section with the
+    full physical mapping chain, per-label evidence table, and API audit."""
+    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
+    assert "C3 Character Evidence Feasibility Assessment" in doc
+    # Physical mapping chain
+    for term in [
+        "source SG 150 spinful irrep label",
+        "sampled moire HSP",
+        "HSP little group",
+        "valley mapping",
+        "valley-preserving subgroup",
+        "ValleyScope spinful C3 irrep phase key",
+    ]:
+        assert term.lower() in doc.lower(), f"missing '{term}'"
+    # Per-label evidence table
+    assert "Per-Label Evidence Requirements" in doc
+    # API audit entries
+    assert "Path 1:" in doc or "irreptables.ebrs.load_ebr_data(150, True)" in doc
+    assert "Path 3:" in doc or "irrep.spacegroup_irreps.SpaceGroupIrreps" in doc
+    assert "INSUFFICIENT" in doc
+    assert "FEASIBLE BUT HEAVY" in doc
+    assert "UNAVAILABLE" in doc
+    # No evidence source claims review_ready
+    assert "`review_ready`" not in doc.split("Feasibility Assessment")[1] if "Feasibility Assessment" in doc else True
+
+
+def test_c3_feasibility_has_checklist():
+    """Feasibility section must have a human-reviewer checklist with at
+    least items 1-8 covering evidence source, per-label confirmation,
+    restriction decomposition, convention verification, and sign-off."""
+    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
+    assert "Human Decision Checklist" in doc
+    for item in [
+        "Select evidence source",
+        "Confirm `-GM5`",
+        "Confirm `-K5`",
+        "Resolve `-K6`",
+        "Resolve `-GM6`",
+        "Decide on `-GM4` and `-K4`",
+        "Verify phase convention",
+        "Sign off",
+    ]:
+        assert item in doc, f"missing checklist item: '{item}'"
+
+
+def test_c3_feasibility_distinguishes_facts():
+    """Feasibility section must separate machine-checkable from human-required facts."""
+    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
+    assert "Machine-Checkable Facts" in doc
+    assert "External / Human-Required Facts" in doc
+    # Machine-checkable facts cite test files
+    assert "test_irreptables_table_builder.py" in doc
+    assert "test_phase_tables.py" in doc
+    # Human-required facts cite external references
+    assert "Bradley" in doc or "Bilbao" in doc or "literature" in doc.lower()
+
+
+def test_c3_feasibility_conclusion_is_conservative():
+    """Feasibility conclusion must state machine-only evidence is insufficient
+    and a human-reviewed character table is the intended path."""
+    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
+    assert "Feasibility Conclusion" in doc
+    assert "Machine-only evidence is insufficient" in doc
+    assert "human-reviewed external character table" in doc
+    assert "no C3-like reduced EBR table" in doc
+    assert "may be shipped" in doc
