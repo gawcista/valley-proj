@@ -949,10 +949,11 @@ def test_c3_audit_has_explicit_human_decisions_section():
     """C3 audit doc must list exactly what human decisions are still required."""
     doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
     assert "Human Decisions Still Required" in doc
-    assert "Confirm `-GM5`" in doc
-    assert "Confirm `-K5`" in doc
-    assert "Resolve `-K6`" in doc
-    assert "Decide whether `-GM4` and `-K4`" in doc
+    assert "Confirm the 1D labels with Bilbao character evidence" in doc
+    assert "`-GM4`, `-GM5`" in doc
+    assert "`-K4`, and `-K5`" in doc
+    assert "Resolve `-GM6` and `-K6`" in doc
+    assert "Decide which labels enter the first reduced basis" in doc
     assert "Sign off on provenance record" in doc
     assert "no C3-like reduced EBR table" in doc
     assert "claimed as reviewed" in doc
@@ -994,11 +995,10 @@ def test_c3_feasibility_has_checklist():
     assert "Human Decision Checklist" in doc
     for item in [
         "Select evidence source",
-        "Confirm `-GM5`",
-        "Confirm `-K5`",
+        "Confirm the 1D C3 eigenphases",
         "Resolve `-K6`",
         "Resolve `-GM6`",
-        "Decide on `-GM4` and `-K4`",
+        "Decide the first C3 reduced-basis source labels",
         "Verify phase convention",
         "Sign off",
     ]:
@@ -1027,6 +1027,32 @@ def test_c3_feasibility_conclusion_is_conservative():
     assert 'IrrepTable("150", True)' in doc
     assert "no C3-like reduced EBR table" in doc
     assert "may be shipped" in doc
+
+
+def test_c3_audit_has_no_stale_irreptables_character_claims():
+    """C3 audit doc must not retain pre-IrrepTable correction claims."""
+    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
+    stale_claims = [
+        "`-K5` | KM | 1 | `KM:C3_spinor_phase_+1/6`",
+        "Independent run evidence suggests +1/6",
+        "irreptables has no SG 150 character data",
+        "No — `irreptables` has no phase data",
+        "No public API exposes C3 character",
+        "Confirm `-K5` → `C3_spinor_phase_+1/6`",
+        "Expected: `exp(+i*pi/3)` = phase +1/6",
+        "`IrrepTable(150, True)`\n   fails because `irreptables/data/` lacks SG 150 files",
+    ]
+    for stale in stale_claims:
+        assert stale not in doc, f"stale C3 audit claim remains: {stale}"
+
+    current_claims = [
+        'IrrepTable("150", True)',
+        "`-K5` | 1 | -1 | +1/2 | `KM:C3_spinor_phase_+1/2`",
+        "`-GM4` | 1 | -1 | +1/2 | `GammaM:C3_spinor_phase_+1/2`",
+        "`-K4` | 1 | -1 | +1/2 | `KM:C3_spinor_phase_+1/2`",
+    ]
+    for current in current_claims:
+        assert current in doc, f"missing corrected C3 audit claim: {current}"
 
 
 # -----------------------------------------------------------------------
