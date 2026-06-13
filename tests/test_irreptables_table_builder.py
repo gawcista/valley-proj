@@ -2253,3 +2253,118 @@ def test_c3_smoke_audit_no_material_names():
     doc = Path("docs/reduced_ebr_c3_v1_1_real_source_workflow_smoke.md").read_text(encoding="utf-8")
     for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
         assert name not in doc
+
+
+# -----------------------------------------------------------------------
+# C3 real-source vector reference + mapping E2E
+# -----------------------------------------------------------------------
+
+# Expected reduced EBR vectors from irreptables SG150 spinful + v1.1
+# multiplicity mapping.  Pinned as (wyckoff_position, vector) to avoid
+# Unicode EBR-label fragility.  Key order:
+# [GM:+1/6, GM:+1/2, GM:-1/6, KM:+1/6, KM:+1/2, KM:-1/6]
+_C3_VECTOR_REFERENCE = [
+    ("1a(32,32)", [0, 1, 0, 0, 1, 0]),
+    ("1a(32,32)", [0, 1, 0, 0, 1, 0]),
+    ("1a(32,32)", [1, 0, 1, 1, 0, 1]),
+    ("1b(32,32)", [0, 1, 0, 0, 1, 0]),
+    ("1b(32,32)", [0, 1, 0, 0, 1, 0]),
+    ("1b(32,32)", [1, 0, 1, 1, 0, 1]),
+    (None,               [1, 0, 1, 1, 0, 1]),
+    (None,               [1, 0, 1, 0, 2, 0]),
+    (None,               [0, 2, 0, 1, 0, 1]),
+]
+
+
+def test_c3_real_source_pins_vector_reference(tmp_path):
+    """Real irreptables SG150 spinful + v1.1 mapping produces exactly
+    the pinned reduced EBR vector reference."""
+    _require_real_irreptables_data()
+    from valleyscope.analysis.irreptables_runtime_table_builder import (
+        build_reduced_table_from_spec_file,
+    )
+    spec = {
+        "schema_version": "1.1.0", "data_source": "irreptables",
+        "space_group_number": 150, "spinful": True,
+        "source_hsp_by_irrep": _REAL_HSP_MAP,
+        "valleyscope_irrep_multiplicity_by_source_irrep": _REAL_C3_MULT,
+        "expected_hsps": ["GammaM", "KM"],
+        "allowed_irrep_keys": _REAL_C3_KEYS,
+        "subspace_group_candidate": "C3_like",
+    }
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps(spec))
+    table = build_reduced_table_from_spec_file(str(spec_path))
+
+    assert len(table["ebrs"]) == len(_C3_VECTOR_REFERENCE)
+    for i, (expected_wp, expected_vec) in enumerate(_C3_VECTOR_REFERENCE):
+        ebr = table["ebrs"][i]
+        assert ebr["vector"] == expected_vec, (
+            f"ebr[{i}] ({ebr['label']}): expected {expected_vec}, "
+            f"got {ebr['vector']}"
+        )
+        if expected_wp is not None:
+            assert expected_wp in ebr.get("wyckoff_position", ""), (
+                f"ebr[{i}] ({ebr['label']}): expected wyckoff "
+                f"containing {expected_wp!r}, got "
+                f"{ebr.get('wyckoff_position', '')!r}"
+            )
+
+
+def test_c3_real_source_mapping_e2e_solved_exact(tmp_path):
+    """Build a temporary C3 table from real source data, construct a
+    ready bundle matching one EBR vector, and verify solved_exact
+    mapping with atomic-compatible classification."""
+    _require_real_irreptables_data()
+    from valleyscope.analysis.irreptables_runtime_table_builder import (
+        build_reduced_table_from_spec_file,
+    )
+    from valleyscope.analysis.reduced_ebr_mapping import (
+        build_reduced_ebr_mapping,
+    )
+    spec = {
+        "schema_version": "1.1.0", "data_source": "irreptables",
+        "space_group_number": 150, "spinful": True,
+        "source_hsp_by_irrep": _REAL_HSP_MAP,
+        "valleyscope_irrep_multiplicity_by_source_irrep": _REAL_C3_MULT,
+        "expected_hsps": ["GammaM", "KM"],
+        "allowed_irrep_keys": _REAL_C3_KEYS,
+        "subspace_group_candidate": "C3_like",
+    }
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps(spec))
+    table = build_reduced_table_from_spec_file(str(spec_path))
+
+    # Use the EBR vector [1,0,1,1,0,1] to build a ready bundle.
+    target_vec = [1, 0, 1, 1, 0, 1]
+    irreps_by_kp: dict[str, list[str]] = {}
+    for i, key in enumerate(_REAL_C3_KEYS):
+        hsp, phase = key.split(":", 1)
+        irreps_by_kp.setdefault(hsp, []).extend([phase] * target_vec[i])
+
+    bundle = {
+        "bundles": [{
+            "bundle_id": "c3_real_source_smoke_bundle",
+            "valley": "K",
+            "subspace_group_candidate": "C3_like",
+            "ready_for_external_solver": True,
+            "expected_hsps": ["GammaM", "KM"],
+            "irreps_by_kpoint": irreps_by_kp,
+        }],
+    }
+    result = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
+
+    assert result["mapping_status"] == "solved_exact"
+    assert result["status"] == "solved_exact"
+    solution = result["solutions"][0]
+    assert solution["classification"] == "atomic-compatible-candidate"
+    assert solution["integer_span_status"] == "in_integer_span"
+    assert solution["nonnegative_solution_status"] == "solved_exact"
+    assert solution["status"] == "solved_exact"
+    assert "ebr_decomposition" in solution
+    assert len(solution["ebr_decomposition"]) > 0
+    for term in solution["ebr_decomposition"]:
+        assert isinstance(term["coefficient"], int) and term["coefficient"] >= 0
+    # No C2 keys in irrep basis.
+    for key in table["irreps"]:
+        assert "C2" not in key

@@ -106,6 +106,55 @@ The test `test_c3_real_source_v1_1_workflow_smoke` in
 The generated table is written to a temporary path only and is never
 committed.
 
+## Pinned C3 Reduced EBR Vector Reference
+
+From `irreptables` SG 150 spinful EBR data + v1.1 multiplicity mapping.
+Vectors are in the canonical key order:
+
+```text
+[GammaM:C3_spinor_phase_+1/6,
+ GammaM:C3_spinor_phase_+1/2,
+ GammaM:C3_spinor_phase_-1/6,
+ KM:C3_spinor_phase_+1/6,
+ KM:C3_spinor_phase_+1/2,
+ KM:C3_spinor_phase_-1/6]
+```
+
+| Wyckoff | Reduced EBR Vector | Test Pinned? |
+|---------|-------------------|-------------|
+| 1a(32,32) | `[0, 1, 0, 0, 1, 0]` | Yes |
+| 1a(32,32) | `[0, 1, 0, 0, 1, 0]` | Yes |
+| 1a(32,32) | `[1, 0, 1, 1, 0, 1]` | Yes |
+| 1b(32,32) | `[0, 1, 0, 0, 1, 0]` | Yes |
+| 1b(32,32) | `[0, 1, 0, 0, 1, 0]` | Yes |
+| 1b(32,32) | `[1, 0, 1, 1, 0, 1]` | Yes |
+| — | `[1, 0, 1, 1, 0, 1]` | Yes |
+| — | `[1, 0, 1, 0, 2, 0]` | Yes |
+| — | `[0, 2, 0, 1, 0, 1]` | Yes |
+
+These vectors are pinned by `test_c3_real_source_pins_vector_reference`
+in `tests/test_irreptables_table_builder.py`.  A change in the public
+`irreptables` EBR data or the ValleyScope multiplicity mapping will
+cause the reference test to fail, providing explicit drift detection.
+
+## Mapping E2E Smoke
+
+The test `test_c3_real_source_mapping_e2e_solved_exact` builds a
+temporary C3 reduced table from real source data, constructs a ready
+export-bundle payload matching one EBR vector (`[1, 0, 1, 1, 0, 1]`),
+and calls `build_reduced_ebr_mapping()`.  The result asserts:
+
+- `mapping_status == "solved_exact"`
+- `classification == "atomic-compatible-candidate"`
+- `integer_span_status == "in_integer_span"`
+- `nonnegative_solution_status == "solved_exact"`
+- Nonnegative integer EBR decomposition present
+- No C2/valley sewing keys in the reduced irrep basis
+
+This exercises the Layer 3 exact-integer solver path (`smith_normal_form_plus_bounded_nonnegative_search`)
+with a real-source temporary table.  It is not a shipped reduced EBR
+decomposition report for any material.
+
 ## Non-Delivery
 
 - This smoke test does not ship a reduced EBR table JSON.
