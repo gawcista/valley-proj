@@ -1,0 +1,52 @@
+{
+  "schema_version": "draft-0.1",
+  "status": "draft_not_builder_compatible",
+  "data_source": "irreptables",
+  "space_group_number": "150",
+  "spinful": true,
+  "subspace_group_candidate": "C3_like",
+  "expected_hsps": ["GammaM", "KM"],
+  "allowed_irrep_keys": [
+    "GammaM:C3_spinor_phase_+1/6",
+    "GammaM:C3_spinor_phase_+1/2",
+    "GammaM:C3_spinor_phase_-1/6",
+    "KM:C3_spinor_phase_+1/6",
+    "KM:C3_spinor_phase_+1/2",
+    "KM:C3_spinor_phase_-1/6"
+  ],
+  "source_hsp_by_irrep": {
+    "-GM4": "GammaM",
+    "-GM5": "GammaM",
+    "-GM6": "GammaM",
+    "-K4": "KM",
+    "-K5": "KM",
+    "-K6": "KM"
+  },
+  "valleyscope_irrep_multiplicity_by_source_irrep": {
+    "-GM4": {"GammaM:C3_spinor_phase_+1/2": 1},
+    "-GM5": {"GammaM:C3_spinor_phase_+1/2": 1},
+    "-GM6": {
+      "GammaM:C3_spinor_phase_+1/6": 1,
+      "GammaM:C3_spinor_phase_-1/6": 1
+    },
+    "-K4": {"KM:C3_spinor_phase_+1/2": 1},
+    "-K5": {"KM:C3_spinor_phase_+1/2": 1},
+    "-K6": {
+      "KM:C3_spinor_phase_+1/6": 1,
+      "KM:C3_spinor_phase_-1/6": 1
+    }
+  },
+  "builder_compatibility": {
+    "compatible_with_build_reduced_table_from_spec_file": false,
+    "reason": "current builder only supports source_irrep -> single reduced key via valleyscope_key_by_source_irrep (dict[str, str]) and rejects duplicate reduced keys; C3 signoff requires (a) many-to-one aggregation where multiple source labels (-GM4, -GM5) map to the same reduced key, and (b) one-to-many degenerate-irrep decomposition where one source label (-GM6) contributes to multiple reduced keys with multiplicities"
+  },
+  "provenance": {
+    "review_status": "reviewed",
+    "reviewer": "<use signoff packet reviewer placeholder if not filled>",
+    "review_date": "2026-06-13",
+    "review_method": "Bilbao-derived irreptables.irreps.IrrepTable character table plus ValleyScope C3 double-group central-sign audit",
+    "source_reference": "Bilbao Crystallographic Server SG150 spinful irreps via irreptables.irreps.IrrepTable(\"150\", True)",
+    "valleyscope_reduction": "sampled_hsp_valley_preserving",
+    "central_sign_convention": "chi(C3)=chi(op2), chi(C3^2)=-chi(op3)"
+  }
+}

@@ -1379,3 +1379,105 @@ def test_signoff_packet_no_material_names():
     doc = Path("docs/reduced_ebr_c3_mapping_signoff_packet.md").read_text(encoding="utf-8")
     for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
         assert name not in doc, f"signoff packet contains {name!r}"
+
+
+# -----------------------------------------------------------------------
+# C3 external mapping spec draft tests
+# -----------------------------------------------------------------------
+
+def _load_spec_draft():
+    path = Path("docs/reduced_ebr_c3_external_mapping_spec_draft.json")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_spec_draft_exists_and_parses():
+    """Draft JSON must exist and parse as valid JSON."""
+    spec = _load_spec_draft()
+    assert isinstance(spec, dict)
+
+
+def test_spec_draft_status_is_draft_not_builder_compatible():
+    """Status must be draft_not_builder_compatible."""
+    spec = _load_spec_draft()
+    assert spec["status"] == "draft_not_builder_compatible"
+
+
+def test_spec_draft_has_all_six_source_labels():
+    """source_hsp_by_irrep must contain all six in-scope labels."""
+    spec = _load_spec_draft()
+    for label in ["-GM4", "-GM5", "-GM6", "-K4", "-K5", "-K6"]:
+        assert label in spec["source_hsp_by_irrep"]
+        assert spec["source_hsp_by_irrep"][label] in ("GammaM", "KM")
+
+
+def test_spec_draft_allowed_irrep_keys_has_all_six_c3_keys():
+    """allowed_irrep_keys must contain all six C3 phase keys."""
+    spec = _load_spec_draft()
+    for key in [
+        "GammaM:C3_spinor_phase_+1/6",
+        "GammaM:C3_spinor_phase_+1/2",
+        "GammaM:C3_spinor_phase_-1/6",
+        "KM:C3_spinor_phase_+1/6",
+        "KM:C3_spinor_phase_+1/2",
+        "KM:C3_spinor_phase_-1/6",
+    ]:
+        assert key in spec["allowed_irrep_keys"]
+
+
+def test_spec_draft_multiplicity_maps_1d_labels_to_plus_half():
+    """GM4/GM5/K4/K5 must each map to +1/2 with multiplicity 1."""
+    spec = _load_spec_draft()
+    m = spec["valleyscope_irrep_multiplicity_by_source_irrep"]
+    assert m["-GM4"] == {"GammaM:C3_spinor_phase_+1/2": 1}
+    assert m["-GM5"] == {"GammaM:C3_spinor_phase_+1/2": 1}
+    assert m["-K4"] == {"KM:C3_spinor_phase_+1/2": 1}
+    assert m["-K5"] == {"KM:C3_spinor_phase_+1/2": 1}
+
+
+def test_spec_draft_multiplicity_decomposes_gm6_k6():
+    """GM6 must decompose to GammaM +1/6 and -1/6; K6 to KM +1/6 and -1/6."""
+    spec = _load_spec_draft()
+    m = spec["valleyscope_irrep_multiplicity_by_source_irrep"]
+    assert m["-GM6"] == {
+        "GammaM:C3_spinor_phase_+1/6": 1,
+        "GammaM:C3_spinor_phase_-1/6": 1,
+    }
+    assert m["-K6"] == {
+        "KM:C3_spinor_phase_+1/6": 1,
+        "KM:C3_spinor_phase_-1/6": 1,
+    }
+
+
+def test_spec_draft_builder_compatibility_is_false_with_reason():
+    """builder_compatibility must be false and reason must mention both
+    many-to-one aggregation and one-to-many decomposition."""
+    spec = _load_spec_draft()
+    bc = spec["builder_compatibility"]
+    assert bc["compatible_with_build_reduced_table_from_spec_file"] is False
+    reason = bc["reason"].lower()
+    assert "many-to-one" in reason or "many-to-one" in reason
+    assert "one-to-many" in reason
+
+
+def test_spec_draft_not_under_package_data():
+    """Draft must be under docs/, not under valleyscope/data/reduced_ebr/."""
+    path = Path("docs/reduced_ebr_c3_external_mapping_spec_draft.json")
+    assert path.exists()
+    assert "valleyscope/data/reduced_ebr" not in str(path.resolve())
+
+
+def test_spec_draft_no_material_names():
+    """Draft spec JSON must not contain real material names."""
+    spec = _load_spec_draft()
+    text = json.dumps(spec)
+    for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
+        assert name not in text, f"spec draft contains {name!r}"
+
+
+def test_spec_draft_provenance_has_required_fields():
+    """Provenance must include central_sign_convention and valleyscope_reduction."""
+    spec = _load_spec_draft()
+    p = spec["provenance"]
+    assert p["valleyscope_reduction"] == "sampled_hsp_valley_preserving"
+    assert "central_sign_convention" in p
+    assert "chi(C3)=chi(op2)" in p["central_sign_convention"]
