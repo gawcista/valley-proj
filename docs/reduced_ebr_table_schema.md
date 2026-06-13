@@ -13,13 +13,16 @@ Without a table, the interface reports `status: missing_table`.
 
 External user tables are validated by
 `valleyscope.analysis.reduced_ebr_mapping.load_reduced_ebr_table()` and do
-not need package-data review metadata. Reviewed package-data tables are a
-stricter path loaded by
+not need package-data review metadata. They are selected with
+`analysis.reduced_ebr.table_file`. Reviewed package-data tables are a
+stricter path selected with `analysis.reduced_ebr.table_name` and loaded by
 `valleyscope.data.reduced_ebr.catalog.load_reviewed_reduced_ebr_table()`;
 that path requires reviewed metadata in both `manifest.json` and the table's
 top-level `provenance` object, including `review_status: "reviewed"`,
 `reviewer`, `review_date`, `review_method`, `source_reference`, and
 `valleyscope_reduction: "sampled_hsp_valley_preserving"`.
+`analysis.reduced_ebr.table_file` and `analysis.reduced_ebr.table_name` are
+mutually exclusive.
 
 ## Required Table Keys
 
@@ -38,7 +41,7 @@ top-level `provenance` object, including `review_status: "reviewed"`,
 | Status | Meaning |
 |--------|---------|
 | `not_evaluated` | No export bundle available |
-| `missing_table` | `analysis.reduced_ebr.enabled: true` but no table file provided |
+| `missing_table` | `analysis.reduced_ebr.enabled: true` but no `table_file` or `table_name` provided |
 | `solved_exact` | All bundles classified as `atomic-compatible-candidate` |
 | `no_exact_solution` | At least one bundle classified as fragile or stable |
 
@@ -157,9 +160,10 @@ Given a bundle with irrep count vector `[2, 1, 1]`:
 ## Offline CLI
 
 A standalone CLI entry performs exact-integer reduced EBR mapping from an
-existing `valley_ebr_export_bundle.json` plus a user-supplied validated
-external table. This separates Layer 2 export-bundle generation from
-Layer 3 table-dependent mapping for high-throughput workflows.
+existing `valley_ebr_export_bundle.json` plus either a user-supplied validated
+external table or a reviewed package-data table name. This separates Layer 2
+export-bundle generation from Layer 3 table-dependent mapping for
+high-throughput workflows.
 
 ```bash
 valleyscope map-reduced-ebr \
@@ -167,13 +171,23 @@ valleyscope map-reduced-ebr \
   external_reduced_ebr_table.json \
   --output valley_reduced_ebr_mapping.json \
   --max-coefficient 6
+
+valleyscope map-reduced-ebr \
+  valley_ebr_export_bundle.json \
+  --table-name reviewed_table_name \
+  --output valley_reduced_ebr_mapping.json
 ```
 
 Arguments:
 - `bundle` — path to `valley_ebr_export_bundle.json` (required)
-- `table` — path to external reduced EBR table JSON (required; no built-in tables)
+- `table` — path to external reduced EBR table JSON
+- `--table-name` — name of a reviewed package-data table loaded through
+  `load_reviewed_reduced_ebr_table`
 - `--output`, `-o` — output path (default: `valley_reduced_ebr_mapping.json`)
 - `--max-coefficient` — max coefficient per EBR in brute-force search (default: 6)
+
+Exactly one of positional `table` or `--table-name` is required; they are
+mutually exclusive. No default table name is implied.
 
 Stdout summary example:
 ```

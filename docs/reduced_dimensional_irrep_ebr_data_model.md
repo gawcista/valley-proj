@@ -339,8 +339,11 @@ valleyscope map-reduced-ebr \
 ### 6.2 `analysis.reduced_ebr` Config Path
 
 The existing `analysis.reduced_ebr.enabled` + `table_file` config path
-remains unchanged.  A future convenience key (e.g. `table_name`) could
-resolve to a shipped package-data file, but this is not defined here.
+remains the external user-table path.  Reviewed package-data tables use
+`analysis.reduced_ebr.table_name`, which resolves through
+`load_reviewed_reduced_ebr_table` and therefore requires catalog-reviewed
+manifest metadata plus reviewed table provenance.  `analysis.reduced_ebr.table_file`
+and `analysis.reduced_ebr.table_name` are mutually exclusive.
 
 ### 6.3 Public Schema Preservation
 
@@ -434,5 +437,5 @@ concepts.  Previous versions of this handoff incorrectly used `irreps`
    validation against real-material fixtures. The table identity must remain
    symmetry/data-model based, not material-name based.
 5. **Convenience CLI** — `--builtin <name>` flag for `map-reduced-ebr`.
-6. **Config integration** — `analysis.reduced_ebr.table_name` as alternative
-   to `table_file`.
+6. ~~**Config integration**~~ — `analysis.reduced_ebr.table_name` as a
+   reviewed package-data alternative to external `table_file`.

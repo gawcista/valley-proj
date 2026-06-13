@@ -500,6 +500,19 @@ def test_schema_md_labels_use_clike_form():
     assert '"subspace_group_candidate": "P2"' not in schema_text
 
 
+def test_schema_docs_describe_reviewed_table_name_config():
+    """Schema docs must document reviewed package-data table_name loading."""
+    schema = Path("docs/schema.md").read_text(encoding="utf-8")
+    table_schema = Path("docs/reduced_ebr_table_schema.md").read_text(encoding="utf-8")
+    data_model = Path("docs/reduced_dimensional_irrep_ebr_data_model.md").read_text(encoding="utf-8")
+
+    for doc in [schema, table_schema, data_model]:
+        assert "analysis.reduced_ebr.table_name" in doc
+        assert "analysis.reduced_ebr.table_file" in doc
+        assert "load_reviewed_reduced_ebr_table" in doc
+        assert "mutually exclusive" in doc
+
+
 # -----------------------------------------------------------------------
 # 15. map-reduced-ebr CLI
 # -----------------------------------------------------------------------
@@ -1923,6 +1936,8 @@ def test_analyze_hsp_uses_table_name_with_fake_catalog(tmp_path, monkeypatch):
     from valleyscope.workflows.analyze_hsp import analyze_hsp
     outputs = analyze_hsp(config_path)
     assert "valley_reduced_ebr_mapping_json" in outputs
+    mapping = json.loads(outputs["valley_reduced_ebr_mapping_json"].read_text(encoding="utf-8"))
+    assert mapping["table_status"] == "loaded"
 
 
 def test_cli_map_reduced_ebr_accepts_table_name(tmp_path, monkeypatch):
