@@ -19,7 +19,7 @@ of a degenerate source irrep before it can enter the 1D C3 phase basis).
 | Source Label | Deg | HSP | Candidate ValleyScope Key | Status |
 |-------------|-----|-----|---------------------------|--------|
 | `-GM5` | 1 | GammaM | `GammaM:C3_spinor_phase_+1/2` | `needs_human_review` |
-| `-K5` | 1 | KM | `KM:C3_spinor_phase_+1/6` | `needs_human_review` |
+| `-K5` | 1 | KM | `KM:C3_spinor_phase_+1/2` | `needs_human_review` |
 | `-GM4` | 1 | GammaM | none — no C3 phase evidence | `blocked_by_missing_restriction_data` |
 | `-GM6` | 2 | GammaM | none — degeneracy 2; requires C3 restriction decomposition | `blocked_by_missing_restriction_data` |
 | `-K4` | 1 | KM | none — no C3 phase evidence | `blocked_by_missing_restriction_data` |
@@ -262,23 +262,33 @@ blocks prevent fully automated C3 phase mapping:
    `SpaceGroupIrreps` or character tables that could be queried for C3
    eigenvalues.
 
-### Candidate Rows With Independent Evidence
+### Candidate Rows With Bilbao C3 Character Evidence
 
-| Source | Candidate ValleyScope Key | Evidence | Status |
-|--------|--------------------------|----------|--------|
-| `-GM5` (deg 1) | `GammaM:C3_spinor_phase_+1/2` | Independent ValleyScope C3 eigenphase evidence. This is per-run diagnostic evidence, not an irreptables API guarantee. | `needs_human_review` |
-| `-K5` (deg 1) | `KM:C3_spinor_phase_+1/6` | Independent ValleyScope C3 eigenphase evidence. | `needs_human_review` |
-| `-K6` (deg 2) | none yet | Degeneracy 2; requires source-irrep restriction/decomposition before it can contribute to the 1D C3 phase basis. | `blocked_by_missing_restriction_data` |
+| Source | C3 Character | C3 Phase | ValleyScope Key | Status |
+|--------|------------|----------|-----------------|--------|
+| `-GM4` (deg 1) | -1 | +1/2 | `GammaM:C3_spinor_phase_+1/2` | `needs_human_review` |
+| `-GM5` (deg 1) | -1 | +1/2 | `GammaM:C3_spinor_phase_+1/2` | `needs_human_review` |
+| `-GM6` (deg 2) | +1 | — | decomposes to {+1/6, -1/6} | `blocked_by_missing_restriction_data` |
+| `-K4` (deg 1) | -1 | +1/2 | `KM:C3_spinor_phase_+1/2` | `needs_human_review` |
+| `-K5` (deg 1) | -1 | +1/2 | `KM:C3_spinor_phase_+1/2` | `needs_human_review` |
+| `-K6` (deg 2) | +1 | — | decomposes to {+1/6, -1/6} | `blocked_by_missing_restriction_data` |
+
+**Note corrected 2026-06-13**: The earlier audit incorrectly mapped `-K5`
+to `KM:C3_spinor_phase_+1/6` based on independent ValleyScope eigenphase
+runs.  The Bilbao-derived `irreptables.irreps.IrrepTable("150", True)`
+character table shows `-K5` has C3 character -1 = phase **+1/2**, not
++1/6.  The +1/6 phase appears in the C3-restriction decomposition of
+the degenerate irrep `-K6`.
 
 ### Conclusion
 
-No source label is review-ready from public `irreptables` EBR data alone.
-`-GM5` and `-K5` are candidate rows with independent ValleyScope evidence,
-so they are `needs_human_review`, not final table data.  `-K6` is blocked
-until the degenerate source irrep is restricted/decomposed into the
-valley-preserving C3 basis.  A reviewed C3-like reduced EBR table authoring
-requires resolving these blockers through an external irrep character table
-source or explicit human review of the relevant source-irrep convention.
+With the `irreptables.irreps` Bilbao character data, the C3 characters for
+all six in-scope source labels at GammaM and KM are now machine-checkable via
+`IrrepTable("150", True)`.  The key remaining blocker is the C3 subgroup
+restriction decomposition for the degenerate labels (`-GM6`, `-K6`), which
+requires explicit decomposition of the 2D irrep into two 1D C3 spinful
+irreps.  A reviewed C3-like reduced EBR table still requires human review
+of the mapping convention and provenance before it can be shipped.
 
 ## Source-Irrep Restriction Feasibility Audit
 
@@ -287,7 +297,7 @@ source or explicit human review of the relevant source-irrep convention.
 | Package | Module | Key Classes | Can Query SG 150 C3 Characters? |
 |---------|--------|-------------|-------------------------------|
 | `irrep` v2.6.3 | `irrep.spacegroup_irreps` | `SpaceGroupIrreps`, `SpaceGroup`, `IrrepTable` | Partial — requires explicit lattice + symmetry operations + spinor rotations; no `from_sg_number` factory |
-| `irreptables` | `irreptables.irreps` | `IrrepTable`, `Irrep`, `KPoint` | No — `IrrepTable(SGnumber, spinor)` parses data files; no data files for SG 150 in `irreptables/data/` |
+| `irreptables` | `irreptables.irreps` | `IrrepTable`, `Irrep`, `SymopTable` | **Yes** — `IrrepTable("150", True)` (string SG identifier) loads Bilbao-derived SG 150 spinful irrep character-table data; 16 irreps with per-operation complex characters |
 | `irreptables` | `irreptables.ebrs` | `load_ebr_data` | No — returns combinatorial EBR data only; no character/eigenphase information |
 
 ### Inspection Commands
@@ -297,9 +307,10 @@ source or explicit human review of the relevant source-irrep convention.
 from irrep.spacegroup_irreps import SpaceGroupIrreps
 # No simple from_sg_number factory available.
 
-# irreptables.irreps: IrrepTable parser, no SG 150 data files
+# irreptables.irreps: Bilbao-derived irrep character-table data — VERIFIED
 import irreptables.irreps as ir
-# ir.IrrepTable(150, True) -> AssertionError (no data file)
+# ir.IrrepTable("150", True)  -> loads 16 spinful irreps with characters
+# NOTE: IrrepTable(150, True) (int) fails — must use string "150"
 
 # irreptables.ebrs: EBR-only, no character data
 from irreptables.ebrs import load_ebr_data
@@ -308,36 +319,48 @@ from irreptables.ebrs import load_ebr_data
 
 ### Findings
 
-1. **No `from_sg_number` query endpoint**: neither `irrep.spacegroup_irreps`
-   nor `irreptables.irreps` provides a simple query-by-space-group-number
-   API for C3 eigenphase/character data.
+1. **`irreptables.irreps.IrrepTable("150", True)` loads SG 150 spinful irrep
+   character data.**  This is a Bilbao-derived data source with 16 irreps,
+   6 symmetry operations, and per-operation complex characters.  The SG
+   identifier must be passed as a string — `IrrepTable(150, True)` (int)
+   fails with `AssertionError`.  This was the key correction to the earlier
+   audit, which incorrectly claimed `irreptables.irreps` could not load
+   SG 150.
 
-2. **`irreptables.irreps` cannot load SG 150**: the `IrrepTable` constructor
-   parses irrep output data files, but `irreptables/data/` does not contain
-   SG 150 data files.
-
-3. **`irrep.spacegroup_irreps` is computationally accessible but heavy**:
+2. **`irrep.spacegroup_irreps` is computationally accessible but heavy**:
    it can be constructed from a lattice + spglib symmetry operations, but:
    - requires explicit crystal structure (not just SG number)
    - requires spinor rotation matching via `match_spinor_rotations`
    - outputs full-space-group irreps, not per-HSP valley-preserving restrictions
    - no built-in C3 subgroup restriction function
 
-4. **Character/restriction decomposition not automated**: the API provides
+3. **Character/restriction decomposition not automated**: the API provides
    full space-group irreps, not the C3 subgroup restriction that would
    tell us that `-GM5` decomposes as `C3_spinor_phase_+1/2`.
 
-### Updated Per-Label Status
+4. **`irreptables.ebrs.load_ebr_data` provides only EBR combinatorial data**
+   (labels, degeneracies, vectors, Smith form) — no character information.
 
-| Source Label | Deg | Status | Reason |
-|-------------|-----|--------|--------|
-| `-GM4` | 1 | `blocked_by_missing_restriction_data` | No public API gives C3 character for this label |
-| `-GM5` | 1 | `needs_human_review` | ValleyScope run evidence suggests +1/2; cannot be verified from public package APIs alone |
-| `-GM6` | 2 | `blocked_by_missing_restriction_data` | Degeneracy 2; requires C3 restriction decomposition; no public API provides this |
-| `-K4` | 1 | `blocked_by_missing_restriction_data` | No public API gives C3 character for this label |
-| `-K5` | 1 | `needs_human_review` | ValleyScope run evidence suggests +1/6; cannot be verified from public package APIs alone |
-| `-K6` | 2 | `blocked_by_missing_restriction_data` | Degeneracy 2; requires C3 restriction decomposition |
-| `-KA4/-KA5/-KA6` | 1/1/2 | `blocked_by_missing_restriction_data` | Not in sampled HSP set {GammaM, KM} |
+### Updated Per-Label Status (With Bilbao C3 Characters)
+
+| Source Label | Deg | C3 Character | C3 Phase (2π) | ValleyScope Key | Status |
+|-------------|-----|-------------|--------------|-----------------|--------|
+| `-GM4` | 1 | -1 | +1/2 | `GammaM:C3_spinor_phase_+1/2` | `needs_human_review` |
+| `-GM5` | 1 | -1 | +1/2 | `GammaM:C3_spinor_phase_+1/2` | `needs_human_review` |
+| `-GM6` | 2 | +1 | — | decomposes to {+1/6, -1/6} | `blocked_by_missing_restriction_data` — needs C3 restriction decomposition |
+| `-K4` | 1 | -1 | +1/2 | `KM:C3_spinor_phase_+1/2` | `needs_human_review` |
+| `-K5` | 1 | -1 | +1/2 | `KM:C3_spinor_phase_+1/2` | `needs_human_review` |
+| `-K6` | 2 | +1 | — | decomposes to {+1/6, -1/6} | `blocked_by_missing_restriction_data` — needs C3 restriction decomposition |
+| `-KA4/-KA5/-KA6` | 1/1/2 | n/a | n/a | out of scope | `blocked_by_missing_restriction_data` — not in sampled HSP set {GammaM, KM} |
+
+**Key finding corrected 2026-06-13**: The distinction between `-GM4`/`-GM5`
+(and `-K4`/`-K5`) is in their **C2 characters**, not their **C3 characters**.
+All four 1D labels at GammaM and KM have C3 character = -1 (phase +1/2).
+The earlier audit incorrectly mapped `-K5` to phase +1/6 based on
+independent ValleyScope eigenphase runs; the Bilbao character table
+shows `-K5` has C3 character -1 = phase +1/2.  The +1/6 and -1/6 phases
+appear only in the C3-restriction decomposition of the degenerate labels
+`-GM6` and `-K6`.
 
 ### Conclusion
 
@@ -557,19 +580,39 @@ EBR vectors, and precomputed Smith normal form.  No C3
 character/eigenphase data is exposed.  This is already machine-checked
 by `tests/test_irreptables_table_builder.py`.
 
-#### Path 2: `irreptables.irreps.IrrepTable(150, True)`
+#### Path 2: `irreptables.irreps.IrrepTable("150", True)`
 
-**Status: UNAVAILABLE.**  The `IrrepTable` constructor parses irrep
-output data files from `irreptables/data/`.  No data file for SG 150
-exists in the installed `irreptables` package.  Attempts raise
-`AssertionError`.  This path cannot provide C3 evidence for any
-source label.
+**Status: AVAILABLE — BILBAO-DERIVED CHARACTER TABLE.**  This loads
+SG 150 (P321) spinful irrep data from Bilbao-derived data files
+shipped with the `irreptables` package.  The API provides:
+- 16 irreps with names, dimensions, k-point labels, and complex
+  per-operation characters keyed by 1-indexed Bilbao operation IDs.
+- 6 symmetry operations (rotations + translations) with order
+  information: identity (op 1), two C3 operations (ops 2-3), three
+  C2 operations (ops 4-6).
+
+Critical usage note: the SG identifier must be a **string**
+(`IrrepTable("150", True)`), not an integer.  `IrrepTable(150, True)`
+raises `AssertionError` because the API compares the input to a
+string SG identifier.
+
+This is the recommended path for machine-checkable C3 character
+evidence.  The key observations (verified by
+`tests/test_irreptables_table_builder.py`):
+
+1. All four 1D labels at GammaM and KM (`-GM4`, `-GM5`, `-K4`, `-K5`)
+   have C3 character = -1 = `exp(+i*pi)` = phase +1/2.
+2. The degenerate labels (`-GM6`, `-K6`) have C3 character = +1,
+   decomposing as `{exp(+i*pi/3), exp(-i*pi/3)}` = `{+1/6, -1/6}`.
+3. The 1D labels are distinguished by their **C2** characters (ops
+   4-6), which are valley-changing and not relevant to the C3
+   valley-preserving reduced basis.
 
 #### Path 3: `irrep.spacegroup_irreps.SpaceGroupIrreps`
 
-**Status: FEASIBLE BUT HEAVY.**  This is the only public Python API
-that can produce SG 150 spinful irreps with full character/eigenphase
-data.  It requires:
+**Status: FEASIBLE BUT HEAVY — NOT NEEDED FOR BASIC C3 CHARACTERS.**
+The `irreptables.irreps` Bilbao data (Path 2) already provides C3
+characters.  `SpaceGroupIrreps` is an alternative heavy path that
 
 - Explicit hexagonal lattice vectors.
 - Symmetry operations (rotations + translations) from spglib
@@ -724,31 +767,48 @@ reduced EBR table with the `{GammaM, KM}` HSP set.  Items 5 and 6
 are optional depending on whether the reviewer wants to include
 all 1D source labels in the basis.
 
-### Feasibility Conclusion
+### Feasibility Conclusion (Revised 2026-06-13)
 
-**Machine-only evidence is insufficient.** No public Python API
-provides a simple, reproducible C3 character/eigenphase lookup for
-SG 150 spinful source irrep labels.  The `irrep.spacegroup_irreps`
-module can produce the required data but requires explicit
-construction with lattice + symmetry inputs, manual C3 subgroup
-restriction, and per-label extraction — a multi-step computational
-procedure, not a publishable reference table.
+**C3 character evidence is now machine-checkable.** The
+`irreptables.irreps.IrrepTable("150", True)` Bilbao-derived data
+provides reproducible, per-operation character values for all six
+in-scope source labels at GammaM and KM.  This was the key missing
+piece identified in the earlier audit and is now verified by
+`tests/test_irreptables_table_builder.py`.
 
-**A human-reviewed external character table is the intended path.**
-The most practical approach is:
-1. Obtain the P321 spinful double group C3 character table from a
-   standard physics reference (Bradley & Cracknell, Bilbao
-   Crystallographic Server, or equivalent).
-2. Map the source irrep labels (`-GM5`, `-K5`, etc.) to their C3
-   eigenphases using the published convention.
-3. Decompose degenerate labels (`-GM6`, `-K6`) under the C3 subgroup.
-4. Fill out the checklist above and record provenance.
-5. Use the completed checklist to populate a reviewed mapping spec,
-   which can then be built into a reviewed reduced EBR table via
-   `valleyscope build-reduced-ebr-table`.
+The 1D labels (`-GM4`, `-GM5`, `-K4`, `-K5`) all have C3 character = -1
+(phase +1/2).  The degenerate labels (`-GM6`, `-K6`) have C3 character = +1
+and decompose as `{+1/6, -1/6}`.  The `-4`/`-5` distinction at each HSP
+is in the C2 characters, not C3 — only the C3 characters matter for the
+valley-preserving reduced EBR basis.
 
-Until this human review is complete, no C3-like reduced EBR table
-may be shipped as reviewed ValleyScope package data.
+**Remaining blockers:**
+
+1. **C3 restriction decomposition** for `-GM6` and `-K6`: the Bilbao
+   data gives the full 2D irrep C3 character (+1), but extracting
+   individual 1D C3 spinful eigenphases requires explicit subgroup
+   restriction.  The decomposition `{+1/6, -1/6}` follows from
+   spinful C3 algebra but should be explicitly verified.
+
+2. **Human review of the mapping convention**: the C3 character values
+   are now machine-verified, but the mapping from source labels to
+   ValleyScope keys still requires a human to confirm the convention
+   and sign off on the provenance record per the checklist above.
+
+3. **Operation identification**: the Bilbao convention uses 1-indexed
+   operation IDs.  Operations 2 and 3 are C3/C3^2 (valley-preserving);
+   operations 4-6 are C2 (valley-changing at K/K').  All four 1D
+   labels at each HSP have identical C3 characters — the `-4`/`-5`
+   distinction is in C2 characters only.
+
+The most practical next step is to complete the Human Decision Checklist
+above using the Bilbao character evidence, then populate a reviewed
+mapping spec.  An external literature character table is still
+recommended for cross-verification but is no longer the only viable
+evidence source.
+
+Until human review is complete, no C3-like reduced EBR table may be
+shipped as reviewed ValleyScope package data.
 
 ## Non-Features
 

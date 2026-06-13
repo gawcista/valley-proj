@@ -977,10 +977,11 @@ def test_c3_audit_has_feasibility_assessment_section():
     assert "Per-Label Evidence Requirements" in doc
     # API audit entries
     assert "Path 1:" in doc or "irreptables.ebrs.load_ebr_data(150, True)" in doc
+    assert "Path 2:" in doc or 'IrrepTable("150", True)' in doc
     assert "Path 3:" in doc or "irrep.spacegroup_irreps.SpaceGroupIrreps" in doc
     assert "INSUFFICIENT" in doc
-    assert "FEASIBLE BUT HEAVY" in doc
-    assert "UNAVAILABLE" in doc
+    assert "AVAILABLE" in doc
+    assert "BILBAO" in doc
     # No evidence source claims review_ready
     assert "`review_ready`" not in doc.split("Feasibility Assessment")[1] if "Feasibility Assessment" in doc else True
 
@@ -1017,11 +1018,127 @@ def test_c3_feasibility_distinguishes_facts():
 
 
 def test_c3_feasibility_conclusion_is_conservative():
-    """Feasibility conclusion must state machine-only evidence is insufficient
-    and a human-reviewed character table is the intended path."""
+    """Feasibility conclusion must state C3 character evidence is now
+    machine-checkable via irreptables Bilbao data, while still requiring
+    human review before shipping any reviewed table."""
     doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
     assert "Feasibility Conclusion" in doc
-    assert "Machine-only evidence is insufficient" in doc
-    assert "human-reviewed external character table" in doc
+    assert "C3 character evidence is now machine-checkable" in doc
+    assert 'IrrepTable("150", True)' in doc
     assert "no C3-like reduced EBR table" in doc
     assert "may be shipped" in doc
+
+
+# -----------------------------------------------------------------------
+# Irreptables Bilbao irrep data verification
+# -----------------------------------------------------------------------
+
+def _require_irreptables_irreps():
+    """Skip test if irreptables.irreps cannot be imported."""
+    try:
+        import irreptables.irreps  # noqa: F401
+    except ImportError:
+        pytest.skip("irreptables.irreps not available")
+
+
+def test_irreptables_irrep_table_loads_sg150_spinful():
+    """IrrepTable('150', True) loads SG 150 spinful irreps from Bilbao data."""
+    _require_irreptables_irreps()
+    import irreptables.irreps as ir
+    tbl = ir.IrrepTable("150", True)
+    assert tbl.number_str == "150"
+    assert tbl.spinor is True
+    assert tbl.nsym == 6
+    assert len(tbl.irreps) == 16
+
+
+def test_irreptables_sg150_contains_all_6_target_source_labels():
+    """All six in-scope source labels appear in the table."""
+    _require_irreptables_irreps()
+    import irreptables.irreps as ir
+    tbl = ir.IrrepTable("150", True)
+    names = {irrep.name for irrep in tbl.irreps}
+    for label in ["-GM4", "-GM5", "-GM6", "-K4", "-K5", "-K6"]:
+        assert label in names, f"missing source label {label}"
+
+
+def test_irreptables_sg150_1d_labels_have_c3_character_minus_one():
+    """All four 1D labels at GM and K have C3 character = -1 (phase +1/2).
+
+    This means they all map to ValleyScope C3_spinor_phase_+1/2.
+    The -4/-5 distinction is from C2 characters, not C3.
+    """
+    _require_irreptables_irreps()
+    import irreptables.irreps as ir
+    tbl = ir.IrrepTable("150", True)
+    for irrep in tbl.irreps:
+        if irrep.name in ("-GM4", "-GM5", "-K4", "-K5"):
+            assert irrep.dim == 1, f"{irrep.name} should be 1D"
+            c3_char = irrep.characters.get(2)
+            c32_char = irrep.characters.get(3)
+            assert c3_char is not None, f"{irrep.name} missing C3 character"
+            assert abs(c3_char.real + 1) < 1e-10, (
+                f"{irrep.name} C3 char should be -1, got {c3_char}"
+            )
+            assert abs(c3_char.imag) < 1e-10
+            assert abs(c32_char.real + 1) < 1e-10
+
+
+def test_irreptables_sg150_2d_labels_decompose_under_c3():
+    """-GM6 and -K6 have C3 character = +1, decomposing to {+1/6, -1/6}."""
+    _require_irreptables_irreps()
+    import irreptables.irreps as ir
+    tbl = ir.IrrepTable("150", True)
+    for irrep in tbl.irreps:
+        if irrep.name in ("-GM6", "-K6"):
+            assert irrep.dim == 2, f"{irrep.name} should be 2D"
+            c3_char = irrep.characters.get(2)
+            assert c3_char is not None, f"{irrep.name} missing C3 character"
+            assert abs(c3_char.real - 1) < 1e-10
+            assert abs(c3_char.imag) < 1e-10
+
+
+def test_irreptables_sg150_c3_operations_are_indices_2_and_3():
+    """Operations 2 and 3 (1-indexed Bilbao convention) are C3 and C3^2."""
+    _require_irreptables_irreps()
+    import irreptables.irreps as ir
+    import numpy as np
+    tbl = ir.IrrepTable("150", True)
+    # Operation 2 -> C3 (order 3, trace 0)
+    R2 = tbl.symmetries[1].R
+    assert np.allclose(np.linalg.matrix_power(R2, 3), np.eye(3))
+    assert not np.allclose(R2, np.eye(3))
+    # Operation 3 -> C3^2 (order 3, trace 0)
+    R3 = tbl.symmetries[2].R
+    assert np.allclose(np.linalg.matrix_power(R3, 3), np.eye(3))
+    assert not np.allclose(R3, np.eye(3))
+    # Operations 4,5,6 -> C2 (order 2, trace -1)
+    for i in [3, 4, 5]:
+        R = tbl.symmetries[i].R
+        assert np.allclose(R @ R, np.eye(3))
+
+
+def test_irreptables_sg150_ops_4_5_6_are_c2_valley_changing():
+    """Operations 4,5,6 are C2 (order 2, trace -1) — valley-changing at K/K'."""
+    _require_irreptables_irreps()
+    import irreptables.irreps as ir
+    import numpy as np
+    tbl = ir.IrrepTable("150", True)
+    for i in [3, 4, 5]:
+        R = tbl.symmetries[i].R
+        assert int(np.trace(R)) == -1
+        assert int(np.linalg.det(R)) == 1
+
+
+def test_irreptables_sg150_no_kA_labels():
+    """KA source labels should not exist — A labels belong to A HSP, not KA."""
+    _require_irreptables_irreps()
+    import irreptables.irreps as ir
+    tbl = ir.IrrepTable("150", True)
+    names = {irrep.name for irrep in tbl.irreps}
+    assert "-KA4" not in names
+    assert "-KA5" not in names
+    assert "-KA6" not in names
+    # But -A4, -A5, -A6 do exist (at A HSP, not KA)
+    for label in ["-A4", "-A5", "-A6"]:
+        assert label in names, f"missing {label}"
