@@ -60,6 +60,10 @@ detailed audit and blocker evidence.
   (export bundle has `status: no_bundles`, `bundle_count: 0`)
 - **Detailed blocker evidence**: `docs/benchmarks/tzrse2_blocker_evidence.md`
 - **Smoke walkthrough**: `docs/benchmarks/symmetry_adapted_valley_smoke.md` §2
+- **C2-like reduced EBR unblock audit**: `docs/reduced_ebr_c2_authoring_audit.md`
+  — SG149/P312 source data is available, but C2 central-sign convention
+  signoff and tZrSe2 fixture-quality blockers remain before any C2 table can
+  be reviewed.
 
 ## tPdSe2 / PdSe2
 

@@ -28,11 +28,12 @@ The data source is verified machine-readable.
 Machine-verified by: `python -c "import irreptables.irreps as ir;
 ir.IrrepTable('149', True)"` — loads successfully.
 
-### SG 149 C2 Characters (Bilbao Table)
+### SG 149 Order-2 Character Evidence (Bilbao Table)
 
-1D irreps and their C2 characters (op4-6):
+1D irreps and their Bilbao characters for the order-2 spatial operations
+(op4-6):
 
-| Source Label | Deg | kpname | C2 char (op4) | Phase (2π) |
+| Source Label | Deg | kpname | op4 character | Phase (2π) |
 |-------------|-----|--------|--------------|-----------|
 | `-GM4` | 1 | GM | -1 | +0.500 |
 | `-GM5` | 1 | GM | -1 | +0.500 |
@@ -41,11 +42,13 @@ ir.IrrepTable('149', True)"` — loads successfully.
 | `-K5` | 1 | K | exp(-iπ/3) | -0.167 |
 | `-K6` | 1 | K | exp(+iπ/3) | +0.167 |
 
-The C2 character = -1 (phase +1/2) at GammaM does NOT correspond to the
+The op4 character = -1 (phase +1/2) at GammaM does NOT correspond to the
 ValleyScope spinful C2 phase labels `C2_spinor_phase_+1/4` and
-`C2_spinor_phase_-1/4`.  The relationship between the Bilbao little-group
-C2 character and the valley-preserving C2 spinful eigenphase requires
-explicit convention review (see central-sign convention below).
+`C2_spinor_phase_-1/4` by direct identity.  These Bilbao rows are source
+character evidence, not a ValleyScope reduced-basis assignment.  The
+relationship between Bilbao little-group/order-2 characters and the
+valley-preserving C2 spinful eigenphase requires explicit convention review
+(see central-sign convention below).
 
 ### ValleyScope C2 Phase Table
 
@@ -70,11 +73,16 @@ For P312 at the relevant HSPs (from Bilbao table):
 | K | (1/3,1/3,0) | ops 4,5,6 | Same as GM |
 | H | (1/3,1/3,1/2) | ops 4,5,6 | — |
 
-The tZrSe2 M-star fixture uses however:
-- GammaM: C2 ops present but identity-only for M1/M2 at GammaM (only M3
-  gets C2 at GammaM per HSP-star conjugation)
-- KM and MM: M1/M2 are identity-only; M3 C2 ops require HSP-star
-  derivation from MM
+The tZrSe2 M-star fixture is a moire/valley-projected validation context,
+not a direct copy of the raw Bilbao source-label list:
+- GammaM: M1, M2, and M3 each have an HSP-local C2-like row, but all are
+  diagnostic-only because of spinor-convention, seed-overlap, and for M3
+  representation-unitarity blockers.
+- KM: M1/M2/M3 are identity-only in the configured sampled HSP; non-identity
+  C2 data would have to come from HSP-star derivation.
+- MM: M1/M2 are identity-only at the configured sampled HSP; M3 has the
+  explicit HSP-local C2-like source row, but it is diagnostic-only because
+  of representation-unitarity and spinor-convention blockers.
 
 ### Valley Mapping For tZrSe2 P312 M-Star
 
@@ -85,19 +93,22 @@ C2 operations: preserve M3 at GammaM and MM; map M1 <-> M2 at
   certain HSPs (HSP-star dependent)
 ```
 
-For the C2-like valley-preserving subgroup, the relevant valley is M3
-(at GammaM and MM), which experiences a C2 operation in its little
-group.
+For the C2-like valley-preserving subgroup, GammaM has candidate local
+C2-like rows for M1/M2/M3, while MM has an explicit C2-like source row for
+M3.  KM and MM M1/M2 require HSP-star derivation rather than direct
+single-HSP local C2 data.
 
 ### Valley-Preserving Subgroup
 
-At GammaM for valley M3: `G_k^{(M3)} = {E, C2}`  (order 2)
+At GammaM for valleys M1/M2/M3: `G_k^{(a)} = {E, C2_a}` (order 2),
+with different C2 representatives for different M-star labels.
 
-At MM for valley M3: `G_k^{(M3)} = {E, C2}` (via HSP-star)
+At MM for valley M3: `G_k^{(M3)} = {E, C2}` for the explicit sampled
+HSP source row.
 
-M1 and M2 valleys at GammaM and KM are identity-only in the C2
-preserving subgroup (the C2 operations map between M1 and M2
-within the M-star orbit).
+At KM, and at MM for M1/M2, the sampled HSP-local preserving subgroup is
+identity-only; non-identity C2 characters would need trusted HSP-star
+derivation from an explicit source such as MM/M3.
 
 ### Valley-Changing Operations
 
@@ -108,7 +119,7 @@ These must not enter the single-valley C2 reduced EBR vector basis.
 
 ### Central-Sign Convention: Blocker
 
-The Bilbao SG 149 spinful table shows C2 character = -1 (exp(+iπ)) for
+The Bilbao SG 149 spinful table shows op4 character = -1 (exp(+iπ)) for
 1D irreps `-GM4`/`-GM5`/`-K4` at GammaM and K.  The ValleyScope C2
 phase table has labels for ±1/4 phases (eigenvalues ±i).
 
@@ -117,14 +128,15 @@ directly correspond to the spinful C2 rotation eigenphase in the
 ValleyScope convention.**  This is analogous to the C3 double-group lift
 issue resolved in the C3 audit: the character table uses independent
 spinor lifts per spatial operation, and the relationship between
-`chi(C2)` from the table and the valley-preserving C2 eigenphase
+`chi(C2)` or an order-2 source character from the table and the
+valley-preserving C2 eigenphase
 requires explicit convention translation.
 
 Specifically:
 - In the double group, C2^2 = -E, so 1D C2 irreps have eigenvalues ±i
   (phases ±1/4)
-- The Bilbao table gives C2 character = -1 (phase +1/2) for many 1D
-  labels at GM and K
+- The Bilbao table gives order-2 source characters such as -1 (phase +1/2)
+  for several 1D labels at GM and K
 - The relationship between Bilbao chi(C2) and the valley-preserving
   C2 eigenphase is NOT a simple identity
 
@@ -140,7 +152,7 @@ Local fixture probe (from `real_tests/tZrSe2/analyze.yaml`, default config):
 | Export bundle | `no_bundles` (0) | No EBR problem instances exist |
 | EBR input candidates | none | No candidate passes readiness gates |
 | B1: spinor convention | **Blocked** | `spinor_convention_verified: False` on all rows; no reference benchmark (`spinor_benchmark: None`) for C2 spinor cross-verification |
-| B2: D_raw closure | **Blocked** | Seed overlap and D_raw target-subspace closure quality insufficient at GammaM |
+| B2: D_raw closure | **Blocked** | GammaM/MM op=5 closure is `usable_with_caution`, but local representation unitarity remains above trusted EBR-readiness thresholds |
 | All eigenphase rows | `diagnostic_only: True` | Cannot be used for reduced EBR input |
 | `spinor_rotation_applied` | `True` | Spinor rotation is mechanically applied; the issue is convention verification, not missing rotation |
 
@@ -151,8 +163,10 @@ Local fixture probe (from `real_tests/tZrSe2/analyze.yaml`, default config):
    reduced EBR input.  The ValleyScope C2 phase convention (±1/4) needs
    explicit physics signoff mapping it to the Bilbao C2 characters.
 
-2. **B2 (D_raw closure)**: Target-subspace closure at GammaM is below the
-   usable threshold.  This is a numerical/DFT quality issue, not a
+2. **B2 (D_raw closure)**: Target-subspace closure for op=5 at GammaM/MM is
+   `usable_with_caution`, but that is not a trusted EBR-input pass.  The
+   resulting local representation unitarity remains above the EBR-readiness
+   threshold.  This is a numerical/DFT target-subspace quality issue, not a
    code-design issue.
 
 3. **Seed overlap**: Low seed overlap values at GammaM prevent candidate

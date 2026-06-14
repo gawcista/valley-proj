@@ -216,9 +216,15 @@ valley-changing operations as invariance of a single label operator.
   Bilbao/irreptables source data, sampled `GammaM`/`KM`, the single-valley
   valley-preserving subgroup `{E, C3, C3^2}`, and central sign convention
   `chi(C3)=chi(op2), chi(C3^2)=-chi(op3)`.  Valley-changing C2 operations
-  remain valley sewing matrix data, not reduced EBR basis entries.  Next
-  physics work is validation against trusted C3 fixture outputs and then
-  comparable reviewed tables for other valley-preserving subgroups.
+  remain valley sewing matrix data, not reduced EBR basis entries.  The tMoTe2
+  fixture validation is documented in
+  `docs/benchmarks/tmote2_reduced_ebr_mapping_validation.md`.
+* C2-like reduced EBR signoff: `docs/reduced_ebr_c2_authoring_audit.md`
+  records the SG149/P312 source-data availability and tZrSe2 blocker audit.
+  No C2-like table is shipped yet.  Required next physics decisions are the
+  C2 central-sign convention mapping from Bilbao/order-2 source characters to
+  ValleyScope spinful C2 phases, an external C2 spinor benchmark, and improved
+  tZrSe2 fixture quality or a replacement C2 validation fixture.
 * Codebase refinement: `docs/codebase_refinement_audit.md` is complete.  The
   three-phase test-only split of the former catch-all
   `tests/test_io_and_workflow.py` is merged.  Config parsing, output-profile
