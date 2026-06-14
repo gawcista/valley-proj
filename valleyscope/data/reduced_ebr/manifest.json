@@ -1,5 +1,15 @@
 {
   "schema_version": "1.0.0",
   "description": "Reviewed reduced-dimensional ValleyScope EBR package-data catalog",
-  "tables": []
+  "tables": [
+    {
+      "name": "P321_C3_like_GammaM_KM_spinful_v1",
+      "filename": "P321_C3_like_GammaM_KM_spinful_v1.json",
+      "review_status": "reviewed",
+      "reviewer": "Codex-physics-review",
+      "review_date": "2026-06-14",
+      "review_method": "Codex condensed-matter review of Bilbao-derived irreptables SG150 spinful character data, C3 signoff packet, and pinned reduced-vector tests",
+      "source_reference": "Bilbao Crystallographic Server SG150 spinful irreps and EBRs via public irreptables"
+    }
+  ]
 }

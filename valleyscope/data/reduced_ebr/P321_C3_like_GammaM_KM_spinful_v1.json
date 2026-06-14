@@ -1,0 +1,143 @@
+{
+  "schema_version": "1.0.0",
+  "subspace_group_candidate": "C3_like",
+  "expected_hsps": [
+    "GammaM",
+    "KM"
+  ],
+  "irreps": [
+    "GammaM:C3_spinor_phase_+1/6",
+    "GammaM:C3_spinor_phase_+1/2",
+    "GammaM:C3_spinor_phase_-1/6",
+    "KM:C3_spinor_phase_+1/6",
+    "KM:C3_spinor_phase_+1/2",
+    "KM:C3_spinor_phase_-1/6"
+  ],
+  "ebrs": [
+    {
+      "label": "-1E↑G(1) @ 1a(32,32)",
+      "vector": [
+        0,
+        1,
+        0,
+        0,
+        1,
+        0
+      ],
+      "wyckoff_position": "1a(32,32)"
+    },
+    {
+      "label": "-2E↑G(1) @ 1a(32,32)",
+      "vector": [
+        0,
+        1,
+        0,
+        0,
+        1,
+        0
+      ],
+      "wyckoff_position": "1a(32,32)"
+    },
+    {
+      "label": "-E1↑G(2) @ 1a(32,32)",
+      "vector": [
+        1,
+        0,
+        1,
+        1,
+        0,
+        1
+      ],
+      "wyckoff_position": "1a(32,32)"
+    },
+    {
+      "label": "-1E↑G(1) @ 1b(32,32)",
+      "vector": [
+        0,
+        1,
+        0,
+        0,
+        1,
+        0
+      ],
+      "wyckoff_position": "1b(32,32)"
+    },
+    {
+      "label": "-2E↑G(1) @ 1b(32,32)",
+      "vector": [
+        0,
+        1,
+        0,
+        0,
+        1,
+        0
+      ],
+      "wyckoff_position": "1b(32,32)"
+    },
+    {
+      "label": "-E1↑G(2) @ 1b(32,32)",
+      "vector": [
+        1,
+        0,
+        1,
+        1,
+        0,
+        1
+      ],
+      "wyckoff_position": "1b(32,32)"
+    },
+    {
+      "label": "-1E↑G(2)",
+      "vector": [
+        1,
+        0,
+        1,
+        1,
+        0,
+        1
+      ],
+      "wyckoff_position": "2d(3,3)"
+    },
+    {
+      "label": "-2E↑G(2)",
+      "vector": [
+        1,
+        0,
+        1,
+        0,
+        2,
+        0
+      ],
+      "wyckoff_position": "2d(3,3)"
+    },
+    {
+      "label": "-E↑G(2)",
+      "vector": [
+        0,
+        2,
+        0,
+        1,
+        0,
+        1
+      ],
+      "wyckoff_position": "2d(3,3)"
+    }
+  ],
+  "provenance": {
+    "review_status": "reviewed",
+    "reviewer": "Codex-physics-review",
+    "review_date": "2026-06-14",
+    "review_method": "Codex condensed-matter review of Bilbao-derived irreptables SG150 spinful character data, C3 signoff packet, and pinned reduced-vector tests",
+    "source_reference": "Bilbao Crystallographic Server SG150 spinful irreps and EBRs via public irreptables",
+    "valleyscope_reduction": "sampled_hsp_valley_preserving",
+    "data_source": "irreptables",
+    "space_group_number": 150,
+    "spinful": true,
+    "subspace_group_candidate": "C3_like",
+    "expected_hsps": [
+      "GammaM",
+      "KM"
+    ],
+    "central_sign_convention": "chi(C3)=chi(op2), chi(C3^2)=-chi(op3)"
+  }
+}

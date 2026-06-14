@@ -821,25 +821,25 @@ def test_agents_plan_irrep_boundary_and_package_name():
 # -----------------------------------------------------------------------
 
 def test_package_data_skeleton_structure_and_manifest():
-    """Package-data directory exists, manifest has schema_version, tables empty, only manifest.json present."""
+    """Package-data directory exists, manifest has schema_version, one reviewed table."""
     from valleyscope.data.reduced_ebr.catalog import package_data_root, load_reduced_ebr_manifest, list_reviewed_reduced_ebr_tables
     root = package_data_root()
     for name in ["__init__.py", "manifest.json", "README.md", "catalog.py"]:
         assert (root / name).exists(), f"missing {name}"
     m = load_reduced_ebr_manifest()
     assert isinstance(m.get("schema_version"), str) and m["schema_version"]
-    assert m["tables"] == []
-    assert list_reviewed_reduced_ebr_tables() == []
+    assert len(m["tables"]) == 1
+    assert m["tables"][0]["name"] == "P321_C3_like_GammaM_KM_spinful_v1"
+    assert len(list_reviewed_reduced_ebr_tables()) == 1
     json_names = {f.name for f in root.glob("*.json")}
-    assert json_names == {"manifest.json"}, f"unexpected JSON: {json_names}"
+    assert json_names == {"manifest.json", "P321_C3_like_GammaM_KM_spinful_v1.json"}, f"unexpected JSON: {json_names}"
 
 
 def test_package_data_readme_and_no_forbidden_imports():
     """README states no reviewed tables; catalog and data/__init__ have no forbidden imports."""
     from valleyscope.data.reduced_ebr.catalog import package_data_root
     readme = (package_data_root() / "README.md").read_text(encoding="utf-8").lower()
-    assert "no reviewed tables" in readme or "currently empty" in readme
-    assert "currently" in readme
+    assert "one reviewed" in readme.lower() or "reviewed" in readme.lower()
     assert "load_reviewed_reduced_ebr_table" in readme
     assert "load_reduced_ebr_table" in readme
     assert "review_status" in readme
@@ -894,11 +894,12 @@ def _set_fake_root(monkeypatch, root: Path):
     monkeypatch.setattr(catalog, "package_data_root", lambda: root)
 
 
-def test_empty_real_manifest_lists_empty(monkeypatch):
-    """Real repo manifest must still list []."""
+def test_real_manifest_lists_one_reviewed_table(monkeypatch):
+    """Real repo manifest now lists one reviewed C3 table."""
     from valleyscope.data.reduced_ebr.catalog import list_reviewed_reduced_ebr_tables
     tables = list_reviewed_reduced_ebr_tables()
-    assert tables == []
+    assert len(tables) == 1
+    assert tables[0]["name"] == "P321_C3_like_GammaM_KM_spinful_v1"
 
 
 def _reviewed_table_entry(name: str, filename: str) -> dict:
@@ -1110,7 +1111,7 @@ def test_catalog_loader_integration_does_not_import_irrep2():
 
 
 def test_empty_manifest_still_lists_empty(monkeypatch, tmp_path):
-    """Even a fake root with empty manifest returns []."""
+    """A fake root with empty manifest still returns []."""
     root = _make_fake_catalog_root(tmp_path)
     _set_fake_root(monkeypatch, root)
     from valleyscope.data.reduced_ebr.catalog import list_reviewed_reduced_ebr_tables
@@ -2011,10 +2012,20 @@ def test_cli_map_reduced_ebr_requires_table_or_name(tmp_path):
     assert rc != 0
 
 
-def test_real_manifest_still_lists_no_reviewed_tables():
-    """Real manifest must still list [] (no tables added)."""
-    from valleyscope.data.reduced_ebr.catalog import list_reviewed_reduced_ebr_tables
-    assert list_reviewed_reduced_ebr_tables() == []
+def test_real_manifest_has_one_reviewed_table():
+    """Real manifest lists one reviewed C3 table."""
+    from valleyscope.data.reduced_ebr.catalog import (
+        list_reviewed_reduced_ebr_tables,
+        load_reviewed_reduced_ebr_table,
+    )
+    tables = list_reviewed_reduced_ebr_tables()
+    assert len(tables) == 1
+    name = tables[0]["name"]
+    assert name == "P321_C3_like_GammaM_KM_spinful_v1"
+    # Load through the reviewed gate.
+    tbl = load_reviewed_reduced_ebr_table(name)
+    assert tbl["provenance"]["review_status"] == "reviewed"
+    assert tbl["provenance"]["reviewer"] == "Codex-physics-review"
 
 
 # -----------------------------------------------------------------------
@@ -2135,3 +2146,51 @@ def test_catalog_module_no_forbidden_imports():
         "from irrep.ebrs", "import irrep.ebrs",
     ]:
         assert forbidden not in src
+
+
+# -----------------------------------------------------------------------
+# 25. First C3 reviewed package-data table smoke
+# -----------------------------------------------------------------------
+
+def test_c3_reviewed_table_name_mapping_smoke():
+    """Load the reviewed C3 package-data table by name and verify
+    solved_exact mapping with a synthetic ready C3 bundle."""
+    from valleyscope.data.reduced_ebr.catalog import (
+        load_reviewed_reduced_ebr_table,
+    )
+    from valleyscope.analysis.reduced_ebr_mapping import (
+        build_reduced_ebr_mapping,
+    )
+    table = load_reviewed_reduced_ebr_table(
+        "P321_C3_like_GammaM_KM_spinful_v1",
+    )
+    assert len(table["ebrs"]) == 9
+    _KEYS = [
+        "GammaM:C3_spinor_phase_+1/6", "GammaM:C3_spinor_phase_+1/2",
+        "GammaM:C3_spinor_phase_-1/6",
+        "KM:C3_spinor_phase_+1/6", "KM:C3_spinor_phase_+1/2",
+        "KM:C3_spinor_phase_-1/6",
+    ]
+    target_vec = [1, 0, 1, 1, 0, 1]
+    irreps_by_kp: dict[str, list[str]] = {}
+    for i, key in enumerate(_KEYS):
+        hsp, phase = key.split(":", 1)
+        irreps_by_kp.setdefault(hsp, []).extend([phase] * target_vec[i])
+    bundle = {
+        "bundles": [{
+            "bundle_id": "c3_package_table_smoke",
+            "valley": "K",
+            "subspace_group_candidate": "C3_like",
+            "ready_for_external_solver": True,
+            "expected_hsps": ["GammaM", "KM"],
+            "irreps_by_kpoint": irreps_by_kp,
+        }],
+    }
+    result = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
+    assert result["mapping_status"] == "solved_exact"
+    assert result["table_status"] == "loaded"
+    solution = result["solutions"][0]
+    assert solution["classification"] == "atomic-compatible-candidate"
+    assert len(solution["ebr_decomposition"]) > 0
+    for term in solution["ebr_decomposition"]:
+        assert isinstance(term["coefficient"], int) and term["coefficient"] >= 0
