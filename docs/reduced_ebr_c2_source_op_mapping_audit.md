@@ -22,7 +22,7 @@ From `irreptables.irreps.IrrepTable("149", True)`:
 | op2 | 3 (C3) | [0,-1,0] | exp(±iπ/3) | No |
 | op3 | 3 (C3²) | [-1,1,0] | exp(∓iπ/3) | No |
 | op4 | 2 | [0,-1,0] | **(+i, -i)** | **Yes** |
-| op5 | 2 | [-1,1,0] | **(+i, +i)** | **Yes** |
+| op5 | 2 | [-1,1,0] | **(+i, -i)** | **Yes** |
 | op6 | 2 | [1,0,0] | **(+i, -i)** | **Yes** |
 
 Ops 4-6 are spatial order-2 rotations (trace = -1, det = +1) with
@@ -81,7 +81,8 @@ Candidate assignment:
 **Status: candidate_mapping_identified.**  The eigenvalue ~±0.99i at
 MM M3 is the closest to a clean C2 spinful value.  The mapping
 Bilbao op6 → ValleyScope op5 is a coordinate/orientation convention.
-The phase mapping +i → +1/4 appears direct (no sign conversion needed).
+The phase mapping +i → +1/4 appears direct if the source-op assignment
+and local generator orientation are accepted.
 
 Blocker: `spinor_convention_verified: False` for the MM M3 row.
 The candidate mapping is physically consistent but not signed off.
@@ -129,12 +130,12 @@ appears direct:
 
 For the clean near-unity eigenvalue at MM M3 (~+0.99i), the candidate
 would be `C2_spinor_phase_+1/4`.  The Bilbao source character is +i
-(from `-M4`), and the phase mapping is direct (+i → +1/4) with no
-sign conversion needed.
+(from `-M4`), and the phase mapping is direct (+i → +1/4) if the
+source-op assignment and local generator orientation are accepted.
 
 This is a CANDIDATE mapping, not a reviewed one.  The mapping is marked
-`blocked_pending_spinor_convention_review` until the central-sign
-convention for C2 is signed off.
+`blocked_pending_spinor_lift_reference` until the C2 source-op /
+spinor-lift convention is signed off.
 
 ## 5. Per-Row Status Summary
 
@@ -181,8 +182,9 @@ convention for C2 is signed off.
 
 ### Next Steps
 
-1. Physicist signoff on C2 central-sign convention (candidate: direct
-   mapping +i → +1/4, -i → -1/4).
+1. Physicist signoff on the C2 source-op / spinor-lift convention
+   (candidate: direct mapping +i → +1/4, -i → -1/4 after source-op and
+   local generator orientation are accepted).
 2. Physicist signoff on valley-preserving C2 generator orientation
    for each M-star label at each HSP.
 3. Improved tZrSe2 GammaM D_raw closure / seed overlap quality, or

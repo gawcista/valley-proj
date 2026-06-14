@@ -257,7 +257,11 @@ dynamically during a high-throughput run.
   (`docs/reduced_ebr_c2_mapping_signoff_packet.md`) records the unresolved
   Bilbao source-HSP/op assignment, generator-orientation, and spinor-lift
   questions analogous to the reviewed C3 packet; it does not ship a C2
-  package-data table or claim a tZrSe2 reduced EBR decomposition.
+  package-data table or claim a tZrSe2 reduced EBR decomposition.  The
+  follow-up source-op mapping audit
+  (`docs/reduced_ebr_c2_source_op_mapping_audit.md`) records the corrected
+  SG149 GM/M C2-like source characters (`±i`), the candidate MM/M3
+  source-op assignment, and the blocked GammaM/KM/MM-M1/M2 rows.
 * Codebase refinement: `docs/codebase_refinement_audit.md` is complete.  The
   three-phase test-only split of the former catch-all
   `tests/test_io_and_workflow.py` is merged.  Config parsing, output-profile

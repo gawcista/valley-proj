@@ -68,6 +68,10 @@ detailed audit and blocker evidence.
   `docs/reduced_ebr_c2_mapping_signoff_packet.md` — records the unresolved
   Bilbao source-HSP/op assignment, generator-orientation, and spinor-lift
   questions; no C2 table or tZrSe2 reduced EBR decomposition is claimed.
+- **C2 source-op mapping audit**:
+  `docs/reduced_ebr_c2_source_op_mapping_audit.md` — records corrected SG149
+  GM/M C2-like source characters (`±i`), the candidate MM/M3 source-op
+  assignment, and blocked GammaM/KM/MM-M1/M2 rows.
 
 ## tPdSe2 / PdSe2
 
