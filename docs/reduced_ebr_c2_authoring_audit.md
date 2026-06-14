@@ -30,25 +30,33 @@ ir.IrrepTable('149', True)"` — loads successfully.
 
 ### SG 149 Order-2 Character Evidence (Bilbao Table)
 
-1D irreps and their Bilbao characters for the order-2 spatial operations
-(op4-6):
+The order-2 source-character evidence exposed by
+`IrrepTable("149", True)` is HSP-local:
 
-| Source Label | Deg | kpname | op4 character | Phase (2π) |
-|-------------|-----|--------|--------------|-----------|
-| `-GM4` | 1 | GM | -1 | +0.500 |
-| `-GM5` | 1 | GM | -1 | +0.500 |
-| `-GM6` | 2 | GM | — | — |
-| `-K4` | 1 | K | -1 | +0.500 |
-| `-K5` | 1 | K | exp(-iπ/3) | -0.167 |
-| `-K6` | 1 | K | exp(+iπ/3) | +0.167 |
+| Source HSP | Exposed little-group ops | Order-2 source ops |
+|------------|--------------------------|--------------------|
+| GM | ops 1-6 | ops 4, 5, 6 |
+| A | ops 1-6 | ops 4, 5, 6 |
+| M | ops 1, 6 | op 6 |
+| L | ops 1, 6 | op 6 |
+| K | ops 1, 2, 3 | none in the source irrep characters |
+| H | ops 1, 2, 3 | none in the source irrep characters |
 
-The op4 character = -1 (phase +1/2) at GammaM does NOT correspond to the
-ValleyScope spinful C2 phase labels `C2_spinor_phase_+1/4` and
-`C2_spinor_phase_-1/4` by direct identity.  These Bilbao rows are source
-character evidence, not a ValleyScope reduced-basis assignment.  The
-relationship between Bilbao little-group/order-2 characters and the
-valley-preserving C2 spinful eigenphase requires explicit convention review
-(see central-sign convention below).
+Relevant 1D C2-like source rows carry spinful phases `±1/4` directly:
+
+| Source Label | Deg | kpname | Order-2 op | Character | Phase (2π) |
+|--------------|-----|--------|------------|-----------|------------|
+| `-GM4` | 1 | GM | op4/op5/op6 | `-i` | -1/4 |
+| `-GM5` | 1 | GM | op4/op5/op6 | `+i` | +1/4 |
+| `-GM6` | 2 | GM | op4/op5/op6 | 0 | not 1D |
+| `-M3` | 1 | M | op6 | `-i` | -1/4 |
+| `-M4` | 1 | M | op6 | `+i` | +1/4 |
+
+K/H rows are C3-like in this source table and must not be cited as C2
+source-character rows.  The remaining convention review is not a
+`-1 -> ±i` conversion; it is the assignment of the correct Bilbao source
+HSP/op to each ValleyScope valley-preserving C2 generator and any required
+generator-orientation or spinor-lift conversion.
 
 ### ValleyScope C2 Phase Table
 
@@ -65,13 +73,14 @@ These are validated by `tests/test_phase_tables.py`.
 
 ### HSP Little Group
 
-For P312 at the relevant HSPs (from Bilbao table):
+For P312 source irreps, order-2 character availability from the Bilbao table is:
 
 | HSP | k-coordinate | Little-Group C2 Ops | Notes |
 |-----|-------------|-------------------|-------|
 | GammaM (GM) | (0,0,0) | ops 4,5,6 | Full C2 little group |
-| K | (1/3,1/3,0) | ops 4,5,6 | Same as GM |
-| H | (1/3,1/3,1/2) | ops 4,5,6 | — |
+| M | see source table | op6 | C2-like source row |
+| K | (1/3,1/3,0) | none in source characters | C3-like source row |
+| H | (1/3,1/3,1/2) | none in source characters | C3-like source row |
 
 The tZrSe2 M-star fixture is a moire/valley-projected validation context,
 not a direct copy of the raw Bilbao source-label list:
@@ -117,31 +126,20 @@ C2 ops between M1/M2: valley-changing (sewing M1↔M2)
 
 These must not enter the single-valley C2 reduced EBR vector basis.
 
-### Central-Sign Convention: Blocker
+### C2 Source-Op / Phase Convention: Blocker
 
-The Bilbao SG 149 spinful table shows op4 character = -1 (exp(+iπ)) for
-1D irreps `-GM4`/`-GM5`/`-K4` at GammaM and K.  The ValleyScope C2
-phase table has labels for ±1/4 phases (eigenvalues ±i).
+The Bilbao SG 149 spinful table gives relevant C2-like 1D source
+characters `±i`, consistent with the allowed ValleyScope C2 spinful
+phase set `±1/4` at the level of source-character phases.
 
-**The C2 character convention in the Bilbao little-group table does NOT
-directly correspond to the spinful C2 rotation eigenphase in the
-ValleyScope convention.**  This is analogous to the C3 double-group lift
-issue resolved in the C3 audit: the character table uses independent
-spinor lifts per spatial operation, and the relationship between
-`chi(C2)` or an order-2 source character from the table and the
-valley-preserving C2 eigenphase
-requires explicit convention translation.
+The unresolved convention issue is therefore more specific: ValleyScope
+must identify which Bilbao source HSP and order-2 op represent the
+valley-preserving C2 generator for each sampled moire HSP / valley label,
+and whether the local generator orientation matches the source phase or
+requires a sign/lift conversion.
 
-Specifically:
-- In the double group, C2^2 = -E, so 1D C2 irreps have eigenvalues ±i
-  (phases ±1/4)
-- The Bilbao table gives order-2 source characters such as -1 (phase +1/2)
-  for several 1D labels at GM and K
-- The relationship between Bilbao chi(C2) and the valley-preserving
-  C2 eigenphase is NOT a simple identity
-
-**This convention resolution must be completed by a physicist before any
-C2-like reduced EBR mapping can be reviewed.**
+**This source-op and spinor-lift convention resolution must be completed
+before any C2-like reduced EBR mapping can be reviewed.**
 
 ## tZrSe2 Fixture Blocker Status
 
@@ -159,9 +157,10 @@ Local fixture probe (from `real_tests/tZrSe2/analyze.yaml`, default config):
 ### Blocker Root Cause Analysis
 
 1. **B1 (spinor convention)**: This is the primary blocker. Without a
-   verified C2 spinor convention, no eigenphase row can be trusted for
-   reduced EBR input.  The ValleyScope C2 phase convention (±1/4) needs
-   explicit physics signoff mapping it to the Bilbao C2 characters.
+   verified C2 source-op and spinor-lift convention, no eigenphase row can be
+   trusted for reduced EBR input.  The ValleyScope C2 phase convention
+   (±1/4) needs explicit physics signoff mapping the selected Bilbao C2-like
+   source characters to the local valley-preserving C2 generator.
 
 2. **B2 (D_raw closure)**: Target-subspace closure for op=5 at GammaM/MM is
    `usable_with_caution`, but that is not a trusted EBR-input pass.  The
@@ -184,14 +183,15 @@ ValleyScope package data, these items must be completed:
 
 ### Physics Convention Signoff (User Required)
 
-- [ ] **C2 spinor convention resolved.** Map the Bilbao SG 149 C2
-  little-group characters to ValleyScope C2 spinful eigenphases (±1/4).
-  This is the analog of the C3 `chi(C3)=chi(op2), chi(C3^2)=-chi(op3)`
-  convention.  The C2 convention must address:
-  - Which Bilbao op index corresponds to the C2 generator
-  - How the little-group projective character relates to the spinful
-    C2 rotation eigenphase
-  - The central-sign convention for chi(C2^2) = -1 in the double group
+- [ ] **C2 source-op / spinor-lift convention resolved.** Map the selected
+  Bilbao SG 149 C2-like little-group characters to ValleyScope C2 spinful
+  eigenphases (±1/4).  This is the analog of the C3
+  `chi(C3)=chi(op2), chi(C3^2)=-chi(op3)` convention.  The C2 convention
+  must address:
+  - Which Bilbao source HSP and op index correspond to the C2 generator
+  - Whether the selected source character maps directly to the ValleyScope
+    phase key or needs generator-orientation / spinor-lift conversion
+  - How to treat valley-changing C2 operations as valley sewing matrix data
 
 - [ ] **Spinor benchmark for C2 convention verification.** A trusted
   reference system with known C2 spinful eigenphases (e.g., a
@@ -222,18 +222,18 @@ After the above physics signoffs are complete:
 
 **A C2-like reduced EBR table is physically definable** — the SG 149
 Bilbao source data is available and the ValleyScope v1.1 multiplicity-aware
-builder supports C2-like group labels.  However, **the C2 central-sign
-convention (Bilbao C2 characters → ValleyScope C2 spinful eigenphases)
-must be resolved by a physicist before any reviewed C2 table can be
-authored.**
+builder supports C2-like group labels.  However, **the C2 source-op /
+spinor-lift convention (which Bilbao C2-like source character maps to each
+ValleyScope valley-preserving C2 phase key) must be resolved by a physicist
+before any reviewed C2 table can be authored.**
 
 **tZrSe2 remains blocked** as a validation fixture primarily by the
 spinor convention verification gap (B1) and secondarily by numerical
 quality issues (B2, seed overlap).  These are physical/numerical
 blockers, not ValleyScope code-design blockers.
 
-**No C2-like package-data table should be shipped until the C2
-central-sign convention is signed off,** analogous to the C3 signoff
-process documented in `docs/reduced_ebr_c3_mapping_signoff_packet.md`.
+**No C2-like package-data table should be shipped until the C2 source-op /
+spinor-lift convention is signed off,** analogous to the C3 signoff process
+documented in `docs/reduced_ebr_c3_mapping_signoff_packet.md`.
 
 No C2 package-data table is shipped by this audit.

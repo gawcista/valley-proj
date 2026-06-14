@@ -61,9 +61,13 @@ detailed audit and blocker evidence.
 - **Detailed blocker evidence**: `docs/benchmarks/tzrse2_blocker_evidence.md`
 - **Smoke walkthrough**: `docs/benchmarks/symmetry_adapted_valley_smoke.md` §2
 - **C2-like reduced EBR unblock audit**: `docs/reduced_ebr_c2_authoring_audit.md`
-  — SG149/P312 source data is available, but C2 central-sign convention
-  signoff and tZrSe2 fixture-quality blockers remain before any C2 table can
-  be reviewed.
+  — SG149/P312 source data is available, but C2 source-op / spinor-lift
+  convention signoff and tZrSe2 fixture-quality blockers remain before any
+  C2 table can be reviewed.
+- **C2 convention signoff packet**:
+  `docs/reduced_ebr_c2_mapping_signoff_packet.md` — records the unresolved
+  Bilbao source-HSP/op assignment, generator-orientation, and spinor-lift
+  questions; no C2 table or tZrSe2 reduced EBR decomposition is claimed.
 
 ## tPdSe2 / PdSe2
 

@@ -250,12 +250,14 @@ dynamically during a high-throughput run.
 * C2-like reduced EBR signoff: `docs/reduced_ebr_c2_authoring_audit.md`
   records the SG149/P312 source-data availability and tZrSe2 blocker audit.
   No C2-like table is shipped yet.  Required next physics decisions are the
-  C2 central-sign convention mapping from Bilbao/order-2 source characters to
-  ValleyScope spinful C2 phases, an external C2 spinor benchmark, and improved
-  tZrSe2 fixture quality or a replacement C2 validation fixture.  The next
-  planned step is a C2 convention signoff packet analogous to the reviewed C3
-  packet; it must not ship a C2 package-data table or claim a tZrSe2 reduced
-  EBR decomposition.
+  C2 source-op / spinor-lift convention mapping from Bilbao C2-like source
+  characters to ValleyScope spinful C2 phase keys, an external C2 spinor
+  benchmark, and improved tZrSe2 fixture quality or a replacement C2
+  validation fixture.  The C2 convention signoff packet
+  (`docs/reduced_ebr_c2_mapping_signoff_packet.md`) records the unresolved
+  Bilbao source-HSP/op assignment, generator-orientation, and spinor-lift
+  questions analogous to the reviewed C3 packet; it does not ship a C2
+  package-data table or claim a tZrSe2 reduced EBR decomposition.
 * Codebase refinement: `docs/codebase_refinement_audit.md` is complete.  The
   three-phase test-only split of the former catch-all
   `tests/test_io_and_workflow.py` is merged.  Config parsing, output-profile

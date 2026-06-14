@@ -30,7 +30,7 @@ from this packet after the signoff checklist is completed.
 | Spinor type | Spinful (double group, SOC) |
 | Number of symmetry operations | 6 (identity, 2×C3, 3×order-2) |
 | Number of irreps | 16 |
-| Character encoding | Complex: `ch = \|ch\| * exp(iπ * phase/π)` per operation |
+| Character encoding | Complex Bilbao/irreptables character values per operation |
 | Operation indexing | 1-indexed Bilbao convention |
 
 Machine-verified by the C2 authoring audit (`docs/reduced_ebr_c2_authoring_audit.md`).
@@ -52,17 +52,23 @@ label without passing through the convention steps documented below.
 
 ## 2. Source HSP Little Group Evidence
 
-From the Bilbao SG 149 spinful table, the little-group structure at
-each relevant HSP:
+From the Bilbao SG 149 spinful table, the order-2 source-character
+availability is:
 
-| HSP | k-coordinate | Little-Group Order-2 Ops |
-|-----|-------------|-------------------------|
-| GammaM (GM) | (0,0,0) | ops 4, 5, 6 |
-| K | (1/3, 1/3, 0) | ops 4, 5, 6 |
-| H | (1/3, 1/3, 1/2) | ops 4, 5, 6 |
+| Source HSP | Exposed little-group ops | Order-2 source ops |
+|------------|--------------------------|--------------------|
+| GM | ops 1-6 | ops 4, 5, 6 |
+| A | ops 1-6 | ops 4, 5, 6 |
+| M | ops 1, 6 | op 6 |
+| L | ops 1, 6 | op 6 |
+| K | ops 1, 2, 3 | none in the source irrep characters |
+| H | ops 1, 2, 3 | none in the source irrep characters |
 
-Ops 4-6 are spatial order-2 rotations (trace = -1, determinant = +1).
-For the spinful double group, S^2 = -I is verified for all three.
+Globally, ops 4-6 are spatial order-2 rotations (trace = -1,
+determinant = +1).  For the spinful double group, S^2 = -I is verified
+for all three.  However, a source irrep row only carries characters for
+the operations in its own HSP little group.  K/H source rows are C3-like
+in this table and must not be used as C2 source-character evidence.
 
 This is source HSP little group data.  The ValleyScope sampled-HSP set
 for a C2-like reduced table depends on the valley family (e.g., tZrSe2
@@ -75,14 +81,20 @@ For the tZrSe2 M-star three-valley system under P312:
 ```
 Valleys: M1, M2, M3 (threefold M-star at K)
 C3 ops:  M1 → M2 → M3 → M1  (valley-changing)
-C2 ops:  M3 preserved at GammaM, MM (valley-preserving)
-         M1 ↔ M2 swapped       (valley-changing)
+C2 ops:  GammaM has M1/M2/M3 HSP-local C2-like rows
+         MM has an explicit M3 C2-like source row
+         KM and MM M1/M2 need HSP-star derivation for non-identity C2 data
 ```
 
 - C3 operations are valley-changing for all M-star valleys.
-- One C2 operation preserves M3 at GammaM and MM — this is the
-  valley-preserving C2 operation for valley M3.
-- C2 operations between M1 and M2 are valley-changing sewing data.
+- GammaM has candidate HSP-local C2-like rows for M1, M2, and M3.  In
+  the current fixture these rows remain diagnostic-only because of spinor
+  convention, seed-overlap, and representation-quality blockers.
+- MM has the explicit HSP-local C2-like source row for M3, also
+  diagnostic-only until the C2 convention and representation-quality blockers
+  are resolved.
+- KM, and MM for M1/M2, need HSP-star derivation for non-identity C2
+  data rather than direct sampled-HSP-local C2 rows.
 
 This valley mapping is fixture-specific for tZrSe2.  A different C2
 valley system under P312 could have different valley-preserving
@@ -90,16 +102,21 @@ subgroup structure.
 
 ## 4. Valley-Preserving Subgroup
 
-For the M3 valley at GammaM (tZrSe2 M-star):
+For a local C2-like row such as M3 at GammaM or MM (tZrSe2 M-star):
 
 ```text
 G_k^{(M3)} = {g ∈ G_k | π_g(M3) = M3} = {E, C2_M3}
 ```
 
 The valley-preserving subgroup is order 2, isomorphic to C2.
-For M1 and M2 valleys at GammaM, KM, and MM, the sampled-HSP-local
-preserving subgroup is identity-only (C2 ops are valley-changing
-between M1↔M2 at these HSPs).
+At GammaM, M1 and M2 have analogous local C2-like candidate rows with their
+own preserving C2 representatives.  These are source/readiness evidence, not
+trusted reduced-basis assignments.
+
+At KM, and at MM for M1/M2, the sampled-HSP-local preserving subgroup is
+identity-only in the current fixture.  Non-identity C2 characters for those
+rows would need trusted HSP-star derivation from an explicit source row such
+as MM/M3.
 
 ## 5. Valley-Changing Operations and Valley Sewing Matrix
 
@@ -116,20 +133,25 @@ A full M-star three-valley orbit representation would use sewing matrices
 to capture the orbital relationship, but that is outside the scope of
 this single-valley C2 signoff.
 
-## 6. Central-Sign Convention (Unresolved — Blocker For C2 Table Shipment)
+## 6. C2 Source-Op / Spinor-Lift Convention (Unresolved — Blocker For C2 Table Shipment)
 
 ### Bilbao Source Evidence
 
-The SG 149 spinful Bilbao table provides order-2 characters for 1D
-irreps at GammaM and K:
+The SG 149 spinful Bilbao table provides the following order-2 source
+characters for relevant 1D rows:
 
-| Source Label | Deg | kpname | Bilbao chi(op4) | Phase (2π) |
-|-------------|-----|--------|----------------|-----------|
-| `-GM4` | 1 | GM | -1 | +0.500 |
-| `-GM5` | 1 | GM | -1 | +0.500 |
-| `-K4` | 1 | K | -1 | +0.500 |
-| `-K5` | 1 | K | exp(-iπ/3) | -0.167 |
-| `-K6` | 1 | K | exp(+iπ/3) | +0.167 |
+| Source Label | Deg | kpname | Order-2 op | Character | Phase (2π) |
+|--------------|-----|--------|------------|-----------|------------|
+| `-GM4` | 1 | GM | op4/op5/op6 | `-i` | -1/4 |
+| `-GM5` | 1 | GM | op4/op5/op6 | `+i` | +1/4 |
+| `-GM6` | 2 | GM | op4/op5/op6 | 0 | not 1D |
+| `-M3` | 1 | M | op6 | `-i` | -1/4 |
+| `-M4` | 1 | M | op6 | `+i` | +1/4 |
+
+The 3D source table also has A/L analogues at kz=1/2.  Those are full
+3D source rows and are only relevant if a future reduced mapping spec
+explicitly keeps them.  K/H source rows do not expose order-2
+characters in `IrrepTable("149", True)`.
 
 ### ValleyScope Spinful C2 Phase Labels
 
@@ -145,28 +167,33 @@ for spinors, giving eigenvalue equation λ^2 = -1 → λ = ±i).
 
 ### Convention Gap
 
-The Bilbao chi(op4) = -1 (exp(+iπ)) for `-GM4`/`-GM5`/`-K4` does NOT
-equal exp(±iπ/2) = ±i.  The ValleyScope C2 spinful phase labels ±1/4
-are NOT direct identities of the Bilbao order-2 characters.
+The relevant GM and M 1D source rows already carry spinful C2-like
+characters `±i`, matching the allowed ValleyScope spinful C2 phase set
+`±1/4` at the level of source-character phases.
 
-This is the same class of issue resolved for C3: the Bilbao character
-table uses independent spinor lifts per spatial operation, and the
-central-sign convention must be established before the source
-characters can be mapped to ValleyScope reduced-basis labels.
+The unresolved convention gap is therefore not a fake `-1 -> ±i`
+conversion.  It is the review of which Bilbao source HSP and operation
+represent the ValleyScope valley-preserving C2 generator for each
+sampled moire HSP / valley label, and whether the local ValleyScope
+generator orientation matches the source phase or requires a sign/lift
+conversion.
 
 ### Mapping Hypotheses (Not Reviewed)
 
-For 1D irreps with Bilbao chi(op4) = -1 (phase +1/2), the ValleyScope
+For 1D source rows with Bilbao C2-like character `±i`, the ValleyScope
 C2 eigenphase could be:
 
-- **Hypothesis A**: C2 eigenphase = ±1/4 directly, with a sign
-  convention relating Bilbao chi(op4) to the C2 generator eigenvalue.
-  This would require identifying which Bilbao op (4, 5, or 6)
-  corresponds to the valley-preserving C2 for each valley label.
+- **Hypothesis A**: direct phase mapping after source-op assignment:
+  `chi(op_j)=+i -> C2_spinor_phase_+1/4` and
+  `chi(op_j)=-i -> C2_spinor_phase_-1/4`.
+  This requires identifying which Bilbao op (`4`, `5`, or `6`, or only
+  `6` for M/L source rows) corresponds to the valley-preserving C2
+  generator for each ValleyScope valley label.
 
-- **Hypothesis B**: The Bilbao order-2 character requires a
-  central-sign correction analogous to the C3
-  `chi(C3²) = -chi(op3)` convention.
+- **Hypothesis B**: the local ValleyScope C2 generator is opposite in
+  orientation or differs by a central lift from the chosen Bilbao source
+  representative, so the phase sign or central factor must be converted
+  before assigning a ValleyScope key.
 
 All hypotheses are `not_reviewed` / `blocked_pending_spinor_lift_reference`
 until a physicist resolves the convention.
@@ -181,17 +208,19 @@ chi(C3²) = -chi(op3)          (central-negative correction)
 
 The C2 convention requires an analogous resolution answering:
 - Which Bilbao op is the valley-preserving C2 generator?
-- What is the central-sign convention for the C2 eigenphase?
-- How does chi(C2) from Bilbao relate to the ValleyScope C2 spinful phase ±1/4?
+- Does the selected generator orientation match the source character phase?
+- Does the selected Bilbao C2-like source character map directly to the
+  ValleyScope C2 spinful phase ±1/4, or is a sign/lift conversion needed?
 
 ## 7. Signoff Checklist
 
 Before a C2-like reduced EBR table can be shipped as reviewed
 ValleyScope package data:
 
-- [ ] **C2 central-sign convention resolved.**  Explicit mapping from
-  Bilbao SG 149 order-2 characters to ValleyScope C2 spinful
-  eigenphases (±1/4), with spinor-lift justification.
+- [ ] **C2 source-op / spinor-lift convention resolved.**  Explicit mapping from
+  Bilbao SG 149 C2-like source characters (`±i` in the relevant 1D
+  source rows) to ValleyScope C2 spinful eigenphases (±1/4), with
+  spinor-lift and generator-orientation justification.
   Convention statement: _______________
 
 - [ ] **Valley-preserving C2 operation identified.**  Which Bilbao op
