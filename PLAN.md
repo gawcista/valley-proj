@@ -144,6 +144,34 @@ projectors regardless of `projector_mode`.
 Do not treat high q-cut valley purity as irrep readiness. Do not test
 valley-changing operations as invariance of a single label operator.
 
+### Bilbao Source Data And ValleyScope Reduction
+
+Bilbao-derived `irreptables` data is the source convention standard for
+space-group irreps, characters, and EBR vectors.  ValleyScope should use this
+source data as the canonical 3D input layer whenever possible, so that
+ValleyScope conventions can be compared directly with public Bilbao-derived
+tables.
+
+This does not make raw 3D EBR decomposition a ValleyScope output.  The
+ValleyScope-owned physical step is the reduced-dimensional, valley-preserving
+restriction:
+
+1. choose the sampled moire HSP set;
+2. identify each HSP little group;
+3. compute the valley mapping under little-group operations;
+4. keep only the valley-preserving subgroup for the valley label;
+5. map Bilbao source irreps/characters to ValleyScope valley-preserving irrep
+   keys with explicit spinor-lift and central-sign convention;
+6. project the Bilbao EBR vectors onto this reviewed reduced basis.
+
+Mapping specs are the review boundary between Bilbao source data and
+ValleyScope package data.  They must record source HSP labels, source
+operation IDs, source character evidence, valley-preserving operation choices,
+central-sign/spinor-lift convention, and any discarded 3D or valley-changing
+data.  `analyze-hsp` should consume only reviewed package-data tables or
+user-supplied validated reduced tables; it should not infer reduced EBR tables
+dynamically during a high-throughput run.
+
 ## Phase Completion Status
 
 | Phase | Description | Status |
@@ -224,7 +252,10 @@ valley-changing operations as invariance of a single label operator.
   No C2-like table is shipped yet.  Required next physics decisions are the
   C2 central-sign convention mapping from Bilbao/order-2 source characters to
   ValleyScope spinful C2 phases, an external C2 spinor benchmark, and improved
-  tZrSe2 fixture quality or a replacement C2 validation fixture.
+  tZrSe2 fixture quality or a replacement C2 validation fixture.  The next
+  planned step is a C2 convention signoff packet analogous to the reviewed C3
+  packet; it must not ship a C2 package-data table or claim a tZrSe2 reduced
+  EBR decomposition.
 * Codebase refinement: `docs/codebase_refinement_audit.md` is complete.  The
   three-phase test-only split of the former catch-all
   `tests/test_io_and_workflow.py` is merged.  Config parsing, output-profile
