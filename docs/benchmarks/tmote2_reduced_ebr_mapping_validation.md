@@ -17,6 +17,12 @@ production logic or schema name is used.
 - Output: untracked temporary directory
 - No fixture files committed
 
+The validation command was run with an absolute-path temporary config:
+
+```bash
+python -m valleyscope.cli analyze-hsp /tmp/.../analyze_tmote2_reduced_ebr.yaml
+```
+
 ## Configuration Delta From Default
 
 ```yaml
@@ -74,6 +80,12 @@ No debug/detail files were emitted.
 - tMoTe2 is used as a P321 C3-like benchmark only; the result is
   recorded as a physically meaningful outcome (both valleys produce
   `atomic-compatible-candidate`), not as a pass/fail gate.
+- The fixture uses `readiness_preset: loose`; KM seed projector
+  symmetry/block leakage is about `0.0064`, which passes the loose
+  `1e-2` gate but would not pass the normal `1e-3` gate.
+- The run reports q-cut overlap warnings at GammaM, KM, and MM.  These are
+  already part of the known q-cut seed diagnostic behavior and do not enter
+  the reviewed reduced EBR table itself.
 - The `solved_exact` result depends on the tMoTe2 fixture's specific
   band selection and symmetry tolerance; it does not guarantee that
   all P321 systems will produce `solved_exact`.

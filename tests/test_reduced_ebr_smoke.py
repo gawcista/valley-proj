@@ -489,8 +489,19 @@ def test_analyze_hsp_uses_reviewed_package_table_by_name(tmp_path):
     assert mapping_path is not None and mapping_path.exists()
     mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
     assert mapping["table_status"] == "loaded"
-    # Standard profile: no debug/detail files.
+    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    assert summary["valley_reduced_ebr_mapping"] == mapping
+
+    # Standard profile: exactly the public files, no debug/detail files.
+    expected_public = {
+        "valley_summary.txt",
+        "valley_summary.json",
+        "valley_weights.csv",
+        "valley_ebr_export_bundle.json",
+        "valley_reduced_ebr_mapping.json",
+    }
     written = {p.name for p in out_dir.iterdir() if p.is_file()}
+    assert written == expected_public
     assert not (written & _DEBUG_ONLY_FILES)
 
 
