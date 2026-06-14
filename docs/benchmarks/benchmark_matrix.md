@@ -34,6 +34,9 @@ detailed audit and blocker evidence.
   `valley_ebr_export_bundle.json`
 - **Detailed audit**: `docs/benchmarks/tmote2_c3_irrep_audit.md`
 - **Smoke walkthrough**: `docs/benchmarks/symmetry_adapted_valley_smoke.md` §1
+- **Reviewed package-table validation**: `docs/benchmarks/tmote2_reduced_ebr_mapping_validation.md`
+  — Local fixture run with `P321_C3_like_GammaM_KM_spinful_v1`; both valleys
+  `solved_exact`, `atomic-compatible-candidate`.
 
 ## tZrSe2 P312 — M-Star Valley
 

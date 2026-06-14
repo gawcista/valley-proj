@@ -461,3 +461,37 @@ def test_provenance_survives_through_output_writer_to_export_bundle(tmp_path):
 
 
 # -----------------------------------------------------------------------
+# Reviewed C3 package-table E2E via table_name
+# -----------------------------------------------------------------------
+
+
+def test_analyze_hsp_uses_reviewed_package_table_by_name(tmp_path):
+    """analyze_hsp loads the reviewed C3 package table by table_name
+    and writes valley_reduced_ebr_mapping.json with table_status=loaded."""
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["output"]["profile"] = "standard"
+    raw["analysis"]["reduced_ebr"] = {
+        "enabled": True,
+        "table_name": "P321_C3_like_GammaM_KM_spinful_v1",
+    }
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    outputs = analyze_hsp(config_path)
+
+    assert outputs["valley_ebr_export_bundle_json"].exists()
+    assert outputs["valley_summary_json"].exists()
+    mapping_path = outputs.get("valley_reduced_ebr_mapping_json")
+    assert mapping_path is not None and mapping_path.exists()
+    mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+    assert mapping["table_status"] == "loaded"
+    # Standard profile: no debug/detail files.
+    written = {p.name for p in out_dir.iterdir() if p.is_file()}
+    assert not (written & _DEBUG_ONLY_FILES)
+
+
+# -----------------------------------------------------------------------
