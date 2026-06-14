@@ -51,8 +51,10 @@ The repo already has:
 * material-independent C3-like reduced EBR authoring audit
   (`docs/reduced_ebr_c3_authoring_audit.md`) documenting the source 3D irrep
   labels, HSP little group / valley-preserving subgroup boundary, valley
-  sewing-matrix boundary, and pending human review decisions; no table data is
-  shipped; the phase-convention audit shows public
+  sewing-matrix boundary, and reviewed signoff decisions; the first reviewed
+  package-data table
+  `P321_C3_like_GammaM_KM_spinful_v1` is now shipped through the reviewed
+  catalog gate; the phase-convention audit shows public
   `irreptables.ebrs.load_ebr_data` exposes Bilbao-derived EBR vectors but not
   C3 eigenphase/character data directly.  The corrected feasibility audit
   verifies that `irreptables.irreps.IrrepTable("150", True)` can access
@@ -152,7 +154,7 @@ valley-changing operations as invariance of a single label operator.
 | Phase 3 | Symmetry-adapted valley-irrep workflow | Done — with direct_qcut gated path |
 | Phase 4 | Real benchmarks (tMoTe2, tZrSe2) | Smoke tests pass; blockers documented |
 | Phase 5 | EBR input/candidate/problem/export pipeline | Done |
-| Phase 6 | Reduced EBR mapping interface | Default-off external-table solver exists; no built-in tables |
+| Phase 6 | Reduced EBR mapping interface | Default-off solver exists; one reviewed C3-like package table shipped; no unreviewed/material-specific tables |
 | Phase 7 | Parent-valley / k-resolved projector diagnostics | Done — merged to main |
 | Phase 8 | Output contract cleanup (standard/debug profiles) | Done — merged to main |
 | Phase 9 | High-throughput single-run ingestion record | Done — explicit offline collector, public-output only |
@@ -208,15 +210,15 @@ valley-changing operations as invariance of a single label operator.
   irrep keys.  It remains offline/library-only and is not wired into
   `analyze-hsp`.  The adapter must use the `irreptables.ebrs.load_ebr_data`
   data path, not `irrep.ebrs` raw 3D decomposition or OR-Tools.
-* First reviewed C3-like external table: the read-only
-  `irreptables.irreps.IrrepTable("150", True)` audit is complete and recorded
-  in `docs/reduced_ebr_c3_authoring_audit.md`. `irreptables` provides the raw
-  Bilbao character source, but ValleyScope must still perform its own
-  sampled-HSP and valley-preserving subgroup reduction. The next physics step
-  is to review and sign off the source-irrep restriction convention,
-  double-group lift convention, candidate degenerate-irrep decomposition,
-  reduced-basis label selection, and provenance before any package-data table
-  is shipped.
+* ~~First reviewed C3-like package-data table~~ — Done.
+  `P321_C3_like_GammaM_KM_spinful_v1` ships as reviewed package data through
+  `load_reviewed_reduced_ebr_table()`.  It uses SG150/P321 spinful
+  Bilbao/irreptables source data, sampled `GammaM`/`KM`, the single-valley
+  valley-preserving subgroup `{E, C3, C3^2}`, and central sign convention
+  `chi(C3)=chi(op2), chi(C3^2)=-chi(op3)`.  Valley-changing C2 operations
+  remain valley sewing matrix data, not reduced EBR basis entries.  Next
+  physics work is validation against trusted C3 fixture outputs and then
+  comparable reviewed tables for other valley-preserving subgroups.
 * Codebase refinement: `docs/codebase_refinement_audit.md` is complete.  The
   three-phase test-only split of the former catch-all
   `tests/test_io_and_workflow.py` is merged.  Config parsing, output-profile
@@ -226,13 +228,13 @@ valley-changing operations as invariance of a single label operator.
   `tests/helpers_io_workflow.py`.  Further refinement should return to
   physics-layer code organization, not more test splitting.
 * ~~Package-data skeleton~~ — Done. `valleyscope/data/reduced_ebr/` exists
-  with empty manifest, README, and catalog module. No table data shipped.
+  with manifest, README, catalog module, and the first reviewed C3-like table.
 * ~~Loader integration~~ — Done. `catalog.py` validates manifests, routes
   `load_reviewed_reduced_ebr_table()` through `load_reduced_ebr_table()`,
   rejects path traversal, and enforces reviewed package-data provenance on
   manifest entries plus table `provenance`. External user tables still use
   `load_reduced_ebr_table()` without reviewed provenance requirements. No
-  built-in tables shipped.
+  unreviewed or material-specific built-in tables shipped.
 * High-throughput database pipeline beyond single-run ingestion:
   benchmark-generated ingestion-record regression anchors, then multi-run
   manifest/index collection if needed.

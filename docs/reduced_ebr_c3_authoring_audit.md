@@ -1,18 +1,24 @@
 # ValleyScope C3-Like Reduced EBR Authoring Audit
 
-Date: 2026-06-12 | Status: Audit document (no implementation)
+Date: 2026-06-12 | Status: Pre-shipment audit, later reviewed
 
 This document records a material-independent physics/data audit for the
 first ValleyScope reduced EBR table authoring workflow using a C3-like
-projected-subspace / moire space group.  No reduced EBR table is shipped
-or hardcoded — this audit only verifies the tooling path and source data.
+projected-subspace / moire space group.
+
+Post-review update (2026-06-14): the audited C3-like reduction was signed
+off and shipped as reviewed package data in
+`P321_C3_like_GammaM_KM_spinful_v1`.  This file remains the pre-shipment
+physics/data audit trail; the shipped table lives in
+`valleyscope/data/reduced_ebr/` and is gated by reviewed provenance.
 
 ## C3 Convention Readiness Summary
 
-No source irrep label is `review_ready` from public package data alone.
-Every in-scope GammaM/KM label is `needs_human_review`: machine-readable
+No source irrep label is `review_ready` from public package data alone; at
+audit time, every in-scope GammaM/KM label was `needs_human_review`:
+machine-readable
 Bilbao-derived C3 character evidence exists, but the ValleyScope reduction
-convention and provenance have not been signed off.  Out-of-scope labels
+convention and provenance had not yet been signed off.  Out-of-scope labels
 remain `blocked_by_missing_restriction_data`.
 
 | Source Label | Deg | HSP | Candidate ValleyScope Key | Status |
