@@ -1,8 +1,8 @@
 """Package-data catalog for reviewed reduced-dimensional EBR tables.
 
-Currently contains no reviewed tables.  All accessor functions are typed
-and will raise clear errors for missing data rather than returning
-heuristic or fallback results.
+The catalog contains only reviewed tables.  All accessor functions are typed
+and will raise clear errors for missing or unreviewed data rather than
+returning heuristic or fallback results.
 
 The manifest is validated at load time and requires explicit review
 metadata for every table entry.  Individual tables are validated through
@@ -38,7 +38,7 @@ def load_reduced_ebr_manifest() -> dict:
     """Load and validate the catalog manifest.
 
     Returns a dict with ``schema_version``, ``description``, and ``tables``
-    (a list of table entries, currently empty).
+    (a list of reviewed table entries).
 
     Raises ValueError if the manifest is malformed.
     """
@@ -54,8 +54,7 @@ def load_reduced_ebr_manifest() -> dict:
 def list_reviewed_reduced_ebr_tables() -> list[dict]:
     """Return the list of reviewed reduced EBR table entries from the manifest.
 
-    Each entry is a dict with ``name`` and ``filename`` keys.  Returns an
-    empty list when no reviewed tables exist.
+    Each entry is a dict with ``name`` and ``filename`` keys.
     """
     manifest = load_reduced_ebr_manifest()
     return list(manifest.get("tables", []))

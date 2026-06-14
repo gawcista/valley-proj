@@ -836,15 +836,19 @@ def test_package_data_skeleton_structure_and_manifest():
 
 
 def test_package_data_readme_and_no_forbidden_imports():
-    """README states no reviewed tables; catalog and data/__init__ have no forbidden imports."""
+    """README documents the shipped reviewed table; core package files avoid forbidden imports."""
     from valleyscope.data.reduced_ebr.catalog import package_data_root
     readme = (package_data_root() / "README.md").read_text(encoding="utf-8").lower()
-    assert "one reviewed" in readme.lower() or "reviewed" in readme.lower()
+    assert "one reviewed table is currently shipped" in readme
+    assert "p321_c3_like_gammam_km_spinful_v1" in readme
+    assert "no reviewed tables are currently shipped" not in readme
     assert "load_reviewed_reduced_ebr_table" in readme
     assert "load_reduced_ebr_table" in readme
     assert "review_status" in readme
     assert "source_reference" in readme
     assert "external" in readme
+    catalog_src = (package_data_root() / "catalog.py").read_text(encoding="utf-8").lower()
+    assert "currently contains no reviewed tables" not in catalog_src
     for fname, patterns in [
         ("catalog.py", ["import irrep2", "from irrep2"]),
         ("../../__init__.py", ["import irrep", "from irrep", "import irrep2", "from irrep2",

@@ -5,8 +5,14 @@ reduced-dimensional EBR tables.
 
 ## Current Status
 
-**No reviewed tables are currently shipped.** The catalog (`manifest.json`)
-contains an empty table list.  Tables will be added only after:
+**One reviewed table is currently shipped.** The catalog (`manifest.json`)
+lists:
+
+- `P321_C3_like_GammaM_KM_spinful_v1`: SG150/P321 spinful, sampled
+  `GammaM`/`KM`, valley-preserving `C3_like` reduced-dimensional basis,
+  reviewed from Bilbao/irreptables source data.
+
+Additional tables will be added only after:
 
 1. Literature review and physical validation.
 2. Benchmark verification against known trusted irreps.
@@ -55,7 +61,7 @@ design and validation rules.
 
 ## Non-Features
 
-- No built-in tables are provided.
+- No built-in unreviewed or material-specific tables are provided.
 - No compatibility relations.
 - No heuristic or floating-point EBR fitting.
 - No material-specific identifiers.
