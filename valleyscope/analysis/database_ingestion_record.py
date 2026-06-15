@@ -113,9 +113,36 @@ def build_database_ingestion_record(
                 "fragile_topology": fragile,
                 "stable_topology": stable,
             }
+        # --- per-bundle reduced EBR records (compact public fields) ---
+        if isinstance(solutions, list):
+            reduced_ebr_records: list[dict[str, Any]] = []
+            for s in solutions:
+                if not isinstance(s, dict):
+                    continue
+                rec: dict[str, Any] = {
+                    "bundle_id": s.get("bundle_id", "?"),
+                    "valley": s.get("valley", "?"),
+                    "subspace_group_candidate": s.get("subspace_group_candidate", "?"),
+                    "status": s.get("status", "?"),
+                    "classification": s.get("classification", "?"),
+                    "integer_span_status": s.get("integer_span_status", "?"),
+                    "nonnegative_solution_status": s.get("nonnegative_solution_status", "?"),
+                    "irrep_vector": s.get("irrep_vector", []),
+                }
+                if "ebr_decomposition" in s:
+                    rec["ebr_decomposition"] = s["ebr_decomposition"]
+                if "integer_solution" in s:
+                    rec["integer_solution"] = s["integer_solution"]
+                if "search_status" in s:
+                    rec["search_status"] = s["search_status"]
+                reduced_ebr_records.append(rec)
+            record["reduced_ebr_records"] = reduced_ebr_records
+        else:
+            record["reduced_ebr_records"] = []
     else:
         record["reduced_ebr_mapping_status"] = "not_available"
         record["reduced_ebr_table_status"] = "not_available"
+        record["reduced_ebr_records"] = []
 
     # --- Status ---
     if ready_count > 0:

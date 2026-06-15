@@ -271,6 +271,7 @@ Top-level fields:
 | `reduced_ebr_mapping_status` | string | Reduced EBR mapping status, or `"not_available"` |
 | `reduced_ebr_table_status` | string | Reduced EBR table status, or `"not_available"` |
 | `reduced_ebr_classification_counts` | object | Counts of exact reduced EBR classifications |
+| `reduced_ebr_records` | list[object] | Per-bundle reduced EBR solution records (empty when mapping unavailable) |
 | `validation_errors` | list[string] | Empty for valid records |
 
 Each `valley_irrep_records` entry:
@@ -298,6 +299,22 @@ Each `valley_irrep_records` entry:
 | `atomic_compatible` | int | Count of `atomic-compatible-candidate` solutions |
 | `fragile_topology` | int | Count of `fragile-topology-candidate` solutions |
 | `stable_topology` | int | Count of `stable-topology-candidate` solutions |
+
+Each `reduced_ebr_records` entry:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `bundle_id` | string | Source bundle ID |
+| `valley` | string | Valley label |
+| `subspace_group_candidate` | string | Group candidate |
+| `status` | string | `"solved_exact"` or `"no_exact_solution"` |
+| `classification` | string | Classification label |
+| `integer_span_status` | string | `"in_integer_span"` or `"outside_integer_span"` |
+| `nonnegative_solution_status` | string | `"solved_exact"` or `"no_nonnegative_solution"` |
+| `irrep_vector` | list[int] | Integer count vector |
+| `ebr_decomposition` | list[object]\|null | EBR decomposition terms when present |
+| `integer_solution` | list[object]\|null | Signed integer witness when present |
+| `search_status` | string\|null | Search status when present |
 
 The ingestion record is an indexing contract. It does not introduce new EBR
 tables, compatibility relations, heuristic fits, or topology claims beyond the

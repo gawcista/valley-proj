@@ -255,8 +255,26 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
     mapping = {
         "status": "solved_exact", "table_status": "loaded",
         "solutions": [
-            {"classification": "atomic-compatible-candidate"},
-            {"classification": "atomic-compatible-candidate"},
+            {
+                "bundle_id": "b_001", "valley": "K_valley",
+                "subspace_group_candidate": "C3_like",
+                "status": "solved_exact",
+                "classification": "atomic-compatible-candidate",
+                "integer_span_status": "in_integer_span",
+                "nonnegative_solution_status": "solved_exact",
+                "irrep_vector": [0, 2, 0, 1, 0, 1],
+                "ebr_decomposition": [{"label": "-E↑G(2)", "coefficient": 1}],
+            },
+            {
+                "bundle_id": "b_002", "valley": "Kp_valley",
+                "subspace_group_candidate": "C3_like",
+                "status": "solved_exact",
+                "classification": "atomic-compatible-candidate",
+                "integer_span_status": "in_integer_span",
+                "nonnegative_solution_status": "solved_exact",
+                "irrep_vector": [0, 2, 0, 1, 0, 1],
+                "ebr_decomposition": [{"label": "-E↑G(2)", "coefficient": 1}],
+            },
         ],
     }
     (run_dir / "valley_summary.json").write_text(json.dumps(summary), encoding="utf-8")
@@ -287,6 +305,26 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
         "valley_reduced_ebr_mapping",
     }
     assert all(Path(path).is_absolute() for path in record["source_files"].values())
+    # Per-bundle reduced EBR records
+    recs = record["reduced_ebr_records"]
+    assert len(recs) == 2
+    for r in recs:
+        assert r["valley"] in ("K_valley", "Kp_valley")
+        assert r["status"] == "solved_exact"
+        assert r["classification"] == "atomic-compatible-candidate"
+        assert r["integer_span_status"] == "in_integer_span"
+        assert r["nonnegative_solution_status"] == "solved_exact"
+        assert r["irrep_vector"] == [0, 2, 0, 1, 0, 1]
+        assert len(r["ebr_decomposition"]) == 1
+        assert r["ebr_decomposition"][0]["coefficient"] == 1
+
+
+def test_reduced_ebr_records_empty_when_mapping_missing():
+    """Missing mapping gives empty reduced_ebr_records."""
+    from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
+    summary = {"target_kpoints": [], "iband": [], "input": {}}
+    record = build_database_ingestion_record(valley_summary=summary)
+    assert record["reduced_ebr_records"] == []
 
 
 # -----------------------------------------------------------------------

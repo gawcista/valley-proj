@@ -101,7 +101,13 @@ P321_C3_like_GammaM_KM_spinful_v1` and `output.profile: standard`:
 | `reduced_ebr_classification_counts.atomic_compatible` | 2 |
 | `reduced_ebr_classification_counts.fragile_topology` | 0 |
 | `reduced_ebr_classification_counts.stable_topology` | 0 |
+| `reduced_ebr_records` count | 2 |
 | Public output files | 5 (standard profile) |
+
+Per-bundle `reduced_ebr_records`:
+- both `status: solved_exact`, `classification: atomic-compatible-candidate`
+- both `irrep_vector: [0, 2, 0, 1, 0, 1]`
+- both `ebr_decomposition: [{"label": "-E↑G(2)", "coefficient": 1}]`
 
 Verified by `test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping`
 in `tests/test_database_ingestion.py` and by local tMoTe2 fixture run.
