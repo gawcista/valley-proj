@@ -1,6 +1,6 @@
 # tMoTe2 P321 C3 Reduced EBR Mapping Validation
 
-Date: 2026-06-14 | Status: Validation fixture (not a production benchmark claim)
+Date: 2026-06-14 | Last refresh: 2026-06-15 | Status: Validation fixture (not a production benchmark claim)
 
 ## Scope
 
