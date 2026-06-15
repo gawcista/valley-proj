@@ -191,36 +191,63 @@ def test_ingestion_record_no_material_names():
         assert name not in src, f"database_ingestion_record.py must not contain {name!r}"
 
 
-def test_ingestion_record_with_reduced_ebr_bundle_and_mapping():
-    """Synthetic C3-like ingestion record with ready bundles, reduced EBR
-    mapping, and classification counts."""
-    from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
+def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path):
+    """Synthetic C3-like public outputs preserve reduced EBR ingestion fields."""
+    from valleyscope.analysis.database_ingestion_record import (
+        load_database_ingestion_record_from_directory,
+    )
 
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
     summary = {"target_kpoints": ["GammaM", "KM"], "iband": [101, 102], "input": {}}
+    c3_records = {
+        "GammaM": [
+            {"valley": "K_valley", "operation_id": "C3", "operation_order": 3,
+             "matched_irrep": "C3_spinor_phase_+1/2", "eigenphases": [0.5],
+             "workflow_path": "direct_qcut", "readiness_level": "trusted",
+             "source": "valley_irrep_matching/GammaM/K_valley/C3"},
+            {"valley": "K_valley", "operation_id": "C3^2", "operation_order": 3,
+             "matched_irrep": "C3_spinor_phase_+1/2", "eigenphases": [0.5],
+             "workflow_path": "direct_qcut", "readiness_level": "trusted",
+             "source": "valley_irrep_matching/GammaM/K_valley/C3^2"},
+        ],
+        "KM": [
+            {"valley": "K_valley", "operation_id": "C3", "operation_order": 3,
+             "matched_irrep": "C3_spinor_phase_+1/6", "eigenphases": [1 / 6],
+             "workflow_path": "direct_qcut", "readiness_level": "trusted",
+             "source": "valley_irrep_matching/KM/K_valley/C3"},
+            {"valley": "K_valley", "operation_id": "C3^2", "operation_order": 3,
+             "matched_irrep": "C3_spinor_phase_-1/6", "eigenphases": [-1 / 6],
+             "workflow_path": "direct_qcut", "readiness_level": "trusted",
+             "source": "valley_irrep_matching/KM/K_valley/C3^2"},
+        ],
+    }
+    c3p_records = {
+        kpoint: [
+            {**record, "valley": "Kp_valley",
+             "source": record["source"].replace("K_valley", "Kp_valley")}
+            for record in records
+        ]
+        for kpoint, records in c3_records.items()
+    }
     bundle = {
         "status": "ready_for_external_solver",
         "bundle_count": 2,
         "excluded_count": 0,
         "bundles": [
             {
-                "bundle_id": "b_001", "valley": "K_valley",
+                "bundle_id": "b_001", "source_instance_id": "ebr_001",
+                "valley": "K_valley",
                 "subspace_group_candidate": "C3_like",
                 "ready_for_external_solver": True,
-                "irrep_records_by_kpoint": {
-                    "GammaM": [{"valley_irrep_key": "C3_spinor_phase_+1/2"}],
-                    "KM": [{"valley_irrep_key": "C3_spinor_phase_+1/6"},
-                           {"valley_irrep_key": "C3_spinor_phase_-1/6"}],
-                },
+                "irrep_records_by_kpoint": c3_records,
             },
             {
-                "bundle_id": "b_002", "valley": "Kp_valley",
+                "bundle_id": "b_002", "source_instance_id": "ebr_002",
+                "valley": "Kp_valley",
                 "subspace_group_candidate": "C3_like",
                 "ready_for_external_solver": True,
-                "irrep_records_by_kpoint": {
-                    "GammaM": [{"valley_irrep_key": "C3_spinor_phase_+1/2"}],
-                    "KM": [{"valley_irrep_key": "C3_spinor_phase_+1/6"},
-                           {"valley_irrep_key": "C3_spinor_phase_-1/6"}],
-                },
+                "irrep_records_by_kpoint": c3p_records,
             },
         ],
         "excluded_instances": [],
@@ -232,22 +259,34 @@ def test_ingestion_record_with_reduced_ebr_bundle_and_mapping():
             {"classification": "atomic-compatible-candidate"},
         ],
     }
-    record = build_database_ingestion_record(
-        valley_summary=summary,
-        valley_ebr_export_bundle=bundle,
-        valley_reduced_ebr_mapping=mapping,
+    (run_dir / "valley_summary.json").write_text(json.dumps(summary), encoding="utf-8")
+    (run_dir / "valley_ebr_export_bundle.json").write_text(
+        json.dumps(bundle), encoding="utf-8"
     )
+    (run_dir / "valley_reduced_ebr_mapping.json").write_text(
+        json.dumps(mapping), encoding="utf-8"
+    )
+
+    record = load_database_ingestion_record_from_directory(run_dir)
+
     assert record["record_status"] == "has_ready_ebr_bundles"
     assert record["ready_bundle_count"] == 2
-    assert len(record["valley_irrep_records"]) == 6  # 3 per bundle, 2 bundles
+    assert len(record["valley_irrep_records"]) == 8
+    assert record["valley_irrep_records"][0]["valley"] == "K_valley"
+    assert record["valley_irrep_records"][0]["matched_irrep"] == "C3_spinor_phase_+1/2"
+    assert record["valley_irrep_records"][0]["source_bundle_id"] == "b_001"
     assert record["reduced_ebr_mapping_status"] == "solved_exact"
     assert record["reduced_ebr_table_status"] == "loaded"
     counts = record["reduced_ebr_classification_counts"]
     assert counts["atomic_compatible"] == 2
     assert counts["fragile_topology"] == 0
     assert counts["stable_topology"] == 0
-    # source_files records public output file paths
-    assert isinstance(record.get("source_files"), dict)
+    assert set(record["source_files"]) == {
+        "valley_summary",
+        "valley_ebr_export_bundle",
+        "valley_reduced_ebr_mapping",
+    }
+    assert all(Path(path).is_absolute() for path in record["source_files"].values())
 
 
 # -----------------------------------------------------------------------

@@ -103,7 +103,7 @@ P321_C3_like_GammaM_KM_spinful_v1` and `output.profile: standard`:
 | `reduced_ebr_classification_counts.stable_topology` | 0 |
 | Public output files | 5 (standard profile) |
 
-Verified by `test_ingestion_record_with_reduced_ebr_bundle_and_mapping`
+Verified by `test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping`
 in `tests/test_database_ingestion.py` and by local tMoTe2 fixture run.
 The reduced EBR mapping data is recorded in the ingestion record
 alongside the existing valley-preserving irrep data, consuming only
