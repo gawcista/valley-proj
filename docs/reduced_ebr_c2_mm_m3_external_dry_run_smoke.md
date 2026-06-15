@@ -49,3 +49,17 @@ dry-run table, constructs a synthetic ready export bundle with vector
 - `nonnegative_solution_status`: `solved_exact`
 
 The synthetic bundle does not correspond to any real material.
+
+## CLI Build/Map E2E Smoke
+
+`test_c2_mm_m3_dry_run_cli_build_and_map_e2e` exercises the full
+external user CLI path:
+
+```text
+inspect-ebr-source --space-group-number 149 --spinful
+  -> build-reduced-ebr-table --source-basis (dry-run spec)
+  -> map-reduced-ebr (synthetic bundle + generated table)
+```
+
+Result: `mapping_status: solved_exact`, `classification:
+atomic-compatible-candidate`, `irrep_vector: [1, 1]`.

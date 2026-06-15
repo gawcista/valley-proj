@@ -2503,3 +2503,83 @@ def test_c2_mm_m3_dry_run_mapping_e2e_solved_exact():
     for term in solution["ebr_decomposition"]:
         assert isinstance(term["coefficient"], int) and term["coefficient"] >= 0
     assert table["irreps"] == c2_keys
+
+
+def test_c2_mm_m3_dry_run_cli_build_and_map_e2e(tmp_path):
+    """CLI E2E: inspect-ebr-source -> build-reduced-ebr-table --source-basis
+    -> map-reduced-ebr, producing solved_exact for synthetic MM C2 bundle."""
+    _require_irreptables_sg149()
+    from valleyscope.cli import main
+
+    spec_path = Path("docs/reduced_ebr_c2_mm_m3_external_mapping_spec_dry_run.json")
+
+    # 1. Create source-basis JSON via CLI.
+    source_path = tmp_path / "source_basis.json"
+    rc = main([
+        "inspect-ebr-source", "--space-group-number", "149", "--spinful",
+        "-o", str(source_path),
+    ])
+    assert rc == 0
+    assert source_path.exists()
+
+    # 2. Build reduced table with --source-basis preflight.
+    table_path = tmp_path / "table.json"
+    rc = main([
+        "build-reduced-ebr-table", str(spec_path),
+        "--source-basis", str(source_path),
+        "-o", str(table_path),
+    ])
+    assert rc == 0
+    assert table_path.exists()
+    table = json.loads(table_path.read_text())
+    assert table["irreps"] == [
+        "MM:C2_spinor_phase_-1/4",
+        "MM:C2_spinor_phase_+1/4",
+    ]
+
+    # 3. Create synthetic export bundle with [1, 1] vector.
+    c2_keys = [
+        "MM:C2_spinor_phase_-1/4",
+        "MM:C2_spinor_phase_+1/4",
+    ]
+    target_vec = [1, 1]
+    irreps_by_kp: dict[str, list[str]] = {}
+    for i, key in enumerate(c2_keys):
+        hsp, phase = key.split(":", 1)
+        irreps_by_kp.setdefault(hsp, []).extend([phase] * target_vec[i])
+    bundle = {
+        "status": "ready_for_external_solver",
+        "bundle_count": 1, "excluded_count": 0,
+        "schema_version": "1.0.0",
+        "reduced_ebr_decomposition_status": "not_implemented",
+        "bundles": [{
+            "bundle_id": "c2_cli_dry_run",
+            "valley": "M3",
+            "subspace_group_candidate": "C2_like",
+            "ready_for_external_solver": True,
+            "expected_hsps": ["MM"],
+            "irreps_by_kpoint": irreps_by_kp,
+        }],
+        "excluded_instances": [],
+    }
+    bundle_path = tmp_path / "bundle.json"
+    bundle_path.write_text(json.dumps(bundle))
+
+    # 4. Run map-reduced-ebr.
+    mapping_path = tmp_path / "mapping.json"
+    rc = main([
+        "map-reduced-ebr", str(bundle_path), str(table_path),
+        "-o", str(mapping_path),
+    ])
+    assert rc == 0
+    mapping = json.loads(mapping_path.read_text())
+    assert mapping["status"] == "solved_exact"
+    assert mapping["mapping_status"] == "solved_exact"
+    assert mapping["table_status"] == "loaded"
+    assert mapping["excluded_bundles"] == []
+    solution = mapping["solutions"][0]
+    assert solution["status"] == "solved_exact"
+    assert solution["irrep_vector"] == target_vec
+    assert solution["classification"] == "atomic-compatible-candidate"
+    assert solution["integer_span_status"] == "in_integer_span"
+    assert solution["nonnegative_solution_status"] == "solved_exact"
