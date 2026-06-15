@@ -2468,13 +2468,13 @@ def test_c2_mm_m3_dry_run_mapping_e2e_solved_exact():
     spec_path = Path("docs/reduced_ebr_c2_mm_m3_external_mapping_spec_dry_run.json")
     table = build_reduced_table_from_spec_file(str(spec_path))
 
-    _C2_KEYS = [
+    c2_keys = [
         "MM:C2_spinor_phase_-1/4",
         "MM:C2_spinor_phase_+1/4",
     ]
     target_vec = [1, 1]
     irreps_by_kp: dict[str, list[str]] = {}
-    for i, key in enumerate(_C2_KEYS):
+    for i, key in enumerate(c2_keys):
         hsp, phase = key.split(":", 1)
         irreps_by_kp.setdefault(hsp, []).extend([phase] * target_vec[i])
 
@@ -2490,12 +2490,16 @@ def test_c2_mm_m3_dry_run_mapping_e2e_solved_exact():
     }
     result = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
 
+    assert result["status"] == "solved_exact"
     assert result["mapping_status"] == "solved_exact"
+    assert result["excluded_bundles"] == []
     solution = result["solutions"][0]
+    assert solution["status"] == "solved_exact"
+    assert solution["irrep_vector"] == target_vec
     assert solution["classification"] == "atomic-compatible-candidate"
     assert solution["integer_span_status"] == "in_integer_span"
     assert solution["nonnegative_solution_status"] == "solved_exact"
     assert len(solution["ebr_decomposition"]) > 0
     for term in solution["ebr_decomposition"]:
         assert isinstance(term["coefficient"], int) and term["coefficient"] >= 0
-    assert table["irreps"] == _C2_KEYS
+    assert table["irreps"] == c2_keys
