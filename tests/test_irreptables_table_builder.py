@@ -2421,6 +2421,10 @@ def test_c2_mm_m3_dry_run_spec_and_build():
     ]
     assert len(table["irreps"]) == 2
 
+    assert len(table["ebrs"]) == 18
+    expected_vectors = [[0, 1], [1, 0], [1, 1]] * 6
+    assert [ebr["vector"] for ebr in table["ebrs"]] == expected_vectors
+
     for ebr in table["ebrs"]:
         vec = ebr["vector"]
         assert len(vec) == 2
