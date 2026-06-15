@@ -85,3 +85,26 @@ status.
 - `database_ingestion_record.json` is an explicit offline collector
   artifact; it is NOT written by default `analyze-hsp` runs.
 - No tolerances or readiness gates were changed to produce these results.
+
+## Reduced-EBR-Enabled Ingestion Anchor (2026-06-15)
+
+With `analysis.reduced_ebr.table_name:
+P321_C3_like_GammaM_KM_spinful_v1` and `output.profile: standard`:
+
+| Field | Value |
+|-------|-------|
+| `record_status` | `has_ready_ebr_bundles` |
+| `ready_bundle_count` | 2 |
+| `valley_irrep_records` count | 8 |
+| `reduced_ebr_mapping_status` | `solved_exact` |
+| `reduced_ebr_table_status` | `loaded` |
+| `reduced_ebr_classification_counts.atomic_compatible` | 2 |
+| `reduced_ebr_classification_counts.fragile_topology` | 0 |
+| `reduced_ebr_classification_counts.stable_topology` | 0 |
+| Public output files | 5 (standard profile) |
+
+Verified by `test_ingestion_record_with_reduced_ebr_bundle_and_mapping`
+in `tests/test_database_ingestion.py` and by local tMoTe2 fixture run.
+The reduced EBR mapping data is recorded in the ingestion record
+alongside the existing valley-preserving irrep data, consuming only
+public output files.

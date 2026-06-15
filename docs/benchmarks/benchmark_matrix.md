@@ -95,6 +95,7 @@ Real-fixture smoke anchors (see `docs/benchmarks/database_ingestion_record_smoke
 | Fixture | record_status | ready_bundles | trusted irrep records | space group |
 |---------|--------------|---------------|----------------------|-------------|
 | tMoTe2 P321 | `has_ready_ebr_bundles` | 2 | 8 | P321 (150) |
+| tMoTe2 P321 (reduced-EBR-enabled) | `has_ready_ebr_bundles` | 2 | 8 | P321 (150) — `reduced_ebr_mapping_status: solved_exact`, `atomic_compatible: 2` |
 | tZrSe2 P312 | `no_ready_ebr_bundles` | 0 | 0 | P312 (149) |
 
 tZrSe2 trusted irrep count is zero because all rows are blocked by
