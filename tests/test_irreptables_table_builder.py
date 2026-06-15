@@ -2452,3 +2452,50 @@ def test_c2_mm_m3_dry_run_smoke_doc_no_material_names():
     doc = Path("docs/reduced_ebr_c2_mm_m3_external_dry_run_smoke.md").read_text(encoding="utf-8")
     for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
         assert name not in doc
+
+
+def test_c2_mm_m3_dry_run_mapping_e2e_solved_exact():
+    """Build dry-run C2 table from spec, construct synthetic ready bundle
+    with [1,1] vector, and verify solved_exact mapping."""
+    _require_irreptables_sg149()
+    from valleyscope.analysis.irreptables_runtime_table_builder import (
+        build_reduced_table_from_spec_file,
+    )
+    from valleyscope.analysis.reduced_ebr_mapping import (
+        build_reduced_ebr_mapping,
+    )
+
+    spec_path = Path("docs/reduced_ebr_c2_mm_m3_external_mapping_spec_dry_run.json")
+    table = build_reduced_table_from_spec_file(str(spec_path))
+
+    _C2_KEYS = [
+        "MM:C2_spinor_phase_-1/4",
+        "MM:C2_spinor_phase_+1/4",
+    ]
+    target_vec = [1, 1]
+    irreps_by_kp: dict[str, list[str]] = {}
+    for i, key in enumerate(_C2_KEYS):
+        hsp, phase = key.split(":", 1)
+        irreps_by_kp.setdefault(hsp, []).extend([phase] * target_vec[i])
+
+    bundle = {
+        "bundles": [{
+            "bundle_id": "c2_mm_m3_dry_run_bundle",
+            "valley": "M3",
+            "subspace_group_candidate": "C2_like",
+            "ready_for_external_solver": True,
+            "expected_hsps": ["MM"],
+            "irreps_by_kpoint": irreps_by_kp,
+        }],
+    }
+    result = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
+
+    assert result["mapping_status"] == "solved_exact"
+    solution = result["solutions"][0]
+    assert solution["classification"] == "atomic-compatible-candidate"
+    assert solution["integer_span_status"] == "in_integer_span"
+    assert solution["nonnegative_solution_status"] == "solved_exact"
+    assert len(solution["ebr_decomposition"]) > 0
+    for term in solution["ebr_decomposition"]:
+        assert isinstance(term["coefficient"], int) and term["coefficient"] >= 0
+    assert table["irreps"] == _C2_KEYS

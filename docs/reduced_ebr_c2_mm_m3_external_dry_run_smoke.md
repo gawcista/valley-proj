@@ -35,3 +35,17 @@ Verified by `test_c2_mm_m3_dry_run_spec_and_build` in
 - Not wired into `analyze-hsp`.
 - Does not claim a reduced EBR decomposition for any validation fixture.
 - Material names absent from spec and test.
+
+## Mapping E2E Smoke
+
+`test_c2_mm_m3_dry_run_mapping_e2e_solved_exact` builds the temporary
+dry-run table, constructs a synthetic ready export bundle with vector
+`[1, 1]` (one copy of each C2 spinor phase key at MM), and calls
+`build_reduced_ebr_mapping()`:
+
+- `mapping_status`: `solved_exact`
+- `classification`: `atomic-compatible-candidate`
+- `integer_span_status`: `in_integer_span`
+- `nonnegative_solution_status`: `solved_exact`
+
+The synthetic bundle does not correspond to any real material.
