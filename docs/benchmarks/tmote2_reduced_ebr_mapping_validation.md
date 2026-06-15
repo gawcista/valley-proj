@@ -54,10 +54,10 @@ symmetry, tol) are the fixture defaults.
 - Table status: `loaded` (package-data table)
 - Excluded bundles: 0
 
-| Bundle | Status | Classification | Integer Span | Decomposition |
-|--------|--------|--------------|-------------|---------------|
-| `bundle_ebr_instance_001` (K_valley) | `solved_exact` | `atomic-compatible-candidate` | `in_integer_span` | `-E↑G(2) x 1` |
-| `bundle_ebr_instance_002` (Kp_valley) | `solved_exact` | `atomic-compatible-candidate` | `in_integer_span` | `-E↑G(2) x 1` |
+| Bundle | Status | Classification | Integer Span | Nonnegative Solution | Irrep Vector | Decomposition |
+|--------|--------|--------------|-------------|----------------------|--------------|---------------|
+| `bundle_ebr_instance_001` (K_valley) | `solved_exact` | `atomic-compatible-candidate` | `in_integer_span` | `solved_exact` | `[0, 2, 0, 1, 0, 1]` | `-E↑G(2) x 1` |
+| `bundle_ebr_instance_002` (Kp_valley) | `solved_exact` | `atomic-compatible-candidate` | `in_integer_span` | `solved_exact` | `[0, 2, 0, 1, 0, 1]` | `-E↑G(2) x 1` |
 
 Both K and K' valleys produce identical atomic-compatible decompositions
 with one copy of the `2d(3,3)` EBR `-E↑G(2)`.
