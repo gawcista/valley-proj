@@ -2368,3 +2368,83 @@ def test_c3_real_source_mapping_e2e_solved_exact(tmp_path):
     # No C2 keys in irrep basis.
     for key in table["irreps"]:
         assert "C2" not in key
+
+
+# -----------------------------------------------------------------------
+# C2 MM/M3 external dry-run spec
+# -----------------------------------------------------------------------
+
+def _require_irreptables_sg149():
+    try:
+        from irreptables.ebrs import load_ebr_data
+        load_ebr_data(149, True)
+    except Exception as exc:
+        pytest.skip(f"real irreptables SG149 spinful data unavailable: {exc}")
+
+
+def test_c2_mm_m3_dry_run_spec_and_build():
+    """Load the C2 MM/M3 dry-run spec, validate against real SG149
+    source basis, build a temporary table, and assert structure."""
+    _require_irreptables_sg149()
+    from valleyscope.analysis.reduced_ebr_source_basis_inspector import (
+        inspect_irreptables_source_basis,
+    )
+    from valleyscope.analysis.reduced_ebr_spec_template_validator import (
+        validate_mapping_spec_against_source_basis,
+    )
+    from valleyscope.analysis.irreptables_runtime_table_builder import (
+        build_reduced_table_from_spec_file,
+    )
+
+    spec_path = Path("docs/reduced_ebr_c2_mm_m3_external_mapping_spec_dry_run.json")
+    spec = json.loads(spec_path.read_text(encoding="utf-8"))
+
+    # No material names in spec.
+    for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
+        assert name not in json.dumps(spec)
+
+    assert spec["subspace_group_candidate"] == "C2_like"
+    assert spec["expected_hsps"] == ["MM"]
+
+    # Validate against real SG149 source basis.
+    source_info = inspect_irreptables_source_basis(149, spinful=True)
+    result = validate_mapping_spec_against_source_basis(spec, source_info)
+    assert result["valid"] is True, f"validation errors: {result['errors']}"
+
+    # Build temporary table.
+    table = build_reduced_table_from_spec_file(str(spec_path))
+    assert table["subspace_group_candidate"] == "C2_like"
+    assert table["expected_hsps"] == ["MM"]
+    assert table["irreps"] == [
+        "MM:C2_spinor_phase_-1/4",
+        "MM:C2_spinor_phase_+1/4",
+    ]
+    assert len(table["irreps"]) == 2
+
+    for ebr in table["ebrs"]:
+        vec = ebr["vector"]
+        assert len(vec) == 2
+        assert all(isinstance(v, int) and v >= 0 for v in vec)
+
+
+def test_c2_mm_m3_dry_run_spec_no_material_names():
+    """Dry-run spec JSON must not contain real material names."""
+    spec = json.loads(
+        Path("docs/reduced_ebr_c2_mm_m3_external_mapping_spec_dry_run.json")
+        .read_text(encoding="utf-8")
+    )
+    for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
+        assert name not in json.dumps(spec)
+
+
+def test_c2_mm_m3_dry_run_smoke_doc_exists():
+    """Smoke doc must exist."""
+    path = Path("docs/reduced_ebr_c2_mm_m3_external_dry_run_smoke.md")
+    assert path.exists()
+
+
+def test_c2_mm_m3_dry_run_smoke_doc_no_material_names():
+    """Smoke doc must not contain real material names."""
+    doc = Path("docs/reduced_ebr_c2_mm_m3_external_dry_run_smoke.md").read_text(encoding="utf-8")
+    for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
+        assert name not in doc
