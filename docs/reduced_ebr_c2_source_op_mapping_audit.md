@@ -190,5 +190,8 @@ spinor-lift convention is signed off.
 3. Improved tZrSe2 GammaM D_raw closure / seed overlap quality, or
    identification of an alternative C2 validation fixture with cleaner
    eigenphase extraction.
+4. The review-only MM/M3 mapping-spec skeleton is recorded in
+   `docs/reduced_ebr_c2_mm_m3_mapping_spec_skeleton.md`; it is not buildable
+   and does not ship a C2 package-data table.
 
 No C2 package-data table is shipped by this audit.

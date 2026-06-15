@@ -72,6 +72,9 @@ detailed audit and blocker evidence.
   `docs/reduced_ebr_c2_source_op_mapping_audit.md` — records corrected SG149
   GM/M C2-like source characters (`±i`), the candidate MM/M3 source-op
   assignment, and blocked GammaM/KM/MM-M1/M2 rows.
+- **MM/M3 mapping-spec skeleton**:
+  `docs/reduced_ebr_c2_mm_m3_mapping_spec_skeleton.md` — review-only,
+  non-buildable candidate row-level mapping; no C2 table is shipped.
 
 ## tPdSe2 / PdSe2
 

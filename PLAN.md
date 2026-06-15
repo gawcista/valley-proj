@@ -261,7 +261,11 @@ dynamically during a high-throughput run.
   follow-up source-op mapping audit
   (`docs/reduced_ebr_c2_source_op_mapping_audit.md`) records the corrected
   SG149 GM/M C2-like source characters (`±i`), the candidate MM/M3
-  source-op assignment, and the blocked GammaM/KM/MM-M1/M2 rows.
+  source-op assignment, and the blocked GammaM/KM/MM-M1/M2 rows.  The
+  review-only MM/M3 mapping-spec skeleton
+  (`docs/reduced_ebr_c2_mm_m3_mapping_spec_skeleton.md`) records the
+  candidate row-level mapping but is explicitly non-buildable and does not
+  ship package data.
 * Codebase refinement: `docs/codebase_refinement_audit.md` is complete.  The
   three-phase test-only split of the former catch-all
   `tests/test_io_and_workflow.py` is merged.  Config parsing, output-profile

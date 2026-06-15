@@ -48,15 +48,17 @@ Machine-verified by `tests/test_irreptables_table_builder.py`
 | `-M3` | -i | `MM:C2_spinor_phase_-1/4` | 1 |
 | `-M4` | +i | `MM:C2_spinor_phase_+1/4` | 1 |
 
-The phase mapping is direct: -i → -1/4, +i → +1/4.  No sign
-conversion is needed under the candidate convention that Bilbao op6
-is the valley-preserving C2 generator for M3 at MM.
+The candidate phase mapping is direct: -i → -1/4, +i → +1/4, conditional
+on the source-op assignment and local generator orientation that identify
+Bilbao op6 with the valley-preserving C2 generator for M3 at MM.
 
 ### Non-Buildable Pseudo-Spec
 
 ```json
 {
+  "non_buildable_example": true,
   "_comment": "NON-BUILDABLE SKELETON — for review discussion only",
+  "build_failure_reason": "draft schema_version plus review-only provenance; do not pass to build-reduced-ebr-table",
   "schema_version": "draft-c2-mm-m3-0.1",
   "status": "review_only_not_buildable",
   "data_source": "irreptables",
@@ -72,6 +74,10 @@ is the valley-preserving C2 generator for M3 at MM.
     "-M3": "MM",
     "-M4": "MM"
   },
+  "source_label_context": {
+    "-M3": {"bilbao_hsp": "M", "valleyscope_sampled_hsp": "MM"},
+    "-M4": {"bilbao_hsp": "M", "valleyscope_sampled_hsp": "MM"}
+  },
   "valleyscope_irrep_multiplicity_by_source_irrep": {
     "-M3": {"MM:C2_spinor_phase_-1/4": 1},
     "-M4": {"MM:C2_spinor_phase_+1/4": 1}
@@ -81,7 +87,7 @@ is the valley-preserving C2 generator for M3 at MM.
     "review_status": "not_reviewed",
     "candidate_source_op": "Bilbao M op6",
     "candidate_valleyscope_op": "ValleyScope MM op5",
-    "central_sign_convention": "direct phase mapping +i->+1/4, -i->-1/4 (candidate, not reviewed)"
+    "source_op_spinor_lift_convention": "direct phase mapping +i->+1/4, -i->-1/4 after source-op and generator orientation are accepted (candidate, not reviewed)"
   }
 }
 ```
@@ -137,8 +143,9 @@ is the valley-preserving C2 generator for M3 at MM.
 
 ## Next Steps After Skeleton Review
 
-1. Physicist signoff on C2 central-sign convention (candidate: direct
-   mapping +i→+1/4, -i→-1/4).
+1. Physicist signoff on the C2 source-op / spinor-lift convention
+   (candidate: direct mapping +i→+1/4, -i→-1/4 after source-op and
+   local generator orientation are accepted).
 2. Physicist signoff on Bilbao op6 → ValleyScope MM op5 generator
    assignment for M3 at MM.
 3. Resolve GammaM orientation convention (which Bilbao C2 op → which
