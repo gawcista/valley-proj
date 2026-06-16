@@ -287,6 +287,7 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
 
     record = load_database_ingestion_record_from_directory(run_dir)
 
+    assert record["schema_version"] == "1.1.0"
     assert record["record_status"] == "has_ready_ebr_bundles"
     assert record["ready_bundle_count"] == 2
     assert len(record["valley_irrep_records"]) == 8

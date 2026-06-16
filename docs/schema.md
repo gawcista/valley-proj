@@ -239,6 +239,8 @@ Each excluded bundle:
 
 ### `database_ingestion_record.json`
 
+Current ingestion-record schema version: `"1.1.0"`.
+
 This file is produced only by the explicit offline collector:
 
 ```bash
@@ -255,7 +257,7 @@ Top-level fields:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `schema_version` | string | Ingestion-record schema version |
+| `schema_version` | string | Ingestion-record schema version, currently `"1.1.0"` |
 | `record_status` | string | `"has_ready_ebr_bundles"`, `"no_ready_ebr_bundles"`, or `"invalid_missing_summary"` |
 | `source_files` | object | Absolute source paths for public files consumed by the collector |
 | `output_profile` | string | Profile label supplied to the collector, default `"standard"` |

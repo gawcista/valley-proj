@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-_SCHEMA_VERSION = "1.0.0"
+_SCHEMA_VERSION = "1.1.0"
 
 
 def build_database_ingestion_record(
