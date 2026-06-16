@@ -248,6 +248,68 @@ def test_summary_text_renders_symmetry_adapted_valley_subspaces(tmp_path):
     assert "spinor convention unverified" in text
 
 
+def test_summary_payload_renders_valley_projected_representations(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    config = load_config(config_path)
+    from valleyscope.reports.summary_report import build_summary_payload, render_summary_text
+
+    report = {
+        "rows": [
+            {
+                "kpoint": "GammaM",
+                "valley": "M1_valley",
+                "operation_id": 4,
+                "operation_order": 2,
+                "subspace_space_group": {
+                    "candidate_space_group_symbol": "P2",
+                    "valley_preserving_operation_ids": [0, 4],
+                },
+                "hsp_little_group_operation_ids": [0, 4],
+                "valley_preserving_operation_ids": [0, 4],
+                "readiness_level": "trusted",
+                "workflow_path": "direct_qcut",
+                "blocking_reasons": [],
+                "legacy_subspace_group_candidate": "C2_like",
+            },
+        ],
+        "subspace_space_group_counts": {"P2": 1},
+        "legacy_subspace_group_candidate_counts": {"C2_like": 1},
+        "trusted_representation_count": 1,
+        "blocked_representation_count": 0,
+        "diagnostic_only_count": 0,
+    }
+
+    summary = build_summary_payload(
+        config=config,
+        qcut=0.5,
+        subspace_payload={"kpoints": {}},
+        symmetry_payload={
+            "status": "skipped",
+            "reason": "unit test",
+            "detected_operations": [],
+            "candidate_rotations": [],
+            "little_group_check": {"status": "not_run"},
+            "valley_preservation_check": {"status": "not_run"},
+        },
+        symmetry_rows=[],
+        output_paths={},
+        valley_projected_representation=report,
+    )
+
+    assert summary["valley_projected_representations"] == report
+    text = render_summary_text(summary)
+    assert "Valley-projected representations" in text
+    assert "subspace space groups: P2=1" in text
+    assert "GammaM" in text
+    assert "M1_valley" in text
+    assert "P2" in text
+    assert "C2_like" not in text
+
+
 def test_summary_text_renders_projected_seed_projector_quality(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "config.yaml"

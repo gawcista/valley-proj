@@ -100,7 +100,7 @@ def write_analysis_outputs(
             ebr_problem_instances=ebr_problem_instances,
             ebr_export_bundle=ebr_export_bundle,
             reduced_ebr_mapping=reduced_ebr_mapping,
-        valley_projected_representation=valley_projected_representation,
+            valley_projected_representation=valley_projected_representation,
             folded_center_payload=folded_center_payload,
             sampled_k_coverage=sampled_k_coverage,
         )

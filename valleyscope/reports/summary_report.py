@@ -117,6 +117,8 @@ def build_summary_payload(
         payload["valley_ebr_export_bundle"] = ebr_export_bundle
     if reduced_ebr_mapping is not None:
         payload["valley_reduced_ebr_mapping"] = reduced_ebr_mapping
+    if valley_projected_representation is not None:
+        payload["valley_projected_representations"] = valley_projected_representation
     if folded_center_payload is not None:
         payload["folded_center_report"] = folded_center_payload
     if sampled_k_coverage is not None:
@@ -548,6 +550,10 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     irrep_matching = summary.get("valley_irrep_matching")
     if isinstance(irrep_matching, dict):
         _render_valley_irrep_matching(lines, irrep_matching)
+
+    projected_reps = summary.get("valley_projected_representations")
+    if isinstance(projected_reps, dict):
+        _render_valley_projected_representations(lines, projected_reps)
 
     ebr_candidates = summary.get("valley_ebr_input_candidates")
     if isinstance(ebr_candidates, dict):
@@ -1504,6 +1510,56 @@ def _render_valley_irrep_matching(
                 rows,
             )
         )
+    lines.append("")
+
+
+def _render_valley_projected_representations(
+    lines: list[str],
+    report: dict[str, Any],
+) -> None:
+    _section(lines, "Valley-projected representations")
+    lines.append(
+        "primary object: valley-projected subspace space group and HSP little-group representation"
+    )
+    lines.append(f"trusted rows: {report.get('trusted_representation_count', 0)}")
+    lines.append(f"blocked rows: {report.get('blocked_representation_count', 0)}")
+    lines.append(f"diagnostic-only rows: {report.get('diagnostic_only_count', 0)}")
+    sg_counts = report.get("subspace_space_group_counts", {})
+    if isinstance(sg_counts, dict) and sg_counts:
+        parts = [f"{label}={count}" for label, count in sorted(sg_counts.items())]
+        lines.append(f"subspace space groups: {', '.join(parts)}")
+    rows = report.get("rows", [])
+    if isinstance(rows, list) and rows:
+        table_rows: list[list[Any]] = []
+        for row in rows[:12]:
+            if not isinstance(row, dict):
+                continue
+            subspace_sg = row.get("subspace_space_group", {})
+            if not isinstance(subspace_sg, dict):
+                subspace_sg = {}
+            table_rows.append([
+                row.get("kpoint", ""),
+                row.get("valley", ""),
+                row.get("operation_id", ""),
+                subspace_sg.get("candidate_space_group_symbol", ""),
+                _short_list(row.get("hsp_little_group_operation_ids")),
+                _short_list(row.get("valley_preserving_operation_ids")),
+                row.get("readiness_level", ""),
+                row.get("workflow_path", ""),
+                _short_list(row.get("blocking_reasons")),
+            ])
+        if table_rows:
+            lines.extend(
+                _table(
+                    [
+                        "kpoint", "valley", "op", "subspace_sg", "hsp_ops",
+                        "vp_ops", "readiness", "path", "blockers",
+                    ],
+                    table_rows,
+                )
+            )
+            if len(rows) > len(table_rows):
+                lines.append(f"... {len(rows) - len(table_rows)} additional rows omitted")
     lines.append("")
 
 

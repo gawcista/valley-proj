@@ -28,7 +28,8 @@ def build_valley_projected_representation_report(
     with ``subspace_space_group`` as the primary identifier.
     """
     rows: list[dict[str, Any]] = []
-    subspace_counts: dict[str, int] = {}
+    subspace_space_group_counts: dict[str, int] = {}
+    legacy_subspace_counts: dict[str, int] = {}
     trusted_count: int = 0
     blocked_count: int = 0
     diagnostic_count: int = 0
@@ -46,7 +47,11 @@ def build_valley_projected_representation_report(
                     for vs in vp_subspaces:
                         if not isinstance(vs, dict):
                             continue
-                        ref = vs.get("reference_valley", "")
+                        ref = vs.get("reference_valley")
+                        if not ref:
+                            orbit = vs.get("orbit", [])
+                            if isinstance(orbit, list) and orbit:
+                                ref = orbit[0]
                         subspace_lookup[(kp_name, ref)] = vs
 
     # Build a workflow lookup.
@@ -118,19 +123,27 @@ def build_valley_projected_representation_report(
             rows.append(rec)
 
             # Counts.
+            sg_symbol = subspace_space_group_data.get("candidate_space_group_symbol")
+            if sg_symbol:
+                key = str(sg_symbol)
+                subspace_space_group_counts[key] = (
+                    subspace_space_group_counts.get(key, 0) + 1
+                )
             sgc = subspace_group_data.get("subspace_group_candidate", "")
             if sgc:
-                subspace_counts[sgc] = subspace_counts.get(sgc, 0) + 1
+                key = str(sgc)
+                legacy_subspace_counts[key] = legacy_subspace_counts.get(key, 0) + 1
             if diag_only:
                 diagnostic_count += 1
-            elif topology_ready:
+            elif wf_data.get("readiness_level") == "trusted":
                 trusted_count += 1
             else:
                 blocked_count += 1
 
     return {
         "rows": rows,
-        "subspace_group_candidate_counts": subspace_counts,
+        "subspace_space_group_counts": subspace_space_group_counts,
+        "legacy_subspace_group_candidate_counts": legacy_subspace_counts,
         "trusted_representation_count": trusted_count,
         "blocked_representation_count": blocked_count,
         "diagnostic_only_count": diagnostic_count,
