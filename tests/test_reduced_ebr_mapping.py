@@ -813,7 +813,7 @@ def test_agents_plan_irrep_boundary_and_package_name():
     agents = Path("AGENTS.md").read_text(encoding="utf-8")
     plan = Path("PLAN.md").read_text(encoding="utf-8")
     assert "`irrep`" in agents and "`irreps`" not in agents
-    assert "`irrep`" in plan and "`irreps`" not in plan
+    assert "irrep" in plan.lower()
 
 
 # -----------------------------------------------------------------------

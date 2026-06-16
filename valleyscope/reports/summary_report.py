@@ -32,6 +32,7 @@ def build_summary_payload(
     ebr_problem_instances: dict[str, Any] | None = None,
     ebr_export_bundle: dict[str, Any] | None = None,
     reduced_ebr_mapping: dict[str, Any] | None = None,
+    valley_projected_representation: dict[str, Any] | None = None,
     folded_center_payload: dict[str, Any] | None = None,
     sampled_k_coverage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:

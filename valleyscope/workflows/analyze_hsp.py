@@ -31,6 +31,9 @@ from valleyscope.analysis.ebr_problem_instances import (
 from valleyscope.analysis.ebr_export_bundle import (
     build_ebr_export_bundle,
 )
+from valleyscope.analysis.valley_projected_representation import (
+    build_valley_projected_representation_report,
+)
 from valleyscope.analysis.reduced_ebr_mapping import (
     build_reduced_ebr_mapping,
     load_reduced_ebr_table,
@@ -477,6 +480,15 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 max_coefficient=config.reduced_ebr.max_coefficient,
             )
 
+    # --- Valley-projected representation report ---
+    valley_projected_representation = build_valley_projected_representation_report(
+        kpoint_names=config.analysis.kpoints,
+        valley_names=sector_names,
+        symmetry_eigenvalue_rows=symmetry_rows if isinstance(symmetry_rows, list) else None,
+        symmetry_adapted_valley_report=symmetry_adapted_valley_report,
+        irrep_workflow_decisions=irrep_workflow_decisions,
+    )
+
     # --- Folded-center report ---
     folded_center_report = build_folded_center_report(
         centers=config.valley_centers,
@@ -527,6 +539,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         ebr_problem_instances=ebr_problem_instances,
         ebr_export_bundle=ebr_export_bundle,
         reduced_ebr_mapping=reduced_ebr_mapping,
+        valley_projected_representation=valley_projected_representation,
         folded_center_payload=folded_center_payload,
         sampled_k_coverage=sampled_k_coverage,
     )

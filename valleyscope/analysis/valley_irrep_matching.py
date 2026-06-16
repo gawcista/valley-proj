@@ -1,4 +1,4 @@
-"""Minimal valley-preserving character-table matching for C3 and C2 spinful irreps.
+"""[PROTOTYPE_LEGACY] Minimal valley-preserving character-table matching for C3 and C2 spinful irreps.
 
 Matches already-computed valley-preserving eigenphases to named irrep labels
 using validated package-data phase tables.  Only ``trusted`` readiness enables
@@ -311,5 +311,6 @@ def build_valley_irrep_matching_report(
         "matching_statuses": ["matched", "diagnostic_only", "not_applicable",
                               "failed_no_table", "failed_ambiguous", "blocked"],
         "tables_implemented": ["spinful_C3", "spinful_C2"],
+        "legacy_tables_implemented": ["spinful_C3", "spinful_C2"],
         "by_kpoint": by_kpoint,
     }

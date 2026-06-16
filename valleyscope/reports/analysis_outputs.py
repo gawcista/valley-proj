@@ -44,6 +44,7 @@ def write_analysis_outputs(
     ebr_problem_instances: dict[str, object] | None = None,
     ebr_export_bundle: dict[str, object] | None = None,
     reduced_ebr_mapping: dict[str, object] | None = None,
+    valley_projected_representation: dict[str, object] | None = None,
     folded_center_payload: dict[str, object] | None = None,
     sampled_k_coverage: dict[str, object] | None = None,
 ) -> dict[str, object]:
@@ -99,6 +100,7 @@ def write_analysis_outputs(
             ebr_problem_instances=ebr_problem_instances,
             ebr_export_bundle=ebr_export_bundle,
             reduced_ebr_mapping=reduced_ebr_mapping,
+        valley_projected_representation=valley_projected_representation,
             folded_center_payload=folded_center_payload,
             sampled_k_coverage=sampled_k_coverage,
         )
@@ -123,6 +125,7 @@ def write_analysis_outputs(
         ebr_problem_instances=ebr_problem_instances,
         ebr_export_bundle=ebr_export_bundle,
         reduced_ebr_mapping=reduced_ebr_mapping,
+        valley_projected_representation=valley_projected_representation,
         folded_center_payload=folded_center_payload,
         sampled_k_coverage=sampled_k_coverage,
     )
@@ -154,6 +157,7 @@ def _write_detailed_outputs(
     ebr_problem_instances: dict[str, object] | None = None,
     ebr_export_bundle: dict[str, object] | None = None,
     reduced_ebr_mapping: dict[str, object] | None = None,
+    valley_projected_representation: dict[str, object] | None = None,
     folded_center_payload: dict[str, object] | None = None,
     sampled_k_coverage: dict[str, object] | None = None,
 ) -> None:
@@ -264,6 +268,7 @@ def _write_summary_outputs(
     ebr_problem_instances: dict[str, object] | None = None,
     ebr_export_bundle: dict[str, object] | None = None,
     reduced_ebr_mapping: dict[str, object] | None = None,
+    valley_projected_representation: dict[str, object] | None = None,
     folded_center_payload: dict[str, object] | None = None,
     sampled_k_coverage: dict[str, object] | None = None,
 ) -> None:
@@ -301,6 +306,7 @@ def _write_summary_outputs(
         ebr_problem_instances=ebr_problem_instances,
         ebr_export_bundle=ebr_export_bundle,
         reduced_ebr_mapping=reduced_ebr_mapping,
+        valley_projected_representation=valley_projected_representation,
         folded_center_payload=folded_center_payload,
         sampled_k_coverage=sampled_k_coverage,
     )

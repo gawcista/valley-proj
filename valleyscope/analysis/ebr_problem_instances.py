@@ -12,7 +12,9 @@ from typing import Any
 
 # Expected HSP labels for known subspace groups.  This is a policy table,
 # not a physics solver.  Missing HSPs are reported as blocked/optional.
-_EXPECTED_HSP: dict[str, dict[str, object]] = {
+# Legacy hard-coded expected-HSP policy for C3_like/C2_like prototypes.
+# Must not be presented as the final production source of required HSPs.
+_LEGACY_EXPECTED_HSP: dict[str, dict[str, object]] = {
     "P3": {
         "expected_hsps": ["GammaM", "KM"],
         "optional_hsps": ["MM"],
@@ -72,6 +74,8 @@ def build_ebr_problem_instances(
     groups: dict[tuple[str, str, str, str], list[dict[str, object]]] = {}
     for c in candidates:
         sg = str(c.get("subspace_group_candidate", ""))
+        # Default to no_policy for groups without explicit legacy HSP policy.
+        # Future: expected HSPs should come from reduced table/source reduction.
         valley = str(c.get("valley", ""))
         workflow_path = str(c.get("workflow_path", ""))
         readiness_level = str(c.get("readiness_level", ""))
@@ -109,7 +113,7 @@ def build_ebr_problem_instances(
             })
 
         # Completeness: check expected HSPs
-        policy = _EXPECTED_HSP.get(sg, {})
+        policy = _LEGACY_EXPECTED_HSP.get(sg, {})
         expected = list(policy.get("expected_hsps", []))
         optional = list(policy.get("optional_hsps", []))
 
@@ -164,7 +168,7 @@ def build_ebr_problem_instances(
         "instance_count": len(instances),
         "reduced_ebr_decomposition_status": "not_implemented",
         "expected_hsp_policy": {
-            k: v.get("note", "") for k, v in _EXPECTED_HSP.items()
+            k: v.get("note", "") for k, v in _LEGACY_EXPECTED_HSP.items()
         },
         "interpretation": (
             "Per-valley/per-subspace-group EBR problem instances grouped from "
@@ -194,7 +198,7 @@ def _empty_report(reason: str) -> dict[str, object]:
         "instance_count": 0,
         "reduced_ebr_decomposition_status": "not_implemented",
         "expected_hsp_policy": {
-            k: v.get("note", "") for k, v in _EXPECTED_HSP.items()
+            k: v.get("note", "") for k, v in _LEGACY_EXPECTED_HSP.items()
         },
         "interpretation": reason,
         "instances": [],
