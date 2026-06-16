@@ -26,6 +26,7 @@ def main(argv: list[str] | None = None) -> int:
     extract.add_argument("config", type=Path)
     _add_map_reduced_ebr_parser(subparsers)
     _add_collect_database_record_parser(subparsers)
+    _add_collect_database_index_parser(subparsers)
     _add_build_reduced_ebr_table_parser(subparsers)
     _add_inspect_source_basis_parser(subparsers)
     _add_scaffold_spec_parser(subparsers)
@@ -44,6 +45,8 @@ def main(argv: list[str] | None = None) -> int:
         return _map_reduced_ebr(args)
     if args.command == "collect-database-record":
         return _collect_database_record(args)
+    if args.command == "collect-database-index":
+        return _collect_database_index(args)
     if args.command == "build-reduced-ebr-table":
         return _build_reduced_ebr_table(args)
     if args.command == "inspect-ebr-source":
@@ -230,6 +233,49 @@ def _collect_database_record(args) -> int:
             print(f"  - {e}")
     print(f"ingestion record:       {output_path}")
     if errors:
+        return 1
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# collect-database-index
+# ---------------------------------------------------------------------------
+
+def _add_collect_database_index_parser(subparsers) -> None:
+    p = subparsers.add_parser(
+        "collect-database-index",
+        help="Build a compact multi-run database index from ingestion records",
+    )
+    p.add_argument(
+        "records",
+        nargs="+",
+        type=Path,
+        help="One or more database_ingestion_record.json file paths",
+    )
+    p.add_argument(
+        "--output", "-o",
+        type=Path,
+        default=Path("database_index.json"),
+        help="Output path for the index (default: %(default)s)",
+    )
+
+
+def _collect_database_index(args) -> int:
+    from valleyscope.analysis.database_index import load_database_index_from_files
+    from valleyscope.reports.json_report import write_json
+
+    record_paths = [str(p) for p in args.records]
+    index = load_database_index_from_files(record_paths)
+    write_json(args.output, index)
+    print(f"database_index:        {args.output}")
+    print(f"record count:          {index['record_count']}")
+    print(f"ready bundle total:    {index['ready_bundle_count_total']}")
+    print(f"reduced EBR total:    {index['reduced_ebr_record_count_total']}")
+    status = index["status_counts"]
+    print(f"status counts:         has_ready={status.get('has_ready_ebr_bundles')} "
+          f"no_ready={status.get('no_ready_ebr_bundles')} "
+          f"invalid={status.get('invalid_missing_summary')}")
+    if index["validation_errors"]:
         return 1
     return 0
 

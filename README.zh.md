@@ -282,6 +282,13 @@ valleyscope analyze-hsp analyze.yaml
 valleyscope collect-database-record ./valley_analysis --output record.json
 ```
 
+从多个采集记录生成多运行数据库索引：
+
+```bash
+valleyscope collect-database-index run1/record.json run2/record.json \
+  --output database_index.json
+```
+
 ### 最小可运行配置
 
 一个只含必要字段的 `analyze.yaml`：

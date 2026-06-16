@@ -329,3 +329,88 @@ def test_reduced_ebr_records_empty_when_mapping_missing():
 
 
 # -----------------------------------------------------------------------
+# Multi-run database index collector
+# -----------------------------------------------------------------------
+
+def _make_ingestion_record(status="has_ready_ebr_bundles", run_id="run_0000"):
+    return {
+        "schema_version": "1.1.0",
+        "record_status": status,
+        "space_group_international": "P321",
+        "space_group_number": 150,
+        "ready_bundle_count": 2,
+        "valley_irrep_records": [
+            {"kpoint": "GammaM", "valley": "K_valley",
+             "subspace_group_candidate": "C3_like"},
+        ],
+        "reduced_ebr_records": [
+            {"bundle_id": "b_001", "valley": "K_valley",
+             "subspace_group_candidate": "C3_like",
+             "status": "solved_exact",
+             "classification": "atomic-compatible-candidate",
+             "irrep_vector": [0, 2, 0, 1, 0, 1],
+             "ebr_decomposition": [{"label": "-E↑G(2)", "coefficient": 1}]},
+        ],
+        "reduced_ebr_classification_counts": {
+            "atomic_compatible": 1, "fragile_topology": 0, "stable_topology": 0,
+        },
+        "reduced_ebr_mapping_status": "solved_exact",
+        "reduced_ebr_table_status": "loaded",
+        "validation_errors": [],
+    }
+
+
+def test_database_index_builder_two_records():
+    """Pure builder with has_ready + no_ready records."""
+    from valleyscope.analysis.database_index import build_database_index
+    rec1 = _make_ingestion_record("has_ready_ebr_bundles")
+    rec2 = _make_ingestion_record("no_ready_ebr_bundles")
+    index = build_database_index([rec1, rec2])
+    assert index["record_count"] == 2
+    assert index["status_counts"]["has_ready_ebr_bundles"] == 1
+    assert index["status_counts"]["no_ready_ebr_bundles"] == 1
+    assert index["ready_bundle_count_total"] == 4
+    assert index["reduced_ebr_classification_counts_total"]["atomic_compatible"] == 2
+    # Flattened records have run_id provenance.
+    assert index["runs"][0]["run_id"] == "run_0000"
+    for ir in index["valley_irrep_records"]:
+        assert "run_id" in ir
+    for rr in index["reduced_ebr_records"]:
+        assert "run_id" in rr
+    assert index["reduced_ebr_record_count_total"] == 2
+
+
+def test_database_index_cli_writes_json(tmp_path):
+    """CLI collect-database-index writes database_index.json."""
+    from valleyscope.cli import main
+    rec1_path = tmp_path / "rec1.json"
+    rec1_path.write_text(json.dumps(_make_ingestion_record("has_ready_ebr_bundles")))
+    rec2_path = tmp_path / "rec2.json"
+    rec2_path.write_text(json.dumps(_make_ingestion_record("no_ready_ebr_bundles")))
+    out = tmp_path / "index.json"
+    rc = main(["collect-database-index", str(rec1_path), str(rec2_path),
+               "-o", str(out)])
+    assert rc == 0
+    assert out.exists()
+    idx = json.loads(out.read_text())
+    assert idx["record_count"] == 2
+    assert idx["ready_bundle_count_total"] == 4
+
+
+def test_database_index_cli_invalid_input(tmp_path):
+    """CLI returns nonzero on missing input file."""
+    from valleyscope.cli import main
+    out = tmp_path / "index.json"
+    rc = main(["collect-database-index", "/nonexistent/path.json",
+               "-o", str(out)])
+    assert rc != 0
+
+
+def test_database_index_module_no_material_names():
+    """Index module must not contain real material names."""
+    src = Path("valleyscope/analysis/database_index.py").read_text(encoding="utf-8")
+    for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
+        assert name not in src
+
+
+# -----------------------------------------------------------------------

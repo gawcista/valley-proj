@@ -79,6 +79,10 @@ The repo already has:
   (`valleyscope collect-database-record`);
 * `database_ingestion_record.json` is built from public outputs only and is not
   a default `analyze-hsp` output.
+* explicit offline multi-run database index collector
+  (`valleyscope collect-database-index`); compact `database_index.json`
+  aggregates per-run ingestion records with `run_id` provenance on
+  flattened valley irrep and reduced EBR records.
 
 **Output and summary:**
 * `valley_summary.txt` / `valley_summary.json` (main user entry);

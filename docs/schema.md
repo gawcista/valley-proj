@@ -501,3 +501,44 @@ schema version bump and are not part of the frozen public schema.
   "interpretation": "no reduced EBR table provided"
 }
 ```
+
+## Multi-Run Database Index
+
+### `database_index.json`
+
+The multi-run database index is an explicit offline collector artifact
+built from one or more `database_ingestion_record.json` files.  It is
+NOT generated during a normal `analyze-hsp` run.
+
+```
+valleyscope collect-database-index run1/database_ingestion_record.json \
+  run2/database_ingestion_record.json \
+  --output database_index.json
+```
+
+The CLI accepts only explicit file paths.  It does not scan directories.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `schema_version` | string | Index schema version, currently `"1.0.0"` |
+| `record_count` | int | Number of ingestion records indexed |
+| `source_files` | list[string] | Absolute paths of source record files |
+| `status_counts` | object | Counts of `record_status` values across runs |
+| `ready_bundle_count_total` | int | Total ready bundles across all runs |
+| `valley_irrep_record_count_total` | int | Total flattened valley irrep records |
+| `reduced_ebr_record_count_total` | int | Total flattened reduced EBR records |
+| `reduced_ebr_classification_counts_total` | object | Aggregate classification counts |
+| `runs` | list[object] | Per-run summary entries with `run_id` |
+| `valley_irrep_records` | list[object] | Flattened irrep records with `run_id` provenance |
+| `reduced_ebr_records` | list[object] | Flattened reduced EBR records with `run_id` provenance |
+| `validation_errors` | list[string] | Errors for missing/invalid source records |
+
+Each `runs` entry: `run_id`, `record_status`, `space_group_international`,
+`space_group_number`, `ready_bundle_count`, `valley_irrep_record_count`,
+`reduced_ebr_record_count`, `reduced_ebr_mapping_status`,
+`reduced_ebr_table_status`, and optional `source` path.
+
+Each flattened `valley_irrep_records` and `reduced_ebr_records` entry
+includes a `run_id` field for traceability to the source ingestion record.
+Other fields are identical to the per-run ingestion record.
+```

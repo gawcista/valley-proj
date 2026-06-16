@@ -312,6 +312,13 @@ outputs (an offline collector, not a default `analyze-hsp` output):
 valleyscope collect-database-record ./valley_analysis --output record.json
 ```
 
+Build a multi-run database index:
+
+```bash
+valleyscope collect-database-index run1/record.json run2/record.json \
+  --output database_index.json
+```
+
 ### Minimal Example
 
 A minimal `analyze.yaml` — only the required fields. All others use defaults (`qcut_mode: moire_shell`, symmetry detection skipped, etc.):
