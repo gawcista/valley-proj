@@ -286,6 +286,9 @@ dynamically during a high-throughput run.
   manifest entries plus table `provenance`. External user tables still use
   `load_reduced_ebr_table()` without reviewed provenance requirements. No
   unreviewed or material-specific built-in tables shipped.
-* High-throughput database pipeline beyond single-run ingestion:
-  benchmark-generated ingestion-record regression anchors, then multi-run
-  manifest/index collection if needed.
+* ~~High-throughput database pipeline beyond single-run ingestion~~ — Done.
+  `valleyscope collect-database-index` builds a compact multi-run
+  `database_index.json` from explicit `database_ingestion_record.json` files,
+  with `run_id` / `source_record` provenance on flattened valley irrep and
+  reduced EBR records.  Future database upload/storage backends remain out of
+  scope.
