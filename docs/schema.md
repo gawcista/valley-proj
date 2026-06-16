@@ -529,8 +529,8 @@ The CLI accepts only explicit file paths.  It does not scan directories.
 | `reduced_ebr_record_count_total` | int | Total flattened reduced EBR records |
 | `reduced_ebr_classification_counts_total` | object | Aggregate classification counts |
 | `runs` | list[object] | Per-run summary entries with `run_id` |
-| `valley_irrep_records` | list[object] | Flattened irrep records with `run_id` provenance |
-| `reduced_ebr_records` | list[object] | Flattened reduced EBR records with `run_id` provenance |
+| `valley_irrep_records` | list[object] | Flattened irrep records with `run_id` provenance and optional `source_record` |
+| `reduced_ebr_records` | list[object] | Flattened reduced EBR records with `run_id` provenance and optional `source_record` |
 | `validation_errors` | list[string] | Errors for missing/invalid source records |
 
 Each `runs` entry: `run_id`, `record_status`, `space_group_international`,
@@ -539,6 +539,7 @@ Each `runs` entry: `run_id`, `record_status`, `space_group_international`,
 `reduced_ebr_table_status`, and optional `source` path.
 
 Each flattened `valley_irrep_records` and `reduced_ebr_records` entry
-includes a `run_id` field for traceability to the source ingestion record.
-Other fields are identical to the per-run ingestion record.
-```
+includes a stable sequential `run_id` field for traceability to the source
+ingestion record. When built from files, entries also include `source_record`,
+the absolute path of the source `database_ingestion_record.json`. Other fields
+are identical to the per-run ingestion record.

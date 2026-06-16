@@ -1,7 +1,7 @@
 """Multi-run database index builder.
 
 Builds a compact cross-run index from existing database ingestion records.
-This is a pure offline plumbing module — it does not run analyze-hsp,
+This is a pure offline plumbing module: it does not run analyze-hsp,
 valley projection, irrep matching, or reduced EBR solving.
 """
 
@@ -60,7 +60,6 @@ def build_database_index(
         source = None
         if source_files and idx < len(source_files):
             source = source_files[idx]
-            run_id = Path(source).stem
 
         run_entry: dict[str, Any] = {
             "run_id": run_id,
@@ -75,6 +74,14 @@ def build_database_index(
         }
         if source is not None:
             run_entry["source"] = source
+
+        record_errors = record.get("validation_errors", [])
+        if isinstance(record_errors, list):
+            for err in record_errors:
+                if source is not None:
+                    errors.append(f"{source}: {err}")
+                else:
+                    errors.append(str(err))
 
         status = record.get("record_status", "?")
         if status in status_counts:
@@ -93,12 +100,18 @@ def build_database_index(
         # Flatten valley irrep records with run provenance.
         for ir in record.get("valley_irrep_records", []):
             if isinstance(ir, dict):
-                all_irrep_records.append({**ir, "run_id": run_id})
+                flat = {**ir, "run_id": run_id}
+                if source is not None:
+                    flat["source_record"] = source
+                all_irrep_records.append(flat)
 
         # Flatten reduced EBR records with run provenance.
         for rr in record.get("reduced_ebr_records", []):
             if isinstance(rr, dict):
-                all_reduced_ebr_records.append({**rr, "run_id": run_id})
+                flat = {**rr, "run_id": run_id}
+                if source is not None:
+                    flat["source_record"] = source
+                all_reduced_ebr_records.append(flat)
 
         runs.append(run_entry)
 

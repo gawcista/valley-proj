@@ -365,7 +365,13 @@ def test_database_index_builder_two_records():
     from valleyscope.analysis.database_index import build_database_index
     rec1 = _make_ingestion_record("has_ready_ebr_bundles")
     rec2 = _make_ingestion_record("no_ready_ebr_bundles")
-    index = build_database_index([rec1, rec2])
+    index = build_database_index(
+        [rec1, rec2],
+        source_files=[
+            "/tmp/run_a/database_ingestion_record.json",
+            "/tmp/run_b/database_ingestion_record.json",
+        ],
+    )
     assert index["record_count"] == 2
     assert index["status_counts"]["has_ready_ebr_bundles"] == 1
     assert index["status_counts"]["no_ready_ebr_bundles"] == 1
@@ -373,10 +379,14 @@ def test_database_index_builder_two_records():
     assert index["reduced_ebr_classification_counts_total"]["atomic_compatible"] == 2
     # Flattened records have run_id provenance.
     assert index["runs"][0]["run_id"] == "run_0000"
+    assert index["runs"][1]["run_id"] == "run_0001"
+    assert index["runs"][0]["source"].endswith("/run_a/database_ingestion_record.json")
     for ir in index["valley_irrep_records"]:
         assert "run_id" in ir
+        assert "source_record" in ir
     for rr in index["reduced_ebr_records"]:
         assert "run_id" in rr
+        assert "source_record" in rr
     assert index["reduced_ebr_record_count_total"] == 2
 
 
@@ -400,10 +410,19 @@ def test_database_index_cli_writes_json(tmp_path):
 def test_database_index_cli_invalid_input(tmp_path):
     """CLI returns nonzero on missing input file."""
     from valleyscope.cli import main
+    rec1_path = tmp_path / "rec1.json"
+    rec1_path.write_text(json.dumps(_make_ingestion_record("has_ready_ebr_bundles")))
     out = tmp_path / "index.json"
-    rc = main(["collect-database-index", "/nonexistent/path.json",
+    rc = main(["collect-database-index", str(rec1_path), "/nonexistent/path.json",
                "-o", str(out)])
     assert rc != 0
+    assert out.exists()
+    idx = json.loads(out.read_text())
+    assert idx["record_count"] == 2
+    assert idx["status_counts"]["has_ready_ebr_bundles"] == 1
+    assert idx["status_counts"]["invalid_missing_summary"] == 1
+    assert idx["validation_errors"]
+    assert "FileNotFoundError" in idx["validation_errors"][0]
 
 
 def test_database_index_module_no_material_names():

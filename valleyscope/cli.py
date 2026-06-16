@@ -266,8 +266,10 @@ def _collect_database_index(args) -> int:
 
     record_paths = [str(p) for p in args.records]
     index = load_database_index_from_files(record_paths)
-    write_json(args.output, index)
-    print(f"database_index:        {args.output}")
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    write_json(output_path, index)
+    print(f"database_index:        {output_path}")
     print(f"record count:          {index['record_count']}")
     print(f"ready bundle total:    {index['ready_bundle_count_total']}")
     print(f"reduced EBR total:    {index['reduced_ebr_record_count_total']}")
@@ -276,6 +278,9 @@ def _collect_database_index(args) -> int:
           f"no_ready={status.get('no_ready_ebr_bundles')} "
           f"invalid={status.get('invalid_missing_summary')}")
     if index["validation_errors"]:
+        print(f"validation errors:     {len(index['validation_errors'])}")
+        for error in index["validation_errors"]:
+            print(f"  - {error}")
         return 1
     return 0
 
