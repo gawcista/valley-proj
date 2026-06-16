@@ -287,7 +287,7 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
 
     record = load_database_ingestion_record_from_directory(run_dir)
 
-    assert record["schema_version"] == "1.1.0"
+    assert record["schema_version"] == "1.2.0"
     assert record["record_status"] == "has_ready_ebr_bundles"
     assert record["ready_bundle_count"] == 2
     assert len(record["valley_irrep_records"]) == 8
@@ -334,7 +334,7 @@ def test_reduced_ebr_records_empty_when_mapping_missing():
 
 def _make_ingestion_record(status="has_ready_ebr_bundles", run_id="run_0000"):
     return {
-        "schema_version": "1.1.0",
+        "schema_version": "1.2.0",
         "record_status": status,
         "space_group_international": "P321",
         "space_group_number": 150,
@@ -430,6 +430,106 @@ def test_database_index_module_no_material_names():
     src = Path("valleyscope/analysis/database_index.py").read_text(encoding="utf-8")
     for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
         assert name not in src
+
+
+def test_ingestion_record_includes_excluded_ebr_records():
+    """Excluded instances from export bundle become excluded_ebr_records."""
+    from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
+    summary = {"target_kpoints": [], "iband": [], "input": {}}
+    bundle = {
+        "status": "has_bundles",
+        "interpretation": "one blocked instance",
+        "bundles": [],
+        "excluded_instances": [
+            {
+                "source_instance_id": "ebr_001", "valley": "M3_valley",
+                "subspace_group_candidate": "C2_like",
+                "status": "blocked",
+                "ready_for_ebr_decomposition": False,
+                "exclusion_reasons": [
+                    "spinor_convention_unverified",
+                    "low_seed_projector_symmetry",
+                ],
+            },
+        ],
+    }
+    record = build_database_ingestion_record(
+        valley_summary=summary, valley_ebr_export_bundle=bundle,
+    )
+    assert record["ebr_export_status"] == "has_bundles"
+    assert record["ebr_export_interpretation"] == "one blocked instance"
+    exclude = record["excluded_ebr_records"]
+    assert len(exclude) == 1
+    assert exclude[0]["source_instance_id"] == "ebr_001"
+    assert exclude[0]["valley"] == "M3_valley"
+    assert exclude[0]["exclusion_reasons"] == [
+        "spinor_convention_unverified", "low_seed_projector_symmetry",
+    ]
+
+
+def test_excluded_ebr_records_empty_when_not_present():
+    """Missing bundle gives empty excluded_ebr_records."""
+    from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
+    summary = {"target_kpoints": [], "iband": [], "input": {}}
+    record = build_database_ingestion_record(valley_summary=summary)
+    assert record["excluded_ebr_records"] == []
+    assert record["ebr_export_status"] == "not_available"
+
+
+def test_database_index_excluded_ebr_records_aggregated():
+    """Index aggregates excluded EBR records with run_id provenance."""
+    from valleyscope.analysis.database_index import build_database_index
+    rec = {
+        "schema_version": "1.2.0",
+        "record_status": "has_ready_ebr_bundles",
+        "ready_bundle_count": 1,
+        "valley_irrep_records": [],
+        "reduced_ebr_records": [],
+        "reduced_ebr_classification_counts": {},
+        "reduced_ebr_mapping_status": "?",
+        "reduced_ebr_table_status": "?",
+        "ebr_export_status": "has_bundles",
+        "excluded_ebr_records": [
+            {"source_instance_id": "ebr_001", "valley": "M3_valley",
+             "exclusion_reasons": ["spinor_convention_unverified"]},
+        ],
+        "validation_errors": [],
+    }
+    idx = build_database_index([rec])
+    assert idx["excluded_ebr_record_count_total"] == 1
+    assert idx["ebr_export_status_counts"]["has_bundles"] == 1
+    assert idx["excluded_ebr_records"][0]["run_id"] == "run_0000"
+
+
+def test_database_index_excluded_ebr_records_have_source_record():
+    """Excluded EBR records carry source_record when source_files provided."""
+    from valleyscope.analysis.database_index import build_database_index
+    rec = {
+        "record_status": "has_ready_ebr_bundles",
+        "ready_bundle_count": 0,
+        "valley_irrep_records": [],
+        "reduced_ebr_records": [],
+        "reduced_ebr_classification_counts": {},
+        "reduced_ebr_mapping_status": "?",
+        "reduced_ebr_table_status": "?",
+        "ebr_export_status": "no_bundles",
+        "excluded_ebr_records": [
+            {"source_instance_id": "ebr_x", "valley": "M1_valley",
+             "exclusion_reasons": ["low_seed_overlap"]},
+        ],
+    }
+    idx = build_database_index([rec], source_files=["/tmp/rec.json"])
+    er = idx["excluded_ebr_records"][0]
+    assert er["run_id"] in ("rec", "run_0000")
+    assert er["source_record"] == "/tmp/rec.json"
+
+
+def test_ingestion_record_schema_version_is_1_2_0():
+    """Ingestion record schema_version is now 1.2.0."""
+    from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
+    summary = {"target_kpoints": [], "iband": [], "input": {}}
+    record = build_database_ingestion_record(valley_summary=summary)
+    assert record["schema_version"] == "1.2.0"
 
 
 # -----------------------------------------------------------------------

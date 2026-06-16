@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-_SCHEMA_VERSION = "1.1.0"
+_SCHEMA_VERSION = "1.2.0"
 
 
 def build_database_ingestion_record(
@@ -95,6 +95,20 @@ def build_database_ingestion_record(
     record["ready_bundle_count"] = ready_count
     record["excluded_bundle_count"] = excluded_count
     record["valley_irrep_records"] = valley_irrep_records
+
+    # --- export-bundle status and excluded EBR records ---
+    if valley_ebr_export_bundle is not None:
+        record["ebr_export_status"] = valley_ebr_export_bundle.get("status", "?")
+        record["ebr_export_interpretation"] = valley_ebr_export_bundle.get("interpretation", "")
+        excluded_instances = valley_ebr_export_bundle.get("excluded_instances", [])
+        if isinstance(excluded_instances, list):
+            record["excluded_ebr_records"] = _compact_excluded_records(excluded_instances)
+        else:
+            record["excluded_ebr_records"] = []
+    else:
+        record["ebr_export_status"] = "not_available"
+        record["ebr_export_interpretation"] = ""
+        record["excluded_ebr_records"] = []
 
     # --- valley_reduced_ebr_mapping (optional) ---
     if valley_reduced_ebr_mapping is not None:
@@ -241,6 +255,25 @@ def _extract_irrep_records(
                 "source_bundle_id": source_bundle_id,
                 "source_instance_id": source_instance_id,
             })
+
+
+def _compact_excluded_records(
+    excluded_instances: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Extract compact public fields from excluded_instances."""
+    records: list[dict[str, Any]] = []
+    for exc in excluded_instances:
+        if not isinstance(exc, dict):
+            continue
+        records.append({
+            "source_instance_id": exc.get("source_instance_id", "?"),
+            "valley": exc.get("valley", "?"),
+            "subspace_group_candidate": exc.get("subspace_group_candidate", "?"),
+            "status": exc.get("status", "?"),
+            "ready_for_ebr_decomposition": exc.get("ready_for_ebr_decomposition", False),
+            "exclusion_reasons": exc.get("exclusion_reasons", []),
+        })
+    return records
 
 
 def _empty_classification_counts() -> dict[str, int]:

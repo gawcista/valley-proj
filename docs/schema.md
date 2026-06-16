@@ -257,7 +257,7 @@ Top-level fields:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `schema_version` | string | Ingestion-record schema version, currently `"1.1.0"` |
+| `schema_version` | string | Ingestion-record schema version, currently `"1.2.0"` |
 | `record_status` | string | `"has_ready_ebr_bundles"`, `"no_ready_ebr_bundles"`, or `"invalid_missing_summary"` |
 | `source_files` | object | Absolute source paths for public files consumed by the collector |
 | `output_profile` | string | Profile label supplied to the collector, default `"standard"` |
@@ -274,6 +274,9 @@ Top-level fields:
 | `reduced_ebr_table_status` | string | Reduced EBR table status, or `"not_available"` |
 | `reduced_ebr_classification_counts` | object | Counts of exact reduced EBR classifications |
 | `reduced_ebr_records` | list[object] | Per-bundle reduced EBR solution records (empty when mapping unavailable) |
+| `ebr_export_status` | string | Export-bundle status, or `"not_available"` |
+| `ebr_export_interpretation` | string | Export-bundle interpretation string |
+| `excluded_ebr_records` | list[object] | Compact blocked/excluded EBR instance records from public export bundle |
 | `validation_errors` | list[string] | Empty for valid records |
 
 Each `valley_irrep_records` entry:
@@ -317,6 +320,17 @@ Each `reduced_ebr_records` entry:
 | `ebr_decomposition` | list[object]\|null | EBR decomposition terms when present |
 | `integer_solution` | list[object]\|null | Signed integer witness when present |
 | `search_status` | string\|null | Search status when present |
+
+Each `excluded_ebr_records` entry:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `source_instance_id` | string | Source EBR problem instance ID |
+| `valley` | string | Valley label |
+| `subspace_group_candidate` | string | Group candidate |
+| `status` | string | Exclusion status (typically `"blocked"`) |
+| `ready_for_ebr_decomposition` | bool | Whether instance was ready for decomposition |
+| `exclusion_reasons` | list[string] | Reasons for exclusion (e.g., `"spinor_convention_unverified"`) |
 
 The ingestion record is an indexing contract. It does not introduce new EBR
 tables, compatibility relations, heuristic fits, or topology claims beyond the
@@ -531,6 +545,9 @@ The CLI accepts only explicit file paths.  It does not scan directories.
 | `runs` | list[object] | Per-run summary entries with `run_id` |
 | `valley_irrep_records` | list[object] | Flattened irrep records with `run_id` provenance and optional `source_record` |
 | `reduced_ebr_records` | list[object] | Flattened reduced EBR records with `run_id` provenance and optional `source_record` |
+| `excluded_ebr_record_count_total` | int | Total flattened excluded EBR records |
+| `ebr_export_status_counts` | object | Counts of `ebr_export_status` values across runs |
+| `excluded_ebr_records` | list[object] | Flattened excluded EBR records with `run_id` provenance and optional `source_record` |
 | `validation_errors` | list[string] | Errors for missing/invalid source records |
 
 Each `runs` entry: `run_id`, `record_status`, `space_group_international`,
