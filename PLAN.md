@@ -1,294 +1,306 @@
 # PLAN.md
 
-This roadmap reflects the current ValleyScope methodology.
+This roadmap resets the ValleyScope implementation direction as of
+2026-06-16.  The project target is not a collection of C2/C3 examples.  The
+target is a general high-throughput workflow for valley-projected irreps and
+valley-resolved reduced EBR decomposition in moire materials.
 
-## Current Code Baseline (updated 2026-06)
+Stage-specific task details belong in `.codex_cc_handoff.md`; this file records
+the physical method and implementation direction.
 
-The repo already has:
+## Physical Target
 
-**Layer 1 — valley projection + diagnostics:**
-* q-cut valley projection and seed projector construction;
-* multi-valley basis diagnostics using projected seed matrices;
-* valley orbit and valley mapping logic;
-* moire HSP symmetry representation matrices D_raw;
-* seed projector symmetry-consistency diagnostic (`projector_symmetry_report.json`);
-* target-subspace closure provenance diagnostics (`target_subspace_closure.json`);
-* subspace representation quality diagnostics (embedded in formal reports;
-  standalone `subspace_representation_quality.json` is optional/default-off).
+For each sampled moire HSP `k` and valley label `a`, ValleyScope must first
+identify the symmetry of the valley-projected subspace.  The final physical
+object is the **valley-projected subspace space group** (a valley-preserving
+subgroup/subspace group of the moire space group), together with its HSP
+little-group representations.  It is not an effective `C2_like`/`C3_like`
+label.
 
-**Layer 2 — gated irrep workflow:**
-* irrep workflow decision layer (`direct_qcut` / `symmetry_adapted` / `blocked`);
-* formal symmetry-adapted valley analysis (P_a^sym, integrated);
-* valley-preserving character/eigenphase diagnostics;
-* minimal valley-preserving irrep matching (spinful C3, C2 with internal tables);
-* HSP-star conjugation and derived character layer;
-* EBR input candidates, problem instances, and export bundle.
-
-**Layer 3 — external solver interface:**
-* default-off reduced EBR mapping interface (exact integer, external table only);
-* ValleyScope-native reduced EBR solver API
-  (`valleyscope.analysis.reduced_ebr_solver`): Smith normal form integer-span
-  check plus bounded nonnegative search, with no OR-Tools dependency;
-* runtime source normalizer/reducer for package-style 3D EBR data to
-  ValleyScope sampled-HSP, valley-preserving reduced tables;
-* offline `valleyscope inspect-ebr-source` source-basis inspector for
-  mapping-spec authoring; it reports source irrep labels/degeneracies only and
-  does not infer moire HSPs or ValleyScope valley-preserving irrep keys;
-* offline `valleyscope scaffold-spec` / `valleyscope validate-spec`
-  authoring aids for non-buildable mapping-spec templates and preflight
-  source-basis coverage checks; they do not infer HSPs or ValleyScope
-  valley-preserving irrep keys;
-* offline `irreptables` table builder with explicit source-irrep/HSP/key maps
-  and provenance, plus `valleyscope build-reduced-ebr-table` for canonical
-  mapping-spec driven table generation; optional `--source-basis` preflight
-  validates the human-authored mapping before build; no raw 3D decomposition
-  call and no `analyze-hsp` wiring;
-* reviewed reduced EBR package-data catalog gate:
-  `load_reviewed_reduced_ebr_table()` now requires reviewed metadata in both
-  `manifest.json` and the table `provenance` block, while external
-  `load_reduced_ebr_table()` remains the permissive user-table schema
-  validator;
-* material-independent C3-like reduced EBR authoring audit
-  (`docs/reduced_ebr_c3_authoring_audit.md`) documenting the source 3D irrep
-  labels, HSP little group / valley-preserving subgroup boundary, valley
-  sewing-matrix boundary, and reviewed signoff decisions; the first reviewed
-  package-data table
-  `P321_C3_like_GammaM_KM_spinful_v1` is now shipped through the reviewed
-  catalog gate; the phase-convention audit shows public
-  `irreptables.ebrs.load_ebr_data` exposes Bilbao-derived EBR vectors but not
-  C3 eigenphase/character data directly.  The corrected feasibility audit
-  verifies that `irreptables.irreps.IrrepTable("150", True)` can access
-  Bilbao-derived SG 150 spinful irrep character tables when called with a
-  string space-group number: in-scope 1D labels have op2 C3 character -1
-  (candidate phase +1/2 after convention review), while `-GM6`/`-K6` have
-  op2/op3 character evidence `(+1,+1)`. The double-group lift audit shows
-  op3 is the central-negative `-g^2` representative, giving candidate
-  multiplicities `{+1/6: 1, -1/6: 1}` after central-sign conversion.
-  ValleyScope still must perform its own sampled-HSP, valley-preserving
-  subgroup restriction before any reduced EBR table is considered reviewed;
-  raw 3D table data is only the input layer.
-* read-only codebase refinement audit (`docs/codebase_refinement_audit.md`)
-  classifies cleanup candidates by physics layer and identifies
-  `test_io_and_workflow.py` splitting as the lowest-risk first cleanup step;
-* OR-Tools / `irrep.ebrs` raw 3D decomposition is not required by the portable
-  ValleyScope core path; unsafe native optional probes are opt-in only;
-* `valley_reduced_ebr_mapping.json` (only when `analysis.reduced_ebr.enabled`).
-
-**High-throughput database interface:**
-* explicit offline database ingestion record collector
-  (`valleyscope collect-database-record`);
-* `database_ingestion_record.json` is built from public outputs only and is not
-  a default `analyze-hsp` output.
-* explicit offline multi-run database index collector
-  (`valleyscope collect-database-index`); compact `database_index.json`
-  aggregates per-run ingestion records with `run_id` provenance on
-  flattened valley irrep and reduced EBR records.
-
-**Output and summary:**
-* `valley_summary.txt` / `valley_summary.json` (main user entry);
-* `valley_ebr_export_bundle.json` (downstream EBR entry);
-* `valley_reduced_ebr_mapping.json` (default-off, when analysis.reduced_ebr.enabled);
-* `database_ingestion_record.json` (explicit offline collector output for
-  high-throughput indexing; not controlled by `output.profile`);
-* `valley_weights.csv` (quick-scan file, standard profile);
-* Output controlled by `output.profile: standard | debug` (standard = public only,
-  debug = full diagnostics). Legacy `output.write_detailed_files` is deprecated.
-* Debug/detail outputs (debug profile only): diagnostics.h5, valley_subspace.json,
-  symmetry_report.json, symmetry_eigenvalues.csv, valley_basis_transform.h5,
-  projector_symmetry_report.json, symmetry_adapted_valley_analysis.json,
-  target_subspace_closure.json, hsp_star_conjugation.json,
-  hsp_star_derived_characters.json, subspace_representation_quality.json,
-  irrep_workflow_decisions.json, valley_irrep_matching.json,
-  valley_ebr_input_candidates.json, valley_ebr_problem_instances.json,
-  folded_center_report.json, sampled_k_coverage.json.
-
-## Methodology
-
-For each moire HSP k, define the target DFT band subspace
+At each sampled HSP, the relevant local representation is the representation
+of the **valley-preserving HSP little subgroup**
 
 ```math
-H_k = \mathrm{span}\{|\psi_{n,k}\rangle\}.
+G_k^{(a)} = \{g \in G_k \mid \pi_g(a)=a\},
+\qquad
+G_k = \{g \in G \mid gk = k + G_M\}.
 ```
 
-Inside this subspace:
+The output object is the valley-projected representation
 
-1. `P_a^0` is the q-cut valley seed projector.
-2. `D_g` is the moire HSP symmetry representation matrix.
-3. `pi_g(a)` is the operation-induced valley mapping.
-4. The seed diagnostic checks
+```math
+D_a(g), \quad g \in G_k^{(a)},
+```
 
-   ```math
-   D_g P_a^0 D_g^\dagger \approx P_{\pi_g(a)}^0 .
-   ```
+with closure/unitarity/projector-symmetry diagnostics.  Irrep labels are then
+matched against Bilbao/irreptables source conventions for the same restricted
+operation set.  Valley-changing operations are not failures; they are
+valley sewing matrix data and must not be forced into a single-valley irrep
+label.
 
-5. `P_a^sym` is the symmetry-adapted valley projector, built from seed
-   averaging and spectral purification. It is used when the seed basis fails
-   the projector symmetry check but P_a^sym construction is feasible (the
-   `symmetry_adapted` workflow path).
+Reduced EBR decomposition is downstream:
 
-6. The `direct_qcut` path bypasses P_a^sym when the q-cut seed basis already
-   passes all readiness gates (tMoTe2-like clean systems).
+```text
+valley-projected irreps at sampled HSPs
+-> Bilbao/irreptables source EBR data
+-> ValleyScope reduction to sampled HSPs and G_k^(a) irreps
+-> exact integer reduced EBR decomposition
+```
 
-### Projector modes
+This workflow must be space-group based and group-agnostic.  C2, C3, C4, C6,
+mirrors, and products of generators are all operation content inside the
+subspace space group / HSP little group, not separate production strategies or
+final output categories.
 
-Two projector-center modes (`projection.projector_mode`). This is
-momentum-space parent-valley projection, not full Bloch-state unfolding.
+## Keep As Core
 
-- **`fixed_center`** (default): Local fixed-valley-point diagnostic.
-  `q = k_M + G_M` is compared to fixed monolayer valley centers `Q_a`.
-- **`k_resolved_parent_valley`**: Momentum-space parent-valley diagnostic.
-  `Q_a` is folded into the moire BZ to obtain `k_a^fold`; dynamic centers
-  `Q_a(k_M) = Q_a + (k_M - k_a^fold)` are used for each sampled moire k_M.
-  Deprecated alias: `folded_family`.
+These existing layers are physically necessary and should remain:
 
-**Readiness boundary**: `k_resolved_parent_valley` is weight/report-only.
-Seed projector matrices and all irrep/EBR readiness gates use fixed-center
-projectors regardless of `projector_mode`.
+* HDF5/WAVECAR HSP input and target-band subspace handling.
+* q-cut valley seed projectors `P_a^0`.
+* seed projector symmetry-consistency diagnostics:
 
-Do not treat high q-cut valley purity as irrep readiness. Do not test
-valley-changing operations as invariance of a single label operator.
+  ```math
+  D_g P_a^0 D_g^\dagger \approx P_{\pi_g(a)}^0 .
+  ```
 
-### Bilbao Source Data And ValleyScope Reduction
+* target-subspace closure diagnostics.
+* valley orbit and valley mapping logic.
+* HSP little group inventory.
+* per-valley valley-preserving subgroup construction.
+* direct q-cut trusted path when the fixed-center seed basis passes all
+  readiness gates.
+* symmetry-adapted projector path when the seed basis is not directly trusted
+  but a physically valid valley-adapted subspace can be constructed.
+* standard/debug output profile separation.
+* exact-integer reduced EBR solver based on ValleyScope reduced tables.
+* offline database ingestion/index collectors built from public outputs.
 
-Bilbao-derived `irreptables` data is the source convention standard for
-space-group irreps, characters, and EBR vectors.  ValleyScope should use this
-source data as the canonical 3D input layer whenever possible, so that
-ValleyScope conventions can be compared directly with public Bilbao-derived
-tables.
+## Downgrade To Prototype Or Debug
 
-This does not make raw 3D EBR decomposition a ValleyScope output.  The
-ValleyScope-owned physical step is the reduced-dimensional, valley-preserving
-restriction:
+The following are useful validation/prototype assets but must not define the
+production architecture:
 
-1. choose the sampled moire HSP set;
-2. identify each HSP little group;
-3. compute the valley mapping under little-group operations;
-4. keep only the valley-preserving subgroup for the valley label;
-5. map Bilbao source irreps/characters to ValleyScope valley-preserving irrep
-   keys with explicit spinor-lift and central-sign convention;
-6. project the Bilbao EBR vectors onto this reviewed reduced basis.
+* `spinful_C2_phase_v1` and `spinful_C3_phase_v1` phase tables:
+  keep as regression fixtures and fallback prototype data, not as the main
+  irrep backend.
+* legacy C2/C3-specific `subspace_group_candidate` policy:
+  treat as an unfinished prototype hint.  It must not appear as the final
+  subspace definition in public user-facing output.
+* `P321_C3_like_GammaM_KM_spinful_v1`:
+  keep as one legacy reviewed reduced-table validation fixture while the
+  generic subspace-space-group reduction is being built.  It is not the model
+  for all future systems.
+* tMoTe2/tZrSe2 benchmark logic:
+  keep under `real_tests/` and `docs/benchmarks/`; never use material names or
+  material-specific branches in production code.
+* HSP-star derived character reports:
+  keep as debug/provenance until the generic representation matching path
+  explicitly consumes them with a documented physical rule.
+* Large database plumbing tasks:
+  pause new expansion until the generic valley irrep representation backend is
+  in place.
 
-Mapping specs are the review boundary between Bilbao source data and
-ValleyScope package data.  They must record source HSP labels, source
-operation IDs, source character evidence, valley-preserving operation choices,
-central-sign/spinor-lift convention, and any discarded 3D or valley-changing
-data.  `analyze-hsp` should consume only reviewed package-data tables or
-user-supplied validated reduced tables; it should not infer reduced EBR tables
-dynamically during a high-throughput run.
+## Remove Or Replace Candidates
 
-## Phase Completion Status
+These are not to be deleted blindly.  They should be removed or replaced only
+with tests proving that the generic path covers the behavior:
 
-| Phase | Description | Status |
-|-------|------------|--------|
-| Phase 0 | Freeze old interpretation (q-cut seed = diagnostic) | Done |
-| Phase 1 | Seed projector symmetry-consistency diagnostics | Done |
-| Phase 2 | Symmetry-adapted valley projector prototype | Done — integrated into production workflow |
-| Phase 3 | Symmetry-adapted valley-irrep workflow | Done — with direct_qcut gated path |
-| Phase 4 | Real benchmarks (tMoTe2, tZrSe2) | Smoke tests pass; blockers documented |
-| Phase 5 | EBR input/candidate/problem/export pipeline | Done |
-| Phase 6 | Reduced EBR mapping interface | Default-off solver exists; one reviewed C3-like package table shipped; no unreviewed/material-specific tables |
-| Phase 7 | Parent-valley / k-resolved projector diagnostics | Done — merged to main |
-| Phase 8 | Output contract cleanup (standard/debug profiles) | Done — merged to main |
-| Phase 9 | High-throughput single-run ingestion record | Done — explicit offline collector, public-output only |
-| Phase 10 | Valley-irrep phase table data contract | Done — spinful C3/C2 phase tables are validated package data |
-| Phase 11 | Runtime EBR source reduction adapter | Done — normalizer/reducer plus offline `irreptables` builder, external tables only |
-| Phase 12 | ValleyScope-native reduced EBR solver API | Done — extracted pure Python / SymPy solver, no OR-Tools |
+* Hard-coded C2/C3 dispatch in `valley_irrep_matching.py`.
+* `_EXPECTED_HSP` policy table in `ebr_problem_instances.py`.
+* Any public schema or summary text that presents `C2_like`/`C3_like` as the
+  subspace definition or final output.  These names are legacy prototype hints,
+  not physical space-group labels.
+* Tests whose only purpose is to preserve C2/C3 special-case behavior instead
+  of preserving physical group-agnostic behavior.
+* Handoff tasks that only add more C2/C3 smoke coverage without advancing the
+  generic representation and Bilbao-reduction backend.
 
-## Real Benchmarks
+## Correct General Workflow
 
-**tMoTe2 K/Kp** (P321):
-- Clean C3 valley-preserving subspaces with `direct_qcut` / `trusted` readiness.
-- GammaM and KM produce trusted C3-like irrep labels.
-- MM has only identity in the HSP little group → blocked.
+### Layer 1 — Valley Projection And Readiness
 
-**tZrSe2 M-star** (P312):
-- P2-like single-valley subspaces identified at space-group level.
-- Current blockers: `spinor_convention_unverified`, low seed overlap at GammaM,
-  D_raw target-subspace closure at ~1.9e-2 (usable_with_caution).
-- M1/M2 non-identity C2 characters require HSP-star derivation from MM M3
-  source. Source is diagnostic_only until closure/seed quality improves.
-- No trusted C2 EBR instances exist yet.
+Input:
 
-## Open Work
+```text
+VASP WAVECAR / HDF5 HSP wavefunctions
+space-group operations
+target bands
+valley centers
+```
 
-* ~~Freeze public schema~~ — Done. `docs/schema.md` is the authoritative frozen
-  public schema. `output.profile: standard` (default) emits only public
-  user-facing outputs; debug/detail files require `output.profile: debug`.
-* ~~Build benchmark matrix~~ — Done. `docs/benchmarks/benchmark_matrix.md`
-  records tMoTe2 and tZrSe2 fixture status. tPdSe2/PdSe2 is deferred until
-  evidence exists.
-* **Benchmark matrix as regression anchor**: keep `docs/benchmarks/benchmark_matrix.md`
-  up to date with current fixture status so that output-contract regressions
-  are caught by standard-profile smoke tests.
-* Spinor convention benchmark verification for tZrSe2-like fixtures
-  (blocker B1 in `docs/benchmarks/tzrse2_blocker_evidence.md`).
-* Expanded-band HDF5 to test D_raw closure sensitivity for tZrSe2 M3 C2
-  (blocker B2).
-* ~~Design `irrep2`-like reduced-dimensional irrep/EBR data model~~ — Done.
-  `docs/reduced_dimensional_irrep_ebr_data_model.md` covers physical objects,
-  label conventions, package-data layout, and validation rules.  The public
-  Python package `irrep` may be used as a runtime 3D irrep/EBR data source,
-  but final ValleyScope output must be reduced-dimensional and
-  valley-preserving, not raw 3D `irrep` decomposition.
-* ~~`irrep` / `irreptables` runtime source adapter boundary~~ — Done.  The
-  implemented path normalizes package-style 3D EBR data, applies explicit
-  sampled-HSP and valley-preserving key maps, filters zero reduced EBR vectors
-  with provenance, and builds ValleyScope external reduced tables from
-  canonical mapping specs via `valleyscope build-reduced-ebr-table`, with
-  optional `--source-basis` preflight before table construction.
-  `valleyscope inspect-ebr-source`, `valleyscope scaffold-spec`, and
-  `valleyscope validate-spec` provide deterministic authoring aids for the
-  public source basis and mapping specs, but do not infer HSPs or ValleyScope
-  irrep keys.  It remains offline/library-only and is not wired into
-  `analyze-hsp`.  The adapter must use the `irreptables.ebrs.load_ebr_data`
-  data path, not `irrep.ebrs` raw 3D decomposition or OR-Tools.
-* ~~First reviewed C3-like package-data table~~ — Done.
-  `P321_C3_like_GammaM_KM_spinful_v1` ships as reviewed package data through
-  `load_reviewed_reduced_ebr_table()`.  It uses SG150/P321 spinful
-  Bilbao/irreptables source data, sampled `GammaM`/`KM`, the single-valley
-  valley-preserving subgroup `{E, C3, C3^2}`, and central sign convention
-  `chi(C3)=chi(op2), chi(C3^2)=-chi(op3)`.  Valley-changing C2 operations
-  remain valley sewing matrix data, not reduced EBR basis entries.  The tMoTe2
-  fixture validation is documented in
-  `docs/benchmarks/tmote2_reduced_ebr_mapping_validation.md`.
-* C2-like reduced EBR signoff: `docs/reduced_ebr_c2_authoring_audit.md`
-  records the SG149/P312 source-data availability and tZrSe2 blocker audit.
-  No C2-like table is shipped yet.  Required next physics decisions are the
-  C2 source-op / spinor-lift convention mapping from Bilbao C2-like source
-  characters to ValleyScope spinful C2 phase keys, an external C2 spinor
-  benchmark, and improved tZrSe2 fixture quality or a replacement C2
-  validation fixture.  The C2 convention signoff packet
-  (`docs/reduced_ebr_c2_mapping_signoff_packet.md`) records the unresolved
-  Bilbao source-HSP/op assignment, generator-orientation, and spinor-lift
-  questions analogous to the reviewed C3 packet; it does not ship a C2
-  package-data table or claim a tZrSe2 reduced EBR decomposition.  The
-  follow-up source-op mapping audit
-  (`docs/reduced_ebr_c2_source_op_mapping_audit.md`) records the corrected
-  SG149 GM/M C2-like source characters (`±i`), the candidate MM/M3
-  source-op assignment, and the blocked GammaM/KM/MM-M1/M2 rows.  The
-  review-only MM/M3 mapping-spec skeleton
-  (`docs/reduced_ebr_c2_mm_m3_mapping_spec_skeleton.md`) records the
-  candidate row-level mapping but is explicitly non-buildable and does not
-  ship package data.
-* Codebase refinement: `docs/codebase_refinement_audit.md` is complete.  The
-  three-phase test-only split of the former catch-all
-  `tests/test_io_and_workflow.py` is merged.  Config parsing, output-profile
-  contracts, EBR pipeline, reduced-EBR smoke, database ingestion,
-  benchmark-doc, phase-table, workflow, summary, symmetry, parent-valley, and
-  irrep-readiness tests now live in focused files with shared fixtures in
-  `tests/helpers_io_workflow.py`.  Further refinement should return to
-  physics-layer code organization, not more test splitting.
-* ~~Package-data skeleton~~ — Done. `valleyscope/data/reduced_ebr/` exists
-  with manifest, README, catalog module, and the first reviewed C3-like table.
-* ~~Loader integration~~ — Done. `catalog.py` validates manifests, routes
-  `load_reviewed_reduced_ebr_table()` through `load_reduced_ebr_table()`,
-  rejects path traversal, and enforces reviewed package-data provenance on
-  manifest entries plus table `provenance`. External user tables still use
-  `load_reduced_ebr_table()` without reviewed provenance requirements. No
-  unreviewed or material-specific built-in tables shipped.
-* ~~High-throughput database pipeline beyond single-run ingestion~~ — Done.
-  `valleyscope collect-database-index` builds a compact multi-run
-  `database_index.json` from explicit `database_ingestion_record.json` files,
-  with `run_id` / `source_record` provenance on flattened valley irrep and
-  reduced EBR records.  Future database upload/storage backends remain out of
-  scope.
+Output:
+
+```text
+P_a^0 seed projectors
+valley weights
+seed projector symmetry-consistency
+target-subspace closure
+HSP little group G_k
+valley mapping pi_g(a)
+valley-preserving subgroup G_k^(a)
+```
+
+Readiness gates must be physical:
+
+* low valley weight alone is not an irrep failure;
+* high valley purity alone is not irrep readiness;
+* valley-changing operations test covariance under `pi_g`, not invariance;
+* failed closure/projector-symmetry rows are diagnostic-only.
+
+### Layer 2 — Generic Valley-Preserving Representation
+
+Build a group-agnostic representation object for each `(k, valley)`:
+
+```text
+subspace_space_group_number / symbol / operation_ids
+space_group_number
+space_group_symbol
+kpoint
+valley
+hsp_little_group_operation_ids
+valley_preserving_operation_ids
+valley_changing_operation_ids
+operation_matrices D_a(g)
+characters chi_a(g)
+eigenvalues/eigenphases
+closure/unitarity/projector diagnostics
+readiness status
+```
+
+The core matching unit is the full character/eigenvalue data on
+`G_k^(a)`, not a single Cn generator.  A cyclic subgroup can still be matched
+from one generator when mathematically sufficient, but the implementation
+should treat that as a special case of the generic representation object.
+
+The public output must identify the subspace space group and HSP little-group
+irreps.  It must not report `C2_like`, `C3_like`, or any future `C{n}_like`
+string as the final physical irrep/EBR object.
+
+### Layer 3 — Bilbao/irreptables Irrep Matching
+
+Use Bilbao-derived `irreptables` source data as the convention standard.
+The matching path should:
+
+1. identify the source space-group irreps at the relevant HSP;
+2. map source operations to ValleyScope operation IDs;
+3. restrict source characters to `G_k^(a)`;
+4. compare the ValleyScope representation character against restricted source
+   irreps using an explicit tolerance and convention record;
+5. support reducible representations by returning multiplicities, not only
+   one-dimensional phase labels;
+6. report unmatched or ambiguous rows as diagnostic-only.
+
+The existing C2/C3 phase tables remain useful tests for the cyclic, rank-1
+case, but they should be bypassable by the generic Bilbao character matcher.
+
+### Layer 4 — Reduced EBR Table Construction
+
+Reduced EBR tables must be generated by applying the same physical reduction
+to Bilbao/irreptables EBR data:
+
+```text
+full source EBR vector
+-> sampled moire HSP set
+-> source-HSP operation map
+-> valley-preserving subgroup restriction
+-> ValleyScope irrep basis multiplicities
+-> reduced EBR matrix
+```
+
+No raw 3D decomposition is a ValleyScope final result.  Raw source data is
+input evidence only.
+
+### Layer 5 — Reduced EBR Decomposition And Database Output
+
+Use the existing pure Python / SymPy exact solver on the reduced EBR matrix.
+Database ingestion should consume public outputs only:
+
+```text
+valley_summary.json
+valley_ebr_export_bundle.json
+valley_reduced_ebr_mapping.json
+```
+
+Further database index work should pause unless it directly supports the
+generic irrep/EBR representation record.
+
+## Revised Phase Status
+
+| Phase | Status | Meaning |
+|-------|--------|---------|
+| A. Valley projection/readiness | Keep | Physically necessary and mostly implemented |
+| B. Valley-preserving subspace space-group inventory | Keep/refine | Implemented pieces exist; should become the central public object |
+| C. Generic representation object | Missing | Needs implementation before more EBR expansion |
+| D. Generic Bilbao irrep matcher | Missing | Current C2/C3 matcher is prototype only |
+| E. Generic reduced EBR builder | Partial | Reducer exists, but still relies on explicit mapping specs/tables |
+| F. Exact reduced EBR solver | Keep | Implemented and should stay pure Python / SymPy |
+| G. Database ingestion/index | Keep, pause expansion | Adequate for now; do not add more plumbing until C/D advance |
+
+## Immediate Work Order
+
+1. **Stop Cn-specific expansion.**
+   Cancel the previous C3 database-contract task.  It is not wrong, but it is
+   lower priority than fixing the generic irrep backend.
+
+2. **Code audit and classification.**
+   Produce a code-level inventory with each module marked:
+   `core`, `prototype`, `debug`, `fixture`, or `delete-candidate`.
+
+3. **Introduce a generic representation schema.**
+   Add a small internal/public data object for the valley-projected subspace
+   space group and its `(k, valley, G_k^(a))` little-group representation data.
+   Existing outputs should be adapted to populate this object rather than
+   emitting legacy `C{n}_like` hints as if they were the final result.
+
+4. **Replace hard-coded C2/C3 matching with a strategy boundary.**
+   Keep the phase tables as a fallback prototype strategy, but make the public
+   API group-agnostic and ready for a Bilbao character matcher.
+
+5. **Remove expected-HSP special policy from the production path.**
+   EBR problem instances should derive required HSP/irrep basis from a reduced
+   table or reviewed source reduction, not from a hand-coded legacy
+   `C{n}_like` / `Pn` policy table.
+
+6. **Implement the first generic Bilbao character-matching skeleton.**
+   This can initially cover the same cyclic cases as the old C2/C3 matcher,
+   but the API and tests must prove the logic is group-agnostic.
+
+7. **Only after generic irrep matching works, return to reduced EBR table
+   generation and database end-to-end tests.**
+
+## Validation Fixtures
+
+Real materials are validation fixtures only:
+
+* tMoTe2: clean P321/K-valley fixture for direct q-cut readiness and
+  valley-preserving HSP little-group behavior.
+* tZrSe2: P312/M-star fixture for blocked or difficult valley-preserving
+  subgroup behavior.
+* Future C4/C6/mirror systems should be added as fixtures when available, but
+  never as production branches.
+
+Fixture outcomes may validate the generic workflow.  They must not become
+case-specific implementation rules.
+
+## Success Criteria
+
+The next credible milestone is not "more C3/C2 tests".  It is:
+
+```text
+For an arbitrary sampled HSP and valley label, ValleyScope emits a
+valley-projected subspace-space-group record plus an HSP little-group
+representation record for G_k^(a), including operation IDs,
+matrices/characters/eigenphases, readiness, and matching status.
+```
+
+The following milestone is:
+
+```text
+The representation record is matched against Bilbao/irreptables restricted
+characters without hard-coded C2/C3 logic.
+```
+
+Only then should we claim general valley-resolved irreps.  Reduced EBR
+decomposition follows after the same restricted-basis convention is used to
+build reduced EBR matrices.

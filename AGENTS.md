@@ -26,8 +26,9 @@ VASP WAVECAR / HDF5
 ```text
 -> irrep workflow decision (direct_qcut / symmetry_adapted / blocked)
 -> formal symmetry-adapted valley analysis (P_a^sym when needed)
--> valley-preserving irreps (character / eigenphase)
--> minimal valley-preserving irrep matching (C3, C2 spinful)
+-> valley-projected subspace space group
+-> HSP little-group representations inside the valley-projected subspace
+-> valley-preserving irreps (character / eigenphase / multiplicity)
 -> EBR input candidates / problem instances / export bundle
 ```
 
@@ -97,9 +98,9 @@ Low `fixed_center` `W_val` must use `fixed_center_not_captured` or
 `low_fixed_center_weight` in summary output, never an unqualified
 `not_derived`.
 
-## Direct qcut trusted path (tMoTe2-like clean systems)
+## Direct qcut trusted path
 
-A clean system such as tMoTe2 P321 can take the `direct_qcut` path when:
+A clean valley-preserving subspace can take the `direct_qcut` path when:
 
 - seed projector symmetry passes for valley-preserving operations;
 - target-subspace closure quality is clean/usable for valley-preserving ops;
@@ -110,10 +111,12 @@ A clean system such as tMoTe2 P321 can take the `direct_qcut` path when:
 In this case `P_a^sym` reconstruction is not forced. The q-cut seed basis is
 already a valid valley irrep input.
 
-For tZrSe2 P312 M-star, the symmetry-adapted path remains physically
-reasonable but current blockers are `spinor_convention_unverified`, low seed
-overlap in some rows, and D_raw target-subspace closure / expanded-band
-sensitivity. These must not be hidden with tolerance changes.
+The tMoTe2 P321 fixture is only a validation example of this path.  The
+tZrSe2 P312 M-star fixture is only a validation example of a difficult/blocked
+case where symmetry-adapted analysis may be physically reasonable but current
+blockers include `spinor_convention_unverified`, low seed overlap in some
+rows, and D_raw target-subspace closure / expanded-band sensitivity. These
+must not be hidden with tolerance changes.
 
 ## Reduced EBR Status
 
@@ -131,10 +134,16 @@ reduced-dimensional model and an `irrep`-like packaged-data architecture
 data, but ValleyScope must not report raw 3D `irrep` EBR decomposition as
 valley-resolved output. ValleyScope must first perform its own
 reduced-dimensional valley-preserving reduction: sampled moire HSP set, HSP
-little group, valley mapping, valley-preserving subgroup, and
-valley-preserving irrep basis.
+little group, valley mapping, valley-projected subspace space group,
+valley-preserving subgroup, and valley-preserving irrep basis.
 "No built-in unreviewed tables" means no ad hoc hardcoded or unvalidated
 tables, not a ban on a future reviewed package-data layer.
+
+Legacy labels such as `C2_like`, `C3_like`, or `C{n}_like` are unfinished
+prototype hints.  They must not be treated as the final definition of a
+valley-projected subspace, final user-facing irrep output, or final reduced EBR
+object.  The physical output must be based on the subspace space group and its
+HSP little-group irreps.
 
 OR-Tools and `irrep.ebrs` raw 3D decomposition are not part of the portable
 ValleyScope core path. The exact-integer reduced EBR solver in
@@ -270,9 +279,9 @@ G_k^{(a)} = \{g \in G_k \mid \pi_g(a)=a\}.
 ```
 
 Valley-preserving irreps are not full-group irreps. Any final database output
-must distinguish full-group irrep, HSP little group, valley orbit, valley
-mapping, valley-preserving subgroup, valley-preserving irrep, valley-changing
-operation, and valley sewing matrix.
+must distinguish full-group irrep, valley-projected subspace space group, HSP
+little group, valley orbit, valley mapping, valley-preserving subgroup,
+valley-preserving irrep, valley-changing operation, and valley sewing matrix.
 
 ## Current Stage Boundaries
 
@@ -288,7 +297,11 @@ Current work may include:
 * Target-subspace closure provenance diagnostics.
 * HSP-star conjugation and derived character layer.
 * Irrep workflow decision layer.
-* Minimal valley-preserving irrep matching (C3, C2 spinful).
+* Generic valley-projected subspace-space-group representation records.
+* Generic valley-preserving irrep matching against reviewed Bilbao-derived
+  conventions.
+* Legacy C2/C3 phase-table matching only as a prototype/fallback validation
+  path while the generic matcher is being completed.
 * EBR input candidate collection / problem instances / export bundle.
 * Default-off external-table reduced EBR mapping interface.
 
@@ -301,7 +314,10 @@ Current work must not implement:
 * Wilson loop;
 * Chern number;
 * full-mBZ valley-goodness validation;
-* unreviewed character-table logic beyond the implemented spinful C3/C2 tables.
+* new hard-coded Cn-specific character-table logic;
+* public final irrep/EBR output defined by legacy `C2_like`, `C3_like`, or
+  `C{n}_like` labels instead of the subspace space group and HSP little-group
+  irreps.
 
 ## Hard Rules
 
@@ -314,6 +330,10 @@ Current work must not implement:
 * Do not report q-cut seed-basis irrep labels as trusted when the seed projector
   symmetry-consistency check fails.
 * Do not make the two-valley special case the main framework.
+* Do not make `C2_like`, `C3_like`, or any `C{n}_like` hint the final
+  subspace definition or final public output.  These are legacy prototype
+  labels.  The subspace is defined by its valley-projected subspace space group
+  and HSP little-group representations.
 * Do not treat `ecut_adjust_tol` as the physical VASP `ENCUT`.
 * Do not restore removed public fields such as `valley_sectors` or
   `target_bands_vasp`.
@@ -355,6 +375,8 @@ Public schema should prefer:
 * `seed_projector_symmetry_error`
 * `seed_projector_symmetry_status`
 * `hsp_little_group`
+* `valley_projected_subspace_space_group`
+* `subspace_space_group`
 * `valley_mapping`
 * `valley_preserving_subgroup`
 * `valley_preserving_operations`
