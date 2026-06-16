@@ -73,7 +73,7 @@ def build_database_index(
             "reduced_ebr_record_count": len(record.get("reduced_ebr_records", [])),
             "reduced_ebr_mapping_status": record.get("reduced_ebr_mapping_status", "?"),
             "reduced_ebr_table_status": record.get("reduced_ebr_table_status", "?"),
-            "ebr_export_status": record.get("ebr_export_status", "?"),
+            "ebr_export_status": record.get("ebr_export_status", "not_available"),
             "excluded_ebr_record_count": len(record.get("excluded_ebr_records", [])),
         }
         if source is not None:
@@ -118,7 +118,7 @@ def build_database_index(
                 all_reduced_ebr_records.append(flat)
 
         # Aggregate ebr_export_status counts.
-        ebr_status = record.get("ebr_export_status", "?")
+        ebr_status = record.get("ebr_export_status", "not_available")
         ebr_export_status_counts[ebr_status] = ebr_export_status_counts.get(ebr_status, 0) + 1
 
         # Flatten excluded EBR records with run provenance.

@@ -437,7 +437,7 @@ def test_ingestion_record_includes_excluded_ebr_records():
     from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
     summary = {"target_kpoints": [], "iband": [], "input": {}}
     bundle = {
-        "status": "has_bundles",
+        "status": "partial_export",
         "interpretation": "one blocked instance",
         "bundles": [],
         "excluded_instances": [
@@ -456,7 +456,7 @@ def test_ingestion_record_includes_excluded_ebr_records():
     record = build_database_ingestion_record(
         valley_summary=summary, valley_ebr_export_bundle=bundle,
     )
-    assert record["ebr_export_status"] == "has_bundles"
+    assert record["ebr_export_status"] == "partial_export"
     assert record["ebr_export_interpretation"] == "one blocked instance"
     exclude = record["excluded_ebr_records"]
     assert len(exclude) == 1
@@ -488,7 +488,7 @@ def test_database_index_excluded_ebr_records_aggregated():
         "reduced_ebr_classification_counts": {},
         "reduced_ebr_mapping_status": "?",
         "reduced_ebr_table_status": "?",
-        "ebr_export_status": "has_bundles",
+        "ebr_export_status": "partial_export",
         "excluded_ebr_records": [
             {"source_instance_id": "ebr_001", "valley": "M3_valley",
              "exclusion_reasons": ["spinor_convention_unverified"]},
@@ -497,7 +497,7 @@ def test_database_index_excluded_ebr_records_aggregated():
     }
     idx = build_database_index([rec])
     assert idx["excluded_ebr_record_count_total"] == 1
-    assert idx["ebr_export_status_counts"]["has_bundles"] == 1
+    assert idx["ebr_export_status_counts"]["partial_export"] == 1
     assert idx["excluded_ebr_records"][0]["run_id"] == "run_0000"
 
 
@@ -520,7 +520,7 @@ def test_database_index_excluded_ebr_records_have_source_record():
     }
     idx = build_database_index([rec], source_files=["/tmp/rec.json"])
     er = idx["excluded_ebr_records"][0]
-    assert er["run_id"] in ("rec", "run_0000")
+    assert er["run_id"] == "run_0000"
     assert er["source_record"] == "/tmp/rec.json"
 
 
