@@ -601,30 +601,15 @@ def test_schema_doc_documents_irrep_records_by_kpoint():
 
 
 def test_generic_irrep_full_pipeline_smoke():
-    """Synthetic generic matches -> candidates -> instances -> export ->
+    """Generic matcher -> candidates -> instances -> export ->
     reduced EBR mapping with matching table, rejection with mismatched table."""
+    from valleyscope.analysis.valley_irrep_matching import (
+        build_valley_irrep_matching_report,
+    )
     from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
     from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
     from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
 
-    # Fake generic matches from bilbao_restricted_character matching.
-    matching = {
-        "by_kpoint": {},
-        "generic_matches_by_kpoint": {
-            "GammaM": {
-                "K_valley": {
-                    "matching_status": "matched",
-                    "matching_strategy": "bilbao_restricted_character",
-                    "irrep_multiplicities": {"-GM5": 1, "-GM6_a": 1},
-                        "subspace_group_candidate": "P4",
-                    "source_operation_map": {0: 1, 4: 2},
-                    "valley_preserving_operation_ids": [0, 4],
-                    "diagnostic_only": False,
-                    "reason": "",
-                },
-            },
-        },
-    }
     workflow = {
         "by_kpoint": {
             "GammaM": {
@@ -635,27 +620,72 @@ def test_generic_irrep_full_pipeline_smoke():
             },
         },
     }
-    # 1. EBR input candidates.
+    symmetry_adapted_report = {
+        "by_kpoint": {
+            "GammaM": {
+                "valley_preserving_subspaces": [{
+                    "reference_valley": "K_valley",
+                    "orbit": ["K_valley"],
+                    "subspace_group": {"subspace_group_candidate": "P4"},
+                    "subspace_space_group": {
+                        "candidate_space_group_symbol": "P4",
+                        "valley_preserving_operation_ids": [0, 4],
+                    },
+                    "hsp_preserving_operation_ids": [0, 4],
+                    "valley_preserving_character_diagnostics": {
+                        "per_valley": {
+                            "K_valley": [
+                                {"operation_id": 0, "eigenphases": [0.0, 0.0]},
+                                {"operation_id": 4, "eigenphases": [0.0, 0.5]},
+                            ],
+                        },
+                    },
+                }],
+            },
+        },
+    }
+    source_chars = {
+        "-GM5": {1: 1.0 + 0j, 2: 1.0 + 0j},
+        "-GM6_a": {1: 1.0 + 0j, 2: -1.0 + 0j},
+    }
+    operation_maps = {"GammaM": {"K_valley": {0: 1, 4: 2}}}
+
+    # 1. Generic restricted-character matching.
+    matching = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=workflow,
+        symmetry_adapted_valley_report=symmetry_adapted_report,
+        source_irrep_characters_flattened={
+            "GammaM": {"K_valley": source_chars},
+        },
+        source_operation_maps=operation_maps,
+    )
+    generic = matching["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
+    assert generic["matching_status"] == "matched"
+    assert generic["matching_strategy"] == "bilbao_restricted_character"
+    assert generic["irrep_multiplicities"] == {"-GM5": 1, "-GM6_a": 1}
+    assert generic["subspace_space_group"]["candidate_space_group_symbol"] == "P4"
+
+    # 2. EBR input candidates.
     candidates = build_ebr_input_candidates(
         irrep_workflow_decisions=workflow,
         valley_irrep_matching=matching,
     )
     assert candidates["candidate_count"] == 2
 
-    # 2. Problem instances (table-authoritative: expected_hsps from actual).
+    # 3. Problem instances (table-authoritative: expected_hsps from actual).
     instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
     assert instances["instance_count"] == 1
     inst = instances["instances"][0]
     assert inst["ready_for_ebr_decomposition"] is True
     assert inst["expected_hsps"] == ["GammaM"]
 
-    # 3. Export bundle.
+    # 4. Export bundle.
     bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
     assert bundle["bundle_count"] == 1
     b = bundle["bundles"][0]
     assert b["ready_for_external_solver"] is True
 
-    # 4. Reduced EBR mapping with a matching table.
+    # 5. Reduced EBR mapping with a matching table.
     bp_irreps = b["irreps_by_kpoint"]["GammaM"]
     matching_table = {
         "schema_version": "1.0.0",
@@ -672,7 +702,7 @@ def test_generic_irrep_full_pipeline_smoke():
     )
     assert result["mapping_status"] == "solved_exact"
 
-    # 5. Rejected by mismatched HSP basis.
+    # 6. Rejected by mismatched HSP basis.
     bad_table = dict(matching_table)
     bad_table["expected_hsps"] = ["GammaM", "KM"]
     bad_table["irreps"] = list(matching_table["irreps"]) + ["KM:-K5"]
