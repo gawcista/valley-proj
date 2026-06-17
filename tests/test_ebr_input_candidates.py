@@ -355,3 +355,44 @@ def test_null_inputs_gives_empty():
     )
     assert r["status"] == "no_candidates"
     assert r["candidate_count"] == 0
+
+
+def test_generic_matches_produce_ebr_candidates():
+    """Generic matched multiplicities become EBR input candidates."""
+    from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
+    decisions = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {"readiness_level": "trusted", "workflow_path": "direct_qcut"},
+            },
+        },
+    }
+    matching = {
+        "by_kpoint": {},
+        "generic_matches_by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "matching_status": "matched",
+                    "matching_strategy": "bilbao_restricted_character",
+                    "irrep_multiplicities": {"-GM5": 1, "-GM6_a": 2},
+                    "source_operation_map": {0: 1, 4: 2},
+                    "valley_preserving_operation_ids": [0, 4],
+                    "diagnostic_only": False,
+                    "reason": "",
+                },
+            },
+        },
+    }
+    result = build_ebr_input_candidates(
+        irrep_workflow_decisions=decisions,
+        valley_irrep_matching=matching,
+    )
+    assert result["status"] == "has_candidates"
+    assert result["candidate_count"] == 3  # 1 + 2
+    cands = result["candidates"]
+    labels = [c["matched_irrep"] for c in cands]
+    assert labels.count("-GM5") == 1
+    assert labels.count("-GM6_a") == 2
+    for c in cands:
+        assert c["matching_strategy"] == "bilbao_restricted_character"
+        assert c["ready_for_ebr_input"] is True
