@@ -451,30 +451,17 @@ def build_valley_irrep_matching_report(
                     if source_operation_maps and isinstance(source_operation_maps, Mapping)
                     else {}
                 )
-                char_diag_fl = sa.get("char_diag", {})
-                per_valley_fl = char_diag_fl.get("per_valley", {})
-                computed_fl: dict[int, complex] = {}
-                vp_ids_fl: list[int] = []
-                if isinstance(per_valley_fl, dict):
-                    for _, items in per_valley_fl.items():
-                        if not isinstance(items, list):
-                            continue
-                        for item in items:
-                            if not isinstance(item, dict):
-                                continue
-                            op_id = item.get("operation_id")
-                            if not isinstance(op_id, int) or isinstance(op_id, bool):
-                                continue
-                            eigenphases = item.get("eigenphases")
-                            if not eigenphases:
-                                continue
-                            import math as _math
-                            from cmath import exp as _exp
-                            tr = sum(_exp(2j * _math.pi * p) for p in eigenphases
-                                     if isinstance(p, (int, float)))
-                            computed_fl[op_id] = tr
-                            if op_id not in vp_ids_fl and op_id != 0:
-                                vp_ids_fl.append(op_id)
+                # Use full G_k^(a) from subspace_space_group, including identity.
+                ssg_fl = sa.get("subspace_space_group", {})
+                vp_ids_fl = _operation_ids_from_value(
+                    ssg_fl.get("valley_preserving_operation_ids", [])
+                ) if isinstance(ssg_fl, dict) else []
+                if not vp_ids_fl:
+                    hsp_ids_from_sa = _operation_ids_from_value(
+                        sa.get("hsp_preserving_operation_ids", [])
+                    )
+                    vp_ids_fl = [i for i in hsp_ids_from_sa if i in op_map] if isinstance(op_map, Mapping) else hsp_ids_from_sa
+                computed_fl = _computed_characters_from_items(sa.get("char_diag", {}))
                 if not vp_ids_fl or not computed_fl or not isinstance(op_map, Mapping) or not op_map:
                     generic_matches.setdefault(kp_name, {})[v_name] = {
                         "matching_status": "blocked",

@@ -592,15 +592,24 @@ def _parse_generic_irrep_source_config(raw: dict[str, Any]) -> GenericIrrepSourc
     if not isinstance(raw, dict) or not raw:
         return GenericIrrepSourceConfig()
     enabled = bool(raw.get("enabled", False))
+    if not enabled:
+        return GenericIrrepSourceConfig()
     sg = raw.get("spacegroup_number")
-    if sg is not None and not (isinstance(sg, int) and not isinstance(sg, bool)):
+    if not (isinstance(sg, int) and not isinstance(sg, bool)):
         raise ValueError(
-            "analysis.generic_irrep_source.spacegroup_number must be an integer"
+            "analysis.generic_irrep_source.spacegroup_number must be an integer "
+            "when enabled"
         )
     spinor = raw.get("spinor")
-    if spinor is not None and not isinstance(spinor, bool):
+    if not isinstance(spinor, bool):
         raise ValueError(
-            "analysis.generic_irrep_source.spinor must be a boolean when present"
+            "analysis.generic_irrep_source.spinor must be a boolean "
+            "when enabled"
+        )
+    if not isinstance(raw.get("source_hsp_labels"), dict) or not raw.get("source_hsp_labels"):
+        raise ValueError(
+            "analysis.generic_irrep_source.source_hsp_labels must be a "
+            "non-empty mapping when enabled"
         )
     op_tol = float(raw.get("operation_match_tol", 5e-5))
     if op_tol <= 0:

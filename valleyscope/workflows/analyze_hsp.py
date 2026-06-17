@@ -31,6 +31,10 @@ from valleyscope.analysis.ebr_problem_instances import (
 from valleyscope.analysis.ebr_export_bundle import (
     build_ebr_export_bundle,
 )
+from valleyscope.irreps.tables import load_standard_irrep_table
+from valleyscope.irreps.source_payload import (
+    build_source_payload_for_generic_matching,
+)
 from valleyscope.analysis.valley_projected_representation import (
     build_valley_projected_representation_report,
 )
@@ -546,36 +550,37 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             symmetry_adapted_valley_report=symmetry_adapted_valley_report,
         )
 
-        ebr_input_candidates = build_ebr_input_candidates(
-            irrep_workflow_decisions=irrep_workflow_decisions,
-            valley_irrep_matching=valley_irrep_matching,
-            symmetry_adapted_valley_report=symmetry_adapted_valley_report,
-        )
-        ebr_problem_instances = build_ebr_problem_instances(
-            ebr_input_candidates=ebr_input_candidates,
-        )
-        ebr_export_bundle = build_ebr_export_bundle(
-            ebr_problem_instances=ebr_problem_instances,
-        )
-        if config.reduced_ebr.enabled:
-            table = None
-            if config.reduced_ebr.table_file:
-                table = load_reduced_ebr_table(config.reduced_ebr.table_file)
-            elif config.reduced_ebr.table_name:
-                from valleyscope.data.reduced_ebr.catalog import (
-                    load_reviewed_reduced_ebr_table,
-                )
-                table = load_reviewed_reduced_ebr_table(
-                    config.reduced_ebr.table_name
-                )
-            reduced_ebr_mapping = build_reduced_ebr_mapping(
-                ebr_export_bundle=ebr_export_bundle,
-                table=table,
-                max_coefficient=config.reduced_ebr.max_coefficient,
+
+    ebr_input_candidates = build_ebr_input_candidates(
+        irrep_workflow_decisions=irrep_workflow_decisions,
+        valley_irrep_matching=valley_irrep_matching,
+        symmetry_adapted_valley_report=symmetry_adapted_valley_report,
+    )
+    ebr_problem_instances = build_ebr_problem_instances(
+        ebr_input_candidates=ebr_input_candidates,
+    )
+    ebr_export_bundle = build_ebr_export_bundle(
+        ebr_problem_instances=ebr_problem_instances,
+    )
+    if config.reduced_ebr.enabled:
+        table = None
+        if config.reduced_ebr.table_file:
+            table = load_reduced_ebr_table(config.reduced_ebr.table_file)
+        elif config.reduced_ebr.table_name:
+            from valleyscope.data.reduced_ebr.catalog import (
+                load_reviewed_reduced_ebr_table,
             )
+            table = load_reviewed_reduced_ebr_table(
+                config.reduced_ebr.table_name
+            )
+        reduced_ebr_mapping = build_reduced_ebr_mapping(
+            ebr_export_bundle=ebr_export_bundle,
+            table=table,
+            max_coefficient=config.reduced_ebr.max_coefficient,
+        )
 
 
-    # --- Valley-projected representation report ---
+# --- Valley-projected representation report ---
     valley_projected_representation = build_valley_projected_representation_report(
         kpoint_names=config.analysis.kpoints,
         valley_names=sector_names,

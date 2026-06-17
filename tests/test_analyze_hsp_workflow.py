@@ -758,12 +758,8 @@ def test_generic_irrep_source_rejects_non_integer_sg(tmp_path):
         }
         cfg_path = tmp_path / "cfg.yaml"
         cfg_path.write_text(yaml.safe_dump(config), encoding="utf-8")
-        if bad_sg is None:
-            cfg = load_config(cfg_path)
-            assert cfg.generic_irrep_source.spacegroup_number is None
-        else:
-            with pytest.raises(ValueError, match="spacegroup_number"):
-                load_config(cfg_path)
+        with pytest.raises(ValueError, match="spacegroup_number"):
+            load_config(cfg_path)
 
 
 def test_generic_irrep_source_rejects_non_bool_spinor(tmp_path):
