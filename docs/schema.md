@@ -296,12 +296,12 @@ Each `valley_irrep_records` entry:
 | `source` | string | Source path inside the irrep-matching payload |
 | `source_bundle_id` | string | Source export bundle ID |
 | `source_instance_id` | string | Source EBR problem instance ID |
-| `irrep_multiplicity` | int\|null | Multiplicity from generic restricted-character matching |
-| `matching_strategy` | string\|null | `"bilbao_restricted_character"` or `"legacy_phase_table"` |
-| `subspace_space_group` | object\|null | Physical subspace space group provenance |
-| `legacy_subspace_group_candidate` | string\|null | Legacy C2_like/C3_like hint |
-| `valley_preserving_operation_ids` | list[int]\|null | Operation IDs in G_k^(a) |
-| `source_operation_map` | object\|null | ValleyScope → source operation ID mapping |
+| `irrep_multiplicity` | int | Optional; multiplicity from generic restricted-character matching |
+| `matching_strategy` | string | Optional; `"bilbao_restricted_character"` or `"legacy_phase_table"` |
+| `subspace_space_group` | object | Optional; physical subspace space group provenance |
+| `legacy_subspace_group_candidate` | string | Optional; legacy C2_like/C3_like hint |
+| `valley_preserving_operation_ids` | list[int] | Optional; operation IDs in G_k^(a) |
+| `source_operation_map` | object | Optional; ValleyScope → source operation ID mapping |
 
 `reduced_ebr_classification_counts` has stable integer fields:
 

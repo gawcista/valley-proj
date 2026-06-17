@@ -606,3 +606,58 @@ def test_legacy_records_still_ingest_without_generic_fields():
     assert record["ready_bundle_count"] == 1
     r = record["valley_irrep_records"][0]
     assert r["matched_irrep"] == "C3_spinor_phase_+1/2"
+    for key in [
+        "irrep_multiplicity",
+        "matching_strategy",
+        "subspace_space_group",
+        "legacy_subspace_group_candidate",
+        "valley_preserving_operation_ids",
+        "source_operation_map",
+    ]:
+        assert key not in r
+
+
+def test_database_index_preserves_generic_irrep_fields_with_run_provenance():
+    """Database index keeps generic irrep fields with run provenance."""
+    from valleyscope.analysis.database_index import build_database_index
+
+    record = {
+        "schema_version": "1.2.0",
+        "record_status": "has_ready_ebr_bundles",
+        "ready_bundle_count": 1,
+        "valley_irrep_records": [{
+            "kpoint": "GammaM",
+            "valley": "K_valley",
+            "subspace_group_candidate": "P3",
+            "matched_irrep": "-GM5",
+            "irrep_multiplicity": 2,
+            "matching_strategy": "bilbao_restricted_character",
+            "subspace_space_group": {"candidate_space_group_symbol": "P3"},
+            "legacy_subspace_group_candidate": "C3_like",
+            "valley_preserving_operation_ids": [0, 2, 3],
+            "source_operation_map": {0: 1, 2: 2, 3: 3},
+        }],
+        "reduced_ebr_records": [],
+        "reduced_ebr_classification_counts": {
+            "atomic_compatible": 0,
+            "fragile_topology": 0,
+            "stable_topology": 0,
+        },
+        "reduced_ebr_mapping_status": "not_available",
+        "reduced_ebr_table_status": "not_available",
+        "validation_errors": [],
+    }
+
+    index = build_database_index(
+        [record],
+        source_files=["/tmp/database_ingestion_record.json"],
+    )
+    ir = index["valley_irrep_records"][0]
+    assert ir["run_id"] == "run_0000"
+    assert ir["source_record"] == "/tmp/database_ingestion_record.json"
+    assert ir["irrep_multiplicity"] == 2
+    assert ir["matching_strategy"] == "bilbao_restricted_character"
+    assert ir["subspace_space_group"] == {"candidate_space_group_symbol": "P3"}
+    assert ir["legacy_subspace_group_candidate"] == "C3_like"
+    assert ir["valley_preserving_operation_ids"] == [0, 2, 3]
+    assert ir["source_operation_map"] == {0: 1, 2: 2, 3: 3}
