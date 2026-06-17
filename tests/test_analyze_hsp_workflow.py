@@ -813,3 +813,94 @@ def test_generic_irrep_source_rejects_invalid_tol(tmp_path):
     cfg_path.write_text(yaml.safe_dump(config), encoding="utf-8")
     with pytest.raises(ValueError, match="operation_match_tol"):
         load_config(cfg_path)
+
+
+def test_generic_irrep_ebr_e2e_via_analyze_hsp(tmp_path, monkeypatch):
+    """analyze_hsp with monkeypatched generic_irrep_source produces
+    generic_matches_by_kpoint, standard-profile outputs, and database ingestion."""
+    import json, yaml, h5py, numpy as np
+    from valleyscope.workflows.analyze_hsp import analyze_hsp
+    from valleyscope.analysis.database_ingestion_record import (
+        load_database_ingestion_record_from_directory,
+    )
+
+    # Toy HDF5 fixture with square lattice for C2 symmetry.
+    h5_path = tmp_path / "wf.h5"
+    structure = tmp_path / "CONTCAR"
+    write_square_poscar(structure)
+    with h5py.File(h5_path, "w") as h5:
+        meta = h5.create_group("metadata")
+        lattice = meta.create_group("lattice")
+        lattice["direct_cart"] = np.eye(3)
+        lattice["reciprocal_cart"] = np.eye(3)
+        meta["spinor"] = False
+        meta["source"] = "toy"
+        meta["vasp_band_index_base"] = 1
+        kp = h5.create_group("kpoints").create_group("0")
+        kp["name"] = "GammaM"
+        kp["frac"] = np.zeros(3)
+        kp["cart"] = np.zeros(3)
+        kp["g_vectors_frac"] = np.array([[1, 0, 0], [-1, 0, 0]])
+        kp["g_vectors_cart"] = np.array([[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]])
+        kp["coefficients"] = np.array([[[1.0, 0.0]], [[0.0, 1.0]]], dtype=np.complex128)
+        kp["energies_eV"] = np.array([0.1, 0.1001])
+        kp["band_indices_vasp"] = np.array([101, 102])
+
+    out_dir = tmp_path / "out"
+    config = {
+        "input": {"wavefunction_h5": str(h5_path)},
+        "analysis": {
+            "kpoints": ["GammaM"], "iband": [101, 102], "degeneracy_tol_meV": 1.0,
+            "generic_irrep_source": {
+                "enabled": True,
+                "spacegroup_number": 143,
+                "spinor": False,
+                "source_hsp_labels": {"GammaM": {"K_valley": "GM"}},
+            },
+        },
+        "monolayer_lattices": {"default": {"reciprocal_cart": np.eye(3).tolist()}},
+        "valley_centers": {
+            "coordinate_mode": "cart",
+            "centers": [
+                {"name": "K", "cart": [1.0, 0.0, 0.0]},
+                {"name": "Kp", "cart": [-1.0, 0.0, 0.0]},
+            ],
+        },
+        "valley_subspaces": [
+            {"name": "K_valley", "centers": ["K"]},
+            {"name": "Kp_valley", "centers": ["Kp"]},
+        ],
+        "projection": {"qcut_mode": "absolute", "qcut_Ainv": 0.25, "overlap_policy": "warn_exclude"},
+        "symmetry": {
+            "operations": {"mode": "auto", "structure_file": str(structure), "backend": "spglib"},
+            "tolerance": {"symprec": 1.0e-5, "angle_tolerance": -1.0},
+            "filters": {"rotation_order": 2},
+        },
+        "output": {"directory": str(out_dir), "profile": "standard"},
+    }
+    config_path = tmp_path / "cfg.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    outputs = analyze_hsp(config_path)
+
+    # Standard profile: only public files.
+    assert outputs["valley_summary_json"].exists()
+    assert outputs["valley_summary_txt"].exists()
+    assert outputs["valley_ebr_export_bundle_json"].exists()
+
+    # No debug/detail files in standard profile.
+    written = {p.name for p in out_dir.iterdir() if p.is_file()}
+    debug_only = {
+        "valley_subspace.json", "diagnostics.h5", "symmetry_report.json",
+        "hsp_star_conjugation.json", "hsp_star_derived_characters.json",
+    }
+    assert not (written & debug_only), f"debug files leaked: {written & debug_only}"
+
+    # Database ingestion from the output directory.
+    record = load_database_ingestion_record_from_directory(str(out_dir))
+    assert record["summary_status"] == "present"
+    assert "valley_irrep_records" in record
+
+    # Valley summary contains matching report.
+    summary = json.loads(outputs["valley_summary_json"].read_text())
+    assert "valley_irrep_matching" in summary
