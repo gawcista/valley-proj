@@ -216,6 +216,142 @@ def test_non_integer_multiplicity_diagnostic():
 # ID validation
 # -----------------------------------------------------------------------
 
+# -----------------------------------------------------------------------
+# Wiring into build_valley_irrep_matching_report
+# -----------------------------------------------------------------------
+
+def test_generic_matching_via_build_report():
+    """build_valley_irrep_matching_report with fake source data produces
+    generic_matches_by_kpoint."""
+    from valleyscope.analysis.valley_irrep_matching import (
+        build_valley_irrep_matching_report,
+    )
+    import cmath
+    decisions = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "readiness_level": "trusted",
+                    "workflow_path": "direct_qcut",
+                },
+            },
+        },
+    }
+    # Fake symmetry-adapted report with character diagnostics.
+    sa_report = {
+        "by_kpoint": {
+            "GammaM": {
+                "valley_preserving_subspaces": [{
+                    "orbit": ["K_valley"],
+                    "reference_valley": "K_valley",
+                    "valley_preserving_character_diagnostics": {
+                        "per_valley": {
+                            "K_valley": [
+                                {"operation_id": 1, "eigenphases": [0.0]},
+                                {"operation_id": 2, "eigenphases": [0.5]},
+                                {"operation_id": 3, "eigenphases": [0.5]},
+                            ],
+                        },
+                    },
+                    "subspace_group": {
+                        "subspace_group_candidate": "C3_like",
+                        "operation_orders": {"1": 1, "2": 3, "3": 3},
+                    },
+                }],
+            },
+        },
+    }
+    source_chars = {
+        "-GM5": {1: 1.0 + 0j, 2: -1.0 + 0j, 3: -1.0 + 0j},
+    }
+    op_maps = {
+        "GammaM": {"K_valley": {1: 1, 2: 2, 3: 3}},
+    }
+    report = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=decisions,
+        symmetry_adapted_valley_report=sa_report,
+        source_irrep_characters=source_chars,
+        source_operation_maps=op_maps,
+    )
+    # Legacy path still runs
+    assert report["by_kpoint"]["GammaM"]["K_valley"]["2"]["matching_strategy"] == "legacy_phase_table"
+    # Generic matches present
+    gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
+    assert gm["matching_strategy"] == "bilbao_restricted_character"
+    assert gm["matching_status"] == "matched"
+    assert gm["irrep_multiplicities"] == {"-GM5": 1}
+
+
+def test_missing_source_payload_falls_back_to_legacy():
+    """build_valley_irrep_matching_report without source data uses
+    legacy only, no generic_matches_by_kpoint."""
+    from valleyscope.analysis.valley_irrep_matching import (
+        build_valley_irrep_matching_report,
+    )
+    decisions = {"by_kpoint": {}}
+    report = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=decisions,
+        symmetry_adapted_valley_report=None,
+    )
+    assert "generic_matches_by_kpoint" not in report
+    assert report["legacy_tables_implemented"] == ["spinful_C3", "spinful_C2"]
+
+
+def test_incomplete_source_map_diagnostic():
+    """Incomplete operation map produces diagnostic generic match."""
+    from valleyscope.analysis.valley_irrep_matching import (
+        build_valley_irrep_matching_report,
+    )
+    decisions = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "readiness_level": "trusted",
+                    "workflow_path": "direct_qcut",
+                },
+            },
+        },
+    }
+    sa_report = {
+        "by_kpoint": {
+            "GammaM": {
+                "valley_preserving_subspaces": [{
+                    "orbit": ["K_valley"],
+                    "reference_valley": "K_valley",
+                    "valley_preserving_character_diagnostics": {
+                        "per_valley": {
+                            "K_valley": [
+                                {"operation_id": 1, "eigenphases": [0.0]},
+                                {"operation_id": 2, "eigenphases": [0.5]},
+                            ],
+                        },
+                    },
+                    "subspace_group": {
+                        "subspace_group_candidate": "C3_like",
+                        "operation_orders": {"1": 1, "2": 3},
+                    },
+                }],
+            },
+        },
+    }
+    source_chars = {"-GM5": {1: 1.0 + 0j, 2: -1.0 + 0j}}
+    # Map missing op 2 -> blocked
+    op_maps = {"GammaM": {"K_valley": {1: 1}}}
+    report = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=decisions,
+        symmetry_adapted_valley_report=sa_report,
+        source_irrep_characters=source_chars,
+        source_operation_maps=op_maps,
+    )
+    gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
+    assert gm["matching_status"] == "blocked"
+    assert "incomplete" in gm["reason"]
+
+
+# -----------------------------------------------------------------------
+# ID validation
+# -----------------------------------------------------------------------
+
 def test_non_integer_op_id_raises():
     """Float operation ID raises ValueError."""
     with pytest.raises(ValueError, match="integer"):

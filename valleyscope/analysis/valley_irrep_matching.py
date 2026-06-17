@@ -9,6 +9,7 @@ Non-goals: no reduced EBR, no compatibility relations, no full induced rep logic
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from valleyscope.data.valley_irreps.catalog import get_irrep_phase_list
@@ -212,11 +213,20 @@ def build_valley_irrep_matching_report(
     irrep_workflow_decisions: dict[str, object] | None,
     symmetry_adapted_valley_report: dict[str, object] | None,
     allow_caution: bool = False,
+    source_irrep_characters: Mapping[str, Mapping[int, complex]] | None = None,
+    source_operation_maps: (
+        Mapping[str, Mapping[str, Mapping[int, int]]] | None
+    ) = None,
 ) -> dict[str, object]:
     """Build per-(kpoint, valley) irrep matching results.
 
     Cross-references the workflow decision report with character diagnostics
     from the symmetry-adapted valley analysis.
+
+    When ``source_irrep_characters`` and per-(kpoint, valley)
+    ``source_operation_maps`` are provided, uses the generic
+    ``match_restricted_characters`` strategy.  Otherwise uses the legacy
+    C2/C3 phase-table fallback.
     """
     if irrep_workflow_decisions is None:
         return {"status": "not_evaluated", "by_kpoint": {}}
@@ -296,6 +306,7 @@ def build_valley_irrep_matching_report(
                                 readiness_level=readiness,
                                 allow_caution=allow_caution,
                             )
+                            result["matching_strategy"] = "legacy_phase_table"
                         result["workflow_path"] = path
                         result["readiness_level"] = readiness
                         result["subspace_group_candidate"] = sg_candidate
@@ -306,6 +317,66 @@ def build_valley_irrep_matching_report(
         if kp_matches:
             by_kpoint[kp_name] = kp_matches
 
+    # --- Generic restricted-character matching (optional) ---
+    generic_matches: dict[str, dict[str, dict[str, object]]] = {}
+    if source_irrep_characters is not None and source_operation_maps is not None:
+        from valleyscope.analysis.generic_irrep_matching import (
+            match_restricted_characters,
+        )
+        for kp_name, v_maps in source_operation_maps.items():
+            if not isinstance(v_maps, Mapping):
+                continue
+            for v_name, op_map in v_maps.items():
+                if not isinstance(op_map, Mapping):
+                    continue
+                # Collect ValleyScope computed characters from character
+                # diagnostics for this (kpoint, valley).
+                sa = sa_by_kp.get(kp_name, {}).get(v_name, {})
+                char_diag_g = sa.get("char_diag", {})
+                per_valley_g = char_diag_g.get("per_valley", {})
+                computed: dict[int, complex] = {}
+                vp_ids: list[int] = []
+                if isinstance(per_valley_g, dict):
+                    for _, items in per_valley_g.items():
+                        if not isinstance(items, list):
+                            continue
+                        for item in items:
+                            if not isinstance(item, dict):
+                                continue
+                            op_id = item.get("operation_id")
+                            if not isinstance(op_id, int) or isinstance(op_id, bool):
+                                continue
+                            eigenphases = item.get("eigenphases")
+                            if not eigenphases:
+                                continue
+                            # Sum eigenphases across states to get trace.
+                            from cmath import exp
+                            import math
+                            tr = sum(exp(2j * math.pi * p) for p in eigenphases
+                                     if isinstance(p, (int, float)))
+                            computed[op_id] = tr
+                            if op_id not in vp_ids and op_id != 0:
+                                vp_ids.append(op_id)
+                if not vp_ids or not computed:
+                    continue
+
+                # Run generic matcher.
+                g_result = match_restricted_characters(
+                    computed_characters=computed,
+                    source_irrep_characters=source_irrep_characters,
+                    valley_preserving_operation_ids=vp_ids,
+                    source_operation_map=dict(op_map),
+                )
+                generic_matches.setdefault(kp_name, {})[v_name] = {
+                    "matching_status": g_result["matching_status"],
+                    "matching_strategy": g_result["matching_strategy"],
+                    "irrep_multiplicities": g_result.get("irrep_multiplicities", {}),
+                    "source_operation_map": g_result.get("source_operation_map", {}),
+                    "valley_preserving_operation_ids": vp_ids,
+                    "diagnostic_only": g_result.get("diagnostic_only", False),
+                    "reason": g_result.get("reason", ""),
+                }
+
     return {
         "status": "ok" if by_kpoint else "not_evaluated",
         "matching_statuses": ["matched", "diagnostic_only", "not_applicable",
@@ -313,4 +384,6 @@ def build_valley_irrep_matching_report(
         "tables_implemented": ["spinful_C3", "spinful_C2"],
         "legacy_tables_implemented": ["spinful_C3", "spinful_C2"],
         "by_kpoint": by_kpoint,
+        **({"generic_matches_by_kpoint": generic_matches}
+           if generic_matches else {}),
     }
