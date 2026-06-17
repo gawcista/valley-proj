@@ -133,6 +133,15 @@ class ReducedEbrConfig:
 
 
 @dataclass(frozen=True)
+class GenericIrrepSourceConfig:
+    enabled: bool = False
+    spacegroup_number: int | None = None
+    spinor: bool | None = None
+    operation_match_tol: float = 5e-5
+    source_hsp_labels: dict[str, dict[str, str]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class SymmetryAdaptedValleyConfig:
     enabled: bool = True
     seed_overlap_warn_tol: float = 0.8
@@ -159,6 +168,7 @@ class AppConfig:
     rotation: RotationConfig = field(default_factory=RotationConfig)
     symmetry_adapted_valley: SymmetryAdaptedValleyConfig = field(default_factory=SymmetryAdaptedValleyConfig)
     reduced_ebr: ReducedEbrConfig = field(default_factory=ReducedEbrConfig)
+    generic_irrep_source: GenericIrrepSourceConfig = field(default_factory=GenericIrrepSourceConfig)
     monolayer_lattices: dict[str, np.ndarray] = field(default_factory=dict)
     layer_transforms: dict[str, dict[str, Any]] = field(default_factory=dict)
 
@@ -576,6 +586,67 @@ def _parse_reduced_ebr_config(base: Path, raw: dict[str, Any]) -> ReducedEbrConf
     )
 
 
+
+
+def _parse_generic_irrep_source_config(raw: dict[str, Any]) -> GenericIrrepSourceConfig:
+    if not isinstance(raw, dict) or not raw:
+        return GenericIrrepSourceConfig()
+    enabled = bool(raw.get("enabled", False))
+    sg = raw.get("spacegroup_number")
+    if sg is not None and not (isinstance(sg, int) and not isinstance(sg, bool)):
+        raise ValueError(
+            "analysis.generic_irrep_source.spacegroup_number must be an integer"
+        )
+    spinor = raw.get("spinor")
+    if spinor is not None and not isinstance(spinor, bool):
+        raise ValueError(
+            "analysis.generic_irrep_source.spinor must be a boolean when present"
+        )
+    op_tol = float(raw.get("operation_match_tol", 5e-5))
+    if op_tol <= 0:
+        raise ValueError(
+            "analysis.generic_irrep_source.operation_match_tol must be positive"
+        )
+    source_hsp_labels: dict[str, dict[str, str]] = {}
+    raw_hsp = raw.get("source_hsp_labels")
+    if raw_hsp is not None:
+        if not isinstance(raw_hsp, dict):
+            raise ValueError(
+                "analysis.generic_irrep_source.source_hsp_labels must be a mapping"
+            )
+        for kp_label, valley_map in raw_hsp.items():
+            if not isinstance(kp_label, str) or not kp_label:
+                raise ValueError(
+                    "analysis.generic_irrep_source.source_hsp_labels keys "
+                    "must be non-empty strings (kpoint labels)"
+                )
+            if not isinstance(valley_map, dict):
+                raise ValueError(
+                    f"analysis.generic_irrep_source.source_hsp_labels[{kp_label!r}] "
+                    "must be a mapping (valley -> source HSP label)"
+                )
+            inner: dict[str, str] = {}
+            for v_label, src_hsp in valley_map.items():
+                if not isinstance(v_label, str) or not v_label:
+                    raise ValueError(
+                        f"analysis.generic_irrep_source.source_hsp_labels"
+                        f"[{kp_label!r}] keys must be non-empty strings"
+                    )
+                if not isinstance(src_hsp, str) or not src_hsp:
+                    raise ValueError(
+                        f"analysis.generic_irrep_source.source_hsp_labels"
+                        f"[{kp_label!r}][{v_label!r}] must be a non-empty string"
+                    )
+                inner[v_label] = src_hsp
+            source_hsp_labels[kp_label] = inner
+    return GenericIrrepSourceConfig(
+        enabled=enabled,
+        spacegroup_number=int(sg) if sg is not None else None,
+        spinor=bool(spinor) if spinor is not None else None,
+        operation_match_tol=op_tol,
+        source_hsp_labels=source_hsp_labels,
+    )
+
 def _parse_symmetry_adapted_valley_config(raw: dict[str, Any]) -> SymmetryAdaptedValleyConfig:
     if not isinstance(raw, dict):
         return SymmetryAdaptedValleyConfig()
@@ -663,6 +734,9 @@ def load_config(path: str | Path) -> AppConfig:
             analysis_raw.get("symmetry_adapted_valley", {})
         ),
         reduced_ebr=_parse_reduced_ebr_config(base, analysis_raw.get("reduced_ebr", {})),
+        generic_irrep_source=_parse_generic_irrep_source_config(
+            analysis_raw.get("generic_irrep_source", {}),
+        ),
         output=OutputConfig(
             directory=resolve_config_path(base, output_raw.get("directory", "valley_analysis")),
             profile=_resolve_output_profile(output_raw),

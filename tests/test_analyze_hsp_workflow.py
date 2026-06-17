@@ -676,3 +676,60 @@ def test_subspace_thresholds_inherit_user_config(tmp_path):
     kp_data = subspace["kpoints"]["GammaM"]
     # overlap_warn=0.15 > max_w_overlap=0.1 -> not projector_unreliable
     assert kp_data.get("subspace_valley_status") == "valley_separable_subspace"
+
+
+def test_generic_irrep_source_disabled_by_default(tmp_path):
+    """Default config has generic_irrep_source disabled."""
+    from valleyscope.io.config import load_config
+    import yaml, numpy as np
+    config = {
+        "input": {"wavefunction_h5": "wave.h5"},
+        "analysis": {"kpoints": ["GammaM"], "iband": [1]},
+        "monolayer_lattices": {"default": {"reciprocal_cart": np.eye(3).tolist()}},
+        "valley_centers": {"coordinate_mode": "cart", "centers": [{"name": "K", "cart": [0, 0, 0]}]},
+        "valley_subspaces": [{"name": "K_valley", "centers": ["K"]}],
+        "output": {"directory": str(tmp_path)},
+    }
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    cfg = load_config(cfg_path)
+    assert cfg.generic_irrep_source.enabled is False
+    assert cfg.generic_irrep_source.spacegroup_number is None
+
+
+def test_generic_irrep_source_config_parses(tmp_path):
+    """Config parses generic_irrep_source block correctly."""
+    from valleyscope.io.config import load_config
+    import yaml, numpy as np
+    config = {
+        "input": {"wavefunction_h5": "wave.h5"},
+        "analysis": {
+            "kpoints": ["GammaM"], "iband": [1],
+            "generic_irrep_source": {
+                "enabled": True,
+                "spacegroup_number": 150,
+                "spinor": True,
+                "operation_match_tol": 1e-4,
+                "source_hsp_labels": {
+                    "GammaM": {"K_valley": "GM"},
+                    "KM": {"K_valley": "K"},
+                },
+            },
+        },
+        "monolayer_lattices": {"default": {"reciprocal_cart": np.eye(3).tolist()}},
+        "valley_centers": {"coordinate_mode": "cart", "centers": [{"name": "K", "cart": [0, 0, 0]}]},
+        "valley_subspaces": [{"name": "K_valley", "centers": ["K"]}],
+        "output": {"directory": str(tmp_path)},
+    }
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    cfg = load_config(cfg_path)
+    gis = cfg.generic_irrep_source
+    assert gis.enabled is True
+    assert gis.spacegroup_number == 150
+    assert gis.spinor is True
+    assert gis.operation_match_tol == 1e-4
+    assert gis.source_hsp_labels == {
+        "GammaM": {"K_valley": "GM"},
+        "KM": {"K_valley": "K"},
+    }

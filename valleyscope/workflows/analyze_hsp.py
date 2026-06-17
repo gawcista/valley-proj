@@ -480,6 +480,64 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 max_coefficient=config.reduced_ebr.max_coefficient,
             )
 
+
+    # --- Generic irrep source preflight (optional, default-off) ---
+    generic_irrep_source_payload: dict[str, Any] | None = None
+    generic_irrep_source_blocked: dict[str, Any] | None = None
+    if config.generic_irrep_source.enabled:
+        from valleyscope.irreps.tables import load_standard_irrep_table
+        from valleyscope.irreps.source_payload import (
+            build_source_payload_for_generic_matching,
+        )
+        gis_cfg = config.generic_irrep_source
+        if gis_cfg.spacegroup_number is None:
+            generic_irrep_source_blocked = {
+                "status": "blocked",
+                "reason": "analysis.generic_irrep_source.spacegroup_number is required",
+            }
+        elif gis_cfg.spinor is None:
+            generic_irrep_source_blocked = {
+                "status": "blocked",
+                "reason": "analysis.generic_irrep_source.spinor is required",
+            }
+        elif not gis_cfg.source_hsp_labels:
+            generic_irrep_source_blocked = {
+                "status": "blocked",
+                "reason": "analysis.generic_irrep_source.source_hsp_labels is empty",
+            }
+        else:
+            try:
+                table = load_standard_irrep_table(
+                    gis_cfg.spacegroup_number, spinor=gis_cfg.spinor,
+                )
+            except Exception as exc:
+                generic_irrep_source_blocked = {
+                    "status": "blocked",
+                    "reason": f"load_standard_irrep_table failed: {exc}",
+                }
+            if generic_irrep_source_blocked is None:
+                # Build per-row source operation maps and character payloads.
+                src_chars_by_kp: dict[str, dict[str, Any]] = {}
+                for kp_name, valley_map in gis_cfg.source_hsp_labels.items():
+                    for v_name, src_hsp in valley_map.items():
+                        key = f"{kp_name}/{v_name}"
+                        payload = build_source_payload_for_generic_matching(
+                            table=table,
+                            source_hsp_label=src_hsp,
+                            detected_operations=symmetry_payload.get(
+                                "detected_operations", [],
+                            ),
+                            valley_preserving_operation_ids=[],
+                            tol=gis_cfg.operation_match_tol,
+                        )
+                        src_chars_by_kp.setdefault(kp_name, {})[v_name] = payload
+                generic_irrep_source_payload = {
+                    "table_sg_number": gis_cfg.spacegroup_number,
+                    "table_spinor": gis_cfg.spinor,
+                    "source_hsp_labels": gis_cfg.source_hsp_labels,
+                    "per_row_payloads": src_chars_by_kp,
+                }
+
     # --- Valley-projected representation report ---
     valley_projected_representation = build_valley_projected_representation_report(
         kpoint_names=config.analysis.kpoints,
