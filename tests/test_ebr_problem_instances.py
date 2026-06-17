@@ -62,7 +62,14 @@ def test_candidates_group_into_instances():
     assert "KM" in inst["irreps_by_kpoint"]
     # Table-authoritative: expected_hsps from actual, optional from legacy debug.
     assert inst["expected_hsps"] == ["GammaM", "KM"]
-    assert inst["expected_hsp_policy_source"] == "sampled_irrep_basis_with_legacy_debug_policy"
+    assert (
+        inst["expected_hsp_policy_source"]
+        == "sampled_irrep_basis_with_legacy_debug_policy"
+    )
+    assert inst["optional_hsps"] == []
+    assert inst["missing_optional_hsps"] == []
+    assert inst["_legacy_hsp_policy_debug"]["optional_hsps"] == ["MM"]
+    assert inst["_legacy_hsp_policy_debug"]["missing_optional_hsps"] == ["MM"]
 
 
 # -----------------------------------------------------------------------
@@ -89,7 +96,10 @@ def test_partial_hsp_still_complete_table_authoritative():
     assert inst["status"] == "complete"
     assert inst["ready_for_ebr_decomposition"] is True
     assert inst["expected_hsps"] == ["GammaM"]
-    assert inst["expected_hsp_policy_source"] == "sampled_irrep_basis_with_legacy_debug_policy"
+    assert (
+        inst["expected_hsp_policy_source"]
+        == "sampled_irrep_basis_with_legacy_debug_policy"
+    )
 
 
 # -----------------------------------------------------------------------

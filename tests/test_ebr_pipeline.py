@@ -224,6 +224,96 @@ def test_reduced_ebr_mapping_rejects_hsp_mismatch():
     assert "expected_hsps mismatch" in r["excluded_bundles"][0]["reason"]
 
 
+def test_generic_p4_table_authoritative_bundle_maps_and_rejects_mismatch():
+    """P4 synthetic instance exports without hard-coded Cn HSP policy."""
+    problem_instances = build_ebr_problem_instances(
+        ebr_input_candidates={
+            "status": "has_candidates",
+            "candidates": [
+                {
+                    "kpoint": "GammaM",
+                    "valley": "K_valley",
+                    "workflow_path": "direct_qcut",
+                    "readiness_level": "trusted",
+                    "subspace_space_group": {
+                        "candidate_space_group_symbol": "P4",
+                        "valley_preserving_operation_ids": [0, 4],
+                    },
+                    "legacy_subspace_group_candidate": "C4_like",
+                    "matched_irrep": "P4_spinor_phase_+1/4",
+                    "irrep_multiplicity": 1,
+                    "matching_strategy": "bilbao_restricted_character",
+                    "ready_for_ebr_input": True,
+                },
+                {
+                    "kpoint": "XM",
+                    "valley": "K_valley",
+                    "workflow_path": "direct_qcut",
+                    "readiness_level": "trusted",
+                    "subspace_space_group": {
+                        "candidate_space_group_symbol": "P4",
+                        "valley_preserving_operation_ids": [0, 4],
+                    },
+                    "legacy_subspace_group_candidate": "C4_like",
+                    "matched_irrep": "P4_spinor_phase_-1/4",
+                    "irrep_multiplicity": 1,
+                    "matching_strategy": "bilbao_restricted_character",
+                    "ready_for_ebr_input": True,
+                },
+            ],
+        },
+    )
+    inst = problem_instances["instances"][0]
+    assert inst["subspace_group_candidate"] == "P4"
+    assert inst["legacy_subspace_group_candidate"] == "C4_like"
+    assert inst["expected_hsps"] == ["GammaM", "XM"]
+    assert inst["expected_hsp_policy_source"] == "sampled_irrep_basis"
+    assert inst["ready_for_ebr_decomposition"] is True
+
+    export_bundle = build_ebr_export_bundle(
+        ebr_problem_instances=problem_instances
+    )
+    assert export_bundle["status"] == "ready_for_external_solver"
+    bundle = export_bundle["bundles"][0]
+    assert bundle["subspace_group_candidate"] == "P4"
+    assert bundle["expected_hsps"] == ["GammaM", "XM"]
+
+    matching_table = {
+        "schema_version": "1.0.0",
+        "subspace_group_candidate": "P4",
+        "expected_hsps": ["GammaM", "XM"],
+        "irreps": [
+            "GammaM:P4_spinor_phase_+1/4",
+            "XM:P4_spinor_phase_-1/4",
+        ],
+        "ebrs": [{"label": "EBR_P4_A", "vector": [1, 1]}],
+    }
+    solved = build_reduced_ebr_mapping(
+        ebr_export_bundle=export_bundle,
+        table=matching_table,
+    )
+    assert solved["status"] == "solved_exact"
+    assert solved["solutions"][0]["irrep_vector"] == [1, 1]
+
+    mismatched_table = {
+        "schema_version": "1.0.0",
+        "subspace_group_candidate": "P4",
+        "expected_hsps": ["GammaM", "MM"],
+        "irreps": [
+            "GammaM:P4_spinor_phase_+1/4",
+            "MM:P4_spinor_phase_-1/4",
+        ],
+        "ebrs": [{"label": "EBR_P4_bad", "vector": [1, 1]}],
+    }
+    rejected = build_reduced_ebr_mapping(
+        ebr_export_bundle=export_bundle,
+        table=mismatched_table,
+    )
+    assert rejected["solutions"] == []
+    assert len(rejected["excluded_bundles"]) == 1
+    assert "expected_hsps mismatch" in rejected["excluded_bundles"][0]["reason"]
+
+
 _STANDARD_PUBLIC_FILES = frozenset({
     "valley_summary.txt", "valley_summary.json", "valley_weights.csv",
     "valley_ebr_export_bundle.json", "valley_reduced_ebr_mapping.json",

@@ -10,11 +10,10 @@ from __future__ import annotations
 from typing import Any
 
 
-# Expected HSP labels for known subspace groups.  This is a policy table,
-# not a physics solver.  Missing HSPs are reported as blocked/optional.
 # Legacy hard-coded expected-HSP policy for C3_like/C2_like prototypes.
-# Must not be presented as the final production source of required HSPs.
-_LEGACY_EXPECTED_HSP: dict[str, dict[str, object]] = {
+# Debug/provenance only: it must not gate production readiness or populate
+# production optional-HSP fields.
+_LEGACY_EXPECTED_HSP_POLICY_DEBUG: dict[str, dict[str, object]] = {
     "P3": {
         "expected_hsps": ["GammaM", "KM"],
         "optional_hsps": ["MM"],
@@ -83,7 +82,10 @@ def build_ebr_problem_instances(
         valley = str(c.get("valley", ""))
         workflow_path = str(c.get("workflow_path", ""))
         readiness_level = str(c.get("readiness_level", ""))
-        groups.setdefault((sg, legacy_sg, valley, workflow_path, readiness_level), []).append(c)
+        groups.setdefault(
+            (sg, legacy_sg, valley, workflow_path, readiness_level),
+            [],
+        ).append(c)
 
     instances: list[dict[str, object]] = []
     instance_counter = 0
@@ -136,16 +138,15 @@ def build_ebr_problem_instances(
         actual_hsps = sorted(irreps_by_kpoint.keys())
         expected_hsps = list(actual_hsps)
         optional_hsps: list[str] = []
-        missing_optional_hsps: list[str] = []
         blocked_by: list[str] = []
 
         # Legacy HSP policy for debug/provenance only (not a production gate).
-        legacy_policy = _LEGACY_EXPECTED_HSP.get(sg, {}) if sg else {}
+        legacy_policy = (
+            _LEGACY_EXPECTED_HSP_POLICY_DEBUG.get(sg, {}) if sg else {}
+        )
         legacy_expected = list(legacy_policy.get("expected_hsps", []))
         legacy_optional = list(legacy_policy.get("optional_hsps", []))
-
-        # Report optional HSP gaps for provenance only.
-        missing_optional_hsps = [
+        legacy_missing_optional = [
             h for h in legacy_optional if h not in actual_hsps
         ]
 
@@ -182,11 +183,12 @@ def build_ebr_problem_instances(
             "expected_hsp_policy_source": result_hsp_policy_source,
             "optional_hsps": optional_hsps,
             "actual_hsps": actual_hsps,
-            "missing_optional_hsps": missing_optional_hsps,
+            "missing_optional_hsps": [],
             "_legacy_hsp_policy_debug": {
                 "group": sg,
                 "expected_hsps": legacy_expected,
                 "optional_hsps": legacy_optional,
+                "missing_optional_hsps": legacy_missing_optional,
             } if legacy_policy else {},
         })
 
@@ -196,7 +198,8 @@ def build_ebr_problem_instances(
         "instance_count": len(instances),
         "reduced_ebr_decomposition_status": "not_implemented",
         "_legacy_expected_hsp_policy_debug": {
-            k: v.get("note", "") for k, v in _LEGACY_EXPECTED_HSP.items()
+            k: v.get("note", "")
+            for k, v in _LEGACY_EXPECTED_HSP_POLICY_DEBUG.items()
         },
         "interpretation": (
             "Per-valley/per-subspace-group EBR problem instances grouped from "
@@ -232,7 +235,8 @@ def _empty_report(reason: str) -> dict[str, object]:
         "instance_count": 0,
         "reduced_ebr_decomposition_status": "not_implemented",
         "_legacy_expected_hsp_policy_debug": {
-            k: v.get("note", "") for k, v in _LEGACY_EXPECTED_HSP.items()
+            k: v.get("note", "")
+            for k, v in _LEGACY_EXPECTED_HSP_POLICY_DEBUG.items()
         },
         "interpretation": reason,
         "instances": [],
