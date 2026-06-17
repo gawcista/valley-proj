@@ -598,3 +598,90 @@ def test_schema_doc_documents_irrep_records_by_kpoint():
     assert "provenance" in schema.lower(), (
         "docs/schema.md should mention provenance for the new field"
     )
+
+
+def test_generic_irrep_full_pipeline_smoke():
+    """Synthetic generic matches -> candidates -> instances -> export ->
+    reduced EBR mapping with matching table, rejection with mismatched table."""
+    from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
+    from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
+    from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
+
+    # Fake generic matches from bilbao_restricted_character matching.
+    matching = {
+        "by_kpoint": {},
+        "generic_matches_by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "matching_status": "matched",
+                    "matching_strategy": "bilbao_restricted_character",
+                    "irrep_multiplicities": {"-GM5": 1, "-GM6_a": 1},
+                        "subspace_group_candidate": "P4",
+                    "source_operation_map": {0: 1, 4: 2},
+                    "valley_preserving_operation_ids": [0, 4],
+                    "diagnostic_only": False,
+                    "reason": "",
+                },
+            },
+        },
+    }
+    workflow = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "readiness_level": "trusted",
+                    "workflow_path": "direct_qcut",
+                },
+            },
+        },
+    }
+    # 1. EBR input candidates.
+    candidates = build_ebr_input_candidates(
+        irrep_workflow_decisions=workflow,
+        valley_irrep_matching=matching,
+    )
+    assert candidates["candidate_count"] == 2
+
+    # 2. Problem instances (table-authoritative: expected_hsps from actual).
+    instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
+    assert instances["instance_count"] == 1
+    inst = instances["instances"][0]
+    assert inst["ready_for_ebr_decomposition"] is True
+    assert inst["expected_hsps"] == ["GammaM"]
+
+    # 3. Export bundle.
+    bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
+    assert bundle["bundle_count"] == 1
+    b = bundle["bundles"][0]
+    assert b["ready_for_external_solver"] is True
+
+    # 4. Reduced EBR mapping with a matching table.
+    bp_irreps = b["irreps_by_kpoint"]["GammaM"]
+    matching_table = {
+        "schema_version": "1.0.0",
+        "subspace_group_candidate": "P4",
+        "expected_hsps": ["GammaM"],
+        "irreps": [f"GammaM:{irr}" for irr in bp_irreps],
+        "ebrs": [
+            {"label": "EBR_A", "vector": [1, 0]},
+            {"label": "EBR_B", "vector": [0, 1]},
+        ],
+    }
+    result = build_reduced_ebr_mapping(
+        ebr_export_bundle=bundle, table=matching_table,
+    )
+    assert result["mapping_status"] == "solved_exact"
+
+    # 5. Rejected by mismatched HSP basis.
+    bad_table = dict(matching_table)
+    bad_table["expected_hsps"] = ["GammaM", "KM"]
+    bad_table["irreps"] = list(matching_table["irreps"]) + ["KM:-K5"]
+    bad_table["ebrs"] = [
+        {"label": "EBR_A", "vector": [1, 0, 0]},
+        {"label": "EBR_B", "vector": [0, 1, 0]},
+    ]
+    result2 = build_reduced_ebr_mapping(
+        ebr_export_bundle=bundle, table=bad_table,
+    )
+    assert len(result2["excluded_bundles"]) == 1
+    assert "expected_hsps" in result2["excluded_bundles"][0]["reason"]
