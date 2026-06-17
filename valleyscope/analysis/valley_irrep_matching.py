@@ -222,6 +222,7 @@ def build_valley_irrep_matching_report(
     source_irrep_characters_flattened: (
         Mapping[str, Mapping[str, Mapping[str, Mapping[int, complex]]]] | None
     ) = None,
+    source_payload_blocked_rows: list[Mapping[str, Any]] | None = None,
 ) -> dict[str, object]:
     """Build per-(kpoint, valley) irrep matching results.
 
@@ -506,6 +507,44 @@ def build_valley_irrep_matching_report(
                     "diagnostic_only": g_result.get("diagnostic_only", False),
                     "reason": g_result.get("reason", ""),
                 }
+
+    # --- Blocked source-payload rows (adapter/preflight diagnostics) ---
+    if source_payload_blocked_rows:
+        for row in source_payload_blocked_rows:
+            if not isinstance(row, Mapping):
+                continue
+            kp_name = row.get("kpoint")
+            v_name = row.get("valley")
+            if not isinstance(kp_name, str) or not isinstance(v_name, str):
+                continue
+            existing = generic_matches.get(kp_name, {}).get(v_name)
+            if existing is not None and existing.get("matching_status") == "matched":
+                continue
+            blocker_reasons = row.get("blocker_reasons", row.get("reason", ""))
+            if isinstance(blocker_reasons, list):
+                reason = "; ".join(str(reason) for reason in blocker_reasons)
+            else:
+                reason = str(blocker_reasons)
+            provenance = {
+                key: value
+                for key, value in row.items()
+                if key not in {"kpoint", "valley", "blocker_reasons", "reason"}
+            }
+            generic_matches.setdefault(kp_name, {})[v_name] = {
+                "matching_status": "blocked",
+                "matching_strategy": "bilbao_restricted_character",
+                "irrep_multiplicities": {},
+                "source_operation_map": dict(row.get("source_operation_map", {}))
+                if isinstance(row.get("source_operation_map", {}), Mapping)
+                else {},
+                "valley_preserving_operation_ids": _operation_ids_from_value(
+                    row.get("valley_preserving_operation_ids", [])
+                ),
+                "diagnostic_only": True,
+                "reason": reason,
+                "source_payload_status": "blocked",
+                "source_payload_provenance": provenance,
+            }
 
     return {
         "status": "ok" if by_kpoint else "not_evaluated",

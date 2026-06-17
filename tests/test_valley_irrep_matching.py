@@ -425,3 +425,43 @@ def test_flattened_per_row_path_matches_with_identity():
     assert gm["matching_status"] == "matched"
     assert gm["irrep_multiplicities"] == {"A": 1, "B": 1}
     assert gm["diagnostic_only"] is False
+
+
+def test_source_payload_blocked_row_surfaces_in_generic_matches():
+    """Blocked source payload rows must remain visible to downstream review."""
+    from valleyscope.analysis.valley_irrep_matching import (
+        build_valley_irrep_matching_report,
+    )
+    decisions = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "readiness_level": "trusted",
+                    "workflow_path": "direct_qcut",
+                },
+            },
+        },
+    }
+    report = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=decisions,
+        symmetry_adapted_valley_report={"by_kpoint": {}},
+        source_payload_blocked_rows=[{
+            "kpoint": "GammaM",
+            "valley": "K_valley",
+            "source_hsp_label": "GM",
+            "table_sg_number": 150,
+            "table_spinor": True,
+            "valley_preserving_operation_ids": [0, 4],
+            "blocker_reasons": [
+                "table_operation_matching_failed: no mapped VP op",
+            ],
+        }],
+    )
+    gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
+    assert gm["matching_status"] == "blocked"
+    assert gm["matching_strategy"] == "bilbao_restricted_character"
+    assert gm["diagnostic_only"] is True
+    assert gm["irrep_multiplicities"] == {}
+    assert gm["valley_preserving_operation_ids"] == [0, 4]
+    assert "table_operation_matching_failed" in gm["reason"]
+    assert gm["source_payload_provenance"]["source_hsp_label"] == "GM"

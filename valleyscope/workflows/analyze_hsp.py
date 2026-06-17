@@ -463,9 +463,16 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     gis_cfg.spacegroup_number, spinor=gis_cfg.spinor,
                 )
             except Exception as exc:
-                generic_source_blocked_rows.append({
-                    "reason": f"load_standard_irrep_table failed: {exc}",
-                })
+                for kp_name, valley_map in gis_cfg.source_hsp_labels.items():
+                    for v_name, src_hsp in valley_map.items():
+                        generic_source_blocked_rows.append({
+                            "kpoint": kp_name,
+                            "valley": v_name,
+                            "source_hsp_label": src_hsp,
+                            "table_sg_number": gis_cfg.spacegroup_number,
+                            "table_spinor": gis_cfg.spinor,
+                            "reason": f"load_standard_irrep_table failed: {exc}",
+                        })
                 table = None
             if table is not None:
                 # Build per-(kpoint, valley) source payloads using actual
@@ -520,6 +527,11 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                                         "kpoint": kp_name,
                                         "valley": v_name,
                                         "source_hsp_label": src_hsp,
+                                        "table_sg_number": table.number,
+                                        "table_name": table.name,
+                                        "table_spinor": table.spinor,
+                                        "valley_preserving_operation_ids": list(vp_ids),
+                                        "provenance": payload.get("provenance", {}),
                                         "blocker_reasons": payload["blocker_reasons"],
                                     })
                 if src_chars and src_op_maps:
@@ -542,6 +554,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 generic_source_payloads.get("source_operation_maps", {})
                 if generic_source_payloads else None
             ),
+            source_payload_blocked_rows=generic_source_blocked_rows,
         )
     else:
         # Legacy: no generic source payloads.
