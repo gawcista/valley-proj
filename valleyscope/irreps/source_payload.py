@@ -28,8 +28,8 @@ def build_source_payload_for_generic_matching(
     Parameters
     ----------
     table : StandardIrrepTable
-        A reviewed Bilbao/irreptable irrep table loaded with
-        ``StandardIrrepTable.from_irreptables("149", True)`` or equivalent.
+        A reviewed Bilbao/irreptable irrep table loaded through
+        ``load_standard_irrep_table(...)`` or an equivalent table object.
     source_hsp_label : str
         The Bilbao source HSP label to use (e.g. ``"K"``, ``"GM"``).
         Not inferred from ValleyScope labels.
@@ -48,12 +48,30 @@ def build_source_payload_for_generic_matching(
     dict with ``source_irrep_characters``, ``source_operation_map``,
     ``provenance``, ``status``, and if blocked, ``blocker_reasons``.
     """
-    errors: list[str] = []
-
     # --- Validate VP operation IDs ---
-    if not valley_preserving_operation_ids:
+    vp_ids = _validate_operation_ids(valley_preserving_operation_ids)
+    if vp_ids is None:
+        return _blocked(
+            "invalid_valley_preserving_operation_ids",
+            "valley-preserving operation IDs must be distinct integers",
+        )
+    if not vp_ids:
         return _blocked("empty_valley_preserving_operation_ids",
                         "no valley-preserving operation IDs provided")
+
+    if not isinstance(source_hsp_label, str) or not source_hsp_label:
+        return _blocked(
+            "missing_source_hsp_label",
+            "source_hsp_label must be an explicit non-empty string",
+        )
+
+    # --- Check source HSP has irreps before operation matching ---
+    irreps = table.irreps_by_kpoint(source_hsp_label)
+    if not irreps:
+        return _blocked(
+            "no_source_irreps_for_hsp",
+            f"source HSP {source_hsp_label!r} has no irreps in the table",
+        )
 
     # Build lookup from ValleyScope op ID to detected operation metadata.
     vs_op_lookup: dict[int, dict[str, Any]] = {}
@@ -65,8 +83,7 @@ def build_source_payload_for_generic_matching(
             continue
         vs_op_lookup[op_id] = det
 
-    missing_vs = [op for op in valley_preserving_operation_ids
-                  if op not in vs_op_lookup]
+    missing_vs = [op for op in vp_ids if op not in vs_op_lookup]
     if missing_vs:
         return _blocked(
             "missing_detected_operations",
@@ -75,20 +92,22 @@ def build_source_payload_for_generic_matching(
         )
 
     # --- Match ValleyScope operations to table operations ---
+    vp_detected_operations = [vs_op_lookup[op_id] for op_id in vp_ids]
     op_match = match_table_operations(
         table=table,
-        detected_operations=detected_operations,
+        detected_operations=vp_detected_operations,
         tolerance=tol,
     )
-    if op_match.status not in ("ok", "complete"):
+    if op_match.unmatched_operation_ids:
         return _blocked(
             "table_operation_matching_failed",
-            f"match_table_operations status={op_match.status}",
+            "valley-preserving operations could not be mapped to table "
+            f"operation indices: {op_match.unmatched_operation_ids}",
         )
 
     # Build source_operation_map: VS op ID -> table operation index.
     source_operation_map: dict[int, int] = {}
-    for op_id in valley_preserving_operation_ids:
+    for op_id in vp_ids:
         table_index = op_match.mapping_by_operation_id.get(op_id)
         if table_index is None:
             return _blocked(
@@ -98,12 +117,33 @@ def build_source_payload_for_generic_matching(
             )
         source_operation_map[op_id] = table_index
 
-    # --- Check source HSP has irreps ---
-    irreps = table.irreps_by_kpoint(source_hsp_label)
-    if not irreps:
+    mapped_table_indices = list(source_operation_map.values())
+    missing_chars = {
+        irrep.label: [
+            table_index for table_index in mapped_table_indices
+            if table_index not in irrep.characters
+        ]
+        for irrep in irreps
+    }
+    missing_chars = {
+        label: missing for label, missing in missing_chars.items() if missing
+    }
+    if missing_chars:
         return _blocked(
-            "no_source_irreps_for_hsp",
-            f"source HSP {source_hsp_label!r} has no irreps in the table",
+            "missing_source_irrep_characters",
+            f"source irreps are missing mapped operation characters: "
+            f"{missing_chars}",
+        )
+
+    ambiguous = _ambiguous_restricted_irreps(
+        irreps=irreps,
+        table_indices=mapped_table_indices,
+    )
+    if ambiguous:
+        return _blocked(
+            "ambiguous_restricted_source_irreps",
+            "source irreps are not distinguishable on the restricted "
+            f"operation set: {ambiguous}",
         )
 
     # --- Build source_irrep_characters ---
@@ -120,11 +160,42 @@ def build_source_payload_for_generic_matching(
             "table_name": table.name,
             "table_spinor": table.spinor,
             "source_hsp_label": source_hsp_label,
-            "valley_preserving_operation_ids": valley_preserving_operation_ids,
+            "valley_preserving_operation_ids": vp_ids,
+            "source_table_operation_indices": mapped_table_indices,
+            "unused_table_operation_indices": op_match.unused_table_operation_indices,
             "table_operations_mapped": len(source_operation_map),
         },
         "blocker_reasons": [],
     }
+
+
+def _validate_operation_ids(values: list[int]) -> list[int] | None:
+    out: list[int] = []
+    for value in values:
+        if not isinstance(value, int) or isinstance(value, bool):
+            return None
+        if value in out:
+            return None
+        out.append(value)
+    return out
+
+
+def _ambiguous_restricted_irreps(
+    *,
+    irreps: object,
+    table_indices: list[int],
+) -> dict[tuple[tuple[float, float], ...], list[str]]:
+    groups: dict[tuple[tuple[float, float], ...], list[str]] = {}
+    for irrep in irreps:
+        key = tuple(
+            (
+                round(float(irrep.characters[idx].real), 12),
+                round(float(irrep.characters[idx].imag), 12),
+            )
+            for idx in table_indices
+        )
+        groups.setdefault(key, []).append(irrep.label)
+    return {key: labels for key, labels in groups.items() if len(labels) > 1}
 
 
 def _blocked(reason_key: str, reason: str) -> dict[str, Any]:
