@@ -10,6 +10,8 @@ Non-goals: no reduced EBR, no compatibility relations, no full induced rep logic
 from __future__ import annotations
 
 from collections.abc import Mapping
+from cmath import exp
+import math
 from typing import Any
 
 from valleyscope.data.valley_irreps.catalog import get_irrep_phase_list
@@ -243,15 +245,23 @@ def build_valley_irrep_matching_report(
             for subspace in kp_data.get("valley_preserving_subspaces", []):
                 if not isinstance(subspace, dict):
                     continue
-                orbit = subspace.get("orbit", [])
-                if not orbit:
-                    continue
-                v = str(orbit[0])
+                v_raw = subspace.get("reference_valley")
+                if not v_raw:
+                    orbit = subspace.get("orbit", [])
+                    if not orbit:
+                        continue
+                    v_raw = orbit[0]
+                v = str(v_raw)
                 char_diag = subspace.get("valley_preserving_character_diagnostics", {})
                 sg = subspace.get("subspace_group", {})
+                ssg = subspace.get("subspace_space_group", {})
                 sa_by_kp.setdefault(kp_name, {})[v] = {
                     "char_diag": char_diag,
                     "subspace_group": sg,
+                    "subspace_space_group": ssg,
+                    "hsp_preserving_operation_ids": subspace.get(
+                        "hsp_preserving_operation_ids", []
+                    ),
                 }
 
     for kp_name, valley_decisions in decisions_by_kp.items():
@@ -332,32 +342,65 @@ def build_valley_irrep_matching_report(
                 # Collect ValleyScope computed characters from character
                 # diagnostics for this (kpoint, valley).
                 sa = sa_by_kp.get(kp_name, {}).get(v_name, {})
+                decision = (
+                    decisions_by_kp.get(kp_name, {}).get(v_name, {})
+                    if isinstance(decisions_by_kp.get(kp_name, {}), dict)
+                    else {}
+                )
+                readiness = (
+                    str(decision.get("readiness_level", ""))
+                    if isinstance(decision, dict)
+                    else ""
+                )
+                path = (
+                    str(decision.get("workflow_path", ""))
+                    if isinstance(decision, dict)
+                    else ""
+                )
                 char_diag_g = sa.get("char_diag", {})
                 per_valley_g = char_diag_g.get("per_valley", {})
-                computed: dict[int, complex] = {}
-                vp_ids: list[int] = []
-                if isinstance(per_valley_g, dict):
-                    for _, items in per_valley_g.items():
-                        if not isinstance(items, list):
-                            continue
-                        for item in items:
-                            if not isinstance(item, dict):
-                                continue
-                            op_id = item.get("operation_id")
-                            if not isinstance(op_id, int) or isinstance(op_id, bool):
-                                continue
-                            eigenphases = item.get("eigenphases")
-                            if not eigenphases:
-                                continue
-                            # Sum eigenphases across states to get trace.
-                            from cmath import exp
-                            import math
-                            tr = sum(exp(2j * math.pi * p) for p in eigenphases
-                                     if isinstance(p, (int, float)))
-                            computed[op_id] = tr
-                            if op_id not in vp_ids and op_id != 0:
-                                vp_ids.append(op_id)
+                items = (
+                    per_valley_g.get(v_name, [])
+                    if isinstance(per_valley_g, dict)
+                    else []
+                )
+                computed, item_op_ids = _computed_characters_from_items(items)
+                ssg = sa.get("subspace_space_group", {})
+                vp_ids = (
+                    _operation_ids_from_value(
+                        ssg.get("valley_preserving_operation_ids")
+                        if isinstance(ssg, Mapping)
+                        else None
+                    )
+                    or item_op_ids
+                )
+                hsp_ids = (
+                    _operation_ids_from_value(
+                        sa.get("hsp_preserving_operation_ids")
+                    )
+                    or vp_ids
+                )
                 if not vp_ids or not computed:
+                    continue
+
+                if readiness != READINESS_TRUSTED:
+                    status = (
+                        "blocked"
+                        if readiness == READINESS_BLOCKED
+                        else "diagnostic_only"
+                    )
+                    generic_matches.setdefault(kp_name, {})[v_name] = {
+                        "matching_status": status,
+                        "matching_strategy": "bilbao_restricted_character",
+                        "irrep_multiplicities": {},
+                        "source_operation_map": dict(op_map),
+                        "valley_preserving_operation_ids": vp_ids,
+                        "hsp_little_group_operation_ids": hsp_ids,
+                        "diagnostic_only": True,
+                        "reason": f"readiness_level={readiness} is not trusted",
+                        "workflow_path": path,
+                        "readiness_level": readiness,
+                    }
                     continue
 
                 # Run generic matcher.
@@ -366,6 +409,7 @@ def build_valley_irrep_matching_report(
                     source_irrep_characters=source_irrep_characters,
                     valley_preserving_operation_ids=vp_ids,
                     source_operation_map=dict(op_map),
+                    hsp_little_group_operation_ids=hsp_ids,
                 )
                 generic_matches.setdefault(kp_name, {})[v_name] = {
                     "matching_status": g_result["matching_status"],
@@ -373,8 +417,11 @@ def build_valley_irrep_matching_report(
                     "irrep_multiplicities": g_result.get("irrep_multiplicities", {}),
                     "source_operation_map": g_result.get("source_operation_map", {}),
                     "valley_preserving_operation_ids": vp_ids,
+                    "hsp_little_group_operation_ids": hsp_ids,
                     "diagnostic_only": g_result.get("diagnostic_only", False),
                     "reason": g_result.get("reason", ""),
+                    "workflow_path": path,
+                    "readiness_level": readiness,
                 }
 
     return {
@@ -387,3 +434,46 @@ def build_valley_irrep_matching_report(
         **({"generic_matches_by_kpoint": generic_matches}
            if generic_matches else {}),
     }
+
+
+def _operation_ids_from_value(value: object) -> list[int]:
+    if isinstance(value, Mapping):
+        iterable = value.keys()
+    elif isinstance(value, (list, tuple, set)):
+        iterable = value
+    else:
+        return []
+    out: list[int] = []
+    for op_id in iterable:
+        if isinstance(op_id, int) and not isinstance(op_id, bool) and op_id not in out:
+            out.append(op_id)
+    return out
+
+
+def _computed_characters_from_items(
+    items: object,
+) -> tuple[dict[int, complex], list[int]]:
+    computed: dict[int, complex] = {}
+    op_ids: list[int] = []
+    if not isinstance(items, list):
+        return computed, op_ids
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        op_id = item.get("operation_id")
+        if not isinstance(op_id, int) or isinstance(op_id, bool):
+            continue
+        eigenphases = item.get("eigenphases")
+        if not isinstance(eigenphases, list) or not eigenphases:
+            continue
+        phases = [
+            float(phase)
+            for phase in eigenphases
+            if isinstance(phase, (int, float)) and not isinstance(phase, bool)
+        ]
+        if not phases:
+            continue
+        computed[op_id] = sum(exp(2j * math.pi * phase) for phase in phases)
+        if op_id not in op_ids:
+            op_ids.append(op_id)
+    return computed, op_ids

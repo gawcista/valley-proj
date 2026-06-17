@@ -348,6 +348,171 @@ def test_incomplete_source_map_diagnostic():
     assert "incomplete" in gm["reason"]
 
 
+def test_generic_wiring_includes_identity_zero_for_reducible_character():
+    """Wiring must include identity op=0 in the full G_k^(a) inner product."""
+    from valleyscope.analysis.valley_irrep_matching import (
+        build_valley_irrep_matching_report,
+    )
+    decisions = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "readiness_level": "trusted",
+                    "workflow_path": "direct_qcut",
+                },
+            },
+        },
+    }
+    sa_report = {
+        "by_kpoint": {
+            "GammaM": {
+                "valley_preserving_subspaces": [{
+                    "orbit": ["K_valley"],
+                    "reference_valley": "K_valley",
+                    "hsp_preserving_operation_ids": [0, 4],
+                    "subspace_space_group": {
+                        "valley_preserving_operation_ids": [0, 4],
+                    },
+                    "valley_preserving_character_diagnostics": {
+                        "per_valley": {
+                            "K_valley": [
+                                {"operation_id": 0, "eigenphases": [0.0, 0.0]},
+                                {"operation_id": 4, "eigenphases": [0.0, 0.5]},
+                            ],
+                        },
+                    },
+                    "subspace_group": {
+                        "subspace_group_candidate": "P2",
+                        "operation_orders": {"0": 1, "4": 2},
+                    },
+                }],
+            },
+        },
+    }
+    source_chars = {
+        "A": {1: 1.0 + 0j, 2: 1.0 + 0j},
+        "B": {1: 1.0 + 0j, 2: -1.0 + 0j},
+    }
+    op_maps = {"GammaM": {"K_valley": {0: 1, 4: 2}}}
+    report = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=decisions,
+        symmetry_adapted_valley_report=sa_report,
+        source_irrep_characters=source_chars,
+        source_operation_maps=op_maps,
+    )
+    gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
+    assert gm["matching_status"] == "matched"
+    assert gm["valley_preserving_operation_ids"] == [0, 4]
+    assert gm["source_operation_map"] == {0: 1, 4: 2}
+    assert gm["irrep_multiplicities"] == {"A": 1, "B": 1}
+
+
+def test_generic_wiring_blocks_non_trusted_readiness():
+    """Generic wiring must not produce trusted matches for blocked rows."""
+    from valleyscope.analysis.valley_irrep_matching import (
+        build_valley_irrep_matching_report,
+    )
+    decisions = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "readiness_level": "blocked",
+                    "workflow_path": "blocked",
+                },
+            },
+        },
+    }
+    sa_report = {
+        "by_kpoint": {
+            "GammaM": {
+                "valley_preserving_subspaces": [{
+                    "orbit": ["K_valley"],
+                    "reference_valley": "K_valley",
+                    "subspace_space_group": {
+                        "valley_preserving_operation_ids": [0, 4],
+                    },
+                    "valley_preserving_character_diagnostics": {
+                        "per_valley": {
+                            "K_valley": [
+                                {"operation_id": 0, "eigenphases": [0.0]},
+                                {"operation_id": 4, "eigenphases": [0.5]},
+                            ],
+                        },
+                    },
+                    "subspace_group": {
+                        "subspace_group_candidate": "P2",
+                        "operation_orders": {"0": 1, "4": 2},
+                    },
+                }],
+            },
+        },
+    }
+    report = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=decisions,
+        symmetry_adapted_valley_report=sa_report,
+        source_irrep_characters={"B": {1: 1.0 + 0j, 2: -1.0 + 0j}},
+        source_operation_maps={"GammaM": {"K_valley": {0: 1, 4: 2}}},
+    )
+    gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
+    assert gm["matching_status"] == "blocked"
+    assert gm["diagnostic_only"]
+    assert gm["irrep_multiplicities"] == {}
+    assert "not trusted" in gm["reason"]
+
+
+def test_generic_wiring_uses_current_valley_only():
+    """Do not mix character diagnostics from other valleys at the same HSP."""
+    from valleyscope.analysis.valley_irrep_matching import (
+        build_valley_irrep_matching_report,
+    )
+    decisions = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "readiness_level": "trusted",
+                    "workflow_path": "direct_qcut",
+                },
+            },
+        },
+    }
+    sa_report = {
+        "by_kpoint": {
+            "GammaM": {
+                "valley_preserving_subspaces": [{
+                    "orbit": ["K_valley"],
+                    "reference_valley": "K_valley",
+                    "subspace_space_group": {
+                        "valley_preserving_operation_ids": [0, 4],
+                    },
+                    "valley_preserving_character_diagnostics": {
+                        "per_valley": {
+                            "K_valley": [
+                                {"operation_id": 0, "eigenphases": [0.0]},
+                            ],
+                            "Kp_valley": [
+                                {"operation_id": 4, "eigenphases": [0.5]},
+                            ],
+                        },
+                    },
+                    "subspace_group": {
+                        "subspace_group_candidate": "P2",
+                        "operation_orders": {"0": 1, "4": 2},
+                    },
+                }],
+            },
+        },
+    }
+    report = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=decisions,
+        symmetry_adapted_valley_report=sa_report,
+        source_irrep_characters={"B": {1: 1.0 + 0j, 2: -1.0 + 0j}},
+        source_operation_maps={"GammaM": {"K_valley": {0: 1, 4: 2}}},
+    )
+    gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
+    assert gm["matching_status"] == "blocked"
+    assert "incomplete_computed_characters" in gm["reason"]
+
+
 # -----------------------------------------------------------------------
 # ID validation
 # -----------------------------------------------------------------------
