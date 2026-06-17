@@ -733,3 +733,87 @@ def test_generic_irrep_source_config_parses(tmp_path):
         "GammaM": {"K_valley": "GM"},
         "KM": {"K_valley": "K"},
     }
+
+
+def test_generic_irrep_source_rejects_non_integer_sg(tmp_path):
+    """Config rejects non-integer spacegroup_number."""
+    from valleyscope.io.config import load_config
+    import yaml, numpy as np
+    for bad_sg in [1.5, "150", True, None]:
+        config = {
+            "input": {"wavefunction_h5": "wave.h5"},
+            "analysis": {
+                "kpoints": ["GammaM"], "iband": [1],
+                "generic_irrep_source": {
+                    "enabled": True,
+                    "spacegroup_number": bad_sg,
+                    "spinor": True,
+                    "source_hsp_labels": {"GammaM": {"K_valley": "GM"}},
+                },
+            },
+            "monolayer_lattices": {"default": {"reciprocal_cart": np.eye(3).tolist()}},
+            "valley_centers": {"coordinate_mode": "cart", "centers": [{"name": "K", "cart": [0, 0, 0]}]},
+            "valley_subspaces": [{"name": "K_valley", "centers": ["K"]}],
+            "output": {"directory": str(tmp_path)},
+        }
+        cfg_path = tmp_path / "cfg.yaml"
+        cfg_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+        if bad_sg is None:
+            cfg = load_config(cfg_path)
+            assert cfg.generic_irrep_source.spacegroup_number is None
+        else:
+            with pytest.raises(ValueError, match="spacegroup_number"):
+                load_config(cfg_path)
+
+
+def test_generic_irrep_source_rejects_non_bool_spinor(tmp_path):
+    """Config rejects non-boolean spinor."""
+    from valleyscope.io.config import load_config
+    import yaml, numpy as np
+    config = {
+        "input": {"wavefunction_h5": "wave.h5"},
+        "analysis": {
+            "kpoints": ["GammaM"], "iband": [1],
+            "generic_irrep_source": {
+                "enabled": True,
+                "spacegroup_number": 150,
+                "spinor": "true",
+                "source_hsp_labels": {"GammaM": {"K_valley": "GM"}},
+            },
+        },
+        "monolayer_lattices": {"default": {"reciprocal_cart": np.eye(3).tolist()}},
+        "valley_centers": {"coordinate_mode": "cart", "centers": [{"name": "K", "cart": [0, 0, 0]}]},
+        "valley_subspaces": [{"name": "K_valley", "centers": ["K"]}],
+        "output": {"directory": str(tmp_path)},
+    }
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    with pytest.raises(ValueError, match="spinor"):
+        load_config(cfg_path)
+
+
+def test_generic_irrep_source_rejects_invalid_tol(tmp_path):
+    """Config rejects non-positive operation_match_tol."""
+    from valleyscope.io.config import load_config
+    import yaml, numpy as np
+    config = {
+        "input": {"wavefunction_h5": "wave.h5"},
+        "analysis": {
+            "kpoints": ["GammaM"], "iband": [1],
+            "generic_irrep_source": {
+                "enabled": True,
+                "spacegroup_number": 150,
+                "spinor": True,
+                "operation_match_tol": 0.0,
+                "source_hsp_labels": {"GammaM": {"K_valley": "GM"}},
+            },
+        },
+        "monolayer_lattices": {"default": {"reciprocal_cart": np.eye(3).tolist()}},
+        "valley_centers": {"coordinate_mode": "cart", "centers": [{"name": "K", "cart": [0, 0, 0]}]},
+        "valley_subspaces": [{"name": "K_valley", "centers": ["K"]}],
+        "output": {"directory": str(tmp_path)},
+    }
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    with pytest.raises(ValueError, match="operation_match_tol"):
+        load_config(cfg_path)

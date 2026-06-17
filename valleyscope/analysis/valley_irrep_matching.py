@@ -219,6 +219,9 @@ def build_valley_irrep_matching_report(
     source_operation_maps: (
         Mapping[str, Mapping[str, Mapping[int, int]]] | None
     ) = None,
+    source_irrep_characters_flattened: (
+        Mapping[str, Mapping[str, Mapping[str, Mapping[int, complex]]]] | None
+    ) = None,
 ) -> dict[str, object]:
     """Build per-(kpoint, valley) irrep matching results.
 
@@ -422,6 +425,92 @@ def build_valley_irrep_matching_report(
                     "reason": g_result.get("reason", ""),
                     "workflow_path": path,
                     "readiness_level": readiness,
+                }
+
+    # --- Generic matching from flattened per-row source payloads ---
+    if source_irrep_characters_flattened is not None:
+        from valleyscope.analysis.generic_irrep_matching import (
+            match_restricted_characters,
+        )
+        for kp_name, valleys in source_irrep_characters_flattened.items():
+            if not isinstance(valleys, Mapping):
+                continue
+            for v_name, per_row_chars in valleys.items():
+                if not isinstance(per_row_chars, Mapping):
+                    continue
+                sa = sa_by_kp.get(kp_name, {}).get(v_name, {})
+                decision = (
+                    decisions_by_kp.get(kp_name, {}).get(v_name, {})
+                    if isinstance(decisions_by_kp.get(kp_name, {}), dict)
+                    else {}
+                )
+                readiness = str(decision.get("readiness_level", ""))
+                path_wf = str(decision.get("workflow_path", ""))
+                op_map = (
+                    source_operation_maps.get(kp_name, {}).get(v_name, {})
+                    if source_operation_maps and isinstance(source_operation_maps, Mapping)
+                    else {}
+                )
+                char_diag_fl = sa.get("char_diag", {})
+                per_valley_fl = char_diag_fl.get("per_valley", {})
+                computed_fl: dict[int, complex] = {}
+                vp_ids_fl: list[int] = []
+                if isinstance(per_valley_fl, dict):
+                    for _, items in per_valley_fl.items():
+                        if not isinstance(items, list):
+                            continue
+                        for item in items:
+                            if not isinstance(item, dict):
+                                continue
+                            op_id = item.get("operation_id")
+                            if not isinstance(op_id, int) or isinstance(op_id, bool):
+                                continue
+                            eigenphases = item.get("eigenphases")
+                            if not eigenphases:
+                                continue
+                            import math as _math
+                            from cmath import exp as _exp
+                            tr = sum(_exp(2j * _math.pi * p) for p in eigenphases
+                                     if isinstance(p, (int, float)))
+                            computed_fl[op_id] = tr
+                            if op_id not in vp_ids_fl and op_id != 0:
+                                vp_ids_fl.append(op_id)
+                if not vp_ids_fl or not computed_fl or not isinstance(op_map, Mapping) or not op_map:
+                    generic_matches.setdefault(kp_name, {})[v_name] = {
+                        "matching_status": "blocked",
+                        "matching_strategy": "bilbao_restricted_character",
+                        "irrep_multiplicities": {},
+                        "source_operation_map": dict(op_map) if isinstance(op_map, Mapping) else {},
+                        "valley_preserving_operation_ids": vp_ids_fl,
+                        "diagnostic_only": True,
+                        "reason": "no_computed_character_data_or_operation_map",
+                    }
+                    continue
+                if readiness not in ("trusted",):
+                    generic_matches.setdefault(kp_name, {})[v_name] = {
+                        "matching_status": "blocked",
+                        "matching_strategy": "bilbao_restricted_character",
+                        "irrep_multiplicities": {},
+                        "source_operation_map": dict(op_map),
+                        "valley_preserving_operation_ids": vp_ids_fl,
+                        "diagnostic_only": True,
+                        "reason": f"readiness_level={readiness} is not trusted",
+                    }
+                    continue
+                g_result = match_restricted_characters(
+                    computed_characters=computed_fl,
+                    source_irrep_characters=per_row_chars,
+                    valley_preserving_operation_ids=vp_ids_fl,
+                    source_operation_map=dict(op_map),
+                )
+                generic_matches.setdefault(kp_name, {})[v_name] = {
+                    "matching_status": g_result["matching_status"],
+                    "matching_strategy": g_result["matching_strategy"],
+                    "irrep_multiplicities": g_result.get("irrep_multiplicities", {}),
+                    "source_operation_map": g_result.get("source_operation_map", {}),
+                    "valley_preserving_operation_ids": vp_ids_fl,
+                    "diagnostic_only": g_result.get("diagnostic_only", False),
+                    "reason": g_result.get("reason", ""),
                 }
 
     return {
