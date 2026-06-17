@@ -451,17 +451,24 @@ def build_valley_irrep_matching_report(
                     if source_operation_maps and isinstance(source_operation_maps, Mapping)
                     else {}
                 )
+                # Extract character items list for this valley, matching existing path.
+                char_diag_fl = sa.get("char_diag", {})
+                per_valley_fl = char_diag_fl.get("per_valley", {}) if isinstance(char_diag_fl, dict) else {}
+                items_fl = (
+                    per_valley_fl.get(v_name, [])
+                    if isinstance(per_valley_fl, dict)
+                    else []
+                )
+                computed_fl, item_op_ids = _computed_characters_from_items(items_fl)
                 # Use full G_k^(a) from subspace_space_group, including identity.
                 ssg_fl = sa.get("subspace_space_group", {})
-                vp_ids_fl = _operation_ids_from_value(
-                    ssg_fl.get("valley_preserving_operation_ids", [])
-                ) if isinstance(ssg_fl, dict) else []
-                if not vp_ids_fl:
-                    hsp_ids_from_sa = _operation_ids_from_value(
-                        sa.get("hsp_preserving_operation_ids", [])
-                    )
-                    vp_ids_fl = [i for i in hsp_ids_from_sa if i in op_map] if isinstance(op_map, Mapping) else hsp_ids_from_sa
-                computed_fl = _computed_characters_from_items(sa.get("char_diag", {}))
+                vp_ids_fl = (
+                    _operation_ids_from_value(
+                        ssg_fl.get("valley_preserving_operation_ids", [])
+                    ) if isinstance(ssg_fl, dict) and _operation_ids_from_value(
+                        ssg_fl.get("valley_preserving_operation_ids", [])
+                    ) else item_op_ids
+                )
                 if not vp_ids_fl or not computed_fl or not isinstance(op_map, Mapping) or not op_map:
                     generic_matches.setdefault(kp_name, {})[v_name] = {
                         "matching_status": "blocked",
