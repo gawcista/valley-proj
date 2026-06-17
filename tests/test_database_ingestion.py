@@ -533,3 +533,76 @@ def test_ingestion_record_schema_version_is_1_2_0():
 
 
 # -----------------------------------------------------------------------
+
+
+def test_irrep_records_preserve_generic_fields():
+    """Generic irrep provenance fields survive ingestion flattening."""
+    from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
+    summary = {"target_kpoints": ["GammaM"], "iband": [1], "input": {}}
+    bundle = {
+        "bundles": [{
+            "bundle_id": "b_001",
+            "subspace_group_candidate": "P3",
+            "ready_for_external_solver": True,
+            "irrep_records_by_kpoint": {
+                "GammaM": [{
+                    "valley": "K_valley",
+                    "operation_id": 2,
+                    "operation_order": 3,
+                    "matched_irrep": "-GM5",
+                    "eigenphases": [0.5],
+                    "workflow_path": "direct_qcut",
+                    "readiness_level": "trusted",
+                    "source": "generic/GammaM/K_valley",
+                    "irrep_multiplicity": 2,
+                    "matching_strategy": "bilbao_restricted_character",
+                    "subspace_space_group": {"candidate_space_group_symbol": "P3"},
+                    "legacy_subspace_group_candidate": "C3_like",
+                    "valley_preserving_operation_ids": [0, 2, 3],
+                    "source_operation_map": {0: 1, 2: 2, 3: 3},
+                }],
+            },
+        }],
+    }
+    record = build_database_ingestion_record(
+        valley_summary=summary, valley_ebr_export_bundle=bundle,
+    )
+    recs = record["valley_irrep_records"]
+    assert len(recs) == 1
+    r = recs[0]
+    assert r["irrep_multiplicity"] == 2
+    assert r["matching_strategy"] == "bilbao_restricted_character"
+    assert r["subspace_space_group"] == {"candidate_space_group_symbol": "P3"}
+    assert r["valley_preserving_operation_ids"] == [0, 2, 3]
+    assert r["source_operation_map"] == {0: 1, 2: 2, 3: 3}
+
+
+def test_legacy_records_still_ingest_without_generic_fields():
+    """Legacy records without generic fields ingest successfully."""
+    from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
+    summary = {"target_kpoints": ["GammaM"], "iband": [1], "input": {}}
+    bundle = {
+        "bundles": [{
+            "bundle_id": "b_001",
+            "subspace_group_candidate": "C3_like",
+            "ready_for_external_solver": True,
+            "irrep_records_by_kpoint": {
+                "GammaM": [{
+                    "valley": "K_valley",
+                    "operation_id": 1,
+                    "operation_order": 3,
+                    "matched_irrep": "C3_spinor_phase_+1/2",
+                    "eigenphases": [0.5],
+                    "workflow_path": "direct_qcut",
+                    "readiness_level": "trusted",
+                    "source": "legacy/GammaM/K_valley",
+                }],
+            },
+        }],
+    }
+    record = build_database_ingestion_record(
+        valley_summary=summary, valley_ebr_export_bundle=bundle,
+    )
+    assert record["ready_bundle_count"] == 1
+    r = record["valley_irrep_records"][0]
+    assert r["matched_irrep"] == "C3_spinor_phase_+1/2"

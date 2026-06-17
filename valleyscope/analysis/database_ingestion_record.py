@@ -240,7 +240,7 @@ def _extract_irrep_records(
         for rec in records:
             if not isinstance(rec, dict):
                 continue
-            out.append({
+            entry: dict[str, Any] = {
                 "kpoint": kpoint,
                 "valley": rec.get("valley", ""),
                 "subspace_group_candidate": bundle.get("subspace_group_candidate", ""),
@@ -254,7 +254,19 @@ def _extract_irrep_records(
                 "source": rec.get("source", ""),
                 "source_bundle_id": source_bundle_id,
                 "source_instance_id": source_instance_id,
-            })
+            }
+            # Preserve generic irrep provenance fields when present.
+            for key in (
+                "irrep_multiplicity",
+                "matching_strategy",
+                "subspace_space_group",
+                "legacy_subspace_group_candidate",
+                "valley_preserving_operation_ids",
+                "source_operation_map",
+            ):
+                if key in rec:
+                    entry[key] = rec[key]
+            out.append(entry)
 
 
 def _compact_excluded_records(
