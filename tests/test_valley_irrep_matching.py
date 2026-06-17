@@ -396,7 +396,11 @@ def test_flattened_per_row_path_matches_with_identity():
                 "valley_preserving_subspaces": [{
                     "reference_valley": "K_valley",
                     "orbit": ["K_valley"],
+                    "subspace_group": {
+                        "subspace_group_candidate": "C3_like",
+                    },
                     "subspace_space_group": {
+                        "candidate_space_group_symbol": "P3",
                         "valley_preserving_operation_ids": [0, 4],
                     },
                     "valley_preserving_character_diagnostics": {
@@ -425,6 +429,10 @@ def test_flattened_per_row_path_matches_with_identity():
     assert gm["matching_status"] == "matched"
     assert gm["irrep_multiplicities"] == {"A": 1, "B": 1}
     assert gm["diagnostic_only"] is False
+    assert gm["subspace_group_candidate"] == "C3_like"
+    assert gm["subspace_space_group"]["candidate_space_group_symbol"] == "P3"
+    assert gm["workflow_path"] == "direct_qcut"
+    assert gm["readiness_level"] == "trusted"
 
 
 def test_source_payload_blocked_row_surfaces_in_generic_matches():

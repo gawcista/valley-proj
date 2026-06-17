@@ -346,6 +346,8 @@ def build_valley_irrep_matching_report(
                 # Collect ValleyScope computed characters from character
                 # diagnostics for this (kpoint, valley).
                 sa = sa_by_kp.get(kp_name, {}).get(v_name, {})
+                sg = sa.get("subspace_group", {})
+                ssg = sa.get("subspace_space_group", {})
                 decision = (
                     decisions_by_kp.get(kp_name, {}).get(v_name, {})
                     if isinstance(decisions_by_kp.get(kp_name, {}), dict)
@@ -369,7 +371,6 @@ def build_valley_irrep_matching_report(
                     else []
                 )
                 computed, item_op_ids = _computed_characters_from_items(items)
-                ssg = sa.get("subspace_space_group", {})
                 vp_ids = (
                     _operation_ids_from_value(
                         ssg.get("valley_preserving_operation_ids")
@@ -404,6 +405,12 @@ def build_valley_irrep_matching_report(
                         "reason": f"readiness_level={readiness} is not trusted",
                         "workflow_path": path,
                         "readiness_level": readiness,
+                        "subspace_group_candidate": (
+                            sg.get("subspace_group_candidate")
+                            if isinstance(sg, Mapping) else None
+                        ),
+                        "subspace_space_group": dict(ssg)
+                        if isinstance(ssg, Mapping) else {},
                     }
                     continue
 
@@ -426,6 +433,12 @@ def build_valley_irrep_matching_report(
                     "reason": g_result.get("reason", ""),
                     "workflow_path": path,
                     "readiness_level": readiness,
+                    "subspace_group_candidate": (
+                        sg.get("subspace_group_candidate")
+                        if isinstance(sg, Mapping) else None
+                    ),
+                    "subspace_space_group": dict(ssg)
+                    if isinstance(ssg, Mapping) else {},
                 }
 
     # --- Generic matching from flattened per-row source payloads ---
@@ -440,6 +453,8 @@ def build_valley_irrep_matching_report(
                 if not isinstance(per_row_chars, Mapping):
                     continue
                 sa = sa_by_kp.get(kp_name, {}).get(v_name, {})
+                sg_fl = sa.get("subspace_group", {})
+                ssg_fl = sa.get("subspace_space_group", {})
                 decision = (
                     decisions_by_kp.get(kp_name, {}).get(v_name, {})
                     if isinstance(decisions_by_kp.get(kp_name, {}), dict)
@@ -462,7 +477,6 @@ def build_valley_irrep_matching_report(
                 )
                 computed_fl, item_op_ids = _computed_characters_from_items(items_fl)
                 # Use full G_k^(a) from subspace_space_group, including identity.
-                ssg_fl = sa.get("subspace_space_group", {})
                 vp_ids_fl = (
                     _operation_ids_from_value(
                         ssg_fl.get("valley_preserving_operation_ids", [])
@@ -479,6 +493,14 @@ def build_valley_irrep_matching_report(
                         "valley_preserving_operation_ids": vp_ids_fl,
                         "diagnostic_only": True,
                         "reason": "no_computed_character_data_or_operation_map",
+                        "workflow_path": path_wf,
+                        "readiness_level": readiness,
+                        "subspace_group_candidate": (
+                            sg_fl.get("subspace_group_candidate")
+                            if isinstance(sg_fl, Mapping) else None
+                        ),
+                        "subspace_space_group": dict(ssg_fl)
+                        if isinstance(ssg_fl, Mapping) else {},
                     }
                     continue
                 if readiness not in ("trusted",):
@@ -490,6 +512,14 @@ def build_valley_irrep_matching_report(
                         "valley_preserving_operation_ids": vp_ids_fl,
                         "diagnostic_only": True,
                         "reason": f"readiness_level={readiness} is not trusted",
+                        "workflow_path": path_wf,
+                        "readiness_level": readiness,
+                        "subspace_group_candidate": (
+                            sg_fl.get("subspace_group_candidate")
+                            if isinstance(sg_fl, Mapping) else None
+                        ),
+                        "subspace_space_group": dict(ssg_fl)
+                        if isinstance(ssg_fl, Mapping) else {},
                     }
                     continue
                 g_result = match_restricted_characters(
@@ -506,6 +536,14 @@ def build_valley_irrep_matching_report(
                     "valley_preserving_operation_ids": vp_ids_fl,
                     "diagnostic_only": g_result.get("diagnostic_only", False),
                     "reason": g_result.get("reason", ""),
+                    "workflow_path": path_wf,
+                    "readiness_level": readiness,
+                    "subspace_group_candidate": (
+                        sg_fl.get("subspace_group_candidate")
+                        if isinstance(sg_fl, Mapping) else None
+                    ),
+                    "subspace_space_group": dict(ssg_fl)
+                    if isinstance(ssg_fl, Mapping) else {},
                 }
 
     # --- Blocked source-payload rows (adapter/preflight diagnostics) ---

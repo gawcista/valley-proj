@@ -375,6 +375,12 @@ def test_generic_matches_produce_ebr_candidates():
                     "matching_status": "matched",
                     "matching_strategy": "bilbao_restricted_character",
                     "irrep_multiplicities": {"-GM5": 1, "-GM6_a": 2},
+                    "subspace_group_candidate": "C3_like",
+                    "subspace_space_group": {
+                        "candidate_space_group_symbol": "P3",
+                        "valley_preserving_operation_ids": [0, 4],
+                        "status": "candidate",
+                    },
                     "source_operation_map": {0: 1, 4: 2},
                     "valley_preserving_operation_ids": [0, 4],
                     "diagnostic_only": False,
@@ -388,11 +394,14 @@ def test_generic_matches_produce_ebr_candidates():
         valley_irrep_matching=matching,
     )
     assert result["status"] == "has_candidates"
-    assert result["candidate_count"] == 3  # 1 + 2
+    assert result["candidate_count"] == 2
     cands = result["candidates"]
-    labels = [c["matched_irrep"] for c in cands]
-    assert labels.count("-GM5") == 1
-    assert labels.count("-GM6_a") == 2
+    by_label = {c["matched_irrep"]: c for c in cands}
+    assert by_label["-GM5"]["irrep_multiplicity"] == 1
+    assert by_label["-GM6_a"]["irrep_multiplicity"] == 2
     for c in cands:
         assert c["matching_strategy"] == "bilbao_restricted_character"
         assert c["ready_for_ebr_input"] is True
+        assert c["subspace_group_candidate"] == "P3"
+        assert c["legacy_subspace_group_candidate"] == "C3_like"
+        assert c["subspace_space_group"]["candidate_space_group_symbol"] == "P3"

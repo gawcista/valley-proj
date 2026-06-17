@@ -56,6 +56,16 @@ def build_ebr_input_candidates(
                 mults = gm.get("irrep_multiplicities", {})
                 op_map = gm.get("source_operation_map", {})
                 vp_ids = gm.get("valley_preserving_operation_ids", [])
+                positive_mults, invalid_mults = _validated_multiplicities(mults)
+                subspace_space_group = (
+                    dict(gm.get("subspace_space_group", {}))
+                    if isinstance(gm.get("subspace_space_group", {}), dict)
+                    else {}
+                )
+                subspace_group_candidate = (
+                    subspace_space_group.get("candidate_space_group_symbol")
+                    or gm.get("subspace_group_candidate")
+                )
 
                 # Candidate gate
                 if (
@@ -63,26 +73,28 @@ def build_ebr_input_candidates(
                     and path != "blocked"
                     and match_status == "matched"
                     and not diag
-                    and isinstance(mults, dict)
-                    and mults
+                    and positive_mults
+                    and not invalid_mults
                 ):
-                    for irrep_label, mult in mults.items():
-                        if not isinstance(mult, int) or mult <= 0:
-                            continue
-                        for _ in range(mult):
-                            candidates.append({
-                                "kpoint": kp_name,
-                                "valley": v_name,
-                                "workflow_path": path,
-                                "readiness_level": readiness,
-                                "matching_strategy": "bilbao_restricted_character",
-                                "matched_irrep": irrep_label,
-                                "irrep_multiplicity": mult,
-                                "valley_preserving_operation_ids": list(vp_ids),
-                                "source_operation_map": dict(op_map) if isinstance(op_map, dict) else {},
-                                "source": f"valley_irrep_matching/generic/{kp_name}/{v_name}",
-                                "ready_for_ebr_input": True,
-                            })
+                    for irrep_label, mult in positive_mults:
+                        candidates.append({
+                            "kpoint": kp_name,
+                            "valley": v_name,
+                            "workflow_path": path,
+                            "readiness_level": readiness,
+                            "subspace_group_candidate": subspace_group_candidate,
+                            "legacy_subspace_group_candidate": gm.get(
+                                "subspace_group_candidate"
+                            ),
+                            "subspace_space_group": subspace_space_group,
+                            "matching_strategy": "bilbao_restricted_character",
+                            "matched_irrep": irrep_label,
+                            "irrep_multiplicity": mult,
+                            "valley_preserving_operation_ids": _list_or_empty(vp_ids),
+                            "source_operation_map": dict(op_map) if isinstance(op_map, dict) else {},
+                            "source": f"valley_irrep_matching/generic/{kp_name}/{v_name}",
+                            "ready_for_ebr_input": True,
+                        })
                     continue
 
                 # Not a candidate — explain why.
@@ -95,8 +107,12 @@ def build_ebr_input_candidates(
                     reasons.append(f"matching_status={match_status}")
                 if diag:
                     reasons.append("diagnostic_only=true")
-                if not isinstance(mults, dict) or not mults:
+                if not isinstance(mults, dict) or not positive_mults:
                     reasons.append("no irrep_multiplicities")
+                if invalid_mults:
+                    reasons.append(
+                        f"invalid irrep_multiplicities: {invalid_mults}"
+                    )
                 gm_reason = gm.get("reason", "")
                 if isinstance(gm_reason, str) and gm_reason:
                     reasons.append(gm_reason)
@@ -254,6 +270,32 @@ def _coerce_id(op_id: object) -> object:
         return int(str(op_id))
     except (TypeError, ValueError):
         return op_id
+
+
+def _validated_multiplicities(
+    mults: object,
+) -> tuple[list[tuple[str, int]], list[str]]:
+    if not isinstance(mults, dict):
+        return [], ["not a mapping"]
+    positive: list[tuple[str, int]] = []
+    invalid: list[str] = []
+    for label, value in mults.items():
+        if not isinstance(label, str) or not label:
+            invalid.append(f"{label!r}: invalid label")
+            continue
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            invalid.append(f"{label}: {value!r}")
+            continue
+        positive.append((label, value))
+    return positive, invalid
+
+
+def _list_or_empty(value: object) -> list[object]:
+    if isinstance(value, list):
+        return list(value)
+    if isinstance(value, tuple):
+        return list(value)
+    return []
 
 
 def _blocked_row(

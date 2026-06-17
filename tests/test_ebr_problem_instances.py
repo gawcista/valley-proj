@@ -259,3 +259,57 @@ def test_same_valley_different_provenance_not_merged():
         "direct_qcut",
         "symmetry_adapted",
     }
+
+
+def test_generic_multiplicity_records_expand_irrep_counts():
+    """Generic character multiplicities expand only at problem-instance level."""
+    cands = {
+        "candidates": [
+            {
+                "kpoint": "GammaM",
+                "valley": "K_valley",
+                "workflow_path": "direct_qcut",
+                "readiness_level": "trusted",
+                "subspace_group_candidate": "P3",
+                "subspace_space_group": {
+                    "candidate_space_group_symbol": "P3",
+                    "valley_preserving_operation_ids": [0, 4],
+                },
+                "legacy_subspace_group_candidate": "C3_like",
+                "matched_irrep": "-GM6_a",
+                "irrep_multiplicity": 2,
+                "matching_strategy": "bilbao_restricted_character",
+                "valley_preserving_operation_ids": [0, 4],
+                "source_operation_map": {0: 1, 4: 2},
+                "ready_for_ebr_input": True,
+            },
+            {
+                "kpoint": "KM",
+                "valley": "K_valley",
+                "workflow_path": "direct_qcut",
+                "readiness_level": "trusted",
+                "subspace_group_candidate": "P3",
+                "subspace_space_group": {
+                    "candidate_space_group_symbol": "P3",
+                    "valley_preserving_operation_ids": [0, 4],
+                },
+                "legacy_subspace_group_candidate": "C3_like",
+                "matched_irrep": "-K5",
+                "irrep_multiplicity": 1,
+                "matching_strategy": "bilbao_restricted_character",
+                "valley_preserving_operation_ids": [0, 4],
+                "source_operation_map": {0: 1, 4: 2},
+                "ready_for_ebr_input": True,
+            },
+        ],
+    }
+    r = build_ebr_problem_instances(ebr_input_candidates=cands)
+    inst = r["instances"][0]
+    assert inst["status"] == "complete"
+    assert inst["ready_for_ebr_decomposition"] is True
+    assert inst["irreps_by_kpoint"]["GammaM"] == ["-GM6_a", "-GM6_a"]
+    assert inst["irreps_by_kpoint"]["KM"] == ["-K5"]
+    rec = inst["irrep_records_by_kpoint"]["GammaM"][0]
+    assert rec["irrep_multiplicity"] == 2
+    assert rec["matching_strategy"] == "bilbao_restricted_character"
+    assert rec["subspace_space_group"]["candidate_space_group_symbol"] == "P3"

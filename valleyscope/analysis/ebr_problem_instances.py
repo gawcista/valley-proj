@@ -96,21 +96,37 @@ def build_ebr_problem_instances(
             irrep = c.get("matched_irrep")
             op_id = c.get("operation_id")
             if irrep:
-                irreps_by_kpoint.setdefault(kp, []).append(str(irrep))
+                multiplicity = _positive_multiplicity(c.get("irrep_multiplicity"))
+                irreps_by_kpoint.setdefault(kp, []).extend(
+                    [str(irrep)] * multiplicity
+                )
             if op_id is not None:
                 operations_by_kpoint.setdefault(kp, []).append(op_id)
             # Provenance record for trusted candidates only.
-            irrep_records_by_kpoint.setdefault(kp, []).append({
+            record: dict[str, object] = {
                 "valley": valley,
                 "operation_id": c.get("operation_id"),
                 "operation_order": c.get("operation_order"),
                 "matched_irrep": c.get("matched_irrep"),
+                "irrep_multiplicity": _positive_multiplicity(
+                    c.get("irrep_multiplicity")
+                ),
                 "character": c.get("character"),
                 "eigenphases": c.get("eigenphases", []),
                 "workflow_path": workflow_path,
                 "readiness_level": readiness_level,
                 "source": c.get("source", ""),
-            })
+            }
+            for key in (
+                "matching_strategy",
+                "subspace_space_group",
+                "legacy_subspace_group_candidate",
+                "valley_preserving_operation_ids",
+                "source_operation_map",
+            ):
+                if key in c:
+                    record[key] = c[key]
+            irrep_records_by_kpoint.setdefault(kp, []).append(record)
 
         # Completeness: check expected HSPs
         policy = _LEGACY_EXPECTED_HSP.get(sg, {})
@@ -190,6 +206,12 @@ def _sort_key(op_id: object) -> tuple[int, object]:
         return (0, int(str(op_id)))
     except (TypeError, ValueError):
         return (1, str(op_id))
+
+
+def _positive_multiplicity(value: object) -> int:
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return 1
 
 
 def _empty_report(reason: str) -> dict[str, object]:
