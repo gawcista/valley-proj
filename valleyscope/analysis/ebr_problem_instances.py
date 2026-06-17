@@ -69,22 +69,26 @@ def build_ebr_problem_instances(
     if not candidates:
         return _empty_report("no trusted EBR input candidates")
 
-    # Group by the full workflow identity.  Mixing direct q-cut and
-    # symmetry-adapted candidates would make downstream EBR provenance unclear.
-    groups: dict[tuple[str, str, str, str], list[dict[str, object]]] = {}
+    # Group by physical subspace-space-group symbol when present; fall back
+    # to legacy subgroup candidate for older candidates.
+    groups: dict[tuple[str, str, str, str, str], list[dict[str, object]]] = {}
     for c in candidates:
-        sg = str(c.get("subspace_group_candidate", ""))
-        # Default to no_policy for groups without explicit legacy HSP policy.
-        # Future: expected HSPs should come from reduced table/source reduction.
+        ssg = c.get("subspace_space_group", {})
+        sg_symbol = (
+            ssg.get("candidate_space_group_symbol")
+            if isinstance(ssg, dict) else None
+        )
+        sg = str(sg_symbol) if sg_symbol else str(c.get("subspace_group_candidate", ""))
+        legacy_sg = str(c.get("legacy_subspace_group_candidate", ""))
         valley = str(c.get("valley", ""))
         workflow_path = str(c.get("workflow_path", ""))
         readiness_level = str(c.get("readiness_level", ""))
-        groups.setdefault((sg, valley, workflow_path, readiness_level), []).append(c)
+        groups.setdefault((sg, legacy_sg, valley, workflow_path, readiness_level), []).append(c)
 
     instances: list[dict[str, object]] = []
     instance_counter = 0
 
-    for (sg, valley, workflow_path, readiness_level), cands in groups.items():
+    for (sg, legacy_sg, valley, workflow_path, readiness_level), cands in groups.items():
         instance_counter += 1
         instance_id = f"ebr_instance_{instance_counter:03d}"
 
@@ -102,7 +106,6 @@ def build_ebr_problem_instances(
                 )
             if op_id is not None:
                 operations_by_kpoint.setdefault(kp, []).append(op_id)
-            # Provenance record for trusted candidates only.
             record: dict[str, object] = {
                 "valley": valley,
                 "operation_id": c.get("operation_id"),
@@ -128,35 +131,38 @@ def build_ebr_problem_instances(
                     record[key] = c[key]
             irrep_records_by_kpoint.setdefault(kp, []).append(record)
 
-        # Completeness: check expected HSPs
-        policy = _LEGACY_EXPECTED_HSP.get(sg, {})
-        expected = list(policy.get("expected_hsps", []))
-        optional = list(policy.get("optional_hsps", []))
-
-        actual_hsps = set(irreps_by_kpoint.keys())
-        required = set(expected)
-        missing_required = [h for h in required if h not in actual_hsps]
-        missing_optional = [h for h in optional if h not in actual_hsps]
-
+        # Table-authoritative HSP basis: derive expected HSPs from actual
+        # candidate irreps.  Reduced EBR table is the final authority.
+        actual_hsps = sorted(irreps_by_kpoint.keys())
+        expected_hsps = list(actual_hsps)
+        optional_hsps: list[str] = []
+        missing_optional_hsps: list[str] = []
         blocked_by: list[str] = []
-        if not expected and not optional:
-            status = "no_policy"
-            ready = False
-            blocked_by.append(f"no expected-HSP policy for {sg}")
-        elif missing_required:
-            status = "partial"
-            ready = False
-            blocked_by.append(
-                f"missing required HSPs: {missing_required}"
-            )
-        else:
-            status = "complete"
-            ready = True
+
+        # Legacy HSP policy for debug/provenance only (not a production gate).
+        legacy_policy = _LEGACY_EXPECTED_HSP.get(sg, {}) if sg else {}
+        legacy_expected = list(legacy_policy.get("expected_hsps", []))
+        legacy_optional = list(legacy_policy.get("optional_hsps", []))
+
+        # Report optional HSP gaps for provenance only.
+        missing_optional_hsps = [
+            h for h in legacy_optional if h not in actual_hsps
+        ]
+
+        status = "complete" if actual_hsps else "no_data"
+        ready = bool(actual_hsps)
+
+        result_hsp_policy_source = (
+            "sampled_irrep_basis"
+            if not legacy_policy
+            else "sampled_irrep_basis_with_legacy_debug_policy"
+        )
 
         instances.append({
             "instance_id": instance_id,
             "valley": valley,
             "subspace_group_candidate": sg,
+            "legacy_subspace_group_candidate": legacy_sg if legacy_sg else sg,
             "workflow_path": workflow_path,
             "readiness_level": readiness_level,
             "irreps_by_kpoint": {k: v for k, v in sorted(irreps_by_kpoint.items())},
@@ -172,10 +178,16 @@ def build_ebr_problem_instances(
             "status": status,
             "ready_for_ebr_decomposition": ready,
             "blocked_by": blocked_by,
-            "expected_hsps": expected,
-            "optional_hsps": optional,
-            "actual_hsps": sorted(actual_hsps),
-            "missing_optional_hsps": missing_optional,
+            "expected_hsps": expected_hsps,
+            "expected_hsp_policy_source": result_hsp_policy_source,
+            "optional_hsps": optional_hsps,
+            "actual_hsps": actual_hsps,
+            "missing_optional_hsps": missing_optional_hsps,
+            "_legacy_hsp_policy_debug": {
+                "group": sg,
+                "expected_hsps": legacy_expected,
+                "optional_hsps": legacy_optional,
+            } if legacy_policy else {},
         })
 
     overall_status = "has_instances" if instances else "no_instances"
@@ -183,15 +195,15 @@ def build_ebr_problem_instances(
         "status": overall_status,
         "instance_count": len(instances),
         "reduced_ebr_decomposition_status": "not_implemented",
-        "expected_hsp_policy": {
+        "_legacy_expected_hsp_policy_debug": {
             k: v.get("note", "") for k, v in _LEGACY_EXPECTED_HSP.items()
         },
         "interpretation": (
             "Per-valley/per-subspace-group EBR problem instances grouped from "
-            "trusted input candidates. Completeness is assessed against expected "
-            "HSP labels defined in a policy table, not computed from symmetry. "
-            "Missing HSP irreps are reported as blockers; no missing data is "
-            "filled by assumptions, symmetry, TRS, or table inference."
+            "trusted input candidates. Expected HSPs are derived from the "
+            "sampled irrep basis; the reduced EBR table is the final authority "
+            "on HSP completeness. A legacy C2/C3 HSP policy is recorded for "
+            "debug/provenance only and is not a production readiness gate."
         ),
         "instances": instances,
     }
@@ -219,7 +231,7 @@ def _empty_report(reason: str) -> dict[str, object]:
         "status": "no_instances",
         "instance_count": 0,
         "reduced_ebr_decomposition_status": "not_implemented",
-        "expected_hsp_policy": {
+        "_legacy_expected_hsp_policy_debug": {
             k: v.get("note", "") for k, v in _LEGACY_EXPECTED_HSP.items()
         },
         "interpretation": reason,

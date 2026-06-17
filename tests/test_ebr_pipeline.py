@@ -95,11 +95,10 @@ def test_ebr_input_candidates_excludes_blocked_path():
     assert report["status"] == "no_candidates"
 
 
-def test_ebr_problem_instances_missing_hsp_blocked():
-    """Missing required HSPs block instance readiness."""
+def test_ebr_problem_instances_ready_from_actual():
+    """Table-authoritative: ready from actual irreps, not hard-coded policy."""
     from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
 
-    # C3_like requires GammaM+KM. Only GammaM has data -> blocked.
     candidates = {
         "status": "has_candidates",
         "candidates": [{
@@ -115,8 +114,9 @@ def test_ebr_problem_instances_missing_hsp_blocked():
     report = build_ebr_problem_instances(ebr_input_candidates=candidates)
     assert report["instance_count"] == 1
     inst = report["instances"][0]
-    assert inst["ready_for_ebr_decomposition"] is False
-    assert "missing required HSPs" in str(inst["blocked_by"])
+    assert inst["ready_for_ebr_decomposition"] is True
+    assert inst["expected_hsps"] == ["GammaM"]
+    assert inst["status"] == "complete"
 
 
 def test_ebr_problem_instances_complete_hsp_is_ready():

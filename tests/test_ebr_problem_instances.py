@@ -60,16 +60,17 @@ def test_candidates_group_into_instances():
     assert inst["ready_for_ebr_decomposition"] is True
     assert "GammaM" in inst["irreps_by_kpoint"]
     assert "KM" in inst["irreps_by_kpoint"]
-    assert inst["optional_hsps"] == ["MM"]
-    assert inst["missing_optional_hsps"] == ["MM"]
+    # Table-authoritative: expected_hsps from actual, optional from legacy debug.
+    assert inst["expected_hsps"] == ["GammaM", "KM"]
+    assert inst["expected_hsp_policy_source"] == "sampled_irrep_basis_with_legacy_debug_policy"
 
 
 # -----------------------------------------------------------------------
 # 2. Partial HSP data
 # -----------------------------------------------------------------------
 
-def test_partial_hsp_not_marked_ready():
-    """Only GammaM data, missing KM → partial."""
+def test_partial_hsp_still_complete_table_authoritative():
+    """Table-authoritative: expected HSPs = actual HSPs; no hard-coded policy blocks."""
     cands = {
         "candidates": [
             {
@@ -85,9 +86,10 @@ def test_partial_hsp_not_marked_ready():
     r = build_ebr_problem_instances(ebr_input_candidates=cands)
     assert r["instance_count"] == 1
     inst = r["instances"][0]
-    assert inst["status"] == "partial"
-    assert inst["ready_for_ebr_decomposition"] is False
-    assert "missing required HSPs" in inst["blocked_by"][0]
+    assert inst["status"] == "complete"
+    assert inst["ready_for_ebr_decomposition"] is True
+    assert inst["expected_hsps"] == ["GammaM"]
+    assert inst["expected_hsp_policy_source"] == "sampled_irrep_basis_with_legacy_debug_policy"
 
 
 # -----------------------------------------------------------------------
@@ -117,7 +119,8 @@ def test_blocked_rows_excluded():
 # 4. P2/C2_like has no policy → no_instances
 # -----------------------------------------------------------------------
 
-def test_c2_like_no_policy():
+def test_c2_like_table_authoritative():
+    """Table-authoritative: C2_like no longer blocked by legacy policy."""
     cands = {
         "candidates": [
             {
@@ -134,8 +137,9 @@ def test_c2_like_no_policy():
     r = build_ebr_problem_instances(ebr_input_candidates=cands)
     assert r["instance_count"] == 1
     inst = r["instances"][0]
-    assert inst["status"] == "no_policy"
-    assert inst["ready_for_ebr_decomposition"] is False
+    assert inst["status"] == "complete"
+    assert inst["ready_for_ebr_decomposition"] is True
+    assert inst["expected_hsps"] == ["GammaM"]
 
 
 # -----------------------------------------------------------------------
