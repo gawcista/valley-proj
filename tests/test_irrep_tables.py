@@ -201,3 +201,59 @@ def test_match_single_state_irrep_rejects_non_one_dimensional_irrep():
 
     assert result.status == "ambiguous_irrep_label"
     assert result.irrep_label is None
+
+
+# -----------------------------------------------------------------------
+# Source payload adapter for generic irrep matching
+# -----------------------------------------------------------------------
+
+from valleyscope.irreps.source_payload import build_source_payload_for_generic_matching
+
+
+def test_adapter_sg143_spinor_c3_like_payload():
+    """Adapter builds valid payload for SG143 spinor C3-like operations."""
+    table = load_standard_irrep_table(143, spinor=True)
+    detected = [
+        {"operation_id": 1, "rotation_frac": np.eye(3, dtype=int),
+         "translation_frac": np.zeros(3)},
+        {"operation_id": 2, "rotation_frac": np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]], dtype=int),
+         "translation_frac": np.zeros(3)},
+        {"operation_id": 3, "rotation_frac": np.array([[-1, 1, 0], [-1, 0, 0], [0, 0, 1]], dtype=int),
+         "translation_frac": np.zeros(3)},
+    ]
+    payload = build_source_payload_for_generic_matching(
+        table=table, source_hsp_label="K",
+        detected_operations=detected,
+        valley_preserving_operation_ids=[1, 2, 3],
+    )
+    assert payload["status"] == "ok"
+    assert payload["provenance"]["source_hsp_label"] == "K"
+    chars = payload["source_irrep_characters"]
+    assert "-K5" in chars
+    assert chars["-K5"][2] == pytest.approx(np.exp(-1j * np.pi / 3), abs=1e-4)
+
+
+def test_adapter_blocked_missing_source_hsp():
+    """Adapter blocks when source HSP has no irreps."""
+    table = load_standard_irrep_table(143, spinor=True)
+    detected = [{"operation_id": 1, "rotation_frac": np.eye(3, dtype=int),
+                  "translation_frac": np.zeros(3)}]
+    payload = build_source_payload_for_generic_matching(
+        table=table, source_hsp_label="NONEXISTENT",
+        detected_operations=detected,
+        valley_preserving_operation_ids=[1],
+    )
+    assert payload["status"] == "blocked"
+
+
+def test_adapter_blocked_incomplete_ops():
+    """Adapter blocks when VP op not in detected_operations."""
+    table = load_standard_irrep_table(143, spinor=True)
+    detected = [{"operation_id": 1, "rotation_frac": np.eye(3, dtype=int),
+                  "translation_frac": np.zeros(3)}]
+    payload = build_source_payload_for_generic_matching(
+        table=table, source_hsp_label="K",
+        detected_operations=detected,
+        valley_preserving_operation_ids=[1, 2],
+    )
+    assert payload["status"] == "blocked"
