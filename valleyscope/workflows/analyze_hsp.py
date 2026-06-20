@@ -600,6 +600,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         symmetry_eigenvalue_rows=symmetry_rows if isinstance(symmetry_rows, list) else None,
         symmetry_adapted_valley_report=symmetry_adapted_valley_report,
         irrep_workflow_decisions=irrep_workflow_decisions,
+        valley_irrep_matching=valley_irrep_matching,
     )
 
     # --- Folded-center report ---

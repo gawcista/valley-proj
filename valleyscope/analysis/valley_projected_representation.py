@@ -19,13 +19,16 @@ def build_valley_projected_representation_report(
     symmetry_eigenvalue_rows: list[dict[str, Any]] | None = None,
     symmetry_adapted_valley_report: dict[str, Any] | None = None,
     irrep_workflow_decisions: dict[str, Any] | None = None,
+    valley_irrep_matching: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a representation report from computed per-row data.
 
     Consumes the existing symmetry eigenvalue CSV rows, symmetry-adapted
-    valley report (for subspace_space_group data), and irrep workflow
-    decisions (for readiness/blocker info).  Produces per-row records
-    with ``subspace_space_group`` as the primary identifier.
+    valley report (for subspace_space_group data), irrep workflow
+    decisions (for readiness/blocker info), and optional valley irrep
+    matching data (for per-group irrep status).  Produces per-row records
+    with ``subspace_space_group`` as the primary identifier, plus
+    per-``(kpoint, valley)`` grouped ``representation_records``.
     """
     rows: list[dict[str, Any]] = []
     subspace_space_group_counts: dict[str, int] = {}
@@ -140,8 +143,16 @@ def build_valley_projected_representation_report(
             else:
                 blocked_count += 1
 
+    # --- Per-(kpoint, valley) grouped representation records ---
+    representation_records = _build_representation_records(
+        rows=rows,
+        valley_irrep_matching=valley_irrep_matching,
+    )
+
     return {
         "rows": rows,
+        "representation_records": representation_records,
+        "grouped_record_count": len(representation_records),
         "subspace_space_group_counts": subspace_space_group_counts,
         "legacy_subspace_group_candidate_counts": legacy_subspace_counts,
         "trusted_representation_count": trusted_count,
@@ -195,3 +206,118 @@ def _blocking_reasons(
         if wf_path == "blocked":
             reasons.append("workflow_blocked")
     return reasons
+
+
+def _build_representation_records(
+    *,
+    rows: list[dict[str, Any]],
+    valley_irrep_matching: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Group per-operation rows into per-(kpoint, valley) representation records.
+
+    Each record aggregates all operations for a single (kpoint, valley) pair
+    and includes irrep matching data when available.
+    """
+    # Group rows by (kpoint, valley).
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        key = (str(row.get("kpoint", "")), str(row.get("valley", "")))
+        groups.setdefault(key, []).append(row)
+
+    # Collect irrep matching data.
+    matching_by_kp: dict[str, Any] = {}
+    generic_by_kp: dict[str, Any] = {}
+    if isinstance(valley_irrep_matching, dict):
+        by_kp = valley_irrep_matching.get("by_kpoint")
+        if isinstance(by_kp, dict):
+            matching_by_kp = by_kp
+        gen_by_kp = valley_irrep_matching.get("generic_matches_by_kpoint")
+        if isinstance(gen_by_kp, dict):
+            generic_by_kp = gen_by_kp
+
+    records: list[dict[str, Any]] = []
+    for (kpoint, valley), group_rows in sorted(groups.items()):
+        first = group_rows[0]
+        ssg = first.get("subspace_space_group", {})
+        if not isinstance(ssg, dict):
+            ssg = {}
+
+        # Per-operation entries.
+        operations: list[dict[str, Any]] = []
+        for row in group_rows:
+            op_entry: dict[str, Any] = {
+                "operation_id": row.get("operation_id"),
+                "operation_order": row.get("operation_order"),
+                "diagnostic_only": bool(row.get("diagnostic_only", False)),
+                "topology_input_ready": bool(row.get("topology_input_ready", False)),
+            }
+            # Include blocking_reasons only when present.
+            blockers = row.get("blocking_reasons")
+            if isinstance(blockers, list) and blockers:
+                op_entry["blocking_reasons"] = blockers
+            operations.append(op_entry)
+
+        # Irrep matching data for this (kpoint, valley).
+        irrep_matching: dict[str, Any] | None = None
+        gm = generic_by_kp.get(kpoint, {}).get(valley)
+        if isinstance(gm, dict):
+            irrep_matching = {
+                "matching_status": gm.get("matching_status"),
+                "matching_strategy": gm.get("matching_strategy"),
+                "irrep_multiplicities": gm.get("irrep_multiplicities"),
+                "source_operation_map": gm.get("source_operation_map"),
+            }
+        else:
+            lm = matching_by_kp.get(kpoint, {}).get(valley)
+            if isinstance(lm, dict):
+                statuses = {
+                    str(op_result.get("matching_status"))
+                    for op_result in lm.values()
+                    if isinstance(op_result, dict)
+                }
+                irrep_matching = {
+                    "matching_status": (
+                        "matched"
+                        if statuses == {"matched"}
+                        else "incomplete"
+                        if "matched" in statuses
+                        else "not_matched"
+                    ),
+                    "matching_strategy": (
+                        next(
+                            (
+                                str(op_result.get("matching_strategy", ""))
+                                for op_result in lm.values()
+                                if isinstance(op_result, dict)
+                                and op_result.get("matching_strategy")
+                            ),
+                            "legacy_phase_table",
+                        )
+                    ),
+                }
+
+        record: dict[str, Any] = {
+            "kpoint": kpoint,
+            "valley": valley,
+            "subspace_space_group": ssg,
+            "hsp_little_group_operation_ids": first.get(
+                "hsp_little_group_operation_ids", []
+            ),
+            "valley_preserving_operation_ids": first.get(
+                "valley_preserving_operation_ids", []
+            ),
+            "valley_changing_operation_ids": first.get(
+                "valley_changing_operation_ids", []
+            ),
+            "valley_preserving_operations": operations,
+            "readiness_level": first.get("readiness_level", "?"),
+            "workflow_path": first.get("workflow_path", "?"),
+            "blocking_reasons": first.get("blocking_reasons", []),
+            "irrep_matching": irrep_matching,
+            "legacy_subspace_group_candidate": first.get(
+                "legacy_subspace_group_candidate"
+            ),
+        }
+        records.append(record)
+
+    return records

@@ -100,8 +100,71 @@ Conditionally present top-level fields:
 | `valley_ebr_problem_instances` | EBR problem instances built |
 | `valley_ebr_export_bundle` | EBR export bundle built |
 | `valley_reduced_ebr_mapping` | Reduced EBR mapping enabled (`analysis.reduced_ebr.enabled`) |
+| `valley_projected_representations` | Symmetry eigenvalue data available |
 | `folded_center_report` | Always (when moire lattice available) |
 | `sampled_k_coverage` | Always (when moire lattice available) |
+
+---
+
+## Valley-Projected Representation Records
+
+### `valley_projected_representations` (within `valley_summary.json`)
+
+This section carries the group-agnostic representation record for each
+`(kpoint, valley)` pair.  It is the primary public irrep input layer: the
+valley-projected subspace space group, HSP little group, valley mapping
+context, valley-preserving subgroup `G_k^(a)`, per-operation
+character/eigenphase data, readiness, and irrep matching status.
+
+Top-level fields within `valley_projected_representations`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `rows` | list[object] | Per-operation flat rows (existing format) |
+| `representation_records` | list[object] | Per-`(kpoint, valley)` grouped records |
+| `grouped_record_count` | int | Number of grouped records |
+| `subspace_space_group_counts` | object | Counts by `candidate_space_group_symbol` |
+| `legacy_subspace_group_candidate_counts` | object | Counts by legacy `C{n}_like` label |
+| `trusted_representation_count` | int | Count of trusted rows |
+| `blocked_representation_count` | int | Count of blocked rows |
+| `diagnostic_only_count` | int | Count of diagnostic-only rows |
+| `valley_labels` | list[string] | Unique valley labels |
+| `kpoint_labels` | list[string] | Unique HSP labels |
+
+Each `representation_records` entry:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `kpoint` | string | HSP label |
+| `valley` | string | Valley label |
+| `subspace_space_group` | object | Compact subspace space group data |
+| `subspace_space_group.candidate_space_group_symbol` | string | Physical symbol (e.g. `"P3"`, `"P4"`, `"P2"`) |
+| `subspace_space_group.valley_preserving_operation_ids` | list[int] | VP operation IDs |
+| `subspace_space_group.status` | string | Group status (`"candidate"`, `"trivial"`, etc.) |
+| `hsp_little_group_operation_ids` | list[int] | Operation IDs in `G_k` for this HSP |
+| `valley_preserving_operation_ids` | list[int] | Operation IDs in `G_k^(a)` |
+| `valley_changing_operation_ids` | list[int] | Valley-changing operation IDs |
+| `valley_preserving_operations` | list[object] | Per-operation entries |
+| `valley_preserving_operations[].operation_id` | int | Operation ID |
+| `valley_preserving_operations[].operation_order` | int | Operation order |
+| `valley_preserving_operations[].diagnostic_only` | bool | Whether this row is diagnostic-only |
+| `valley_preserving_operations[].topology_input_ready` | bool | Whether this row is topology-input ready |
+| `valley_preserving_operations[].blocking_reasons` | list[string] | Blocking reasons (when present) |
+| `readiness_level` | string | `"trusted"`, `"usable_with_caution"`, `"blocked"` |
+| `workflow_path` | string | `"direct_qcut"`, `"symmetry_adapted"`, or `"blocked"` |
+| `blocking_reasons` | list[string] | Blocking reasons for the grouped record |
+| `irrep_matching` | object\|null | Irrep matching status (when available) |
+| `irrep_matching.matching_status` | string | `"matched"`, `"incomplete"`, `"not_matched"` |
+| `irrep_matching.matching_strategy` | string | `"bilbao_restricted_character"` or `"legacy_phase_table"` |
+| `irrep_matching.irrep_multiplicities` | object | Irrep label → integer multiplicity |
+| `legacy_subspace_group_candidate` | string | Legacy `C{n}_like` hint (provenance only) |
+
+The `representation_records` are the primary group-agnostic irrep input:
+the physical identifier is `subspace_space_group.candidate_space_group_symbol`,
+not `legacy_subspace_group_candidate`.  Irrep matching data reflects the
+full `G_k^(a)` restricted-character matching where available; legacy
+phase-table results are included as `legacy_phase_table` strategy only
+when the generic Bilbao path is not active.
 
 ---
 

@@ -1524,6 +1524,7 @@ def _render_valley_projected_representations(
     lines.append(f"trusted rows: {report.get('trusted_representation_count', 0)}")
     lines.append(f"blocked rows: {report.get('blocked_representation_count', 0)}")
     lines.append(f"diagnostic-only rows: {report.get('diagnostic_only_count', 0)}")
+    lines.append(f"grouped records: {report.get('grouped_record_count', 0)}")
     sg_counts = report.get("subspace_space_group_counts", {})
     if isinstance(sg_counts, dict) and sg_counts:
         parts = [f"{label}={count}" for label, count in sorted(sg_counts.items())]

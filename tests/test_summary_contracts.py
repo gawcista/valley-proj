@@ -276,6 +276,33 @@ def test_summary_payload_renders_valley_projected_representations(tmp_path):
                 "legacy_subspace_group_candidate": "C2_like",
             },
         ],
+        "representation_records": [
+            {
+                "kpoint": "GammaM",
+                "valley": "M1_valley",
+                "subspace_space_group": {
+                    "candidate_space_group_symbol": "P2",
+                    "valley_preserving_operation_ids": [0, 4],
+                },
+                "hsp_little_group_operation_ids": [0, 4],
+                "valley_preserving_operation_ids": [0, 4],
+                "valley_changing_operation_ids": [],
+                "valley_preserving_operations": [
+                    {
+                        "operation_id": 4,
+                        "operation_order": 2,
+                        "diagnostic_only": False,
+                        "topology_input_ready": True,
+                    }
+                ],
+                "readiness_level": "trusted",
+                "workflow_path": "direct_qcut",
+                "blocking_reasons": [],
+                "irrep_matching": None,
+                "legacy_subspace_group_candidate": "C2_like",
+            },
+        ],
+        "grouped_record_count": 1,
         "subspace_space_group_counts": {"P2": 1},
         "legacy_subspace_group_candidate_counts": {"C2_like": 1},
         "trusted_representation_count": 1,
