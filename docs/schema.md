@@ -147,8 +147,15 @@ Each `representation_records` entry:
 | `valley_preserving_operations` | list[object] | Per-operation entries |
 | `valley_preserving_operations[].operation_id` | int | Operation ID |
 | `valley_preserving_operations[].operation_order` | int | Operation order |
+| `valley_preserving_operations[].character_raw` | string\|null | Trace of the raw target-subspace representation for this operation |
+| `valley_preserving_operations[].character_valley` | string\|null | Trace of the valley-projected block for this operation |
+| `valley_preserving_operations[].eigenphases` | list[number] | Eigenphases `phase / 2pi` for this operation, aggregated over state rows |
+| `valley_preserving_operations[].eigenvalues` | list[object] | Eigenvalues as `{real, imag}` entries, aligned with `eigenphases` |
 | `valley_preserving_operations[].diagnostic_only` | bool | Whether this row is diagnostic-only |
 | `valley_preserving_operations[].topology_input_ready` | bool | Whether this row is topology-input ready |
+| `valley_preserving_operations[].source_row_count` | int | Number of flat eigenvalue rows aggregated into this operation entry |
+| `valley_preserving_operations[].max_root_deviation` | number | Optional; maximum root-of-unity deviation across aggregated rows |
+| `valley_preserving_operations[].basis` | string | Optional; representation basis provenance |
 | `valley_preserving_operations[].blocking_reasons` | list[string] | Blocking reasons (when present) |
 | `readiness_level` | string | `"trusted"`, `"usable_with_caution"`, `"blocked"` |
 | `workflow_path` | string | `"direct_qcut"`, `"symmetry_adapted"`, or `"blocked"` |

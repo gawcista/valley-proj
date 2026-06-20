@@ -13,6 +13,12 @@ def test_representation_report_uses_subspace_space_group_as_primary():
                 "target_valley": "M1_valley",
                 "operation_id": 4,
                 "order": 2,
+                "state_index": 0,
+                "eigenvalue_real": -1.0,
+                "eigenvalue_imag": 0.0,
+                "phase_2pi": 0.5,
+                "character_raw": "-1.000000+0.000000j",
+                "character_valley": "-1.000000+0.000000j",
                 "diagnostic_only": False,
                 "topology_input_ready": True,
                 "rotation_ready": True,
@@ -80,6 +86,10 @@ def test_representation_report_uses_subspace_space_group_as_primary():
     op = rec["valley_preserving_operations"][0]
     assert op["operation_id"] == 4
     assert op["operation_order"] == 2
+    assert op["character_valley"] == "-1.000000+0.000000j"
+    assert op["eigenphases"] == [0.5]
+    assert op["eigenvalues"] == [{"real": -1.0, "imag": 0.0}]
+    assert op["source_row_count"] == 1
     assert op["diagnostic_only"] is False
     assert op["topology_input_ready"] is True
 
@@ -147,6 +157,96 @@ def test_representation_records_group_by_kpoint_valley():
     assert len(rec["valley_preserving_operations"]) == 2
     op_ids = {op["operation_id"] for op in rec["valley_preserving_operations"]}
     assert op_ids == {1, 2}
+
+
+def test_representation_records_aggregate_rank_two_operation_data():
+    """One operation with two eigenstate rows becomes one operation entry."""
+    report = build_valley_projected_representation_report(
+        kpoint_names=["GammaM"],
+        valley_names=["M_valley"],
+        symmetry_eigenvalue_rows=[
+            {
+                "kpoint": "GammaM",
+                "target_valley": "M_valley",
+                "operation_id": 4,
+                "order": 2,
+                "state_index": 1,
+                "eigenvalue_real": 0.0,
+                "eigenvalue_imag": 1.0,
+                "phase_2pi": 0.25,
+                "character_raw": "0.000000+0.000000j",
+                "character_valley": "0.000000+0.000000j",
+                "root_deviation": 2.0e-8,
+                "basis": "valley_adapted",
+                "diagnostic_only": False,
+                "topology_input_ready": True,
+                "rotation_ready": True,
+            },
+            {
+                "kpoint": "GammaM",
+                "target_valley": "M_valley",
+                "operation_id": 4,
+                "order": 2,
+                "state_index": 0,
+                "eigenvalue_real": 0.0,
+                "eigenvalue_imag": -1.0,
+                "phase_2pi": -0.25,
+                "character_raw": "0.000000+0.000000j",
+                "character_valley": "0.000000+0.000000j",
+                "root_deviation": 1.0e-8,
+                "basis": "valley_adapted",
+                "diagnostic_only": False,
+                "topology_input_ready": True,
+                "rotation_ready": True,
+            },
+        ],
+        symmetry_adapted_valley_report={
+            "by_kpoint": {
+                "GammaM": {
+                    "valley_preserving_subspaces": [
+                        {
+                            "orbit": ["M_valley"],
+                            "hsp_preserving_operation_ids": [0, 4],
+                            "subspace_space_group": {
+                                "candidate_space_group_symbol": "P2",
+                                "candidate_space_group_number": 3,
+                                "valley_preserving_operation_ids": [0, 4],
+                                "valley_changing_operation_ids": [],
+                                "status": "candidate",
+                            },
+                            "subspace_group": {
+                                "subspace_group_candidate": "C2_like",
+                            },
+                        }
+                    ],
+                }
+            }
+        },
+        irrep_workflow_decisions={
+            "by_kpoint": {
+                "GammaM": {
+                    "M_valley": {
+                        "readiness_level": "trusted",
+                        "workflow_path": "symmetry_adapted",
+                    },
+                }
+            }
+        },
+    )
+
+    rec = report["representation_records"][0]
+    assert len(rec["valley_preserving_operations"]) == 1
+    op = rec["valley_preserving_operations"][0]
+    assert op["operation_id"] == 4
+    assert op["source_row_count"] == 2
+    assert op["character_valley"] == "0.000000+0.000000j"
+    assert op["eigenphases"] == [-0.25, 0.25]
+    assert op["eigenvalues"] == [
+        {"real": 0.0, "imag": -1.0},
+        {"real": 0.0, "imag": 1.0},
+    ]
+    assert op["max_root_deviation"] == 2.0e-8
+    assert op["basis"] == "valley_adapted"
 
 
 def test_representation_records_with_generic_irrep_matching():

@@ -118,6 +118,14 @@ def build_valley_projected_representation_report(
                 "workflow_path": wf_data.get("workflow_path", "?"),
                 "diagnostic_only": diag_only,
                 "topology_input_ready": topology_ready,
+                "state_index": row.get("state_index"),
+                "character_raw": row.get("character_raw", ""),
+                "character_valley": row.get("character_valley", ""),
+                "eigenvalue_real": row.get("eigenvalue_real"),
+                "eigenvalue_imag": row.get("eigenvalue_imag"),
+                "phase_2pi": row.get("phase_2pi"),
+                "root_deviation": row.get("root_deviation"),
+                "basis": row.get("basis", ""),
                 "blocking_reasons": _blocking_reasons(row, wf_data, diag_only),
                 "legacy_subspace_group_candidate": subspace_group_data.get(
                     "subspace_group_candidate",
@@ -242,18 +250,73 @@ def _build_representation_records(
         if not isinstance(ssg, dict):
             ssg = {}
 
-        # Per-operation entries.
-        operations: list[dict[str, Any]] = []
+        # Per-operation entries.  Flat rows are per eigenstate, so aggregate
+        # rows with the same operation ID into one representation entry.
+        op_groups: dict[str, list[dict[str, Any]]] = {}
         for row in group_rows:
+            key = str(row.get("operation_id"))
+            op_groups.setdefault(key, []).append(row)
+
+        operations: list[dict[str, Any]] = []
+        for _, op_rows in sorted(
+            op_groups.items(),
+            key=lambda item: _operation_sort_key(
+                item[1][0].get("operation_id")
+            ),
+        ):
+            row = op_rows[0]
+            sorted_rows = sorted(
+                op_rows,
+                key=lambda r: _operation_sort_key(r.get("state_index")),
+            )
+            eigenphases = [
+                phase for phase in (
+                    _optional_float(r.get("phase_2pi")) for r in sorted_rows
+                )
+                if phase is not None
+            ]
+            eigenvalues = [
+                ev for ev in (
+                    _eigenvalue_entry(r) for r in sorted_rows
+                )
+                if ev is not None
+            ]
+            blockers = _unique_strings(
+                blocker
+                for r in sorted_rows
+                for blocker in (
+                    r.get("blocking_reasons")
+                    if isinstance(r.get("blocking_reasons"), list)
+                    else []
+                )
+            )
+            root_deviations = [
+                value for value in (
+                    _optional_float(r.get("root_deviation")) for r in sorted_rows
+                )
+                if value is not None
+            ]
             op_entry: dict[str, Any] = {
                 "operation_id": row.get("operation_id"),
                 "operation_order": row.get("operation_order"),
-                "diagnostic_only": bool(row.get("diagnostic_only", False)),
-                "topology_input_ready": bool(row.get("topology_input_ready", False)),
+                "character_raw": _nonempty_or_none(row.get("character_raw")),
+                "character_valley": _nonempty_or_none(row.get("character_valley")),
+                "eigenphases": eigenphases,
+                "eigenvalues": eigenvalues,
+                "diagnostic_only": any(
+                    bool(r.get("diagnostic_only", False)) for r in sorted_rows
+                ),
+                "topology_input_ready": all(
+                    bool(r.get("topology_input_ready", False)) for r in sorted_rows
+                ),
+                "source_row_count": len(sorted_rows),
             }
-            # Include blocking_reasons only when present.
-            blockers = row.get("blocking_reasons")
-            if isinstance(blockers, list) and blockers:
+            if root_deviations:
+                op_entry["max_root_deviation"] = max(root_deviations)
+            basis = _nonempty_or_none(row.get("basis"))
+            if basis is not None:
+                op_entry["basis"] = basis
+            if blockers:
                 op_entry["blocking_reasons"] = blockers
             operations.append(op_entry)
 
@@ -321,3 +384,46 @@ def _build_representation_records(
         records.append(record)
 
     return records
+
+
+def _operation_sort_key(value: Any) -> tuple[int, Any]:
+    try:
+        return (0, int(str(value)))
+    except (TypeError, ValueError):
+        return (1, str(value))
+
+
+def _optional_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _eigenvalue_entry(row: dict[str, Any]) -> dict[str, float] | None:
+    real = _optional_float(row.get("eigenvalue_real"))
+    imag = _optional_float(row.get("eigenvalue_imag"))
+    if real is None or imag is None:
+        return None
+    return {"real": real, "imag": imag}
+
+
+def _nonempty_or_none(value: Any) -> Any | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and not value:
+        return None
+    return value
+
+
+def _unique_strings(values: Any) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value)
+        if text and text not in seen:
+            seen.add(text)
+            out.append(text)
+    return out
