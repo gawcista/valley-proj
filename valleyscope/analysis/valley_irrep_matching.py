@@ -229,11 +229,25 @@ def build_valley_irrep_matching_report(
     Cross-references the workflow decision report with character diagnostics
     from the symmetry-adapted valley analysis.
 
-    When ``source_irrep_characters`` and per-(kpoint, valley)
-    ``source_operation_maps`` are provided, uses the generic
-    ``match_restricted_characters`` strategy.  Otherwise uses the legacy
-    C2/C3 phase-table fallback.
+    Strategy boundary:
+
+    - **Generic mode** (``source_irrep_characters``,
+      ``source_irrep_characters_flattened``, or ``source_payload_blocked_rows``
+      supplied): uses the generic ``match_restricted_characters`` strategy.
+      Legacy ``by_kpoint`` phase-table entries are suppressed for any
+      ``(kpoint, valley)`` that has generic coverage (including blocked rows),
+      because the generic source is the authoritative matching path.
+
+    - **Legacy mode** (no generic source attempted): uses the legacy
+      C2/C3 phase-table fallback exclusively.  ``generic_matches_by_kpoint``
+      is absent.
     """
+    _generic_mode = bool(
+        source_irrep_characters
+        or source_irrep_characters_flattened
+        or (source_payload_blocked_rows and len(source_payload_blocked_rows) > 0)
+    )
+
     if irrep_workflow_decisions is None:
         return {"status": "not_evaluated", "by_kpoint": {}}
 
@@ -584,8 +598,18 @@ def build_valley_irrep_matching_report(
                 "source_payload_provenance": provenance,
             }
 
+    # --- Strategy boundary: in generic mode, suppress legacy by_kpoint entries ---
+    # for (kpoint, valley) pairs that have generic coverage.  The generic
+    # source (including blocked rows) is the authoritative matching path.
+    if _generic_mode and generic_matches:
+        _filter_legacy_rows_in_generic_mode(
+            by_kpoint=by_kpoint,
+            generic_matches=generic_matches,
+        )
+
     return {
-        "status": "ok" if by_kpoint else "not_evaluated",
+        "status": "ok" if (by_kpoint or generic_matches) else "not_evaluated",
+        "matching_mode": "generic" if _generic_mode else "legacy",
         "matching_statuses": ["matched", "diagnostic_only", "not_applicable",
                               "failed_no_table", "failed_ambiguous", "blocked"],
         "tables_implemented": ["spinful_C3", "spinful_C2"],
@@ -637,3 +661,36 @@ def _computed_characters_from_items(
         if op_id not in op_ids:
             op_ids.append(op_id)
     return computed, op_ids
+
+
+def _filter_legacy_rows_in_generic_mode(
+    *,
+    by_kpoint: dict[str, object],
+    generic_matches: dict[str, dict[str, dict[str, object]]],
+) -> None:
+    """Remove legacy by_kpoint entries for (kpoint, valley) pairs that have
+    generic coverage in generic_matches (success, diagnostic, or blocked).
+
+    Generic source is the authoritative matching path.  Legacy phase-table
+    entries are kept only for (kpoint, valley) pairs with no generic data.
+    """
+    # Collect (kpoint, valley) pairs with generic coverage.
+    covered: set[tuple[str, str]] = set()
+    for kp_name, valleys in generic_matches.items():
+        if not isinstance(valleys, dict):
+            continue
+        for v_name in valleys:
+            covered.add((str(kp_name), str(v_name)))
+
+    if not covered:
+        return
+
+    for kp_name in list(by_kpoint):
+        v_dict = by_kpoint.get(kp_name)
+        if not isinstance(v_dict, dict):
+            continue
+        for v_name in list(v_dict):
+            if (str(kp_name), str(v_name)) in covered:
+                del v_dict[str(v_name)]
+        if not v_dict:
+            del by_kpoint[str(kp_name)]

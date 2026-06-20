@@ -273,9 +273,10 @@ def test_generic_matching_via_build_report():
         source_irrep_characters=source_chars,
         source_operation_maps=op_maps,
     )
-    # Legacy path still runs
-    assert report["by_kpoint"]["GammaM"]["K_valley"]["2"]["matching_strategy"] == "legacy_phase_table"
-    # Generic matches present
+    # Strategy boundary: generic mode suppresses legacy by_kpoint for covered rows.
+    assert report["matching_mode"] == "generic"
+    assert "GammaM" not in report["by_kpoint"] or "K_valley" not in report["by_kpoint"].get("GammaM", {})
+    # Generic matches present and authoritative.
     gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
     assert gm["matching_strategy"] == "bilbao_restricted_character"
     assert gm["matching_status"] == "matched"
@@ -566,3 +567,284 @@ def test_generic_module_no_forbidden_imports():
         "from irrep.ebrs", "import irrep.ebrs",
     ]:
         assert forbidden not in src
+
+
+# -----------------------------------------------------------------------
+# Strategy boundary: generic mode suppresses legacy by_kpoint
+# -----------------------------------------------------------------------
+
+def test_generic_mode_matching_mode_field():
+    """In generic mode, matching_mode is 'generic'."""
+    from valleyscope.analysis.valley_irrep_matching import (
+        build_valley_irrep_matching_report,
+    )
+    decisions = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "readiness_level": "trusted",
+                    "workflow_path": "direct_qcut",
+                },
+            },
+        },
+    }
+    report = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=decisions,
+        symmetry_adapted_valley_report=None,
+        # Generic source blocked rows trigger generic mode.
+        source_payload_blocked_rows=[
+            {"kpoint": "GammaM", "valley": "K_valley",
+             "reason": "no source HSP mapping"},
+        ],
+    )
+    assert report["matching_mode"] == "generic"
+    assert "generic_matches_by_kpoint" in report
+    gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
+    assert gm["matching_status"] == "blocked"
+
+
+def test_generic_mode_suppresses_legacy_for_covered_rows():
+    """When generic source covers a (kpoint, valley), legacy by_kpoint entry
+    for that pair is removed."""
+    from valleyscope.analysis.valley_irrep_matching import (
+        build_valley_irrep_matching_report,
+    )
+    decisions = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "readiness_level": "trusted",
+                    "workflow_path": "direct_qcut",
+                },
+                "Kp_valley": {
+                    "readiness_level": "trusted",
+                    "workflow_path": "direct_qcut",
+                },
+            },
+        },
+    }
+    sa_report = {
+        "by_kpoint": {
+            "GammaM": {
+                "valley_preserving_subspaces": [
+                    {
+                        "orbit": ["K_valley"],
+                        "valley_preserving_character_diagnostics": {
+                            "per_valley": {
+                                "K_valley": [
+                                    {"operation_id": 1, "eigenphases": [0.0]},
+                                    {"operation_id": 2, "eigenphases": [0.5]},
+                                ],
+                            },
+                        },
+                        "subspace_group": {
+                            "subspace_group_candidate": "C3_like",
+                            "operation_orders": {"1": 1, "2": 3},
+                        },
+                    },
+                    {
+                        "orbit": ["Kp_valley"],
+                        "valley_preserving_character_diagnostics": {
+                            "per_valley": {
+                                "Kp_valley": [
+                                    {"operation_id": 1, "eigenphases": [0.0]},
+                                    {"operation_id": 2, "eigenphases": [0.5]},
+                                ],
+                            },
+                        },
+                        "subspace_group": {
+                            "subspace_group_candidate": "C3_like",
+                            "operation_orders": {"1": 1, "2": 3},
+                        },
+                    },
+                ],
+            },
+        },
+    }
+    # Generic source covers only K_valley.
+    source_chars = {"-GM5": {1: 1.0 + 0j, 2: -1.0 + 0j}}
+    report = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=decisions,
+        symmetry_adapted_valley_report=sa_report,
+        source_irrep_characters_flattened={
+            "GammaM": {"K_valley": source_chars},
+        },
+        source_operation_maps={"GammaM": {"K_valley": {1: 1, 2: 2}}},
+    )
+    assert report["matching_mode"] == "generic"
+    # K_valley has generic coverage → suppressed from legacy by_kpoint.
+    gm_k = report["by_kpoint"].get("GammaM", {})
+    assert "K_valley" not in gm_k, "legacy entry for K_valley must be suppressed"
+    # Kp_valley has NO generic coverage → legacy entry preserved.
+    assert "Kp_valley" in gm_k, "legacy entry for Kp_valley must survive"
+    # Generic matches has K_valley.
+    assert report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]["matching_status"] == "matched"
+
+
+def test_legacy_only_mode_preserves_by_kpoint():
+    """When no generic source is attempted, legacy by_kpoint is the full result."""
+    from valleyscope.analysis.valley_irrep_matching import (
+        build_valley_irrep_matching_report,
+    )
+    decisions = {
+        "by_kpoint": {
+            "GammaM": {
+                "M1_valley": {
+                    "readiness_level": "trusted",
+                    "workflow_path": "direct_qcut",
+                },
+            },
+        },
+    }
+    sa_report = {
+        "by_kpoint": {
+            "GammaM": {
+                "valley_preserving_subspaces": [{
+                    "orbit": ["M1_valley"],
+                    "valley_preserving_character_diagnostics": {
+                        "per_valley": {
+                            "M1_valley": [
+                                {"operation_id": 4, "eigenphases": [0.25]},
+                            ],
+                        },
+                    },
+                    "subspace_group": {
+                        "subspace_group_candidate": "C2_like",
+                        "operation_orders": {"4": 2},
+                    },
+                }],
+            },
+        },
+    }
+    report = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=decisions,
+        symmetry_adapted_valley_report=sa_report,
+    )
+    assert report["matching_mode"] == "legacy"
+    assert "generic_matches_by_kpoint" not in report
+    lm = report["by_kpoint"]["GammaM"]["M1_valley"]["4"]
+    assert lm["matching_strategy"] == "legacy_phase_table"
+    assert lm["matching_status"] == "matched"
+
+
+def test_representation_record_reflects_generic_blocked():
+    """representation_records irrep_matching reflects generic blocked status."""
+    from valleyscope.analysis.valley_projected_representation import (
+        build_valley_projected_representation_report,
+    )
+    report = build_valley_projected_representation_report(
+        kpoint_names=["GammaM"],
+        valley_names=["K_valley"],
+        symmetry_eigenvalue_rows=[{
+            "kpoint": "GammaM",
+            "target_valley": "K_valley",
+            "operation_id": 2,
+            "order": 2,
+            "diagnostic_only": False,
+            "topology_input_ready": True,
+            "rotation_ready": True,
+        }],
+        symmetry_adapted_valley_report={
+            "by_kpoint": {
+                "GammaM": {
+                    "valley_preserving_subspaces": [{
+                        "orbit": ["K_valley"],
+                        "hsp_preserving_operation_ids": [0, 2],
+                        "subspace_space_group": {
+                            "candidate_space_group_symbol": "P2",
+                            "valley_preserving_operation_ids": [0, 2],
+                            "valley_changing_operation_ids": [],
+                            "status": "candidate",
+                        },
+                        "subspace_group": {
+                            "subspace_group_candidate": "C2_like",
+                        },
+                    }],
+                }
+            }
+        },
+        irrep_workflow_decisions={
+            "by_kpoint": {
+                "GammaM": {
+                    "K_valley": {
+                        "readiness_level": "trusted",
+                        "workflow_path": "direct_qcut",
+                    },
+                }
+            }
+        },
+        valley_irrep_matching={
+            "matching_mode": "generic",
+            "generic_matches_by_kpoint": {
+                "GammaM": {
+                    "K_valley": {
+                        "matching_status": "blocked",
+                        "matching_strategy": "bilbao_restricted_character",
+                        "irrep_multiplicities": {},
+                        "diagnostic_only": True,
+                        "reason": "incomplete_source_operation_map: "
+                                 "valley_preserving_operation_ids not "
+                                 "in source_operation_map: [2]",
+                    },
+                },
+            },
+        },
+    )
+    rec = report["representation_records"][0]
+    assert rec["irrep_matching"] is not None
+    assert rec["irrep_matching"]["matching_status"] == "blocked"
+    assert rec["irrep_matching"]["matching_strategy"] == "bilbao_restricted_character"
+
+
+def test_source_payload_blocked_no_legacy_fallback():
+    """source_payload_blocked_rows produce blocked generic entries,
+    not legacy phase-table matches."""
+    from valleyscope.analysis.valley_irrep_matching import (
+        build_valley_irrep_matching_report,
+    )
+    decisions = {
+        "by_kpoint": {
+            "GammaM": {
+                "M_valley": {
+                    "readiness_level": "trusted",
+                    "workflow_path": "symmetry_adapted",
+                },
+            },
+        },
+    }
+    sa_report = {
+        "by_kpoint": {
+            "GammaM": {
+                "valley_preserving_subspaces": [{
+                    "orbit": ["M_valley"],
+                    "valley_preserving_character_diagnostics": {
+                        "per_valley": {
+                            "M_valley": [
+                                {"operation_id": 4, "eigenphases": [0.25]},
+                            ],
+                        },
+                    },
+                    "subspace_group": {
+                        "subspace_group_candidate": "C2_like",
+                        "operation_orders": {"4": 2},
+                    },
+                }],
+            },
+        },
+    }
+    report = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=decisions,
+        symmetry_adapted_valley_report=sa_report,
+        source_payload_blocked_rows=[
+            {"kpoint": "GammaM", "valley": "M_valley",
+             "reason": "incomplete source operation map"},
+        ],
+    )
+    assert report["matching_mode"] == "generic"
+    # Generic blocked entry exists.
+    gm = report["generic_matches_by_kpoint"]["GammaM"]["M_valley"]
+    assert gm["matching_status"] == "blocked"
+    assert gm["matching_strategy"] == "bilbao_restricted_character"
+    # Legacy entry suppressed because generic coverage exists for this pair.
+    no_legacy = report["by_kpoint"].get("GammaM", {})
+    assert "M_valley" not in no_legacy, "legacy entry must be suppressed in generic mode"
