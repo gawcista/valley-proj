@@ -941,7 +941,7 @@ def _reviewed_table_provenance() -> dict:
         "space_group_number": 150,
         "spinful": True,
         "expected_hsps": ["GammaM", "KM"],
-        "subspace_group_candidate": "C3_like",
+        "subspace_group_candidate": "P3",
         "central_sign_convention": "chi(C3)=chi(op2), chi(C3^2)=-chi(op3)",
     }
 
@@ -950,6 +950,7 @@ def test_valid_fake_manifest_lists_entries(monkeypatch, tmp_path):
     """A valid fake manifest with reviewed entries returns them."""
     root = _make_fake_catalog_root(tmp_path)
     tbl = dict(_SAMPLE_TABLE)
+    tbl["subspace_group_candidate"] = "P3"
     tbl["provenance"] = _reviewed_table_provenance()
     (root / "toy.json").write_text(json.dumps(tbl))
     (root / "manifest.json").write_text(json.dumps({
@@ -967,13 +968,14 @@ def test_valid_fake_manifest_lists_entries(monkeypatch, tmp_path):
     assert entries[0]["name"] == "toy"
 
     loaded = load_reviewed_reduced_ebr_table("toy")
-    assert loaded["subspace_group_candidate"] == "C3_like"
+    assert loaded["subspace_group_candidate"] == "P3"
 
 
 def test_fake_table_fails_same_validation_as_external(monkeypatch, tmp_path):
     """Invalid fake table raises the same validation error as external path."""
     root = _make_fake_catalog_root(tmp_path)
     bad_table = dict(_SAMPLE_TABLE)
+    bad_table["subspace_group_candidate"] = "P3"
     bad_table["ebrs"] = [{"label": "X", "vector": [1, 2]}]  # wrong length
     bad_table["provenance"] = _reviewed_table_provenance()
     (root / "bad.json").write_text(json.dumps(bad_table))
@@ -1663,6 +1665,7 @@ def _reviewed_table_with_provenance(provenance_override=None) -> dict:
     if provenance_override is not None:
         p.update(provenance_override)
     tbl = dict(_SAMPLE_TABLE)
+    tbl["subspace_group_candidate"] = "P3"
     tbl["provenance"] = p
     return tbl
 
@@ -1852,12 +1855,13 @@ def _fake_catalog_with_reviewed_table(tmp_path, monkeypatch, name="c3_reviewed",
         "data_source": "irreptables",
         "space_group_number": 150,
         "spinful": True,
-        "subspace_group_candidate": "C3_like",
+        "subspace_group_candidate": "P3",
         "expected_hsps": ["GammaM", "KM"],
         "central_sign_convention": "chi(C3)=chi(op2), chi(C3^2)=-chi(op3)",
     }
     if provenance_overrides is not None:
         prov.update(provenance_overrides)
+    tbl["subspace_group_candidate"] = "P3"
     tbl["provenance"] = prov
     (root / f"{name}.json").write_text(json.dumps(tbl))
     (root / "manifest.json").write_text(json.dumps({
@@ -1986,7 +1990,7 @@ def test_cli_map_reduced_ebr_accepts_table_name(tmp_path, monkeypatch):
     bundle_path = tmp_path / "bundle.json"
     _write_bundle(bundle_path, [{
         "bundle_id": "b", "valley": "K",
-        "subspace_group_candidate": "C3_like",
+        "subspace_group_candidate": "P3",
         "ready_for_external_solver": True,
         "irreps_by_kpoint": {
             "GammaM": ["C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"],
@@ -2038,6 +2042,7 @@ def test_real_manifest_has_one_reviewed_table():
     tbl = load_reviewed_reduced_ebr_table(name)
     assert tbl["provenance"]["review_status"] == "reviewed"
     assert tbl["provenance"]["reviewer"] == "Codex-physics-review"
+    assert tbl["subspace_group_candidate"] == "P3"
 
 
 # -----------------------------------------------------------------------
@@ -2118,10 +2123,11 @@ def test_identity_provenance_missing_central_sign_convention_fails(
         "data_source": "irreptables",
         "space_group_number": 150,
         "spinful": True,
-        "subspace_group_candidate": "C3_like",
+        "subspace_group_candidate": "P3",
         "expected_hsps": ["GammaM", "KM"],
         # central_sign_convention intentionally omitted
     }
+    tbl["subspace_group_candidate"] = "P3"
     tbl["provenance"] = prov
     (root / "c3.json").write_text(json.dumps(tbl))
     (root / "manifest.json").write_text(json.dumps({
@@ -2192,7 +2198,7 @@ def test_c3_reviewed_table_name_mapping_smoke():
         "bundles": [{
             "bundle_id": "c3_package_table_smoke",
             "valley": "K",
-            "subspace_group_candidate": "C3_like",
+            "subspace_group_candidate": "P3",
             "ready_for_external_solver": True,
             "expected_hsps": ["GammaM", "KM"],
             "irreps_by_kpoint": irreps_by_kp,

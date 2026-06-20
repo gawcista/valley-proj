@@ -9,8 +9,8 @@ reduced-dimensional EBR tables.
 lists:
 
 - `P321_C3_like_GammaM_KM_spinful_v1`: SG150/P321 spinful, sampled
-  `GammaM`/`KM`, valley-preserving `C3_like` reduced-dimensional basis,
-  reviewed from Bilbao/irreptables source data.
+  `GammaM`/`KM`, valley-preserving `P3` subspace-space-group
+  reduced-dimensional basis, reviewed from Bilbao/irreptables source data.
 
 Additional tables will be added only after:
 
