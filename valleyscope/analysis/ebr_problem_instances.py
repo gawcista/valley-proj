@@ -3,48 +3,14 @@
 Groups trusted candidate irreps into per-valley/per-subspace-group EBR
 problem instances and reports HSP completeness.  Does NOT implement
 reduced EBR decomposition, EBR table matching, or new physics.
+
+HSP completeness is table-authoritative: expected HSPs are derived from
+the sampled irrep basis.  The reduced EBR table is the final authority.
 """
 
 from __future__ import annotations
 
 from typing import Any
-
-
-# Legacy hard-coded expected-HSP policy for C3_like/C2_like prototypes.
-# Debug/provenance only: it must not gate production readiness or populate
-# production optional-HSP fields.
-_LEGACY_EXPECTED_HSP_POLICY_DEBUG: dict[str, dict[str, object]] = {
-    "P3": {
-        "expected_hsps": ["GammaM", "KM"],
-        "optional_hsps": ["MM"],
-        "note": (
-            "P3/C3_like single-valley subspace groups expect C3 valley-preserving "
-            "irreps at GammaM and KM. MM is optional: current inputs may not "
-            "provide nontrivial trusted local irreps at MM HSP."
-        ),
-    },
-    "C3_like": {
-        "expected_hsps": ["GammaM", "KM"],
-        "optional_hsps": ["MM"],
-        "note": "C3_like follows same expected HSP policy as P3.",
-    },
-    "P2": {
-        "expected_hsps": [],
-        "optional_hsps": [],
-        "note": (
-            "P2/C2_like completeness requires trusted non-identity C2 data "
-            "at the relevant HSPs. No expected HSPs are declared until "
-            "trusted C2 valley-preserving irreps are available for this "
-            "subspace group candidate. Without trusted C2 irreps the "
-            "instance status is no_instances."
-        ),
-    },
-    "C2_like": {
-        "expected_hsps": [],
-        "optional_hsps": [],
-        "note": "C2_like follows same expected HSP policy as P2.",
-    },
-}
 
 
 def build_ebr_problem_instances(
@@ -140,24 +106,8 @@ def build_ebr_problem_instances(
         optional_hsps: list[str] = []
         blocked_by: list[str] = []
 
-        # Legacy HSP policy for debug/provenance only (not a production gate).
-        legacy_policy = (
-            _LEGACY_EXPECTED_HSP_POLICY_DEBUG.get(sg, {}) if sg else {}
-        )
-        legacy_expected = list(legacy_policy.get("expected_hsps", []))
-        legacy_optional = list(legacy_policy.get("optional_hsps", []))
-        legacy_missing_optional = [
-            h for h in legacy_optional if h not in actual_hsps
-        ]
-
         status = "complete" if actual_hsps else "no_data"
         ready = bool(actual_hsps)
-
-        result_hsp_policy_source = (
-            "sampled_irrep_basis"
-            if not legacy_policy
-            else "sampled_irrep_basis_with_legacy_debug_policy"
-        )
 
         instances.append({
             "instance_id": instance_id,
@@ -180,16 +130,10 @@ def build_ebr_problem_instances(
             "ready_for_ebr_decomposition": ready,
             "blocked_by": blocked_by,
             "expected_hsps": expected_hsps,
-            "expected_hsp_policy_source": result_hsp_policy_source,
+            "expected_hsp_policy_source": "sampled_irrep_basis",
             "optional_hsps": optional_hsps,
             "actual_hsps": actual_hsps,
             "missing_optional_hsps": [],
-            "_legacy_hsp_policy_debug": {
-                "group": sg,
-                "expected_hsps": legacy_expected,
-                "optional_hsps": legacy_optional,
-                "missing_optional_hsps": legacy_missing_optional,
-            } if legacy_policy else {},
         })
 
     overall_status = "has_instances" if instances else "no_instances"
@@ -197,16 +141,11 @@ def build_ebr_problem_instances(
         "status": overall_status,
         "instance_count": len(instances),
         "reduced_ebr_decomposition_status": "not_implemented",
-        "_legacy_expected_hsp_policy_debug": {
-            k: v.get("note", "")
-            for k, v in _LEGACY_EXPECTED_HSP_POLICY_DEBUG.items()
-        },
         "interpretation": (
             "Per-valley/per-subspace-group EBR problem instances grouped from "
             "trusted input candidates. Expected HSPs are derived from the "
             "sampled irrep basis; the reduced EBR table is the final authority "
-            "on HSP completeness. A legacy C2/C3 HSP policy is recorded for "
-            "debug/provenance only and is not a production readiness gate."
+            "on HSP completeness."
         ),
         "instances": instances,
     }
@@ -234,10 +173,6 @@ def _empty_report(reason: str) -> dict[str, object]:
         "status": "no_instances",
         "instance_count": 0,
         "reduced_ebr_decomposition_status": "not_implemented",
-        "_legacy_expected_hsp_policy_debug": {
-            k: v.get("note", "")
-            for k, v in _LEGACY_EXPECTED_HSP_POLICY_DEBUG.items()
-        },
         "interpretation": reason,
         "instances": [],
     }

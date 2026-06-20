@@ -3,14 +3,20 @@ import json
 from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
 
 
-def _make_tmo_te2_candidates():
+def _make_c3_preserving_candidates():
+    """Generic C3 valley-preserving candidate fixture with subspace_space_group."""
     return {
         "status": "has_candidates",
         "candidates": [
             {
                 "kpoint": "GammaM", "valley": "K_valley",
                 "workflow_path": "direct_qcut", "readiness_level": "trusted",
-                "subspace_group_candidate": "C3_like",
+                "subspace_group_candidate": "P3",
+                "subspace_space_group": {
+                    "candidate_space_group_symbol": "P3",
+                    "valley_preserving_operation_ids": [0, 1, 2],
+                },
+                "legacy_subspace_group_candidate": "C3_like",
                 "operation_id": 1, "operation_order": 3,
                 "matched_irrep": "C3_spinor_phase_+1/2",
                 "ready_for_ebr_input": True,
@@ -18,7 +24,12 @@ def _make_tmo_te2_candidates():
             {
                 "kpoint": "GammaM", "valley": "K_valley",
                 "workflow_path": "direct_qcut", "readiness_level": "trusted",
-                "subspace_group_candidate": "C3_like",
+                "subspace_group_candidate": "P3",
+                "subspace_space_group": {
+                    "candidate_space_group_symbol": "P3",
+                    "valley_preserving_operation_ids": [0, 1, 2],
+                },
+                "legacy_subspace_group_candidate": "C3_like",
                 "operation_id": 2, "operation_order": 3,
                 "matched_irrep": "C3_spinor_phase_+1/2",
                 "ready_for_ebr_input": True,
@@ -26,7 +37,12 @@ def _make_tmo_te2_candidates():
             {
                 "kpoint": "KM", "valley": "K_valley",
                 "workflow_path": "direct_qcut", "readiness_level": "trusted",
-                "subspace_group_candidate": "C3_like",
+                "subspace_group_candidate": "P3",
+                "subspace_space_group": {
+                    "candidate_space_group_symbol": "P3",
+                    "valley_preserving_operation_ids": [0, 1, 2],
+                },
+                "legacy_subspace_group_candidate": "C3_like",
                 "operation_id": 1, "operation_order": 3,
                 "matched_irrep": "C3_spinor_phase_+1/6",
                 "ready_for_ebr_input": True,
@@ -34,7 +50,12 @@ def _make_tmo_te2_candidates():
             {
                 "kpoint": "KM", "valley": "K_valley",
                 "workflow_path": "direct_qcut", "readiness_level": "trusted",
-                "subspace_group_candidate": "C3_like",
+                "subspace_group_candidate": "P3",
+                "subspace_space_group": {
+                    "candidate_space_group_symbol": "P3",
+                    "valley_preserving_operation_ids": [0, 1, 2],
+                },
+                "legacy_subspace_group_candidate": "C3_like",
                 "operation_id": 2, "operation_order": 3,
                 "matched_irrep": "C3_spinor_phase_-1/6",
                 "ready_for_ebr_input": True,
@@ -44,32 +65,28 @@ def _make_tmo_te2_candidates():
 
 
 # -----------------------------------------------------------------------
-# 1. tMoTe2-like candidates group into instances
+# 1. C3 valley-preserving candidates group into instances
 # -----------------------------------------------------------------------
 
 def test_candidates_group_into_instances():
     r = build_ebr_problem_instances(
-        ebr_input_candidates=_make_tmo_te2_candidates(),
+        ebr_input_candidates=_make_c3_preserving_candidates(),
     )
     assert r["status"] == "has_instances"
     assert r["instance_count"] == 1
     inst = r["instances"][0]
-    assert inst["subspace_group_candidate"] == "C3_like"
+    assert inst["subspace_group_candidate"] == "P3"
+    assert inst["legacy_subspace_group_candidate"] == "C3_like"
     assert inst["valley"] == "K_valley"
     assert inst["status"] == "complete"
     assert inst["ready_for_ebr_decomposition"] is True
     assert "GammaM" in inst["irreps_by_kpoint"]
     assert "KM" in inst["irreps_by_kpoint"]
-    # Table-authoritative: expected_hsps from actual, optional from legacy debug.
+    # Table-authoritative: expected_hsps from sampled irrep basis.
     assert inst["expected_hsps"] == ["GammaM", "KM"]
-    assert (
-        inst["expected_hsp_policy_source"]
-        == "sampled_irrep_basis_with_legacy_debug_policy"
-    )
+    assert inst["expected_hsp_policy_source"] == "sampled_irrep_basis"
     assert inst["optional_hsps"] == []
     assert inst["missing_optional_hsps"] == []
-    assert inst["_legacy_hsp_policy_debug"]["optional_hsps"] == ["MM"]
-    assert inst["_legacy_hsp_policy_debug"]["missing_optional_hsps"] == ["MM"]
 
 
 # -----------------------------------------------------------------------
@@ -83,7 +100,12 @@ def test_partial_hsp_still_complete_table_authoritative():
             {
                 "kpoint": "GammaM", "valley": "K_valley",
                 "workflow_path": "direct_qcut", "readiness_level": "trusted",
-                "subspace_group_candidate": "C3_like",
+                "subspace_group_candidate": "P3",
+                "subspace_space_group": {
+                    "candidate_space_group_symbol": "P3",
+                    "valley_preserving_operation_ids": [0, 1],
+                },
+                "legacy_subspace_group_candidate": "C3_like",
                 "operation_id": 1, "operation_order": 3,
                 "matched_irrep": "C3_spinor_phase_+1/2",
                 "ready_for_ebr_input": True,
@@ -96,10 +118,7 @@ def test_partial_hsp_still_complete_table_authoritative():
     assert inst["status"] == "complete"
     assert inst["ready_for_ebr_decomposition"] is True
     assert inst["expected_hsps"] == ["GammaM"]
-    assert (
-        inst["expected_hsp_policy_source"]
-        == "sampled_irrep_basis_with_legacy_debug_policy"
-    )
+    assert inst["expected_hsp_policy_source"] == "sampled_irrep_basis"
 
 
 # -----------------------------------------------------------------------
@@ -113,7 +132,12 @@ def test_blocked_rows_excluded():
                 "kpoint": "MM", "valley": "M3_valley",
                 "workflow_path": "symmetry_adapted",
                 "readiness_level": "usable_with_caution",
-                "subspace_group_candidate": "C2_like",
+                "subspace_group_candidate": "P2",
+                "subspace_space_group": {
+                    "candidate_space_group_symbol": "P2",
+                    "valley_preserving_operation_ids": [0, 5],
+                },
+                "legacy_subspace_group_candidate": "C2_like",
                 "operation_id": 5, "operation_order": 2,
                 "matched_irrep": None,
                 "ready_for_ebr_input": False,
@@ -126,18 +150,23 @@ def test_blocked_rows_excluded():
 
 
 # -----------------------------------------------------------------------
-# 4. P2/C2_like has no policy → no_instances
+# 4. C2 valley-preserving: table-authoritative, no legacy policy needed
 # -----------------------------------------------------------------------
 
 def test_c2_like_table_authoritative():
-    """Table-authoritative: C2_like no longer blocked by legacy policy."""
+    """Table-authoritative: C2 valley-preserving no longer blocked by legacy policy."""
     cands = {
         "candidates": [
             {
                 "kpoint": "GammaM", "valley": "M1_valley",
                 "workflow_path": "symmetry_adapted",
                 "readiness_level": "trusted",
-                "subspace_group_candidate": "C2_like",
+                "subspace_group_candidate": "P2",
+                "subspace_space_group": {
+                    "candidate_space_group_symbol": "P2",
+                    "valley_preserving_operation_ids": [0, 4],
+                },
+                "legacy_subspace_group_candidate": "C2_like",
                 "operation_id": 4, "operation_order": 2,
                 "matched_irrep": "C2_spinor_phase_+1/4",
                 "ready_for_ebr_input": True,
@@ -175,7 +204,7 @@ def test_empty_candidates():
 
 def test_json_serializable():
     r = build_ebr_problem_instances(
-        ebr_input_candidates=_make_tmo_te2_candidates(),
+        ebr_input_candidates=_make_c3_preserving_candidates(),
     )
     encoded = json.dumps(r)
     assert len(encoded) > 0
@@ -188,7 +217,7 @@ def test_json_serializable():
 
 def test_schema_fields():
     r = build_ebr_problem_instances(
-        ebr_input_candidates=_make_tmo_te2_candidates(),
+        ebr_input_candidates=_make_c3_preserving_candidates(),
     )
     inst = r["instances"][0]
     for key in ["instance_id", "valley", "subspace_group_candidate",
@@ -207,7 +236,7 @@ def test_schema_fields():
 
 def test_no_forbidden_terms():
     r = build_ebr_problem_instances(
-        ebr_input_candidates=_make_tmo_te2_candidates(),
+        ebr_input_candidates=_make_c3_preserving_candidates(),
     )
     encoded = json.dumps(r)
     for forbidden in ["covariance", "equivariance", "stabilizer",
@@ -225,7 +254,12 @@ def test_multiple_valleys():
             {
                 "kpoint": "GammaM", "valley": "K_valley",
                 "workflow_path": "direct_qcut", "readiness_level": "trusted",
-                "subspace_group_candidate": "C3_like",
+                "subspace_group_candidate": "P3",
+                "subspace_space_group": {
+                    "candidate_space_group_symbol": "P3",
+                    "valley_preserving_operation_ids": [0, 1],
+                },
+                "legacy_subspace_group_candidate": "C3_like",
                 "operation_id": 1, "operation_order": 3,
                 "matched_irrep": "C3_spinor_phase_+1/2",
                 "ready_for_ebr_input": True,
@@ -233,7 +267,12 @@ def test_multiple_valleys():
             {
                 "kpoint": "GammaM", "valley": "Kp_valley",
                 "workflow_path": "direct_qcut", "readiness_level": "trusted",
-                "subspace_group_candidate": "C3_like",
+                "subspace_group_candidate": "P3",
+                "subspace_space_group": {
+                    "candidate_space_group_symbol": "P3",
+                    "valley_preserving_operation_ids": [0, 1],
+                },
+                "legacy_subspace_group_candidate": "C3_like",
                 "operation_id": 1, "operation_order": 3,
                 "matched_irrep": "C3_spinor_phase_+1/2",
                 "ready_for_ebr_input": True,
@@ -252,7 +291,12 @@ def test_same_valley_different_provenance_not_merged():
             {
                 "kpoint": "GammaM", "valley": "K_valley",
                 "workflow_path": "direct_qcut", "readiness_level": "trusted",
-                "subspace_group_candidate": "C3_like",
+                "subspace_group_candidate": "P3",
+                "subspace_space_group": {
+                    "candidate_space_group_symbol": "P3",
+                    "valley_preserving_operation_ids": [0, 1],
+                },
+                "legacy_subspace_group_candidate": "C3_like",
                 "operation_id": 1, "operation_order": 3,
                 "matched_irrep": "C3_spinor_phase_+1/2",
                 "ready_for_ebr_input": True,
@@ -260,7 +304,12 @@ def test_same_valley_different_provenance_not_merged():
             {
                 "kpoint": "GammaM", "valley": "K_valley",
                 "workflow_path": "symmetry_adapted", "readiness_level": "trusted",
-                "subspace_group_candidate": "C3_like",
+                "subspace_group_candidate": "P3",
+                "subspace_space_group": {
+                    "candidate_space_group_symbol": "P3",
+                    "valley_preserving_operation_ids": [0, 1],
+                },
+                "legacy_subspace_group_candidate": "C3_like",
                 "operation_id": 1, "operation_order": 3,
                 "matched_irrep": "C3_spinor_phase_+1/2",
                 "ready_for_ebr_input": True,

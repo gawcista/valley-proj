@@ -490,14 +490,22 @@ def test_table_schema_doc_expected_hsps_basis_contract():
     assert "Missing, extra, malformed, or inferred HSP data is not accepted" in doc_text
 
 
-def test_schema_md_labels_use_clike_form():
-    """Verify docs/schema.md uses C{order}_like for subspace_group_candidate examples."""
+def test_schema_md_labels_use_physical_subspace_space_group():
+    """Verify docs/schema.md uses physical subspace-space-group symbols as primary EBR table keys.
+
+    subspace_group_candidate examples should use P3/P2 (physical), not
+    C3_like/C2_like (legacy).  Legacy C{n}_like labels appear only in
+    legacy_subspace_group_candidate or the transitional convention description.
+    """
     schema_text = Path("docs/schema.md").read_text(encoding="utf-8")
+    # Physical symbols appear as example values.
+    assert '"subspace_group_candidate": "P3"' in schema_text
+    # Legacy hints documented in the label convention description.
     assert "C3_like" in schema_text
     assert "C2_like" in schema_text
-    # Must not use P3/P2 as subspace_group_candidate example values.
-    assert '"subspace_group_candidate": "P3"' not in schema_text
-    assert '"subspace_group_candidate": "P2"' not in schema_text
+    # Must not use C{n}_like as subspace_group_candidate examples anymore.
+    assert '"subspace_group_candidate": "C3_like"' not in schema_text
+    assert '"subspace_group_candidate": "C2_like"' not in schema_text
 
 
 def test_schema_docs_describe_reviewed_table_name_config():

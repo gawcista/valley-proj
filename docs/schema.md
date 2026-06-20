@@ -129,7 +129,7 @@ Each bundle:
 | `bundle_id` | string | Unique bundle identifier |
 | `source_instance_id` | string | Source problem instance ID |
 | `valley` | string | Valley label |
-| `subspace_group_candidate` | string | Effective EBR table label (e.g. `"C3_like"`, `"C2_like"`) — built from `C{max_valley_preserving_order}_like`. External reduced EBR tables must use this label, not crystallographic notation. |
+| `subspace_group_candidate` | string | Physical subspace-space-group symbol (e.g. `"P3"`, `"P4"`, `"P2"`). This is the primary group identity for EBR table matching, derived from the valley-projected subspace space group. For compatibility with older records, it may fall back to a legacy `C{order}_like` label when no physical symbol is available. |
 | `workflow_path` | string | `"direct_qcut"` or `"symmetry_adapted"` |
 | `readiness_level` | string | `"trusted"` |
 | `irreps_by_kpoint` | object | Per-kpoint irrep labels |
@@ -143,16 +143,17 @@ Each bundle:
 Inclusion gate: `ready_for_ebr_decomposition == true` AND `status == "complete"`
 AND `readiness_level == "trusted"`.
 
-**Label convention**: `subspace_group_candidate` uses the effective EBR table
-label form `C{max_order}_like` (e.g. `C3_like`, `C2_like`), built from the
-maximum valley-preserving operation order. External reduced EBR tables must
-use this label. The crystallographic notation (`P3`, `P2`) appears in
-`subspace_space_group.candidate_space_group_symbol` within the
-`symmetry_adapted_valley_analysis.json` report but is not the EBR table key.
-The two conventions are related — a `C3_like` valley-preserving subgroup
-inside a `P3`-family space group, a `C2_like` subgroup inside a
-`P2`-family space group — but the EBR contract uses the `C{order}_like`
-form exclusively.
+**Label convention**: `subspace_group_candidate` carries the physical
+subspace-space-group symbol (e.g. `"P3"`, `"P4"`, `"P2"`) as the primary
+EBR table key.  This symbol comes from
+`subspace_space_group.candidate_space_group_symbol` and reflects the
+valley-projected subspace space group.  The legacy
+`C{order}_like` form (e.g. `"C3_like"`, `"C2_like"`) is retained only in
+`legacy_subspace_group_candidate` for provenance.  External reduced EBR
+tables should use the physical subspace-space-group symbol as their
+`subspace_group_candidate` key.  Reviewed reduced-table provenance records
+the physical group identity; the `C{order}_like` form is a transitional
+compatibility hint, not the final contract.
 
 ### `valley_reduced_ebr_mapping.json`
 
@@ -449,7 +450,7 @@ schema version bump and are not part of the frozen public schema.
       "bundle_id": "bundle_K_valley",
       "source_instance_id": "K_valley",
       "valley": "K_valley",
-      "subspace_group_candidate": "C3_like",
+      "subspace_group_candidate": "P3",
       "workflow_path": "direct_qcut",
       "readiness_level": "trusted",
       "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"], "KM": ["C3_spinor_phase_+1/6", "C3_spinor_phase_-1/6"]},
@@ -486,7 +487,7 @@ schema version bump and are not part of the frozen public schema.
     {
       "bundle_id": "bundle_K_valley",
       "valley": "K_valley",
-      "subspace_group_candidate": "C3_like",
+      "subspace_group_candidate": "P3",
       "irrep_vector": [1, 1],
       "status": "solved_exact",
       "classification": "atomic-compatible-candidate",
