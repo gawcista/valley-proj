@@ -1117,3 +1117,153 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     assert bad_mapping["mapping_status"] == "not_evaluated"
     assert bad_mapping["excluded_bundles"]
     assert "expected_hsps" in bad_mapping["excluded_bundles"][0]["reason"]
+
+
+def test_unmock_generic_source_adapter_positive_full_pipeline():
+    """Unmock: real load_standard_irrep_table + build_source_payload
+    feed through matcher -> EBR -> reduced mapping -> database ingestion."""
+    import json, tempfile
+    from pathlib import Path
+    from valleyscope.irreps.tables import load_standard_irrep_table
+    from valleyscope.irreps.source_payload import (
+        build_source_payload_for_generic_matching,
+    )
+    from valleyscope.analysis.valley_irrep_matching import (
+        build_valley_irrep_matching_report,
+    )
+    from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
+    from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
+    from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
+    from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
+    from valleyscope.analysis.database_ingestion_record import (
+        build_database_ingestion_record,
+    )
+
+    # Real SG 143 P3 spinor table via irreptables.
+    table = load_standard_irrep_table(143, spinor=True)
+    assert table.number == 143
+    assert table.spinor is True
+
+    # Detected operations matching P3 C3 ops at GammaM.
+    detected = [
+        {"operation_id": 1,
+         "rotation_frac": table.operation_by_index(1).rotation_frac,
+         "translation_frac": table.operation_by_index(1).translation_frac},
+        {"operation_id": 2,
+         "rotation_frac": table.operation_by_index(2).rotation_frac,
+         "translation_frac": table.operation_by_index(2).translation_frac},
+        {"operation_id": 3,
+         "rotation_frac": table.operation_by_index(3).rotation_frac,
+         "translation_frac": table.operation_by_index(3).translation_frac},
+    ]
+
+    # Real adapter: build source payload for K HSP, C3-little-group VP ops.
+    payload = build_source_payload_for_generic_matching(
+        table=table,
+        source_hsp_label="K",
+        detected_operations=detected,
+        valley_preserving_operation_ids=[1, 2, 3],
+    )
+    assert payload["status"] == "ok"
+    assert "source_irrep_characters" in payload
+    assert "source_operation_map" in payload
+    assert payload["provenance"]["source_hsp_label"] == "K"
+
+    # Symmetry-adapted report with VP subspace data matching P3.
+    sa = {
+        "by_kpoint": {
+            "GammaM": {
+                "valley_preserving_subspaces": [{
+                    "reference_valley": "K_valley",
+                    "orbit": ["K_valley"],
+                    "hsp_preserving_operation_ids": [1, 2, 3],
+                    "subspace_space_group": {
+                        "valley_preserving_operation_ids": [1, 2, 3],
+                        "candidate_space_group_symbol": "P3",
+                    },
+                    "subspace_group": {
+                        "subspace_group_candidate": "C3_like",
+                        "operation_orders": {"1": 1, "2": 3, "3": 3},
+                    },
+                    "valley_preserving_character_diagnostics": {
+                        "per_valley": {
+                            "K_valley": [
+                                {"operation_id": 1, "eigenphases": [0.0, 0.0]},
+                                {"operation_id": 2, "eigenphases": [-1.0/6, 1.0/6]},
+                                {"operation_id": 3, "eigenphases": [1.0/6, -1.0/6]},
+                            ],
+                        },
+                    },
+                }],
+            },
+        },
+    }
+    workflow = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "readiness_level": "trusted",
+                    "workflow_path": "direct_qcut",
+                },
+            },
+        },
+    }
+    op_maps = {"GammaM": {"K_valley": payload["source_operation_map"]}}
+
+    # 1. Matcher with real adapter payload.
+    matching = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=workflow,
+        symmetry_adapted_valley_report=sa,
+        source_irrep_characters_flattened={
+            "GammaM": {"K_valley": payload["source_irrep_characters"]},
+        },
+        source_operation_maps=op_maps,
+    )
+    gm = matching["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
+    assert gm["matching_status"] == "matched"
+    assert gm["matching_strategy"] == "bilbao_restricted_character"
+    assert gm["irrep_multiplicities"]["-K5"] == 1
+    assert gm["irrep_multiplicities"]["-K6"] == 1
+
+    # 2. EBR input candidates.
+    candidates = build_ebr_input_candidates(
+        irrep_workflow_decisions=workflow,
+        valley_irrep_matching=matching,
+    )
+    assert candidates["candidate_count"] >= 2
+
+    # 3. Problem instances.
+    instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
+    assert instances["instance_count"] == 1
+    inst = instances["instances"][0]
+    assert inst["ready_for_ebr_decomposition"] is True
+    assert inst["subspace_group_candidate"] == "P3"
+
+    # 4. Export bundle.
+    ebr_bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
+    assert ebr_bundle["bundle_count"] == 1
+    b = ebr_bundle["bundles"][0]
+    assert b["ready_for_external_solver"] is True
+
+    # 5. Reduced EBR mapping.
+    bp_irreps = b["irreps_by_kpoint"]["GammaM"]
+    table_def = {
+        "schema_version": "1.0.0",
+        "subspace_group_candidate": "P3",
+        "expected_hsps": ["GammaM"],
+        "irreps": [f"GammaM:{irr}" for irr in bp_irreps],
+        "ebrs": [{"label": "EBR_X", "vector": [1, 1]}],
+    }
+    result = build_reduced_ebr_mapping(ebr_export_bundle=ebr_bundle, table=table_def)
+    assert result["mapping_status"] == "solved_exact"
+
+    # 6. Database ingestion.
+    summary_in = {"target_kpoints": ["GammaM"], "iband": [101], "input": {}}
+    record = build_database_ingestion_record(
+        valley_summary=summary_in,
+        valley_ebr_export_bundle=ebr_bundle,
+        valley_reduced_ebr_mapping=result,
+    )
+    assert record["record_status"] == "has_ready_ebr_bundles"
+    assert record["ready_bundle_count"] == 1
+    assert record["reduced_ebr_mapping_status"] == "solved_exact"
