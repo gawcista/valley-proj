@@ -1122,8 +1122,6 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
 def test_unmock_generic_source_adapter_positive_full_pipeline():
     """Unmock: real load_standard_irrep_table + build_source_payload
     feed through matcher -> EBR -> reduced mapping -> database ingestion."""
-    import json, tempfile
-    from pathlib import Path
     from valleyscope.irreps.tables import load_standard_irrep_table
     from valleyscope.irreps.source_payload import (
         build_source_payload_for_generic_matching,
@@ -1167,6 +1165,8 @@ def test_unmock_generic_source_adapter_positive_full_pipeline():
     assert payload["status"] == "ok"
     assert "source_irrep_characters" in payload
     assert "source_operation_map" in payload
+    assert payload["source_operation_map"] == {1: 1, 2: 2, 3: 3}
+    assert set(payload["source_irrep_characters"]) == {"-K4", "-K5", "-K6"}
     assert payload["provenance"]["source_hsp_label"] == "K"
 
     # Symmetry-adapted report with VP subspace data matching P3.
@@ -1222,15 +1222,20 @@ def test_unmock_generic_source_adapter_positive_full_pipeline():
     gm = matching["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
     assert gm["matching_status"] == "matched"
     assert gm["matching_strategy"] == "bilbao_restricted_character"
-    assert gm["irrep_multiplicities"]["-K5"] == 1
-    assert gm["irrep_multiplicities"]["-K6"] == 1
+    assert gm["irrep_multiplicities"] == {"-K5": 1, "-K6": 1}
+    assert gm["subspace_space_group"]["candidate_space_group_symbol"] == "P3"
+    assert gm["subspace_group_candidate"] == "C3_like"
 
     # 2. EBR input candidates.
     candidates = build_ebr_input_candidates(
         irrep_workflow_decisions=workflow,
         valley_irrep_matching=matching,
     )
-    assert candidates["candidate_count"] >= 2
+    assert candidates["candidate_count"] == 2
+    assert sorted(c["matched_irrep"] for c in candidates["candidates"]) == [
+        "-K5",
+        "-K6",
+    ]
 
     # 3. Problem instances.
     instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
@@ -1238,6 +1243,7 @@ def test_unmock_generic_source_adapter_positive_full_pipeline():
     inst = instances["instances"][0]
     assert inst["ready_for_ebr_decomposition"] is True
     assert inst["subspace_group_candidate"] == "P3"
+    assert inst["legacy_subspace_group_candidate"] == "C3_like"
 
     # 4. Export bundle.
     ebr_bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
@@ -1256,6 +1262,9 @@ def test_unmock_generic_source_adapter_positive_full_pipeline():
     }
     result = build_reduced_ebr_mapping(ebr_export_bundle=ebr_bundle, table=table_def)
     assert result["mapping_status"] == "solved_exact"
+    assert result["solutions"][0]["ebr_decomposition"] == [
+        {"label": "EBR_X", "coefficient": 1},
+    ]
 
     # 6. Database ingestion.
     summary_in = {"target_kpoints": ["GammaM"], "iband": [101], "input": {}}
