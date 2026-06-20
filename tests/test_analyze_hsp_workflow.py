@@ -1278,95 +1278,98 @@ def test_unmock_generic_source_adapter_positive_full_pipeline():
     assert record["reduced_ebr_mapping_status"] == "solved_exact"
 
 
-def test_spinful_p3_analyze_hsp_unmocked_feasibility():
+def test_spinful_p3_analyze_hsp_unmocked_feasibility(tmp_path):
     """Feasibility test: fully unmocked spinful P3 analyze_hsp E2E is blocked
     by toy fixture limitations. Documents exact blocker for future work."""
-    import json, yaml, h5py, numpy as np
-    from pathlib import Path
-    from valleyscope.workflows.analyze_hsp import analyze_hsp
+    h5_path = tmp_path / "wf.h5"
+    structure = tmp_path / "CONTCAR"
+    write_simple_poscar(structure)
+    direct_cart = np.array([
+        [1.0, 0.0, 0.0],
+        [-0.5, np.sqrt(3.0) / 2.0, 0.0],
+        [0.0, 0.0, 8.0],
+    ])
+    recip = 2 * np.pi * np.linalg.inv(direct_cart).T
+    with h5py.File(h5_path, "w") as h5:
+        meta = h5.create_group("metadata")
+        lattice = meta.create_group("lattice")
+        lattice["direct_cart"] = direct_cart
+        lattice["reciprocal_cart"] = recip
+        meta["spinor"] = True
+        meta["source"] = "toy"
+        meta["vasp_band_index_base"] = 1
+        kp = h5.create_group("kpoints").create_group("0")
+        kp["name"] = "GammaM"; kp["frac"] = np.zeros(3); kp["cart"] = np.zeros(3)
+        kp["g_vectors_frac"] = np.array([[0, 0, 0]])
+        kp["g_vectors_cart"] = np.array([[0.0, 0.0, 0.0]])
+        coeffs = np.zeros((2, 2, 1), dtype=np.complex128)
+        coeffs[0, 0, 0] = 1.0
+        coeffs[1, 1, 0] = 1.0
+        kp["coefficients"] = coeffs
+        kp["energies_eV"] = np.array([0.1, 0.1001])
+        kp["band_indices_vasp"] = np.array([101, 102])
 
-    tmp = Path(__import__("tempfile").mkdtemp())
-    try:
-        h5_path = tmp / "wf.h5"
-        structure = tmp / "CONTCAR"
-        from tests.helpers_io_workflow import write_simple_poscar
-        write_simple_poscar(structure)
-        a = 5.0
-        direct_cart = np.array([
-            [a, 0.0, 0.0],
-            [-a/2, a*np.sqrt(3)/2, 0.0],
-            [0.0, 0.0, 20.0],
-        ])
-        recip = 2*np.pi * np.linalg.inv(direct_cart).T
-        with h5py.File(h5_path, "w") as h5:
-            meta = h5.create_group("metadata")
-            lattice = meta.create_group("lattice")
-            lattice["direct_cart"] = direct_cart
-            lattice["reciprocal_cart"] = recip
-            meta["spinor"] = True
-            meta["source"] = "toy"
-            meta["vasp_band_index_base"] = 1
-            kp = h5.create_group("kpoints").create_group("0")
-            kp["name"] = "GammaM"; kp["frac"] = np.zeros(3); kp["cart"] = np.zeros(3)
-            kp["g_vectors_frac"] = np.array([[0,0,0]])
-            kp["g_vectors_cart"] = np.array([[0.,0.,0.]])
-            kp["coefficients"] = np.array([[[1.0+0j]], [[1.0+0j]]], dtype=np.complex128)
-            kp["energies_eV"] = np.array([0.1, 0.2])
-            kp["band_indices_vasp"] = np.array([101, 102])
-
-        out_dir = tmp / "out"
-        config = {
-            "input": {"wavefunction_h5": str(h5_path)},
-            "analysis": {
-                "kpoints": ["GammaM"], "iband": [101, 102], "degeneracy_tol_meV": 1.0,
-                "generic_irrep_source": {
-                    "enabled": True, "spacegroup_number": 143, "spinor": True,
-                    "source_hsp_labels": {"GammaM": {"K_valley": "GM"}},
-                },
+    out_dir = tmp_path / "out"
+    config = {
+        "input": {"wavefunction_h5": str(h5_path)},
+        "analysis": {
+            "kpoints": ["GammaM"], "iband": [101, 102], "degeneracy_tol_meV": 1.0,
+            "generic_irrep_source": {
+                "enabled": True, "spacegroup_number": 143, "spinor": True,
+                "source_hsp_labels": {"GammaM": {"K_valley": "GM"}},
             },
-            "monolayer_lattices": {"default": {"reciprocal_cart": recip.tolist()}},
-            "valley_centers": {"coordinate_mode": "cart",
-                "centers": [{"name": "K", "cart": [0.,0.,0.]},
-                            {"name": "Kp", "cart": [5.,0.,0.]}]},
-            "valley_subspaces": [{"name": "K_valley", "centers": ["K"]},
-                                  {"name": "Kp_valley", "centers": ["Kp"]}],
-            "projection": {"qcut_mode": "absolute", "qcut_Ainv": 0.5, "overlap_policy": "warn_exclude"},
-            "symmetry": {
-                "operations": {"mode": "auto", "structure_file": str(structure), "backend": "spglib"},
-                "tolerance": {"symprec": 1.0e-3, "angle_tolerance": -1.0},
-                "filters": {"rotation_order": 3},
-            },
-            "output": {"directory": str(out_dir), "profile": "standard"},
-        }
-        config_path = tmp / "cfg.yaml"
-        config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+        },
+        "monolayer_lattices": {"default": {"reciprocal_cart": recip.tolist()}},
+        "valley_centers": {"coordinate_mode": "cart",
+            "centers": [{"name": "K", "cart": [0.0, 0.0, 0.0]},
+                        {"name": "Kp", "cart": [5.0, 0.0, 0.0]}]},
+        "valley_subspaces": [{"name": "K_valley", "centers": ["K"]},
+                              {"name": "Kp_valley", "centers": ["Kp"]}],
+        "projection": {"qcut_mode": "absolute", "qcut_Ainv": 0.5, "overlap_policy": "warn_exclude"},
+        "symmetry": {
+            "operations": {"mode": "auto", "structure_file": str(structure), "backend": "spglib"},
+            "tolerance": {"symprec": 1.0e-3, "angle_tolerance": -1.0},
+            "filters": {"rotation_order": 3},
+        },
+        "output": {"directory": str(out_dir), "profile": "standard"},
+    }
+    config_path = tmp_path / "cfg.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
-        outputs = analyze_hsp(config_path)
-        summary = json.loads(outputs["valley_summary_json"].read_text())
-        vm = summary.get("valley_irrep_matching", {})
-        gm = vm.get("generic_matches_by_kpoint", {})
+    outputs = analyze_hsp(config_path)
+    summary = json.loads(outputs["valley_summary_json"].read_text())
+    vm = summary.get("valley_irrep_matching", {})
+    gm = vm.get("generic_matches_by_kpoint", {})
 
-        # Document the blocker: toy fixture cannot produce trusted generic matches.
-        matched_count = 0
-        for kp_data in gm.values() if isinstance(gm, dict) else []:
-            for v_data in kp_data.values() if isinstance(kp_data, dict) else []:
-                if isinstance(v_data, dict) and v_data.get("matching_status") == "matched":
-                    matched_count += 1
+    # Document the blocker: toy fixture cannot produce trusted generic matches.
+    matched_count = 0
+    for kp_data in gm.values() if isinstance(gm, dict) else []:
+        for v_data in kp_data.values() if isinstance(kp_data, dict) else []:
+            if isinstance(v_data, dict) and v_data.get("matching_status") == "matched":
+                matched_count += 1
 
-        # Blocker assertion: no matched generic rows from toy spinful fixture.
-        assert matched_count == 0, (
-            "BLOCKER CLEARED: toy fixture unexpectedly produced trusted "
-            "generic matches — fully unmocked E2E may now be feasible"
+    # Blocker assertion: no matched generic rows from toy spinful fixture.
+    assert matched_count == 0, (
+        "BLOCKER CLEARED: toy fixture unexpectedly produced trusted "
+        "generic matches - fully unmocked E2E may now be feasible"
+    )
+
+    # The one-atom hexagonal toy structure is higher symmetry than SG143/P3,
+    # and the spinor convention is intentionally unverified.
+    symmetry = summary["symmetry_analysis"]
+    assert symmetry["spacegroup_number"] == 191
+    assert summary["input"]["spinor_convention_verified"] is False
+
+    # All eigenphase rows are diagnostic-only or fail the rotation-readiness
+    # gate; no trusted non-identity valley-preserving character row exists.
+    for row in summary.get("symmetry_eigenvalues", []):
+        assert row.get("diagnostic_only") is True or row.get("rotation_ready") is False, (
+            "BLOCKER CLEARED: toy fixture has trusted eigenphase rows"
         )
+    assert summary["valley_ebr_input_candidates"]["candidate_count"] == 0
+    assert summary["valley_ebr_problem_instances"]["instance_count"] == 0
+    assert summary["valley_ebr_export_bundle"]["bundle_count"] == 0
 
-        # All eigenphase rows are diagnostic_only.
-        for row in summary.get("symmetry_eigenvalues", []):
-            assert row.get("diagnostic_only") is True or row.get("rotation_ready") is False, (
-                "BLOCKER CLEARED: toy fixture has trusted eigenphase rows"
-            )
-
-        # Standard outputs exist.
-        assert outputs["valley_summary_json"].exists()
-        assert outputs["valley_ebr_export_bundle_json"].exists()
-    finally:
-        import shutil; shutil.rmtree(str(tmp))
+    # Standard outputs exist.
+    assert outputs["valley_summary_json"].exists()
+    assert outputs["valley_ebr_export_bundle_json"].exists()
