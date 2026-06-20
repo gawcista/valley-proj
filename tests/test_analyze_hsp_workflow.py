@@ -816,11 +816,7 @@ def test_generic_irrep_source_rejects_invalid_tol(tmp_path):
 
 
 def test_generic_irrep_source_blocked_negative_toy_fixture(tmp_path):
-    """analyze_hsp with generic_irrep_source enabled on a scalar toy fixture
-    does NOT produce generic_matches_by_kpoint because no trusted non-identity
-    valley-preserving rows exist."""
-    import json, yaml, h5py, numpy as np
-    from valleyscope.workflows.analyze_hsp import analyze_hsp
+    """A mismatched source table reaches generic preflight but stays blocked."""
     from valleyscope.analysis.database_ingestion_record import (
         load_database_ingestion_record_from_directory,
     )
@@ -886,38 +882,51 @@ def test_generic_irrep_source_blocked_negative_toy_fixture(tmp_path):
     assert record["summary_status"] == "present"
     assert "valley_irrep_records" in record
 
-    # Negative assertion: toy scalar fixture has no trusted non-identity
-    # valley-preserving rows -> no generic matches.
+    # Negative assertion: the scalar square fixture exposes a P4/mmm-like
+    # valley-preserving operation set, which must not be matched to the SG143
+    # source table by convenience.
     summary = json.loads(outputs["valley_summary_json"].read_text())
     vm = summary.get("valley_irrep_matching", {})
     gm = vm.get("generic_matches_by_kpoint", {})
-    # No entries or all entries are blocked/diagnostic.
-    matched = 0
-    for kp_data in gm.values() if isinstance(gm, dict) else []:
-        for v_data in kp_data.values() if isinstance(kp_data, dict) else []:
-            if isinstance(v_data, dict) and v_data.get("matching_status") == "matched":
-                matched += 1
-    assert matched == 0, "toy scalar fixture should produce no trusted generic matches"
+    blocked = gm["GammaM"]["K_valley"]
+    assert blocked["matching_status"] == "blocked"
+    assert blocked["matching_strategy"] == "bilbao_restricted_character"
+    assert blocked["diagnostic_only"] is True
+    assert "table_operation_matching_failed" in blocked["reason"]
+    assert summary["valley_ebr_input_candidates"]["status"] == "no_candidates"
+    assert summary["valley_ebr_input_candidates"]["candidate_count"] == 0
+    assert summary["valley_ebr_problem_instances"]["status"] == "no_instances"
+    assert summary["valley_ebr_export_bundle"]["status"] == "no_bundles"
+    assert not (out_dir / "valley_reduced_ebr_mapping.json").exists()
 
 
-def test_generic_irrep_positive_full_pipeline_e2e():
-    """Positive E2E: synthetic generic matches via build_valley_irrep_matching_report
-    feed through EBR pipeline -> export bundle -> reduced EBR mapping -> database ingestion."""
-    import json, tempfile
-    from pathlib import Path
-    from valleyscope.analysis.valley_irrep_matching import (
-        build_valley_irrep_matching_report,
-    )
-    from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
-    from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
-    from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
-    from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
+def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
+    """analyze_hsp wires a trusted generic match into reduced EBR mapping."""
     from valleyscope.analysis.database_ingestion_record import (
-        build_database_ingestion_record,
+        load_database_ingestion_record_from_directory,
     )
+    import valleyscope.workflows.analyze_hsp as workflow_mod
 
-    # Synthetic symmetry_adapted_valley_report with VP subspace data.
-    sa = {
+    h5_path = tmp_path / "wf.h5"
+    structure = tmp_path / "CONTCAR"
+    write_square_poscar(structure)
+    with h5py.File(h5_path, "w") as h5:
+        meta = h5.create_group("metadata")
+        lattice = meta.create_group("lattice")
+        lattice["direct_cart"] = np.eye(3)
+        lattice["reciprocal_cart"] = np.eye(3)
+        meta["spinor"] = False
+        meta["source"] = "toy"
+        meta["vasp_band_index_base"] = 1
+        kp = h5.create_group("kpoints").create_group("0")
+        kp["name"] = "GammaM"; kp["frac"] = np.zeros(3); kp["cart"] = np.zeros(3)
+        kp["g_vectors_frac"] = np.array([[1, 0, 0], [-1, 0, 0]])
+        kp["g_vectors_cart"] = np.array([[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]])
+        kp["coefficients"] = np.array([[[1.0, 0.0]], [[0.0, 1.0]]], dtype=np.complex128)
+        kp["energies_eV"] = np.array([0.1, 0.1001])
+        kp["band_indices_vasp"] = np.array([101, 102])
+
+    symmetry_adapted_report = {
         "by_kpoint": {
             "GammaM": {
                 "valley_preserving_subspaces": [{
@@ -944,7 +953,7 @@ def test_generic_irrep_positive_full_pipeline_e2e():
             },
         },
     }
-    workflow = {
+    workflow_decisions = {
         "by_kpoint": {
             "GammaM": {
                 "K_valley": {
@@ -954,74 +963,157 @@ def test_generic_irrep_positive_full_pipeline_e2e():
             },
         },
     }
-    source_chars = {"A": {1: 1 + 0j, 2: 1 + 0j}, "B": {1: 1 + 0j, 2: -1 + 0j}}
-    op_maps = {"GammaM": {"K_valley": {0: 1, 4: 2}}}
-
-    # 1. Matcher produces generic_matches_by_kpoint.
-    matching = build_valley_irrep_matching_report(
-        irrep_workflow_decisions=workflow,
-        symmetry_adapted_valley_report=sa,
-        source_irrep_characters_flattened={
-            "GammaM": {"K_valley": source_chars},
-        },
-        source_operation_maps=op_maps,
-    )
-    gm = matching["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
-    assert gm["matching_status"] == "matched"
-    assert gm["matching_strategy"] == "bilbao_restricted_character"
-    assert gm["irrep_multiplicities"] == {"A": 1, "B": 1}
-
-    # 2. EBR input candidates.
-    candidates = build_ebr_input_candidates(
-        irrep_workflow_decisions=workflow,
-        valley_irrep_matching=matching,
-    )
-    assert candidates["candidate_count"] == 2
-
-    # 3. Table-authoritative problem instances.
-    instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
-    assert instances["instance_count"] == 1
-    inst = instances["instances"][0]
-    assert inst["ready_for_ebr_decomposition"] is True
-    assert inst["expected_hsps"] == ["GammaM"]
-
-    # 4. Export bundle.
-    ebr_bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
-    assert ebr_bundle["bundle_count"] == 1
-    b = ebr_bundle["bundles"][0]
-    assert b["ready_for_external_solver"] is True
-
-    # 5. Reduced EBR mapping (solved_exact with matching table).
-    bp_irreps = b["irreps_by_kpoint"]["GammaM"]
-    table = {
+    source_chars = {
+        "A": {1: 1 + 0j, 2: 1 + 0j},
+        "B": {1: 1 + 0j, 2: -1 + 0j},
+    }
+    matching_table = {
         "schema_version": "1.0.0",
         "subspace_group_candidate": "P4",
         "expected_hsps": ["GammaM"],
-        "irreps": [f"GammaM:{irr}" for irr in bp_irreps],
-        "ebrs": [{"label": "EBR_A", "vector": [1, 0]},
-                  {"label": "EBR_B", "vector": [0, 1]}],
+        "irreps": ["GammaM:A", "GammaM:B"],
+        "ebrs": [
+            {"label": "EBR_A", "vector": [1, 0]},
+            {"label": "EBR_B", "vector": [0, 1]},
+        ],
     }
-    result = build_reduced_ebr_mapping(ebr_export_bundle=ebr_bundle, table=table)
-    assert result["mapping_status"] == "solved_exact"
+    bad_table = {
+        **matching_table,
+        "expected_hsps": ["GammaM", "KM"],
+        "irreps": ["GammaM:A", "GammaM:B", "KM:X"],
+        "ebrs": [
+            {"label": "EBR_A", "vector": [1, 0, 0]},
+            {"label": "EBR_B", "vector": [0, 1, 0]},
+        ],
+    }
+    table_path = tmp_path / "reduced_ebr_table.json"
+    bad_table_path = tmp_path / "bad_reduced_ebr_table.json"
+    table_path.write_text(json.dumps(matching_table), encoding="utf-8")
+    bad_table_path.write_text(json.dumps(bad_table), encoding="utf-8")
 
-    # 6. Mismatched HSP basis rejection.
-    bad_table = dict(table)
-    bad_table["expected_hsps"] = ["GammaM", "KM"]
-    bad_table["irreps"] = list(table["irreps"]) + ["KM:-K5"]
-    bad_table["ebrs"] = [{"label": "EBR_A", "vector": [1, 0, 0]},
-                           {"label": "EBR_B", "vector": [0, 1, 0]}]
-    result2 = build_reduced_ebr_mapping(ebr_export_bundle=ebr_bundle, table=bad_table)
-    assert len(result2["excluded_bundles"]) >= 1
-    assert "expected_hsps" in result2["excluded_bundles"][0]["reason"]
-
-    # 7. Database ingestion from the matching results.
-    summary = {"target_kpoints": ["GammaM"], "iband": [101], "input": {}}
-    record = build_database_ingestion_record(
-        valley_summary=summary,
-        valley_ebr_export_bundle=ebr_bundle,
-        valley_reduced_ebr_mapping=result,
+    monkeypatch.setattr(
+        workflow_mod,
+        "_build_symmetry_adapted_valley_report",
+        lambda **_: symmetry_adapted_report,
     )
+    monkeypatch.setattr(
+        workflow_mod,
+        "_build_hsp_star_derived_character_layer",
+        lambda **_: (None, None),
+    )
+    monkeypatch.setattr(
+        workflow_mod,
+        "build_irrep_workflow_decisions",
+        lambda **_: workflow_decisions,
+    )
+    monkeypatch.setattr(
+        workflow_mod,
+        "load_standard_irrep_table",
+        lambda spacegroup_number, *, spinor: object(),
+    )
+    monkeypatch.setattr(
+        workflow_mod,
+        "build_source_payload_for_generic_matching",
+        lambda **_: {
+            "status": "ok",
+            "source_irrep_characters": source_chars,
+            "source_operation_map": {0: 1, 4: 2},
+        },
+    )
+
+    def write_cfg(config_path: Path, out_dir: Path, reduced_table_path: Path) -> None:
+        config = {
+            "input": {"wavefunction_h5": str(h5_path)},
+            "analysis": {
+                "kpoints": ["GammaM"],
+                "iband": [101, 102],
+                "degeneracy_tol_meV": 1.0,
+                "generic_irrep_source": {
+                    "enabled": True,
+                    "spacegroup_number": 143,
+                    "spinor": False,
+                    "source_hsp_labels": {"GammaM": {"K_valley": "GM"}},
+                },
+                "reduced_ebr": {
+                    "enabled": True,
+                    "table_file": str(reduced_table_path),
+                },
+            },
+            "monolayer_lattices": {"default": {"reciprocal_cart": np.eye(3).tolist()}},
+            "valley_centers": {
+                "coordinate_mode": "cart",
+                "centers": [
+                    {"name": "K", "cart": [1.0, 0.0, 0.0]},
+                    {"name": "Kp", "cart": [-1.0, 0.0, 0.0]},
+                ],
+            },
+            "valley_subspaces": [
+                {"name": "K_valley", "centers": ["K"]},
+                {"name": "Kp_valley", "centers": ["Kp"]},
+            ],
+            "projection": {
+                "qcut_mode": "absolute",
+                "qcut_Ainv": 0.25,
+                "overlap_policy": "warn_exclude",
+            },
+            "symmetry": {
+                "operations": {
+                    "mode": "auto",
+                    "structure_file": str(structure),
+                    "backend": "spglib",
+                },
+                "tolerance": {"symprec": 1.0e-5, "angle_tolerance": -1.0},
+                "filters": {"rotation_order": 2},
+            },
+            "output": {"directory": str(out_dir), "profile": "standard"},
+        }
+        config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    out_dir = tmp_path / "out"
+    config_path = tmp_path / "cfg.yaml"
+    write_cfg(config_path, out_dir, table_path)
+
+    outputs = analyze_hsp(config_path)
+
+    assert outputs["valley_summary_json"].exists()
+    assert outputs["valley_reduced_ebr_mapping_json"].exists()
+    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    gm = summary["valley_irrep_matching"]["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
+    assert gm["matching_status"] == "matched"
+    assert gm["matching_strategy"] == "bilbao_restricted_character"
+    assert gm["irrep_multiplicities"] == {"A": 1, "B": 1}
+    assert gm["subspace_space_group"]["candidate_space_group_symbol"] == "P4"
+    assert gm["subspace_space_group"]["candidate_space_group_symbol"] != "C2_like"
+    assert summary["valley_ebr_input_candidates"]["candidate_count"] == 2
+    assert summary["valley_ebr_problem_instances"]["instance_count"] == 1
+    inst = summary["valley_ebr_problem_instances"]["instances"][0]
+    assert inst["ready_for_ebr_decomposition"] is True
+    assert inst["subspace_group_candidate"] == "P4"
+    assert inst["legacy_subspace_group_candidate"] == "C2_like"
+    assert inst["expected_hsps"] == ["GammaM"]
+    assert summary["valley_ebr_export_bundle"]["bundle_count"] == 1
+    b = summary["valley_ebr_export_bundle"]["bundles"][0]
+    assert b["ready_for_external_solver"] is True
+    result = summary["valley_reduced_ebr_mapping"]
+    assert result["mapping_status"] == "solved_exact"
+    assert result["solutions"][0]["ebr_decomposition"] == [
+        {"label": "EBR_A", "coefficient": 1},
+        {"label": "EBR_B", "coefficient": 1},
+    ]
+    record = load_database_ingestion_record_from_directory(str(out_dir))
     assert record["record_status"] == "has_ready_ebr_bundles"
     assert record["ready_bundle_count"] == 1
     assert record["reduced_ebr_mapping_status"] == "solved_exact"
     assert record["reduced_ebr_classification_counts"]["atomic_compatible"] == 1
+
+    bad_out_dir = tmp_path / "bad_out"
+    bad_config_path = tmp_path / "bad_cfg.yaml"
+    write_cfg(bad_config_path, bad_out_dir, bad_table_path)
+    bad_outputs = analyze_hsp(bad_config_path)
+    bad_summary = json.loads(
+        bad_outputs["valley_summary_json"].read_text(encoding="utf-8")
+    )
+    bad_mapping = bad_summary["valley_reduced_ebr_mapping"]
+    assert bad_mapping["mapping_status"] == "not_evaluated"
+    assert bad_mapping["excluded_bundles"]
+    assert "expected_hsps" in bad_mapping["excluded_bundles"][0]["reason"]
