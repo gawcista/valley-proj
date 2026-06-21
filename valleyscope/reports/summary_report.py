@@ -1210,6 +1210,12 @@ def _short_list(value: Any) -> str:
     return "[" + ", ".join(_fmt(item) for item in array.tolist()) + "]"
 
 
+def _short_irrep_multiplicities(value: Any) -> str:
+    if not isinstance(value, dict) or not value:
+        return ""
+    return ", ".join(f"{label}:{mult}" for label, mult in sorted(value.items()))
+
+
 def _short_matrix(value: Any) -> str:
     if value is None:
         return ""
@@ -1475,11 +1481,56 @@ def _render_valley_irrep_matching(
 ) -> None:
     _section(lines, "Valley irrep matching")
     lines.append(f"status: {report.get('status', 'not_evaluated')}")
-    lines.append(
-        f"tables implemented: {', '.join(report.get('tables_implemented', []))}"
-    )
+    matching_mode = str(report.get("matching_mode", "legacy"))
+    lines.append(f"mode: {matching_mode}")
+    legacy_tables = report.get("legacy_tables_implemented")
+    if not isinstance(legacy_tables, list):
+        legacy_tables = report.get("tables_implemented", [])
+    if isinstance(legacy_tables, list) and legacy_tables:
+        label = (
+            "legacy phase tables"
+            if matching_mode == "generic"
+            else "tables implemented"
+        )
+        lines.append(f"{label}: {', '.join(str(item) for item in legacy_tables)}")
+
+    generic_by_kpoint = report.get("generic_matches_by_kpoint", {})
+    generic_rows: list[list[Any]] = []
+    if isinstance(generic_by_kpoint, dict):
+        for kp_name, valleys in generic_by_kpoint.items():
+            if not isinstance(valleys, dict):
+                continue
+            for v_name, match in valleys.items():
+                if not isinstance(match, dict):
+                    continue
+                subspace_sg = match.get("subspace_space_group", {})
+                if not isinstance(subspace_sg, dict):
+                    subspace_sg = {}
+                generic_rows.append([
+                    kp_name,
+                    v_name,
+                    match.get("matching_strategy", ""),
+                    match.get("matching_status", ""),
+                    _short_irrep_multiplicities(match.get("irrep_multiplicities")),
+                    subspace_sg.get("candidate_space_group_symbol", ""),
+                    _short_list(match.get("valley_preserving_operation_ids")),
+                    str(match.get("reason", ""))[:80],
+                    match.get("readiness_level", ""),
+                ])
+    if generic_rows:
+        lines.append("generic restricted-character matches:")
+        lines.extend(
+            _table(
+                ["kpoint", "valley", "strategy", "status", "irreps",
+                 "subspace_sg", "vp_ops", "reason", "readiness"],
+                generic_rows,
+            )
+        )
+
     by_kpoint = report.get("by_kpoint", {})
-    if not isinstance(by_kpoint, dict) or not by_kpoint:
+    if not isinstance(by_kpoint, dict):
+        by_kpoint = {}
+    if not by_kpoint and not generic_rows:
         lines.append("(none)")
         lines.append("")
         return
@@ -1503,6 +1554,8 @@ def _render_valley_irrep_matching(
                     m.get("readiness_level", ""),
                 ])
     if rows:
+        if generic_rows:
+            lines.append("legacy prototype fallback rows:")
         lines.extend(
             _table(
                 ["kpoint", "valley", "op", "group", "status",

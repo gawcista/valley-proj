@@ -337,6 +337,66 @@ def test_summary_payload_renders_valley_projected_representations(tmp_path):
     assert "C2_like" not in text
 
 
+def test_summary_text_renders_generic_irrep_matching_without_legacy_rows(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    config = load_config(config_path)
+    from valleyscope.reports.summary_report import build_summary_payload, render_summary_text
+
+    matching = {
+        "status": "ok",
+        "matching_mode": "generic",
+        "legacy_tables_implemented": ["spinful_C3", "spinful_C2"],
+        "by_kpoint": {},
+        "generic_matches_by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "matching_strategy": "bilbao_restricted_character",
+                    "matching_status": "matched",
+                    "irrep_multiplicities": {"-GM5": 1},
+                    "subspace_space_group": {
+                        "candidate_space_group_symbol": "P3",
+                    },
+                    "valley_preserving_operation_ids": [0, 2],
+                    "reason": "restricted character match",
+                    "readiness_level": "trusted",
+                },
+            },
+        },
+    }
+    summary = build_summary_payload(
+        config=config,
+        qcut=0.5,
+        subspace_payload={"kpoints": {}},
+        symmetry_payload={
+            "status": "skipped",
+            "reason": "unit test",
+            "detected_operations": [],
+            "candidate_rotations": [],
+            "little_group_check": {"status": "not_run"},
+            "valley_preservation_check": {"status": "not_run"},
+        },
+        symmetry_rows=[],
+        output_paths={},
+        valley_irrep_matching=matching,
+    )
+
+    text = render_summary_text(summary)
+    assert "Valley irrep matching" in text
+    assert "mode: generic" in text
+    assert "legacy phase tables: spinful_C3, spinful_C2" in text
+    assert "generic restricted-character matches:" in text
+    assert "GammaM" in text
+    assert "K_valley" in text
+    assert "bilbao_restricted_character" in text
+    assert "-GM5:1" in text
+    assert "P3" in text
+    assert "tables implemented:" not in text
+
+
 def test_summary_text_renders_projected_seed_projector_quality(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "config.yaml"
