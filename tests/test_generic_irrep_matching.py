@@ -848,3 +848,282 @@ def test_source_payload_blocked_no_legacy_fallback():
     # Legacy entry suppressed because generic coverage exists for this pair.
     no_legacy = report["by_kpoint"].get("GammaM", {})
     assert "M_valley" not in no_legacy, "legacy entry must be suppressed in generic mode"
+
+
+def test_no_workflow_decisions_returns_matching_mode():
+    """irrep_workflow_decisions=None still returns matching_mode and legacy tables."""
+    from valleyscope.analysis.valley_irrep_matching import (
+        build_valley_irrep_matching_report,
+    )
+    report = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=None,
+        symmetry_adapted_valley_report=None,
+    )
+    assert report["status"] == "not_evaluated"
+    assert report["matching_mode"] in ("generic", "legacy")
+    assert report["legacy_tables_implemented"] == ["spinful_C3", "spinful_C2"]
+    assert "by_kpoint" in report
+    assert report["by_kpoint"] == {}
+
+
+def test_source_op_map_without_chars_blocked_no_legacy():
+    """source_operation_map without source_irrep_characters creates blocked
+    generic row and legacy is suppressed for that (kpoint, valley)."""
+    from valleyscope.analysis.valley_irrep_matching import (
+        build_valley_irrep_matching_report,
+    )
+    decisions = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "readiness_level": "trusted",
+                    "workflow_path": "direct_qcut",
+                },
+            },
+        },
+    }
+    sa_report = {
+        "by_kpoint": {
+            "GammaM": {
+                "valley_preserving_subspaces": [{
+                    "orbit": ["K_valley"],
+                    "valley_preserving_character_diagnostics": {
+                        "per_valley": {
+                            "K_valley": [
+                                {"operation_id": 1, "eigenphases": [0.0]},
+                                {"operation_id": 2, "eigenphases": [0.5]},
+                            ],
+                        },
+                    },
+                    "subspace_group": {
+                        "subspace_group_candidate": "C3_like",
+                        "operation_orders": {"1": 1, "2": 3},
+                    },
+                }],
+            },
+        },
+    }
+    # Operation map exists but source characters dict is EMPTY.
+    report = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=decisions,
+        symmetry_adapted_valley_report=sa_report,
+        source_irrep_characters={},  # empty → no irrep can match
+        source_operation_maps={"GammaM": {"K_valley": {1: 1, 2: 2}}},
+    )
+    assert report["matching_mode"] == "generic"
+    # Generic blocked entry produced.
+    gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
+    assert gm["matching_status"] in ("diagnostic", "blocked")
+    # Legacy entry suppressed.
+    assert "K_valley" not in report["by_kpoint"].get("GammaM", {})
+
+
+def test_ebr_candidates_generic_mode_no_legacy_promotion():
+    """In generic mode, legacy by_kpoint rows are not promoted to EBR candidates."""
+    from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
+
+    decisions = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "workflow_path": "direct_qcut",
+                    "readiness_level": "trusted",
+                },
+            },
+        },
+    }
+    # Legacy phase-table matching with a "matched" row.
+    matching = {
+        "matching_mode": "generic",
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "1": {
+                        "matching_status": "matched",
+                        "matched_irrep": "C3_spinor_phase_+1/2",
+                        "operation_order": 3,
+                        "subspace_group_candidate": "C3_like",
+                        "eigenphases": [0.5],
+                        "readiness_level": "trusted",
+                    },
+                },
+            },
+        },
+    }
+    r = build_ebr_input_candidates(
+        irrep_workflow_decisions=decisions,
+        valley_irrep_matching=matching,
+    )
+    assert r["candidate_count"] == 0
+    assert r["status"] == "no_candidates"
+
+
+def test_ebr_candidates_legacy_mode_promotes():
+    """In legacy mode, legacy by_kpoint matches DO become candidates."""
+    from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
+
+    decisions = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "workflow_path": "direct_qcut",
+                    "readiness_level": "trusted",
+                },
+            },
+        },
+    }
+    matching = {
+        "matching_mode": "legacy",
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "1": {
+                        "matching_status": "matched",
+                        "matched_irrep": "C3_spinor_phase_+1/2",
+                        "operation_order": 3,
+                        "subspace_group_candidate": "C3_like",
+                        "eigenphases": [0.5],
+                        "readiness_level": "trusted",
+                    },
+                },
+            },
+        },
+    }
+    r = build_ebr_input_candidates(
+        irrep_workflow_decisions=decisions,
+        valley_irrep_matching=matching,
+    )
+    assert r["candidate_count"] == 1
+    assert r["candidates"][0]["matched_irrep"] == "C3_spinor_phase_+1/2"
+
+
+def test_representation_record_no_legacy_fallback_in_generic_mode():
+    """In generic mode, when a (kpoint, valley) has no generic match,
+    irrep_matching is not populated from legacy by_kpoint."""
+    from valleyscope.analysis.valley_projected_representation import (
+        build_valley_projected_representation_report,
+    )
+    report = build_valley_projected_representation_report(
+        kpoint_names=["GammaM"],
+        valley_names=["K_valley"],
+        symmetry_eigenvalue_rows=[{
+            "kpoint": "GammaM",
+            "target_valley": "K_valley",
+            "operation_id": 2,
+            "order": 2,
+            "diagnostic_only": False,
+            "topology_input_ready": True,
+            "rotation_ready": True,
+        }],
+        symmetry_adapted_valley_report={
+            "by_kpoint": {
+                "GammaM": {
+                    "valley_preserving_subspaces": [{
+                        "orbit": ["K_valley"],
+                        "hsp_preserving_operation_ids": [0, 2],
+                        "subspace_space_group": {
+                            "candidate_space_group_symbol": "P2",
+                            "valley_preserving_operation_ids": [0, 2],
+                            "status": "candidate",
+                        },
+                        "subspace_group": {
+                            "subspace_group_candidate": "C2_like",
+                        },
+                    }],
+                }
+            }
+        },
+        irrep_workflow_decisions={
+            "by_kpoint": {
+                "GammaM": {
+                    "K_valley": {
+                        "readiness_level": "trusted",
+                        "workflow_path": "direct_qcut",
+                    },
+                }
+            }
+        },
+        valley_irrep_matching={
+            "matching_mode": "generic",
+            "by_kpoint": {
+                "GammaM": {
+                    "K_valley": {
+                        "2": {
+                            "matching_status": "matched",
+                            "matched_irrep": "C2_spinor_phase_+1/4",
+                            "operation_order": 2,
+                            "subspace_group_candidate": "C2_like",
+                            "eigenphases": [0.25],
+                            "readiness_level": "trusted",
+                            "matching_strategy": "legacy_phase_table",
+                        },
+                    },
+                },
+            },
+        },
+    )
+    rec = report["representation_records"][0]
+    # In generic mode, no legacy fallback — irrep_matching is None.
+    assert rec["irrep_matching"] is None
+    assert rec["legacy_subspace_group_candidate"] == "C2_like"
+
+
+def test_summary_text_generic_first_legacy_explicit():
+    """Summary text labels generic path as primary and legacy as fallback."""
+    from valleyscope.reports.summary_report import render_summary_text
+    summary = {
+        "input": {
+            "wavefunction_h5": "/none",
+            "operation_structure_file": None,
+            "operation_detection_backend": "spglib",
+            "spinor_convention": "vasp_up_down_saxis_z",
+            "spinor_convention_verified": False,
+            "spinor_benchmark": None,
+        },
+        "target_kpoints": ["GammaM"],
+        "iband": [1],
+        "valley_subspaces": [],
+        "qcut": {"projector_mode": "fixed_center", "mode": "absolute", "value_Ainv": 0.05, "scan": []},
+        "valley_projection_summary": [],
+        "valley_subspace_analysis": [],
+        "valley_projector_quality": [],
+        "symmetry_analysis": {
+            "status": "ok",
+            "operation_detection_backend": "spglib",
+            "structure_file": None,
+            "detected_operation_count": 0,
+            "detected_operations": [],
+            "candidate_rotations": [],
+            "symprec_scan_summary": [],
+            "little_group_check": {"required": True, "status": "not_run"},
+            "valley_preservation_check": {"required": True, "status": "not_run"},
+        },
+        "symmetry_eigenvalues": [],
+        "symmetry_characters": [],
+        "rotation_readiness_thresholds": {},
+        "warnings": [],
+        "output_profile": "standard",
+        "output_files": {},
+        "legend": {"topology_input_ready": "explanation"},
+        "valley_irrep_matching": {
+            "status": "ok",
+            "matching_mode": "generic",
+            "legacy_tables_implemented": ["spinful_C3", "spinful_C2"],
+            "generic_matches_by_kpoint": {
+                "GammaM": {
+                    "K_valley": {
+                        "matching_status": "matched",
+                        "matching_strategy": "bilbao_restricted_character",
+                        "irrep_multiplicities": {"-GM5": 1},
+                    },
+                },
+            },
+        },
+    }
+    text = render_summary_text(summary)
+    # Generic-first language.
+    assert "generic restricted-character matches" in text
+    # Legacy tables are labeled explicitly.
+    assert "legacy phase tables" in text
+    # Legacy by_kpoint section header is present only when generic rows exist.
+    assert "legacy prototype fallback rows:" not in text  # by_kpoint is empty

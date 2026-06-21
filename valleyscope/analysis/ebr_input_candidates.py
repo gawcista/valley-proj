@@ -124,6 +124,60 @@ def build_ebr_input_candidates(
                     reason="; ".join(reasons) if reasons else "generic match blocked",
                 ))
 
+    # Legacy phase-table matching: only active in true legacy mode.
+    # In generic mode, legacy by_kpoint rows are never promoted to EBR
+    # candidates; generic_matches_by_kpoint is the sole authoritative source.
+    matching_mode = str(valley_irrep_matching.get("matching_mode", "legacy"))
+
+    if matching_mode != "generic":
+        _collect_legacy_candidates(
+            decisions_by_kp=decisions_by_kp,
+            matching_by_kp=matching_by_kp,
+            char_data=char_data,
+            candidates=candidates,
+            blocked=blocked,
+        )
+
+    by_kpoint: dict[str, dict[str, list[dict[str, object]]]] = {}
+    for c in candidates:
+        by_kpoint.setdefault(str(c["kpoint"]), {}).setdefault(str(c["valley"]), []).append(c)
+
+    status = "has_candidates" if candidates else "no_candidates"
+    return {
+        "status": status,
+        "candidate_count": len(candidates),
+        "blocked_count": len(blocked),
+        "reduced_ebr_decomposition_status": "not_implemented",
+        "interpretation": (
+            "Trusted matched valley-preserving irreps collected as EBR input "
+            "candidates. Reduced EBR decomposition is not implemented here. "
+            "Rows with usable_with_caution, blocked, or diagnostic_only status "
+            "are excluded from candidates and listed in the blocked section "
+            "with explicit reasons."
+        ),
+        "by_kpoint": by_kpoint,
+        "candidates": candidates,
+        "blocked": blocked,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Internal
+# ---------------------------------------------------------------------------
+
+def _collect_legacy_candidates(
+    *,
+    decisions_by_kp: dict[str, object],
+    matching_by_kp: dict[str, object],
+    char_data: dict[tuple[str, str, object], dict[str, object]],
+    candidates: list[dict[str, object]],
+    blocked: list[dict[str, object]],
+) -> None:
+    """Collect EBR candidates from legacy by_kpoint phase-table matches.
+
+    Only invoked in legacy mode (matching_mode != "generic").  In generic
+    mode, generic_matches_by_kpoint is the sole authoritative source.
+    """
     for kp_name in sorted(set(decisions_by_kp) | set(matching_by_kp)):
         kp_decisions = decisions_by_kp.get(kp_name, {})
         kp_matches = matching_by_kp.get(kp_name, {})
@@ -205,32 +259,6 @@ def build_ebr_input_candidates(
                     reason="; ".join(reasons),
                 ))
 
-    by_kpoint: dict[str, dict[str, list[dict[str, object]]]] = {}
-    for c in candidates:
-        by_kpoint.setdefault(str(c["kpoint"]), {}).setdefault(str(c["valley"]), []).append(c)
-
-    status = "has_candidates" if candidates else "no_candidates"
-    return {
-        "status": status,
-        "candidate_count": len(candidates),
-        "blocked_count": len(blocked),
-        "reduced_ebr_decomposition_status": "not_implemented",
-        "interpretation": (
-            "Trusted matched valley-preserving irreps collected as EBR input "
-            "candidates. Reduced EBR decomposition is not implemented here. "
-            "Rows with usable_with_caution, blocked, or diagnostic_only status "
-            "are excluded from candidates and listed in the blocked section "
-            "with explicit reasons."
-        ),
-        "by_kpoint": by_kpoint,
-        "candidates": candidates,
-        "blocked": blocked,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Internal
-# ---------------------------------------------------------------------------
 
 def _collect_character_lookup(
     report: dict[str, object] | None,

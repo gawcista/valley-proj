@@ -321,6 +321,13 @@ def _build_representation_records(
             operations.append(op_entry)
 
         # Irrep matching data for this (kpoint, valley).
+        # In generic mode, only the generic restricted-character path is
+        # authoritative; legacy phase-table matches are never attached.
+        matching_mode = (
+            str(valley_irrep_matching.get("matching_mode", "legacy"))
+            if isinstance(valley_irrep_matching, dict)
+            else "legacy"
+        )
         irrep_matching: dict[str, Any] | None = None
         gm = generic_by_kp.get(kpoint, {}).get(valley)
         if isinstance(gm, dict):
@@ -330,7 +337,7 @@ def _build_representation_records(
                 "irrep_multiplicities": gm.get("irrep_multiplicities"),
                 "source_operation_map": gm.get("source_operation_map"),
             }
-        else:
+        elif matching_mode != "generic":
             lm = matching_by_kp.get(kpoint, {}).get(valley)
             if isinstance(lm, dict):
                 statuses = {

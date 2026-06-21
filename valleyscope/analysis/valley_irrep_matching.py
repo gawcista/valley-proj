@@ -242,14 +242,22 @@ def build_valley_irrep_matching_report(
       C2/C3 phase-table fallback exclusively.  ``generic_matches_by_kpoint``
       is absent.
     """
-    _generic_mode = bool(
-        source_irrep_characters
-        or source_irrep_characters_flattened
-        or (source_payload_blocked_rows and len(source_payload_blocked_rows) > 0)
+    _generic_mode = (
+        source_irrep_characters is not None
+        or source_irrep_characters_flattened is not None
+        or (source_payload_blocked_rows is not None and len(source_payload_blocked_rows) > 0)
     )
 
     if irrep_workflow_decisions is None:
-        return {"status": "not_evaluated", "by_kpoint": {}}
+        return {
+            "status": "not_evaluated",
+            "matching_mode": "generic" if _generic_mode else "legacy",
+            "matching_statuses": ["matched", "diagnostic_only", "not_applicable",
+                                  "failed_no_table", "failed_ambiguous", "blocked"],
+            "tables_implemented": ["spinful_C3", "spinful_C2"],
+            "legacy_tables_implemented": ["spinful_C3", "spinful_C2"],
+            "by_kpoint": {},
+        }
 
     by_kpoint: dict[str, object] = {}
     decisions_by_kp = irrep_workflow_decisions.get("by_kpoint", {})
