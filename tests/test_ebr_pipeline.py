@@ -869,3 +869,158 @@ def test_generic_ebr_builder_e2e_p4_group_agnostic(tmp_path):
     assert rec.get("valley_preserving_operation_ids") == [0, 1]
     assert rec["subspace_space_group"]["candidate_space_group_symbol"] == "P4"
     assert rec.get("legacy_subspace_group_candidate") == "P4"
+
+
+def test_irreptables_loader_e2e_p4_group_agnostic(tmp_path):
+    """E2E through the irreptables loader path with a fake package-style source.
+
+    fake irreptables-style source
+    → build_reduced_table_from_irreptables()
+    → load_reduced_ebr_table() (validated through JSON)
+    → generic P4 export bundle/problem instance
+    → build_reduced_ebr_mapping()
+    → exact reduced EBR solution
+
+    No network, no real Bilbao downloads, no private irrep2.
+    """
+    from valleyscope.analysis.valley_irrep_matching import (
+        build_valley_irrep_matching_report,
+    )
+    from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
+    from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
+    from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
+    from valleyscope.analysis.reduced_ebr_mapping import (
+        build_reduced_ebr_mapping, load_reduced_ebr_table,
+    )
+    from valleyscope.analysis.irreptables_runtime_table_builder import (
+        build_reduced_table_from_irreptables,
+    )
+
+    # --- Steps 1-4: same generic P4 irrep → EBR export pipeline ---
+    workflow = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "readiness_level": "trusted",
+                    "workflow_path": "direct_qcut",
+                },
+            },
+        },
+    }
+    symmetry_adapted_report = {
+        "by_kpoint": {
+            "GammaM": {
+                "valley_preserving_subspaces": [{
+                    "reference_valley": "K_valley",
+                    "orbit": ["K_valley"],
+                    "subspace_group": {"subspace_group_candidate": "P4"},
+                    "subspace_space_group": {
+                        "candidate_space_group_symbol": "P4",
+                        "valley_preserving_operation_ids": [0, 1],
+                    },
+                    "hsp_preserving_operation_ids": [0, 1],
+                    "valley_preserving_character_diagnostics": {
+                        "per_valley": {
+                            "K_valley": [
+                                {"operation_id": 0, "eigenphases": [0.0, 0.0]},
+                                {"operation_id": 1, "eigenphases": [0.25, -0.25]},
+                            ],
+                        },
+                    },
+                }],
+            },
+        },
+    }
+    i = 1j
+    source_chars = {
+        "GM_plus_1over4":  {1: 1.0+0j, 2:  i},
+        "GM_minus_1over4": {1: 1.0+0j, 2: -i},
+    }
+    operation_maps = {"GammaM": {"K_valley": {0: 1, 1: 2}}}
+
+    matching = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=workflow,
+        symmetry_adapted_valley_report=symmetry_adapted_report,
+        source_irrep_characters_flattened={
+            "GammaM": {"K_valley": source_chars},
+        },
+        source_operation_maps=operation_maps,
+    )
+    assert matching["matching_mode"] == "generic"
+    gm = matching["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
+    assert gm["matching_status"] == "matched"
+    mults = gm["irrep_multiplicities"]
+    assert mults.get("GM_plus_1over4") == 1
+    assert mults.get("GM_minus_1over4") == 1
+
+    candidates = build_ebr_input_candidates(
+        irrep_workflow_decisions=workflow,
+        valley_irrep_matching=matching,
+    )
+    instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
+    bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
+    b = bundle["bundles"][0]
+
+    # --- Step 5: build reduced table via irreptables loader with fake source ---
+    bp_irreps = b["irreps_by_kpoint"]["GammaM"]
+    source_irrep_labels = [f"src_{irr}" for irr in bp_irreps]
+    fake_ebr_data = {
+        "basis": {
+            "irrep_labels": source_irrep_labels,
+        },
+        "ebrs": [
+            {"ebr_name": "EBR_A", "vector": [1, 0]},
+            {"ebr_name": "EBR_B", "vector": [0, 1]},
+        ],
+    }
+    fake_package_version = "3.2.1-fake"
+
+    def _fake_loader(sg, spin):
+        """Fake irreptables loader: returns mock EBR data without network."""
+        assert sg == 75  # P4 space group number
+        assert spin is False
+        return fake_ebr_data
+
+    source_hsp_map = {label: "GammaM" for label in source_irrep_labels}
+    valleyscope_key_map = {
+        label: f"GammaM:{irr}"
+        for label, irr in zip(source_irrep_labels, bp_irreps)
+    }
+    table = build_reduced_table_from_irreptables(
+        space_group_number=75,
+        spinful=False,
+        source_loader=_fake_loader,
+        source_hsp_by_irrep=source_hsp_map,
+        valleyscope_key_by_source_irrep=valleyscope_key_map,
+        expected_hsps=["GammaM"],
+        allowed_irrep_keys=[f"GammaM:{irr}" for irr in bp_irreps],
+        subspace_group_candidate="P4",
+        provenance={"package_version": fake_package_version},
+    )
+
+    # --- Provenance assertions ---
+    prov = table.get("provenance", {})
+    assert isinstance(prov, dict) and prov
+    assert prov.get("data_source") == "irreptables"
+    assert prov.get("package") == "irreptables"
+    assert prov.get("space_group_number") == 75
+    assert prov.get("spinful") is False
+    assert prov.get("expected_hsps") == ["GammaM"]
+    assert prov.get("subspace_group_candidate") == "P4"
+    assert prov.get("valleyscope_reduction") == "sampled_hsp_valley_preserving"
+    assert prov.get("package_version") == fake_package_version
+    assert table["subspace_group_candidate"] == "P4"
+    assert table["expected_hsps"] == ["GammaM"]
+
+    # --- Step 6: serialize, validate through load_reduced_ebr_table, solve ---
+    table_path = tmp_path / "p4_irreptables_ebr_table.json"
+    table_path.write_text(json.dumps(table), encoding="utf-8")
+    validated_table = load_reduced_ebr_table(table_path)
+    assert validated_table["subspace_group_candidate"] == "P4"
+
+    result = build_reduced_ebr_mapping(
+        ebr_export_bundle=bundle, table=validated_table,
+    )
+    assert result["mapping_status"] == "solved_exact"
+    assert result["solutions"][0]["classification"] == "atomic-compatible-candidate"
+    assert result["solutions"][0]["subspace_group_candidate"] == "P4"
