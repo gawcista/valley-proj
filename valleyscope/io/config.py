@@ -134,8 +134,17 @@ class ReducedEbrConfig:
 
 @dataclass(frozen=True)
 class GenericIrrepSourceConfig:
+    """Generic Bilbao/irreptables irrep source matching config.
+
+    Enables the generic restricted-character irrep path.  The source table
+    must be the valley-projected subspace space group, not necessarily the
+    full parent moire space group.  For a one-valley projected subspace
+    with P3 symmetry inside a P321 moire, use ``spacegroup_number: 143``
+    (P3) rather than 150 (P321).
+    """
     enabled: bool = False
     spacegroup_number: int | None = None
+    """Subspace-space-group number for the generic irrep source table."""
     spinor: bool | None = None
     operation_match_tol: float = 5e-5
     source_hsp_labels: dict[str, dict[str, str]] = field(default_factory=dict)

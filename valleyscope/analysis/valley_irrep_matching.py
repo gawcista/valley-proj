@@ -406,12 +406,19 @@ def build_valley_irrep_matching_report(
                     )
                     or item_op_ids
                 )
-                hsp_ids = (
+                # G_k^(a) = HSP little-group ops ∩ valley-preserving ops.
+                # At HSPs where VP ops move k to another star rep,
+                # the local valley-preserving subgroup is smaller.
+                hsp_lg_raw = (
                     _operation_ids_from_value(
                         sa.get("hsp_preserving_operation_ids")
                     )
-                    or vp_ids
                 )
+                if hsp_lg_raw:
+                    vp_ids = [op for op in vp_ids if op in hsp_lg_raw]
+                    hsp_ids = hsp_lg_raw
+                else:
+                    hsp_ids = vp_ids
                 if not vp_ids or not computed:
                     continue
 
@@ -505,7 +512,7 @@ def build_valley_irrep_matching_report(
                     else []
                 )
                 computed_fl, item_op_ids = _computed_characters_from_items(items_fl)
-                # Use full G_k^(a) from subspace_space_group, including identity.
+                # G_k^(a) = HSP little-group ops ∩ valley-preserving ops.
                 vp_ids_fl = (
                     _operation_ids_from_value(
                         ssg_fl.get("valley_preserving_operation_ids", [])
@@ -513,6 +520,13 @@ def build_valley_irrep_matching_report(
                         ssg_fl.get("valley_preserving_operation_ids", [])
                     ) else item_op_ids
                 )
+                hsp_lg_fl = (
+                    _operation_ids_from_value(
+                        sa.get("hsp_preserving_operation_ids")
+                    )
+                )
+                if hsp_lg_fl:
+                    vp_ids_fl = [op for op in vp_ids_fl if op in hsp_lg_fl]
                 if not vp_ids_fl or not computed_fl or not isinstance(op_map, Mapping) or not op_map:
                     generic_matches.setdefault(kp_name, {})[v_name] = {
                         "matching_status": "blocked",

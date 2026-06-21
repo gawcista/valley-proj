@@ -84,26 +84,19 @@ workflow.
 
 ## MM Rows
 
-MM remains blocked in the current generic run:
+MM is correctly identity-only in `G_k^(a)` after the
+`cc/generic-source-subspace-little-group` fix:
 
-```text
-missing_source_irrep_characters: source irreps are missing mapped operation
-characters: {'-M2': [2, 3]}
-```
+- `hsp_preserving_operation_ids` at MM is `[0]` (only identity).
+- `valley_preserving_operation_ids` from the subspace space group is `[0, 1, 2]`.
+- `G_k^(a)` = `[0] ∩ [0, 1, 2]` = `[0]` (identity-only).
+- Generic source preflight now uses this correct per-HSP set, not the
+  full subspace space-group VP list.
 
-This exposes a separate workflow issue. The generic source preflight currently
-uses the subspace-space-group valley-preserving operation list for every HSP.
-For an HSP irrep, the operation set should be the HSP little-group
-valley-preserving subgroup
-
-```text
-G_k^(a) = {g in G_k | pi_g(a) = a}
-```
-
-not the full valley-preserving subspace-space-group operation list. At MM,
-the C3 rotations move the HSP to other star representatives, so the local
-`G_k^(a)` is identity-only. This should be handled explicitly in a follow-up
-code task rather than hidden by tolerance changes.
+With identity-only `G_k^(a)`, the matcher uses only the identity character
+and does not request C3 characters that are absent from the source M HSP.
+MM matches succeed with the trivial identity irrep when source data is
+available for that HSP-label mapping.
 
 ## Physical Conclusion
 
@@ -120,16 +113,11 @@ The reported P321 restricted-character ambiguity is useful as a negative
 control, but it should not be treated as a physical blocker of the
 valley-projected P3 workflow.
 
-## Next Work
+## Resolution
 
-The next implementation task should make the generic source preflight choose
-the source table and operation set from the valley-projected subspace-space
-group and HSP little-group valley-preserving subgroup:
-
-```text
-source table: subspace_space_group.candidate_space_group_number/symbol
-operation set: hsp_little_group_operation_ids intersect valley-preserving ops
-```
-
-This must stay group-agnostic and must not add tMoTe2-specific production
-logic.
+The operation-set fix was implemented in `cc/generic-source-subspace-little-group`
+(commit range `main..cc/generic-source-subspace-little-group`). The generic
+source preflight now computes `G_k^(a)` as the intersection of HSP
+little-group operations and valley-preserving operations, rather than using
+the full subspace-space-group VP list at every HSP. This is group-agnostic
+and uses no tMoTe2-specific production logic.

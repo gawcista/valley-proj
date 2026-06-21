@@ -493,11 +493,21 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                                 if not orbit:
                                     continue
                                 v_name = str(orbit[0])
-                                # Get VP operation IDs from subspace_space_group.
+                                # G_k^(a) = HSP little-group ops ∩ valley-preserving ops.
+                                # At HSPs where valley-preserving operations move k
+                                # to another star representative (e.g. MM with C3),
+                                # the local valley-preserving subgroup is identity-only.
                                 ssg = vs.get("subspace_space_group", {})
-                                vp_ids = ssg.get(
+                                full_vp_ids = ssg.get(
                                     "valley_preserving_operation_ids", [],
                                 ) if isinstance(ssg, dict) else []
+                                hsp_lg_ids = vs.get(
+                                    "hsp_preserving_operation_ids", [],
+                                )
+                                if isinstance(hsp_lg_ids, list) and hsp_lg_ids:
+                                    vp_ids = [op for op in full_vp_ids if op in hsp_lg_ids]
+                                else:
+                                    vp_ids = list(full_vp_ids)
                                 if not vp_ids:
                                     continue
                                 # Source HSP label for this (kpoint, valley).
