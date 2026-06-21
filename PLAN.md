@@ -229,45 +229,67 @@ generic irrep/EBR representation record.
 
 | Phase | Status | Meaning |
 |-------|--------|---------|
-| A. Valley projection/readiness | Keep | Physically necessary and mostly implemented |
-| B. Valley-preserving subspace space-group inventory | Keep/refine | Implemented pieces exist; should become the central public object |
-| C. Generic representation object | Missing | Needs implementation before more EBR expansion |
-| D. Generic Bilbao irrep matcher | Missing | Current C2/C3 matcher is prototype only |
-| E. Generic reduced EBR builder | Partial | Reducer exists, but still relies on explicit mapping specs/tables |
-| F. Exact reduced EBR solver | Keep | Implemented and should stay pure Python / SymPy |
-| G. Database ingestion/index | Keep, pause expansion | Adequate for now; do not add more plumbing until C/D advance |
+| A. Valley projection/readiness | Core | Physically necessary and mostly implemented |
+| B. Valley-preserving subspace space-group inventory | Core | `subspace_space_group` is the primary public identifier; `valley_projected_representations.representation_records` is the group-agnostic output layer |
+| C. Generic representation object | Implemented | `build_valley_projected_representation_report()` produces per-`(kpoint, valley)` grouped records with `subspace_space_group`, HSP little group ops, VP/VC ops, characters/eigenphases, readiness, and irrep matching status |
+| D. Generic Bilbao irrep matcher | Implemented | `match_restricted_characters()` in `generic_irrep_matching.py` (Bilbao restricted-character matching over full `G_k^(a)`); strategy boundary in `build_valley_irrep_matching_report()` enforces generic/legacy mode separation |
+| E. Generic reduced EBR builder | Implemented | `build_reduced_table_from_runtime_source()` and `build_reduced_table_from_irreptables()` (with injectable `source_loader`); both use physical `subspace_group_candidate` |
+| F. Exact reduced EBR solver | Core | Pure Python / SymPy; synthetic P4 E2E contract passes through the full pipeline |
+| G. Database ingestion/index | Core, paused expansion | Ingestion record consumes public outputs; pause new expansion until real-material validation advances |
+
+## Completed Work (2026-06-16 through 2026-06-21)
+
+1. **Generic representation record contract.**
+   `build_valley_projected_representation_report()` extended with
+   `valley_irrep_matching` parameter and `representation_records` output.
+   Each `(kpoint, valley)` record carries the physical `subspace_space_group`
+   as the primary identifier, with `legacy_subspace_group_candidate` for
+   provenance only.  P4/order-4 test proves group-agnostic behavior.
+
+2. **Generic irrep matching strategy boundary.**
+   `build_valley_irrep_matching_report()` enforces a clean `matching_mode`
+   (`"generic"` / `"legacy"`).  In generic mode, legacy `by_kpoint` phase-table
+   entries for `(kpoint, valley)` pairs with generic coverage are suppressed.
+   `ebr_input_candidates()` gates legacy promotion on `matching_mode`.
+
+3. **Generic public output contract.**
+   `subspace_group_candidate` in `generic_matches_by_kpoint` entries now uses
+   the physical `candidate_space_group_symbol` when available, via
+   `_generic_group_identity()`.  Public outputs consistently use physical
+   subspace-space-group symbols; `C{n}_like` labels appear only as
+   `legacy_subspace_group_candidate` provenance.
+
+4. **Reduced EBR E2E contracts.**
+   Synthetic P4 E2E test through `build_reduced_table_from_runtime_source()`
+   and `build_reduced_table_from_irreptables()` (with fake `source_loader`).
+   Both paths validate generic provenance: `data_source`, `package`,
+   `space_group_number`, `spinful`, `expected_hsps`, `subspace_group_candidate`.
+
+5. **Public output contract test.**
+   `test_p4_public_output_contract` validates all standard outputs use
+   physical subspace-space-group symbols and forbids Cn-like promotion.
+   `test_generic_irrep_positive_analyze_hsp_workflow_e2e` strengthened
+   with representation_record contract assertions.
 
 ## Immediate Work Order
 
-1. **Stop Cn-specific expansion.**
-   Cancel the previous C3 database-contract task.  It is not wrong, but it is
-   lower priority than fixing the generic irrep backend.
+1. **Remove remaining legacy C2/C3 dependencies.**
+   `match_valley_irrep()` and `_irrep_table_for_order()` in
+   `valley_irrep_matching.py` are only used in legacy mode.  Once the
+   generic source-payload adapter is proven for all supported space groups
+   in real end-to-end runs, the legacy phase-table code can be quarantined
+   or removed.
 
-2. **Code audit and classification.**
-   Produce a code-level inventory with each module marked:
-   `core`, `prototype`, `debug`, `fixture`, or `delete-candidate`.
+2. **Real-material validation with P321/P312 fixtures.**
+   tMoTe2 and tZrSe2 benchmarks in `real_tests/` and `docs/benchmarks/`
+   can validate the generic pipeline but must NOT drive production logic.
+   The next step is to produce a trusted P3 generic irrep match for the
+   tMoTe2 P321 K-valley fixture.
 
-3. **Introduce a generic representation schema.**
-   Add a small internal/public data object for the valley-projected subspace
-   space group and its `(k, valley, G_k^(a))` little-group representation data.
-   Existing outputs should be adapted to populate this object rather than
-   emitting legacy `C{n}_like` hints as if they were the final result.
-
-4. **Replace hard-coded C2/C3 matching with a strategy boundary.**
-   Keep the phase tables as a fallback prototype strategy, but make the public
-   API group-agnostic and ready for a Bilbao character matcher.
-
-5. **Remove expected-HSP special policy from the production path.**
-   EBR problem instances should derive required HSP/irrep basis from a reduced
-   table or reviewed source reduction, not from a hand-coded legacy
-   `C{n}_like` / `Pn` policy table.
-
-6. **Implement the first generic Bilbao character-matching skeleton.**
-   This can initially cover the same cyclic cases as the old C2/C3 matcher,
-   but the API and tests must prove the logic is group-agnostic.
-
-7. **Only after generic irrep matching works, return to reduced EBR table
-   generation and database end-to-end tests.**
+3. **Reduced EBR table provenance for reviewed package-data tables.**
+   The reviewed `P321_C3_like_GammaM_KM_spinful_v1` table still uses
+   `C3_like` as its provenance identity.  When the tMoTe2 P3 generic
+   match is trusted, update the reviewed table to `P3`.
 
 ## Validation Fixtures
 

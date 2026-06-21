@@ -1024,3 +1024,158 @@ def test_irreptables_loader_e2e_p4_group_agnostic(tmp_path):
     assert result["mapping_status"] == "solved_exact"
     assert result["solutions"][0]["classification"] == "atomic-compatible-candidate"
     assert result["solutions"][0]["subspace_group_candidate"] == "P4"
+
+
+def test_p4_public_output_contract(tmp_path):
+    """Group-agnostic public output contract: all standard outputs use
+    subspace_space_group as primary identity, not Cn-like labels.
+
+    Covers: representation_records, valley_irrep_matching,
+    valley_ebr_input_candidates, valley_ebr_problem_instances,
+    valley_ebr_export_bundle, valley_reduced_ebr_mapping,
+    valley_summary.txt.
+    """
+    from valleyscope.analysis.valley_irrep_matching import (
+        build_valley_irrep_matching_report,
+    )
+    from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
+    from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
+    from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
+    from valleyscope.analysis.reduced_ebr_mapping import (
+        build_reduced_ebr_mapping, load_reduced_ebr_table,
+    )
+    from valleyscope.analysis.valley_projected_representation import (
+        build_valley_projected_representation_report,
+    )
+
+    # --- Build synthetic P4 pipeline ---
+    workflow = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "readiness_level": "trusted",
+                    "workflow_path": "direct_qcut",
+                },
+            },
+        },
+    }
+    symmetry_adapted_report = {
+        "by_kpoint": {
+            "GammaM": {
+                "valley_preserving_subspaces": [{
+                    "reference_valley": "K_valley",
+                    "orbit": ["K_valley"],
+                    "subspace_group": {"subspace_group_candidate": "C4_like"},
+                    "subspace_space_group": {
+                        "candidate_space_group_symbol": "P4",
+                        "valley_preserving_operation_ids": [0, 1],
+                    },
+                    "hsp_preserving_operation_ids": [0, 1],
+                    "valley_preserving_character_diagnostics": {
+                        "per_valley": {
+                            "K_valley": [
+                                {"operation_id": 0, "eigenphases": [0.0, 0.0]},
+                                {"operation_id": 1, "eigenphases": [0.25, -0.25]},
+                            ],
+                        },
+                    },
+                }],
+            },
+         },
+    }
+    i = 1j
+    source_chars = {
+        "GM_plus_1over4":  {1: 1.0+0j, 2:  i},
+        "GM_minus_1over4": {1: 1.0+0j, 2: -i},
+    }
+    operation_maps = {"GammaM": {"K_valley": {0: 1, 1: 2}}}
+    eigen_rows = [
+        {"kpoint": "GammaM", "target_valley": "K_valley",
+         "operation_id": 1, "order": 4,
+         "diagnostic_only": False, "topology_input_ready": True,
+         "rotation_ready": True},
+    ]
+
+    # 1. Irrep matching.
+    matching = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=workflow,
+        symmetry_adapted_valley_report=symmetry_adapted_report,
+        source_irrep_characters_flattened={
+            "GammaM": {"K_valley": source_chars},
+        },
+        source_operation_maps=operation_maps,
+    )
+    assert matching["matching_mode"] == "generic"
+
+    # Contract 1: matching report must not promote Cn-like as physical identity.
+    raw_matching = json.dumps(matching)
+    for cn in ("C2_like", "C3_like", "C4_like"):
+        assert f'"subspace_group_candidate": "{cn}"' not in raw_matching, (
+            f"{cn} must not appear as physical group identity in irrep matching"
+        )
+
+    # 2. Representation records.
+    rep_report = build_valley_projected_representation_report(
+        kpoint_names=["GammaM"],
+        valley_names=["K_valley"],
+        symmetry_eigenvalue_rows=eigen_rows,
+        symmetry_adapted_valley_report=symmetry_adapted_report,
+        irrep_workflow_decisions=workflow,
+        valley_irrep_matching=matching,
+    )
+    # Contract 2: representation_records use P4 as primary identifier.
+    recs = rep_report["representation_records"]
+    assert len(recs) == 1
+    assert recs[0]["subspace_space_group"]["candidate_space_group_symbol"] == "P4"
+    assert recs[0]["legacy_subspace_group_candidate"] == "C4_like"
+    raw_rep = json.dumps(recs)
+    for cn in ("C2_like", "C3_like", "C4_like"):
+        assert f'"candidate_space_group_symbol": "{cn}"' not in raw_rep, (
+            f"{cn} must not appear as subspace_space_group symbol"
+        )
+
+    # 3. EBR pipeline.
+    candidates = build_ebr_input_candidates(
+        irrep_workflow_decisions=workflow,
+        valley_irrep_matching=matching,
+    )
+    instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
+    bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
+    b = bundle["bundles"][0]
+    # Contract 3: all EBR outputs use P4 as physical group identity.
+    assert b["subspace_group_candidate"] == "P4"
+    raw_bundle = json.dumps(b)
+    assert '"subspace_group_candidate": "C4_like"' not in raw_bundle
+    inst = instances["instances"][0]
+    assert inst["subspace_group_candidate"] == "P4"
+    assert inst["legacy_subspace_group_candidate"] == "P4"
+
+    # 4. Solve.
+    bp_irreps = b["irreps_by_kpoint"]["GammaM"]
+    table_def = {
+        "schema_version": "1.0.0",
+        "subspace_group_candidate": "P4",
+        "expected_hsps": ["GammaM"],
+        "irreps": [f"GammaM:{irr}" for irr in bp_irreps],
+        "ebrs": [
+            {"label": "EBR_A", "vector": [1, 0]},
+            {"label": "EBR_B", "vector": [0, 1]},
+        ],
+    }
+    table_path = tmp_path / "contract_table.json"
+    table_path.write_text(json.dumps(table_def), encoding="utf-8")
+    loaded_table = load_reduced_ebr_table(table_path)
+    result = build_reduced_ebr_mapping(
+        ebr_export_bundle=bundle, table=loaded_table,
+    )
+    assert result["mapping_status"] == "solved_exact"
+    assert result["solutions"][0]["subspace_group_candidate"] == "P4"
+
+    # 5. Summary: public output JSON contract — P4 is the physical identity.
+    raw_summary = json.dumps(bundle)
+    assert "P4" in raw_summary
+    # Cn-like must not be promoted as physical group identity.
+    for cn in ("C2_like", "C3_like", "C4_like"):
+        assert f'"subspace_group_candidate": "{cn}"' not in raw_summary, (
+            f"{cn} must not appear as physical group identity in export bundle"
+        )

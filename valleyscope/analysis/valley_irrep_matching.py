@@ -432,9 +432,8 @@ def build_valley_irrep_matching_report(
                         "reason": f"readiness_level={readiness} is not trusted",
                         "workflow_path": path,
                         "readiness_level": readiness,
-                        "subspace_group_candidate": (
-                            sg.get("subspace_group_candidate")
-                            if isinstance(sg, Mapping) else None
+                        "subspace_group_candidate": _generic_group_identity(
+                            sg=sg, ssg=ssg,
                         ),
                         "subspace_space_group": dict(ssg)
                         if isinstance(ssg, Mapping) else {},
@@ -460,9 +459,8 @@ def build_valley_irrep_matching_report(
                     "reason": g_result.get("reason", ""),
                     "workflow_path": path,
                     "readiness_level": readiness,
-                    "subspace_group_candidate": (
-                        sg.get("subspace_group_candidate")
-                        if isinstance(sg, Mapping) else None
+                    "subspace_group_candidate": _generic_group_identity(
+                        sg=sg, ssg=ssg,
                     ),
                     "subspace_space_group": dict(ssg)
                     if isinstance(ssg, Mapping) else {},
@@ -523,8 +521,7 @@ def build_valley_irrep_matching_report(
                         "workflow_path": path_wf,
                         "readiness_level": readiness,
                         "subspace_group_candidate": (
-                            sg_fl.get("subspace_group_candidate")
-                            if isinstance(sg_fl, Mapping) else None
+                            _generic_group_identity(sg=sg_fl, ssg=ssg_fl)
                         ),
                         "subspace_space_group": dict(ssg_fl)
                         if isinstance(ssg_fl, Mapping) else {},
@@ -542,8 +539,7 @@ def build_valley_irrep_matching_report(
                         "workflow_path": path_wf,
                         "readiness_level": readiness,
                         "subspace_group_candidate": (
-                            sg_fl.get("subspace_group_candidate")
-                            if isinstance(sg_fl, Mapping) else None
+                            _generic_group_identity(sg=sg_fl, ssg=ssg_fl)
                         ),
                         "subspace_space_group": dict(ssg_fl)
                         if isinstance(ssg_fl, Mapping) else {},
@@ -566,8 +562,7 @@ def build_valley_irrep_matching_report(
                     "workflow_path": path_wf,
                     "readiness_level": readiness,
                     "subspace_group_candidate": (
-                        sg_fl.get("subspace_group_candidate")
-                        if isinstance(sg_fl, Mapping) else None
+                        _generic_group_identity(sg=sg_fl, ssg=ssg_fl)
                     ),
                     "subspace_space_group": dict(ssg_fl)
                     if isinstance(ssg_fl, Mapping) else {},
@@ -744,6 +739,29 @@ def _computed_characters_from_items(
         if op_id not in op_ids:
             op_ids.append(op_id)
     return computed, op_ids
+
+
+def _generic_group_identity(
+    *,
+    sg: object,
+    ssg: object,
+) -> str | None:
+    """Return the physical subspace-space-group symbol for generic matches.
+
+    In generic mode, ``subspace_group_candidate`` should use the physical
+    ``candidate_space_group_symbol`` from ``subspace_space_group`` when
+    available, falling back to the legacy ``subspace_group_candidate``
+    only when no physical symbol exists.
+    """
+    if isinstance(ssg, Mapping):
+        physical = ssg.get("candidate_space_group_symbol")
+        if physical and isinstance(physical, str):
+            return str(physical)
+    if isinstance(sg, Mapping):
+        legacy = sg.get("subspace_group_candidate")
+        if legacy and isinstance(legacy, str):
+            return str(legacy)
+    return None
 
 
 def _filter_legacy_rows_in_generic_mode(
