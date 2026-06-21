@@ -1,17 +1,24 @@
-# tMoTe2 P321 Generic P3 Irrep Validation — Blocked By Restricted-Character Ambiguity
+# tMoTe2 P321 Generic P3 Irrep Validation
 
 Date: 2026-06-21 | Branch: `cc/tmote2-p321-generic-p3-validation`
 
 ## Scope
 
-Validate the generic Bilbao/irreptables P3 valley-preserving irrep path on the
-real tMoTe2 P321 fixture. tMoTe2 is a validation fixture only — no
-material-specific production logic.
+Validate the generic Bilbao/irreptables valley-preserving irrep path on the
+real tMoTe2 P321 fixture. tMoTe2 is a validation fixture only; no
+material-specific production logic is used.
 
-## Command
+The physical point is that the full moire space group is P321, but a
+single-valley projected subspace is not a representation of the full P321
+little group. The relevant one-valley symmetry is the valley-preserving
+subspace space group. For the trusted K/K' rows in this fixture, this is P3:
+identity plus the C3 rotations. The valley-changing C2 operations are sewing
+data between valleys, not single-valley irrep operations.
+
+## Correct Generic Validation Command
 
 ```bash
-python -m valleyscope.cli analyze-hsp /tmp/tmote2_generic_p3.yaml
+python -m valleyscope.cli analyze-hsp /tmp/tmp.8G9ssDjAY6/tmote2_generic_p3_sg143.yaml
 ```
 
 Config delta from `real_tests/tMoTe2/analyze.yaml`:
@@ -20,7 +27,7 @@ Config delta from `real_tests/tMoTe2/analyze.yaml`:
 analysis:
   generic_irrep_source:
     enabled: true
-    spacegroup_number: 150      # P321
+    spacegroup_number: 143      # P3 subspace space group, not full P321
     spinor: true
     source_hsp_labels:
       GammaM: {K_valley: GM, Kp_valley: GM}
@@ -28,101 +35,101 @@ analysis:
       MM:     {K_valley: M,  Kp_valley: M}
 ```
 
-All other config (qcut, spinor convention, tolerances, iband, valley centers,
-valley subspaces, symprec) identical to the production `analyze.yaml`.
+All other config values were inherited from `real_tests/tMoTe2/analyze.yaml`
+with absolute input paths and a temporary output directory.
 
-## Result: Generic Path Blocked
+## Result
 
-All generic restricted-character matches are blocked. Zero EBR input candidates
-are produced ("no candidates"), zero EBR problem instances ("no_instances"),
-zero export bundles ("no_bundles").
+The generic P3 source path succeeds for the trusted direct-qcut rows at
+GammaM and KM:
 
-## Blocker Analysis
-
-### GammaM and KM HSPs: Ambiguous Restricted Source Irreps
-
-P321 spinful irreps at GM (source HSP `GM`) and K (source HSP `K`) have three
-irreps each:
-
-| Source Irrep | Dim | Characters (ops 1,2,3) |
-|-------------|-----|------------------------|
-| -GM4 / -K4  | 1   | {1: 1, 2: -1, 3: -1}  |
-| -GM5 / -K5  | 1   | {1: 1, 2: -1, 3: -1}  |
-| -GM6 / -K6  | 2   | {1: 2, 2:  1, 3:  1}  |
-
-When restricted to the valley-preserving C3 subgroup `G_k^(a) = {E, C3, C3²}`
-(ValleyScope ops [0, 1, 2] → source ops [1, 2, 3]), the 1D irreps -GM4/-GM5
-(and -K4/-K5) have **identical** restricted characters: both give {1: 1, 2: -1,
-3: -1} on the valley-preserving operation set.
-
-The generic restricted-character matcher detects this and reports:
-
-```
-ambiguous_restricted_source_irreps: source irreps are not distinguishable
-on the restricted operation set: {((1.0, 0.0), (-1.0, 0.0), (-1.0, 0.0)):
-['-GM4', '-GM5']}
+```text
+mode generic status ok
+GammaM K_valley  matched P3 C3_like {'-GM4': 1} {'0': 1, '1': 2, '2': 3}
+GammaM Kp_valley matched P3 C3_like {'-GM4': 1} {'0': 1, '1': 2, '2': 3}
+KM     K_valley  matched P3 C3_like {'-K6': 1}  {'0': 1, '1': 2, '2': 3}
+KM     Kp_valley matched P3 C3_like {'-K5': 1}  {'0': 1, '1': 2, '2': 3}
+MM     K_valley  blocked None None {} {} missing_source_irrep_characters
+MM     Kp_valley blocked None None {} {} missing_source_irrep_characters
+candidates 4
+instances 2
+bundles 2
 ```
 
-This is a **genuine physical ambiguity**: the valley-preserving subgroup is a
-proper subgroup of the HSP little group, and restricting full-GM/full-K source
-irreps to the valley-preserving ops makes some source irreps degenerate.
+Interpretation:
 
-The legacy C3 phase-table matching sidesteps this by operating on a single C3
-generator with eigenphase, not on the full restricted character profile. But
-that approach is less physically complete — it ignores the full `G_k^(a)`
-character data.
+- `subspace_group_candidate` is the physical P3 symbol.
+- `legacy_subspace_group_candidate` remains `C3_like` as provenance only.
+- The four trusted GammaM/KM rows are matched by the generic
+  `bilbao_restricted_character` path.
+- The pipeline produces 4 EBR input candidates, 2 problem instances, and
+  2 export bundles.
+- No legacy C3 phase-table fallback is needed for these trusted rows.
 
-### MM HSP: Missing Source Irrep Characters
+This validates the intended direction: use Bilbao/irreptables conventions for
+the valley-projected subspace space group, not the full parent moire space
+group when valley-changing operations are outside the one-valley irrep.
 
-At source HSP `M`, the P321 table has only two irreps (-M3, -M4) with
-characters defined only on ops {1, 6}. The ValleyScope VP ops [0, 1, 2] map
-to source ops [1, 2, 3] (identity + C3 + C3²), but ops 2 and 3 are NOT in
-the M HSP little group. The adapter reports:
+## Negative Control: Full P321 Source Table
 
-```
+Using `spacegroup_number: 150` (P321) is the wrong source table for the
+single-valley projected subspace. It tests a different mathematical object:
+full P321 HSP irreps restricted to the C3 valley-preserving subgroup.
+
+That negative-control run blocks at GammaM and KM because pairs such as
+`-GM4` / `-GM5` and `-K4` / `-K5` become indistinguishable after restriction
+to the C3 operations. This ambiguity is real for the full P321-to-C3
+restriction, but it is not a blocker for the correct P3 subspace-irrep
+workflow.
+
+## MM Rows
+
+MM remains blocked in the current generic run:
+
+```text
 missing_source_irrep_characters: source irreps are missing mapped operation
-characters: {'-M3': [2, 3], '-M4': [2, 3]}
+characters: {'-M2': [2, 3]}
 ```
 
-This is consistent with the legacy benchmark finding: MM has only identity as
-valley-preserving in the HSP little group. C3 ops map MM to other HSP star
-members, so the `G_k^(a)` at MM is just {identity}.
+This exposes a separate workflow issue. The generic source preflight currently
+uses the subspace-space-group valley-preserving operation list for every HSP.
+For an HSP irrep, the operation set should be the HSP little-group
+valley-preserving subgroup
 
-## Production Code Status
+```text
+G_k^(a) = {g in G_k | pi_g(a) = a}
+```
 
-- `subspace_space_group.candidate_space_group_symbol`: `"P3"` for all trusted
-  rows — correct.
-- `legacy_subspace_group_candidate`: `"C3_like"` for all rows — correct
-  provenance.
-- `matching_mode`: `"generic"` — correct.
-- `matching_strategy`: `"bilbao_restricted_character"` — correct.
-- `irrep_matching.matching_status`: `"blocked"` — correct, not a silent
-  legacy fallback.
-- No tMoTe2-specific production logic was added. The blocker is in the
-  physical data-flow: restricted-character irreps of a proper subgroup.
+not the full valley-preserving subspace-space-group operation list. At MM,
+the C3 rotations move the HSP to other star representatives, so the local
+`G_k^(a)` is identity-only. This should be handled explicitly in a follow-up
+code task rather than hidden by tolerance changes.
 
 ## Physical Conclusion
 
-The generic P3 restricted-character path **does not silently fall back** to
-legacy C3 phase-table matching. It correctly reports blocked/diagnostic rows
-with explicit reasons. The blocker is a physical one: restricting full HSP
-little-group source irreps to a proper valley-preserving subgroup produces
-character degeneracies that the generic matcher correctly identifies.
+The tMoTe2 fixture supports the user's physical interpretation:
 
-Possible resolutions (NOT for this task):
+- full moire symmetry: P321;
+- one-valley projected subspace symmetry for trusted GammaM/KM rows: P3;
+- valley-changing C2 operations are sewing operations, not one-valley irrep
+  generators;
+- generic P3 restricted-character matching works for the trusted rows when
+  the source table is the P3 subspace space group.
 
-1. Augment the generic matcher with compatibility relations or additional
-   physical constraints (e.g., selection rules from the full HSP little group)
-   to break degeneracies.
-2. Use the full HSP little-group characters for matching first, then project
-   to the valley-preserving subgroup.
-3. Accept ambiguity at the full-character level and use a minimal-eigenvalue
-   heuristic (like the legacy phase table) only for the cyclic generator,
-   with explicit provenance that this is a generator-only match.
+The reported P321 restricted-character ambiguity is useful as a negative
+control, but it should not be treated as a physical blocker of the
+valley-projected P3 workflow.
 
-## tMoTe2 As A Fixture
+## Next Work
 
-tMoTe2 is a validation fixture only. The blocker above is a generic physical
-problem that any material with a proper valley-preserving subgroup will face.
-This benchmark validates that the generic path is physically honest about the
-ambiguity rather than producing a trusted match from incomplete data.
+The next implementation task should make the generic source preflight choose
+the source table and operation set from the valley-projected subspace-space
+group and HSP little-group valley-preserving subgroup:
+
+```text
+source table: subspace_space_group.candidate_space_group_number/symbol
+operation set: hsp_little_group_operation_ids intersect valley-preserving ops
+```
+
+This must stay group-agnostic and must not add tMoTe2-specific production
+logic.
