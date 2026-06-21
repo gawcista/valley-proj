@@ -435,6 +435,9 @@ def build_valley_irrep_matching_report(
                         "subspace_group_candidate": _generic_group_identity(
                             sg=sg, ssg=ssg,
                         ),
+                        "legacy_subspace_group_candidate": (
+                            _legacy_group_identity(sg)
+                        ),
                         "subspace_space_group": dict(ssg)
                         if isinstance(ssg, Mapping) else {},
                     }
@@ -462,6 +465,7 @@ def build_valley_irrep_matching_report(
                     "subspace_group_candidate": _generic_group_identity(
                         sg=sg, ssg=ssg,
                     ),
+                    "legacy_subspace_group_candidate": _legacy_group_identity(sg),
                     "subspace_space_group": dict(ssg)
                     if isinstance(ssg, Mapping) else {},
                 }
@@ -523,6 +527,9 @@ def build_valley_irrep_matching_report(
                         "subspace_group_candidate": (
                             _generic_group_identity(sg=sg_fl, ssg=ssg_fl)
                         ),
+                        "legacy_subspace_group_candidate": (
+                            _legacy_group_identity(sg_fl)
+                        ),
                         "subspace_space_group": dict(ssg_fl)
                         if isinstance(ssg_fl, Mapping) else {},
                     }
@@ -540,6 +547,9 @@ def build_valley_irrep_matching_report(
                         "readiness_level": readiness,
                         "subspace_group_candidate": (
                             _generic_group_identity(sg=sg_fl, ssg=ssg_fl)
+                        ),
+                        "legacy_subspace_group_candidate": (
+                            _legacy_group_identity(sg_fl)
                         ),
                         "subspace_space_group": dict(ssg_fl)
                         if isinstance(ssg_fl, Mapping) else {},
@@ -563,6 +573,9 @@ def build_valley_irrep_matching_report(
                     "readiness_level": readiness,
                     "subspace_group_candidate": (
                         _generic_group_identity(sg=sg_fl, ssg=ssg_fl)
+                    ),
+                    "legacy_subspace_group_candidate": (
+                        _legacy_group_identity(sg_fl)
                     ),
                     "subspace_space_group": dict(ssg_fl)
                     if isinstance(ssg_fl, Mapping) else {},
@@ -621,6 +634,7 @@ def build_valley_irrep_matching_report(
                 if existing is not None:
                     continue
                 sa = sa_by_kp.get(kp_name, {}).get(v_name, {})
+                sg = sa.get("subspace_group", {})
                 ssg = sa.get("subspace_space_group", {})
                 decision = (
                     decisions_by_kp.get(kp_name, {}).get(v_name, {})
@@ -669,9 +683,10 @@ def build_valley_irrep_matching_report(
                     "workflow_path": path,
                     "readiness_level": readiness,
                     "subspace_group_candidate": (
-                        sa.get("subspace_group", {}).get("subspace_group_candidate")
-                        if isinstance(sa.get("subspace_group", {}), Mapping)
-                        else None
+                        _generic_group_identity(sg=sg, ssg=ssg)
+                    ),
+                    "legacy_subspace_group_candidate": (
+                        _legacy_group_identity(sg)
                     ),
                     "subspace_space_group": dict(ssg)
                     if isinstance(ssg, Mapping) else {},
@@ -761,6 +776,15 @@ def _generic_group_identity(
         legacy = sg.get("subspace_group_candidate")
         if legacy and isinstance(legacy, str):
             return str(legacy)
+    return None
+
+
+def _legacy_group_identity(sg: object) -> str | None:
+    if not isinstance(sg, Mapping):
+        return None
+    legacy = sg.get("subspace_group_candidate")
+    if legacy and isinstance(legacy, str):
+        return str(legacy)
     return None
 
 

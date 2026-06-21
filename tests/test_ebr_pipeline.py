@@ -1148,7 +1148,7 @@ def test_p4_public_output_contract(tmp_path):
     assert '"subspace_group_candidate": "C4_like"' not in raw_bundle
     inst = instances["instances"][0]
     assert inst["subspace_group_candidate"] == "P4"
-    assert inst["legacy_subspace_group_candidate"] == "P4"
+    assert inst["legacy_subspace_group_candidate"] == "C4_like"
 
     # 4. Solve.
     bp_irreps = b["irreps_by_kpoint"]["GammaM"]

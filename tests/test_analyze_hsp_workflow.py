@@ -1105,7 +1105,7 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     inst = summary["valley_ebr_problem_instances"]["instances"][0]
     assert inst["ready_for_ebr_decomposition"] is True
     assert inst["subspace_group_candidate"] == "P4"
-    assert inst["legacy_subspace_group_candidate"] == "P4"
+    assert inst["legacy_subspace_group_candidate"] == "C2_like"
     assert inst["expected_hsps"] == ["GammaM"]
     assert summary["valley_ebr_export_bundle"]["bundle_count"] == 1
     b = summary["valley_ebr_export_bundle"]["bundles"][0]
@@ -1259,7 +1259,7 @@ def test_unmock_generic_source_adapter_positive_full_pipeline():
     inst = instances["instances"][0]
     assert inst["ready_for_ebr_decomposition"] is True
     assert inst["subspace_group_candidate"] == "P3"
-    assert inst["legacy_subspace_group_candidate"] == "P3"
+    assert inst["legacy_subspace_group_candidate"] == "C3_like"
 
     # 4. Export bundle.
     ebr_bundle = build_ebr_export_bundle(ebr_problem_instances=instances)

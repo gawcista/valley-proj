@@ -83,8 +83,9 @@ def build_ebr_input_candidates(
                             "workflow_path": path,
                             "readiness_level": readiness,
                             "subspace_group_candidate": subspace_group_candidate,
-                            "legacy_subspace_group_candidate": gm.get(
-                                "subspace_group_candidate"
+                            "legacy_subspace_group_candidate": (
+                                gm.get("legacy_subspace_group_candidate")
+                                or gm.get("subspace_group_candidate")
                             ),
                             "subspace_space_group": subspace_space_group,
                             "matching_strategy": "bilbao_restricted_character",
