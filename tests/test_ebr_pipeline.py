@@ -715,3 +715,151 @@ def test_generic_irrep_full_pipeline_smoke():
     )
     assert len(result2["excluded_bundles"]) == 1
     assert "expected_hsps" in result2["excluded_bundles"][0]["reason"]
+
+
+def test_generic_ebr_builder_e2e_p4_group_agnostic():
+    """Group-agnostic E2E: generic restricted-character match → candidates →
+    instances → export → builder-generated reduced table → exact solve.
+
+    Uses P4 (not C3_like) with build_reduced_table_from_runtime_source to
+    produce the reduced EBR table, then validates that generic provenance
+    survives the full pipeline.
+    """
+    from valleyscope.analysis.valley_irrep_matching import (
+        build_valley_irrep_matching_report,
+    )
+    from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
+    from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
+    from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
+    from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
+    from valleyscope.analysis.irrep_runtime_reducer import (
+        build_reduced_table_from_runtime_source,
+    )
+
+    workflow = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "readiness_level": "trusted",
+                    "workflow_path": "direct_qcut",
+                },
+            },
+        },
+    }
+    symmetry_adapted_report = {
+        "by_kpoint": {
+            "GammaM": {
+                "valley_preserving_subspaces": [{
+                    "reference_valley": "K_valley",
+                    "orbit": ["K_valley"],
+                    "subspace_group": {"subspace_group_candidate": "P4"},
+                    "subspace_space_group": {
+                        "candidate_space_group_symbol": "P4",
+                        "valley_preserving_operation_ids": [0, 1],
+                    },
+                    "hsp_preserving_operation_ids": [0, 1],
+                    "valley_preserving_character_diagnostics": {
+                        "per_valley": {
+                            "K_valley": [
+                                {"operation_id": 0, "eigenphases": [0.0, 0.0]},
+                                {"operation_id": 1, "eigenphases": [0.25, -0.25]},
+                            ],
+                        },
+                    },
+                }],
+            },
+        },
+    }
+    # P4 C4-symmetric source irreps (two eigenstates, four irreps).
+    i = 1j
+    source_chars = {
+        "GM_plus_1over4":  {1: 1.0+0j, 2:  i},
+        "GM_minus_1over4": {1: 1.0+0j, 2: -i},
+    }
+    operation_maps = {"GammaM": {"K_valley": {0: 1, 1: 2}}}
+
+    # 1. Generic restricted-character matching.
+    matching = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=workflow,
+        symmetry_adapted_valley_report=symmetry_adapted_report,
+        source_irrep_characters_flattened={
+            "GammaM": {"K_valley": source_chars},
+        },
+        source_operation_maps=operation_maps,
+    )
+    assert matching["matching_mode"] == "generic"
+    gm = matching["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
+    assert gm["matching_status"] == "matched"
+    assert gm["matching_strategy"] == "bilbao_restricted_character"
+    mults = gm["irrep_multiplicities"]
+    assert mults.get("GM_plus_1over4") == 1
+    assert mults.get("GM_minus_1over4") == 1
+    assert gm["subspace_space_group"]["candidate_space_group_symbol"] == "P4"
+
+    # 2. EBR input candidates — generic source only, no legacy promotion.
+    candidates = build_ebr_input_candidates(
+        irrep_workflow_decisions=workflow,
+        valley_irrep_matching=matching,
+    )
+    assert candidates["candidate_count"] == 2
+    for c in candidates["candidates"]:
+        assert c["matching_strategy"] == "bilbao_restricted_character"
+        assert c["subspace_group_candidate"] == "P4"
+
+    # 3. Problem instances.
+    instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
+    assert instances["instance_count"] == 1
+    inst = instances["instances"][0]
+    assert inst["ready_for_ebr_decomposition"] is True
+    assert inst["expected_hsps"] == ["GammaM"]
+    assert inst["expected_hsp_policy_source"] == "sampled_irrep_basis"
+    assert inst["subspace_group_candidate"] == "P4"
+    assert inst["legacy_subspace_group_candidate"] == "P4"
+
+    # 4. Export bundle.
+    bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
+    assert bundle["bundle_count"] == 1
+    b = bundle["bundles"][0]
+    assert b["ready_for_external_solver"] is True
+    assert b["subspace_group_candidate"] == "P4"
+
+    # 5. Build reduced EBR table via runtime reducer (not hand-written).
+    bp_irreps = b["irreps_by_kpoint"]["GammaM"]
+    source_payload = {
+        "basis": [
+            {"source_label": f"src_{i}", "hsp": "GammaM",
+             "valleyscope_irrep_key": f"GammaM:{irr}",
+             "source_index": i, "multiplicity": 1}
+            for i, irr in enumerate(bp_irreps)
+        ],
+        "ebrs": [
+            {"label": "EBR_A", "vector": [1, 0]},
+            {"label": "EBR_B", "vector": [0, 1]},
+        ],
+    }
+    table = build_reduced_table_from_runtime_source(
+        source_payload=source_payload,
+        expected_hsps=["GammaM"],
+        allowed_irrep_keys=[f"GammaM:{irr}" for irr in bp_irreps],
+        subspace_group_candidate="P4",
+    )
+    # Validate table has expected fields.
+    assert table["subspace_group_candidate"] == "P4"
+    assert table["expected_hsps"] == ["GammaM"]
+
+    # 6. Exact reduced EBR solve with builder-generated table.
+    result = build_reduced_ebr_mapping(
+        ebr_export_bundle=bundle, table=table,
+    )
+    assert result["mapping_status"] == "solved_exact"
+    assert result["solutions"][0]["classification"] == "atomic-compatible-candidate"
+    assert result["solutions"][0]["subspace_group_candidate"] == "P4"
+
+    # 7. Generic provenance survives the pipeline.
+    rec = inst["irrep_records_by_kpoint"]["GammaM"][0]
+    assert rec.get("matching_strategy") == "bilbao_restricted_character"
+    assert rec.get("irrep_multiplicity") == 1
+    assert rec.get("source_operation_map") == {0: 1, 1: 2}
+    assert rec.get("valley_preserving_operation_ids") == [0, 1]
+    assert rec["subspace_space_group"]["candidate_space_group_symbol"] == "P4"
+    assert rec.get("legacy_subspace_group_candidate") == "P4"

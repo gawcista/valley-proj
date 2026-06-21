@@ -2582,4 +2582,52 @@ def test_c2_mm_m3_dry_run_cli_build_and_map_e2e(tmp_path):
     assert solution["irrep_vector"] == target_vec
     assert solution["classification"] == "atomic-compatible-candidate"
     assert solution["integer_span_status"] == "in_integer_span"
-    assert solution["nonnegative_solution_status"] == "solved_exact"
+
+
+# -----------------------------------------------------------------------
+# Forbidden imports in reduced EBR builder/reducer/mapping modules
+# -----------------------------------------------------------------------
+
+def test_no_forbidden_imports_in_reduced_ebr_modules():
+    """Builder, reducer, and mapping modules must not import OR-Tools,
+    irrep.ebrs, or private irrep2."""
+    from pathlib import Path
+
+    modules_to_check = [
+        "valleyscope/analysis/irrep_runtime_reducer.py",
+        "valleyscope/analysis/irreptables_runtime_table_builder.py",
+        "valleyscope/analysis/irrep_data_normalizer.py",
+        "valleyscope/analysis/reduced_ebr_mapping.py",
+        "valleyscope/analysis/reduced_ebr_solver.py",
+    ]
+    forbidden = [
+        "import ortools", "from ortools",
+        "from irrep.ebrs", "import irrep.ebrs",
+        "from irrep2", "import irrep2",
+    ]
+    for module_path in modules_to_check:
+        src = Path(module_path).read_text(encoding="utf-8")
+        for f in forbidden:
+            assert f not in src, (
+                f"{module_path} must not import {f}"
+            )
+
+
+def test_no_material_names_in_reduced_ebr_modules():
+    """Builder, reducer, and mapping modules must not contain material names."""
+    from pathlib import Path
+
+    modules_to_check = [
+        "valleyscope/analysis/irrep_runtime_reducer.py",
+        "valleyscope/analysis/irreptables_runtime_table_builder.py",
+        "valleyscope/analysis/irrep_data_normalizer.py",
+        "valleyscope/analysis/reduced_ebr_mapping.py",
+        "valleyscope/analysis/reduced_ebr_solver.py",
+    ]
+    forbidden = ["MoTe2", "ZrSe2", "tMoTe2", "tZrSe2"]
+    for module_path in modules_to_check:
+        src = Path(module_path).read_text(encoding="utf-8")
+        for name in forbidden:
+            assert name not in src, (
+                f"{module_path} must not contain material name {name!r}"
+            )

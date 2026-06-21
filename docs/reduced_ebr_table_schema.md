@@ -39,7 +39,7 @@ mutually exclusive.
 | Key | Type | Description |
 |-----|------|-------------|
 | `schema_version` | string | Table schema version (e.g. `"1.0.0"`) |
-| `subspace_group_candidate` | string | EBR table label matching export bundle `subspace_group_candidate`. Must use the `C{order}_like` form (e.g. `"C3_like"`, `"C2_like"`), not crystallographic notation. |
+| `subspace_group_candidate` | string | Physical valley-projected subspace-space-group symbol matching export bundle `subspace_group_candidate` (e.g. `"P3"`, `"P4"`, `"P2"`). This is the primary EBR table key. |
 | `expected_hsps` | list[string] | Unique non-empty HSP labels covered by this table (e.g. `["GammaM", "KM"]`) |
 | `irreps` | list[string] | Unique non-empty irrep keys in the format `<kpoint>:<irrep_label>` with optional `:op<N>` suffix |
 | `ebrs` | list[object] | EBR definitions, each with `label` (unique non-empty string) and `vector` (non-empty list of nonnegative integers aligned to `irreps`) |
@@ -122,7 +122,7 @@ suffix-stripped matches are rejected.
 ```json
 {
   "schema_version": "1.0.0",
-  "subspace_group_candidate": "C3_like",
+  "subspace_group_candidate": "P3",
   "expected_hsps": ["GammaM", "KM"],
   "irreps": [
     "GammaM:C3_spinor_phase_+1/2",
@@ -157,7 +157,7 @@ Given a bundle with irrep count vector `[2, 1, 1]`:
   {
     "bundle_id": "bundle_001",
     "valley": "K_valley",
-    "subspace_group_candidate": "C3_like",
+    "subspace_group_candidate": "P3",
     "irrep_vector": [2, 1, 1],
     "status": "solved_exact",
     "ebr_decomposition": [

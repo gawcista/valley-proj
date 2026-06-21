@@ -55,7 +55,8 @@ def build_reduced_table_from_runtime_source(
         ValleyScope trusted valley-preserving irrep keys.  Only basis entries
         whose ``valleyscope_irrep_key`` is in this set are included.
     subspace_group_candidate : str
-        The ``C{order}_like`` group label for the reduced table.
+        The physical valley-projected subspace-space-group symbol
+        (e.g. ``"P3"``, ``"P4"``, ``"P2"``) for the reduced table.
     provenance : Mapping or None
         Optional provenance dict (package name, version, detected space group,
         etc.) attached to the output.

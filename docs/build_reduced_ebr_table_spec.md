@@ -24,7 +24,7 @@ returning it, and the CLI validates the written JSON before reporting success.
 | `valleyscope_irrep_multiplicity_by_source_irrep` | dict | Yes for `1.1.0` | Multiplicity map from source irrep label to `{ValleyScope irrep key: positive integer}` for sampled-HSP, valley-preserving reduction. |
 | `expected_hsps` | list[str] | Yes | Sampled moire HSP labels in the reduced basis. Only irreps whose HSP is in this set appear in the output. |
 | `allowed_irrep_keys` | list[str] | Yes | Trusted valley-preserving irrep keys; order defines the reduced output `irreps` basis. In `1.0.0`, keys come from `valleyscope_key_by_source_irrep`; in `1.1.0`, keys come from `valleyscope_irrep_multiplicity_by_source_irrep` entries. |
-| `subspace_group_candidate` | str | Yes | `C{order}_like` label (e.g., `"C3_like"`, `"C2_like"`). |
+| `subspace_group_candidate` | str | Yes | Physical valley-projected subspace-space-group symbol (e.g., `"P3"`, `"P4"`, `"P2"`). |
 | `provenance` | dict | No | Optional extra provenance fields attached to the output. |
 
 ## Legacy 1.0.0 Example
@@ -51,7 +51,7 @@ returning it, and the CLI validates the written JSON before reporting success.
     "KM:C3_spinor_phase_+1/6",
     "KM:C3_spinor_phase_-1/6"
   ],
-  "subspace_group_candidate": "C3_like"
+  "subspace_group_candidate": "P3"
 }
 ```
 
@@ -99,7 +99,7 @@ EBR vector basis.
     "KM:C3_spinor_phase_+1/2",
     "KM:C3_spinor_phase_-1/6"
   ],
-  "subspace_group_candidate": "C3_like"
+  "subspace_group_candidate": "P3"
 }
 ```
 
