@@ -19,6 +19,10 @@ from valleyscope.data.valley_irreps.catalog import get_irrep_phase_list
 READINESS_TRUSTED = "trusted"
 READINESS_USABLE_WITH_CAUTION = "usable_with_caution"
 READINESS_BLOCKED = "blocked"
+MATCHING_STATUSES = [
+    "matched", "diagnostic", "diagnostic_only", "not_applicable",
+    "failed_no_table", "failed_ambiguous", "blocked",
+]
 
 
 def _irrep_table_for_order(order: int) -> list[dict[str, object]]:
@@ -232,8 +236,9 @@ def build_valley_irrep_matching_report(
     Strategy boundary:
 
     - **Generic mode** (``source_irrep_characters``,
-      ``source_irrep_characters_flattened``, or ``source_payload_blocked_rows``
-      supplied): uses the generic ``match_restricted_characters`` strategy.
+      ``source_irrep_characters_flattened``, ``source_operation_maps``, or
+      ``source_payload_blocked_rows`` supplied): uses the generic
+      ``match_restricted_characters`` strategy.
       Legacy ``by_kpoint`` phase-table entries are suppressed for any
       ``(kpoint, valley)`` that has generic coverage (including blocked rows),
       because the generic source is the authoritative matching path.
@@ -245,6 +250,7 @@ def build_valley_irrep_matching_report(
     _generic_mode = (
         source_irrep_characters is not None
         or source_irrep_characters_flattened is not None
+        or source_operation_maps is not None
         or (source_payload_blocked_rows is not None and len(source_payload_blocked_rows) > 0)
     )
 
@@ -252,8 +258,7 @@ def build_valley_irrep_matching_report(
         return {
             "status": "not_evaluated",
             "matching_mode": "generic" if _generic_mode else "legacy",
-            "matching_statuses": ["matched", "diagnostic_only", "not_applicable",
-                                  "failed_no_table", "failed_ambiguous", "blocked"],
+            "matching_statuses": list(MATCHING_STATUSES),
             "tables_implemented": ["spinful_C3", "spinful_C2"],
             "legacy_tables_implemented": ["spinful_C3", "spinful_C2"],
             "by_kpoint": {},
@@ -606,6 +611,77 @@ def build_valley_irrep_matching_report(
                 "source_payload_provenance": provenance,
             }
 
+    # --- Rows with operation maps but no source characters ---
+    # A source_operation_map is already a row-level generic matching attempt.
+    # If no source characters produced a generic row, expose the row as
+    # blocked instead of letting legacy phase-table output become authoritative.
+    if source_operation_maps is not None and isinstance(source_operation_maps, Mapping):
+        for kp_name, v_maps in source_operation_maps.items():
+            if not isinstance(kp_name, str) or not isinstance(v_maps, Mapping):
+                continue
+            for v_name, op_map in v_maps.items():
+                if not isinstance(v_name, str) or not isinstance(op_map, Mapping):
+                    continue
+                existing = generic_matches.get(kp_name, {}).get(v_name)
+                if existing is not None:
+                    continue
+                sa = sa_by_kp.get(kp_name, {}).get(v_name, {})
+                ssg = sa.get("subspace_space_group", {})
+                decision = (
+                    decisions_by_kp.get(kp_name, {}).get(v_name, {})
+                    if isinstance(decisions_by_kp.get(kp_name, {}), dict)
+                    else {}
+                )
+                readiness = (
+                    str(decision.get("readiness_level", ""))
+                    if isinstance(decision, dict)
+                    else ""
+                )
+                path = (
+                    str(decision.get("workflow_path", ""))
+                    if isinstance(decision, dict)
+                    else ""
+                )
+                char_diag = sa.get("char_diag", {})
+                per_valley = char_diag.get("per_valley", {}) if isinstance(char_diag, dict) else {}
+                items = per_valley.get(v_name, []) if isinstance(per_valley, dict) else []
+                _, item_op_ids = _computed_characters_from_items(items)
+                vp_ids = (
+                    _operation_ids_from_value(
+                        ssg.get("valley_preserving_operation_ids")
+                        if isinstance(ssg, Mapping)
+                        else None
+                    )
+                    or item_op_ids
+                    or _operation_ids_from_value(op_map)
+                )
+                hsp_ids = (
+                    _operation_ids_from_value(sa.get("hsp_preserving_operation_ids"))
+                    or vp_ids
+                )
+                generic_matches.setdefault(kp_name, {})[v_name] = {
+                    "matching_status": "blocked",
+                    "matching_strategy": "bilbao_restricted_character",
+                    "irrep_multiplicities": {},
+                    "source_operation_map": dict(op_map),
+                    "valley_preserving_operation_ids": vp_ids,
+                    "hsp_little_group_operation_ids": hsp_ids,
+                    "diagnostic_only": True,
+                    "reason": (
+                        "missing_source_irrep_characters: source_operation_maps "
+                        "was supplied without source irrep characters for this row"
+                    ),
+                    "workflow_path": path,
+                    "readiness_level": readiness,
+                    "subspace_group_candidate": (
+                        sa.get("subspace_group", {}).get("subspace_group_candidate")
+                        if isinstance(sa.get("subspace_group", {}), Mapping)
+                        else None
+                    ),
+                    "subspace_space_group": dict(ssg)
+                    if isinstance(ssg, Mapping) else {},
+                }
+
     # --- Strategy boundary: in generic mode, suppress legacy by_kpoint entries ---
     # for (kpoint, valley) pairs that have generic coverage.  The generic
     # source (including blocked rows) is the authoritative matching path.
@@ -618,8 +694,7 @@ def build_valley_irrep_matching_report(
     return {
         "status": "ok" if (by_kpoint or generic_matches) else "not_evaluated",
         "matching_mode": "generic" if _generic_mode else "legacy",
-        "matching_statuses": ["matched", "diagnostic_only", "not_applicable",
-                              "failed_no_table", "failed_ambiguous", "blocked"],
+        "matching_statuses": list(MATCHING_STATUSES),
         "tables_implemented": ["spinful_C3", "spinful_C2"],
         "legacy_tables_implemented": ["spinful_C3", "spinful_C2"],
         "by_kpoint": by_kpoint,

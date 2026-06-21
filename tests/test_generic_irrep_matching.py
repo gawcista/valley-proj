@@ -903,17 +903,17 @@ def test_source_op_map_without_chars_blocked_no_legacy():
             },
         },
     }
-    # Operation map exists but source characters dict is EMPTY.
+    # Operation map exists but source characters are absent.
     report = build_valley_irrep_matching_report(
         irrep_workflow_decisions=decisions,
         symmetry_adapted_valley_report=sa_report,
-        source_irrep_characters={},  # empty → no irrep can match
         source_operation_maps={"GammaM": {"K_valley": {1: 1, 2: 2}}},
     )
     assert report["matching_mode"] == "generic"
     # Generic blocked entry produced.
     gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
-    assert gm["matching_status"] in ("diagnostic", "blocked")
+    assert gm["matching_status"] == "blocked"
+    assert "missing_source_irrep_characters" in gm["reason"]
     # Legacy entry suppressed.
     assert "K_valley" not in report["by_kpoint"].get("GammaM", {})
 
