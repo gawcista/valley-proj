@@ -717,7 +717,7 @@ def test_generic_irrep_full_pipeline_smoke():
     assert "expected_hsps" in result2["excluded_bundles"][0]["reason"]
 
 
-def test_generic_ebr_builder_e2e_p4_group_agnostic():
+def test_generic_ebr_builder_e2e_p4_group_agnostic(tmp_path):
     """Group-agnostic E2E: generic restricted-character match → candidates →
     instances → export → builder-generated reduced table → exact solve.
 
@@ -847,9 +847,15 @@ def test_generic_ebr_builder_e2e_p4_group_agnostic():
     assert table["subspace_group_candidate"] == "P4"
     assert table["expected_hsps"] == ["GammaM"]
 
-    # 6. Exact reduced EBR solve with builder-generated table.
+    table_path = tmp_path / "p4_reduced_ebr_table.json"
+    table_path.write_text(json.dumps(table), encoding="utf-8")
+    validated_table = load_reduced_ebr_table(table_path)
+    assert validated_table["subspace_group_candidate"] == "P4"
+    assert validated_table["expected_hsps"] == ["GammaM"]
+
+    # 6. Exact reduced EBR solve with validated builder-generated table.
     result = build_reduced_ebr_mapping(
-        ebr_export_bundle=bundle, table=table,
+        ebr_export_bundle=bundle, table=validated_table,
     )
     assert result["mapping_status"] == "solved_exact"
     assert result["solutions"][0]["classification"] == "atomic-compatible-candidate"

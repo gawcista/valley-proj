@@ -478,6 +478,8 @@ def test_table_schema_doc_contract():
         assert f"`{status}`" in doc, f"missing status '{status}'"
     assert "P3" in doc and "P2" in doc and "P4" in doc
     assert "C{order}_like" not in doc
+    assert "C3_like" not in doc
+    assert "C2_like" not in doc
     assert "no built-in" in doc.lower()
     assert "no heuristic" in doc.lower()
 

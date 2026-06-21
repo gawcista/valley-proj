@@ -136,9 +136,9 @@ suffix-stripped matches are rejected.
 }
 ```
 
-This table defines a `C3_like` system with 3 irreps across 2 HSPs and
-2 EBR basis vectors.  It is a toy example for testing; it does not
-represent a reviewed physical EBR table for any real material.
+This table defines a `P3` reduced-basis toy problem with 3 irreps across
+2 HSPs and 2 EBR basis vectors.  It is a toy example for testing; it does
+not represent a reviewed physical EBR table for any real material.
 
 ## Toy Decomposition Example
 
@@ -212,8 +212,8 @@ reduced EBR mapping: valley_reduced_ebr_mapping.json
 The CLI:
 - is Layer 3 and requires a user-supplied validated table;
 - uses exact-integer brute-force matching only;
-- `C3_like` / `C2_like` must match the export bundle
-  `subspace_group_candidate`;
+- the table physical subspace-space-group symbol (for example `P3`, `P4`,
+  or `P2`) must match the export bundle `subspace_group_candidate`;
 - no decomposition claim is made without a validated external table.
 
 For offline construction of an external reduced EBR table from public
