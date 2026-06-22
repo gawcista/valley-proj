@@ -584,33 +584,25 @@ def test_p3_reviewed_table_by_name_e2e():
 def test_p3_bilbao_label_bundle_reaches_solver_via_basis_map():
     """Generic P3 export bundle with Bilbao/irreptables labels (-GM4, -K4)
     reaches exact reduced EBR solver via the reviewed P3 basis map."""
-    import json
     from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
     from valleyscope.data.reduced_ebr.catalog import (
-        load_reviewed_reduced_ebr_table, package_data_root,
+        load_reviewed_reduced_ebr_basis_map,
+        load_reviewed_reduced_ebr_table,
     )
 
     # 1. Load reviewed P3 reduced EBR table.
     table = load_reviewed_reduced_ebr_table("P3_GammaM_KM_spinful_v1")
 
     # 2. Load reviewed Bilbao-to-phase-label basis map.
-    manifest = json.loads(
-        (package_data_root() / "manifest.json").read_text(encoding="utf-8")
+    basis_map_json = load_reviewed_reduced_ebr_basis_map(
+        "P3_Bilbao_to_phase_label_v1"
     )
-    basis_map_entry = next(
-        (bm for bm in manifest.get("basis_maps", [])
-         if bm.get("name") == "P3_Bilbao_to_phase_label_v1"),
-        None,
-    )
-    assert basis_map_entry is not None, "basis map not found in manifest"
-    assert basis_map_entry["review_status"] == "reviewed"
-    assert basis_map_entry["table_name"] == "P3_GammaM_KM_spinful_v1"
-
-    map_path = package_data_root() / basis_map_entry["filename"]
-    basis_map_json = json.loads(map_path.read_text(encoding="utf-8"))
     basis_map = basis_map_json["basis_map"]
     assert basis_map_json["subspace_group_candidate"] == "P3"
     assert basis_map_json["source_space_group_number"] == 143
+    assert basis_map_json["table_name"] == "P3_GammaM_KM_spinful_v1"
+    assert basis_map["KM:-K6"] == "C3_spinor_phase_+1/6"
+    assert basis_map["KM:-K5"] == "C3_spinor_phase_-1/6"
 
     # 3. Build generic P3 export bundle with Bilbao labels.
     generic_irreps = {
@@ -622,7 +614,6 @@ def test_p3_bilbao_label_bundle_reaches_solver_via_basis_map():
     for kp, labels in generic_irreps.items():
         translated_irreps[kp] = [
             basis_map[f"{kp}:{lbl}"] for lbl in labels
-            if f"{kp}:{lbl}" in basis_map
         ]
     assert translated_irreps == {
         "GammaM": ["C3_spinor_phase_+1/2"],

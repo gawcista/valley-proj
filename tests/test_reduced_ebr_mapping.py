@@ -833,7 +833,12 @@ def test_agents_plan_irrep_boundary_and_package_name():
 
 def test_package_data_skeleton_structure_and_manifest():
     """Package-data directory exists, manifest has schema_version, one reviewed table."""
-    from valleyscope.data.reduced_ebr.catalog import package_data_root, load_reduced_ebr_manifest, list_reviewed_reduced_ebr_tables
+    from valleyscope.data.reduced_ebr.catalog import (
+        list_reviewed_reduced_ebr_basis_maps,
+        list_reviewed_reduced_ebr_tables,
+        load_reduced_ebr_manifest,
+        package_data_root,
+    )
     root = package_data_root()
     for name in ["__init__.py", "manifest.json", "README.md", "catalog.py"]:
         assert (root / name).exists(), f"missing {name}"
@@ -842,6 +847,9 @@ def test_package_data_skeleton_structure_and_manifest():
     assert len(m["tables"]) == 2
     assert m["tables"][0]["name"] == "P321_C3_like_GammaM_KM_spinful_v1"
     assert len(list_reviewed_reduced_ebr_tables()) == 2
+    basis_maps = list_reviewed_reduced_ebr_basis_maps()
+    assert len(basis_maps) == 1
+    assert basis_maps[0]["name"] == "P3_Bilbao_to_phase_label_v1"
     json_names = {f.name for f in root.glob("*.json")}
     assert json_names == {"manifest.json", "P321_C3_like_GammaM_KM_spinful_v1.json", "P3_Bilbao_to_phase_label_basis_map_v1.json"}, f"unexpected JSON: {json_names}"
 
@@ -929,6 +937,37 @@ def _reviewed_table_entry(name: str, filename: str) -> dict:
     }
 
 
+def _reviewed_basis_map_entry(name: str, filename: str, table_name: str) -> dict:
+    """Return a manifest basis-map entry with reviewed provenance."""
+    return {
+        "name": name,
+        "filename": filename,
+        "table_name": table_name,
+        "review_status": "reviewed",
+        "reviewer": "JD",
+        "review_date": "2026-06-22",
+        "review_method": "explicit reviewed basis map",
+        "source_reference": "SG143 spinful irreps",
+    }
+
+
+def _reviewed_basis_map_payload(table_name: str = "toy") -> dict:
+    """Return a reviewed basis-map payload."""
+    return {
+        "schema_version": "1.0.0",
+        "table_name": table_name,
+        "subspace_group_candidate": "P3",
+        "source_space_group_number": 143,
+        "spinful": True,
+        "review_status": "reviewed",
+        "reviewer": "JD",
+        "review_date": "2026-06-22",
+        "review_method": "explicit reviewed basis map",
+        "source_reference": "SG143 spinful irreps",
+        "basis_map": {"GammaM:-GM4": "C3_spinor_phase_+1/2"},
+    }
+
+
 def _reviewed_table_provenance() -> dict:
     """Return a provenance block for a reviewed table."""
     return {
@@ -972,6 +1011,50 @@ def test_valid_fake_manifest_lists_entries(monkeypatch, tmp_path):
 
     loaded = load_reviewed_reduced_ebr_table("toy")
     assert loaded["subspace_group_candidate"] == "P3"
+
+
+def test_valid_fake_manifest_loads_reviewed_basis_map(monkeypatch, tmp_path):
+    """A valid fake manifest with reviewed basis-map entries loads them."""
+    root = _make_fake_catalog_root(tmp_path)
+    (root / "basis.json").write_text(json.dumps(_reviewed_basis_map_payload()))
+    (root / "manifest.json").write_text(json.dumps({
+        "schema_version": "1.0.0",
+        "tables": [],
+        "basis_maps": [_reviewed_basis_map_entry("basis", "basis.json", "toy")],
+    }))
+    _set_fake_root(monkeypatch, root)
+
+    from valleyscope.data.reduced_ebr.catalog import (
+        list_reviewed_reduced_ebr_basis_maps,
+        load_reviewed_reduced_ebr_basis_map,
+    )
+    entries = list_reviewed_reduced_ebr_basis_maps()
+    assert len(entries) == 1
+    assert entries[0]["name"] == "basis"
+
+    loaded = load_reviewed_reduced_ebr_basis_map("basis")
+    assert loaded["basis_map"] == {"GammaM:-GM4": "C3_spinor_phase_+1/2"}
+    assert loaded["table_name"] == "toy"
+
+
+def test_basis_map_payload_table_name_mismatch_raises(monkeypatch, tmp_path):
+    """Basis-map payload table_name must match the manifest entry."""
+    root = _make_fake_catalog_root(tmp_path)
+    (root / "basis.json").write_text(json.dumps(
+        _reviewed_basis_map_payload(table_name="other")
+    ))
+    (root / "manifest.json").write_text(json.dumps({
+        "schema_version": "1.0.0",
+        "tables": [],
+        "basis_maps": [_reviewed_basis_map_entry("basis", "basis.json", "toy")],
+    }))
+    _set_fake_root(monkeypatch, root)
+
+    from valleyscope.data.reduced_ebr.catalog import (
+        load_reviewed_reduced_ebr_basis_map,
+    )
+    with pytest.raises(ValueError, match="table_name"):
+        load_reviewed_reduced_ebr_basis_map("basis")
 
 
 def test_fake_table_fails_same_validation_as_external(monkeypatch, tmp_path):
