@@ -24,6 +24,11 @@ from pathlib import Path
 
 from valleyscope.analysis.reduced_ebr_mapping import load_reduced_ebr_table
 
+IRREPTABLES_CONVENTION_SOURCE = "Bilbao/irreptables"
+LEGACY_PHASE_LABEL_CONVENTION_SOURCE = (
+    "irreptables_reduced_legacy_phase_label"
+)
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -54,10 +59,38 @@ def load_reduced_ebr_manifest() -> dict:
 def list_reviewed_reduced_ebr_tables() -> list[dict]:
     """Return the list of reviewed reduced EBR table entries from the manifest.
 
-    Each entry is a dict with ``name`` and ``filename`` keys.
+    This includes both production convention tables and explicitly marked
+    legacy validation fixtures. Use ``list_production_reduced_ebr_tables()``
+    when only irreptables-convention production tables should be discovered.
     """
     manifest = load_reduced_ebr_manifest()
     return list(manifest.get("tables", []))
+
+
+def list_reduced_ebr_tables_by_convention_source(
+    convention_source: str,
+) -> list[dict]:
+    """Return reviewed reduced EBR table entries for one convention source."""
+    if not isinstance(convention_source, str) or not convention_source:
+        raise ValueError("convention_source must be a non-empty string")
+    return [
+        entry for entry in list_reviewed_reduced_ebr_tables()
+        if entry.get("convention_source") == convention_source
+    ]
+
+
+def list_production_reduced_ebr_tables() -> list[dict]:
+    """Return reviewed production tables using Bilbao/irreptables conventions."""
+    return list_reduced_ebr_tables_by_convention_source(
+        IRREPTABLES_CONVENTION_SOURCE
+    )
+
+
+def list_legacy_phase_label_reduced_ebr_tables() -> list[dict]:
+    """Return reviewed legacy phase-label validation fixtures."""
+    return list_reduced_ebr_tables_by_convention_source(
+        LEGACY_PHASE_LABEL_CONVENTION_SOURCE
+    )
 
 
 def list_reviewed_reduced_ebr_basis_maps() -> list[dict]:

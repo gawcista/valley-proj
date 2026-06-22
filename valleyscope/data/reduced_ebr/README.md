@@ -5,8 +5,8 @@ reduced-dimensional EBR tables.
 
 ## Current Status
 
-**Two manifest entries ship one reviewed table.** The catalog (`manifest.json`)
-lists:
+**Two manifest entries ship one reviewed legacy validation fixture.** The
+catalog (`manifest.json`) lists:
 
 - `P3_GammaM_KM_spinful_v1` (preferred): Physical P3 subspace-space-group
   identity for the sampled `GammaM`/`KM` valley-preserving C3 subgroup.  This
@@ -15,6 +15,14 @@ lists:
 - `P321_C3_like_GammaM_KM_spinful_v1` (legacy compatibility name): Points to
   the same reviewed table file.  The `C3_like` label in the manifest name is
   legacy only; the table's `subspace_group_candidate` is `"P3"`.
+
+Both entries are marked with
+`convention_source: "irreptables_reduced_legacy_phase_label"`.  They remain
+loadable for regression and backward compatibility, but they are not the
+production convention source.  Production reduced EBR tables must use
+Bilbao/irreptables labels and are discovered through
+`list_production_reduced_ebr_tables()`.  At this stage that production list is
+empty until an irreptables-derived reduced table is reviewed.
 
 Additional tables will be added only after:
 

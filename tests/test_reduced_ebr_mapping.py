@@ -832,7 +832,7 @@ def test_agents_plan_irrep_boundary_and_package_name():
 # -----------------------------------------------------------------------
 
 def test_package_data_skeleton_structure_and_manifest():
-    """Package-data directory exists, manifest has schema_version, one reviewed table."""
+    """Package-data directory has manifest, legacy fixture table, and basis map."""
     from valleyscope.data.reduced_ebr.catalog import (
         list_reviewed_reduced_ebr_basis_maps,
         list_reviewed_reduced_ebr_tables,
@@ -855,12 +855,15 @@ def test_package_data_skeleton_structure_and_manifest():
 
 
 def test_package_data_readme_and_no_forbidden_imports():
-    """README documents the shipped reviewed table; core package files avoid forbidden imports."""
+    """README documents legacy fixture status; core files avoid forbidden imports."""
     from valleyscope.data.reduced_ebr.catalog import package_data_root
     readme = (package_data_root() / "README.md").read_text(encoding="utf-8").lower()
-    assert "two manifest entries ship one reviewed table" in readme
+    assert "two manifest entries ship one reviewed legacy validation fixture" in readme
+    assert "production convention source" in readme
+    assert "bilbao/irreptables" in readme
     assert "p321_c3_like_gammam_km_spinful_v1" in readme
     assert "no reviewed tables are currently shipped" not in readme
+    assert "list_production_reduced_ebr_tables" in readme
     assert "load_reviewed_reduced_ebr_table" in readme
     assert "load_reduced_ebr_table" in readme
     assert "review_status" in readme
@@ -2322,6 +2325,34 @@ def test_legacy_phase_label_tables_marked_in_manifest():
         assert entry.get("convention_source") == (
             "irreptables_reduced_legacy_phase_label"
         ), f"{entry['name']!r} must declare legacy convention source"
+
+
+def test_production_table_discovery_excludes_legacy_phase_fixtures():
+    """Production discovery returns only Bilbao/irreptables-convention tables."""
+    from valleyscope.data.reduced_ebr.catalog import (
+        IRREPTABLES_CONVENTION_SOURCE,
+        LEGACY_PHASE_LABEL_CONVENTION_SOURCE,
+        list_legacy_phase_label_reduced_ebr_tables,
+        list_production_reduced_ebr_tables,
+        list_reduced_ebr_tables_by_convention_source,
+    )
+
+    production = list_production_reduced_ebr_tables()
+    assert production == []
+
+    assert list_reduced_ebr_tables_by_convention_source(
+        IRREPTABLES_CONVENTION_SOURCE
+    ) == production
+
+    legacy = list_legacy_phase_label_reduced_ebr_tables()
+    assert {entry["name"] for entry in legacy} == {
+        "P321_C3_like_GammaM_KM_spinful_v1",
+        "P3_GammaM_KM_spinful_v1",
+    }
+    assert all(
+        entry.get("convention_source") == LEGACY_PHASE_LABEL_CONVENTION_SOURCE
+        for entry in legacy
+    )
 
 
 def test_basis_maps_marked_as_legacy():
