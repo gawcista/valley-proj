@@ -2298,3 +2298,97 @@ def test_c3_reviewed_table_name_mapping_smoke():
     assert len(solution["ebr_decomposition"]) > 0
     for term in solution["ebr_decomposition"]:
         assert isinstance(term["coefficient"], int) and term["coefficient"] >= 0
+
+
+# -----------------------------------------------------------------------
+# Irreptables convention guardrail tests
+# -----------------------------------------------------------------------
+
+def test_manifest_declares_irreptables_as_convention_source():
+    """Manifest top-level declares Bilbao/irreptables as convention source."""
+    from valleyscope.data.reduced_ebr.catalog import load_reduced_ebr_manifest
+    m = load_reduced_ebr_manifest()
+    assert m.get("convention_source") == "Bilbao/irreptables"
+    assert "convention_source_description" in m
+
+
+def test_legacy_phase_label_tables_marked_in_manifest():
+    """All reviewed tables currently in the manifest use legacy phase labels
+    and are marked as convention_source: irreptables_reduced_legacy_phase_label."""
+    from valleyscope.data.reduced_ebr.catalog import (
+        list_reviewed_reduced_ebr_tables,
+    )
+    for entry in list_reviewed_reduced_ebr_tables():
+        assert entry.get("convention_source") == (
+            "irreptables_reduced_legacy_phase_label"
+        ), f"{entry['name']!r} must declare legacy convention source"
+
+
+def test_basis_maps_marked_as_legacy():
+    """All reviewed basis maps are marked as legacy."""
+    from valleyscope.data.reduced_ebr.catalog import (
+        list_reviewed_reduced_ebr_basis_maps,
+    )
+    for entry in list_reviewed_reduced_ebr_basis_maps():
+        assert entry.get("convention_source") == (
+            "irreptables_reduced_legacy_phase_label"
+        ), f"basis map {entry['name']!r} must declare legacy convention source"
+
+
+def test_irreptables_ebr_adapter_skeleton_loads_source_data():
+    """Irreptables EBR adapter can load and normalize source data
+    without importing irrep.ebrs or OR-Tools."""
+    from valleyscope.irreps.ebr_data_adapter import load_ebr_source_data
+    import sys
+
+    # Verify the adapter does not import forbidden modules.
+    adapter_src = (
+        Path("valleyscope/irreps/ebr_data_adapter.py").read_text("utf-8")
+    )
+    for forbidden in [
+        "import ortools", "from ortools",
+        "from irrep.ebrs", "import irrep.ebrs",
+    ]:
+        assert forbidden not in adapter_src, (
+            f"adapter must not import {forbidden}"
+        )
+
+    # Load real irreptables data if available.
+    try:
+        data = load_ebr_source_data(143, spinful=True)
+    except RuntimeError as exc:
+        if "irreptables" in str(exc).lower():
+            pytest.skip("irreptables not available in this environment")
+        raise
+
+    assert data["data_source"] == "irreptables"
+    assert data["space_group_number"] == 143
+    assert data["spinful"] is True
+    assert isinstance(data["source_basis_labels"], list)
+    assert len(data["source_basis_labels"]) > 0
+    # SG143 P3 spinful should have Bilbao-style labels like -GM4, -GM5, -GM6.
+    bilbao_patterns = ["-GM", "-K", "-A", "-H", "-L", "-M"]
+    assert any(
+        any(lbl.startswith(pat) for lbl in data["source_basis_labels"])
+        for pat in bilbao_patterns
+    ), f"expected Bilbao-style labels, got {data['source_basis_labels'][:5]}..."
+    assert isinstance(data["source_ebrs"], list)
+    assert len(data["source_ebrs"]) > 0
+    ebr = data["source_ebrs"][0]
+    assert "ebr_label" in ebr
+    assert "vector" in ebr
+    assert len(ebr["vector"]) == len(data["source_basis_labels"])
+
+
+def test_irreptables_ebr_adapter_no_raw_3d_decomposition_imports():
+    """Adapter must not import raw 3D EBR decomposition modules."""
+    from pathlib import Path
+    src = Path("valleyscope/irreps/ebr_data_adapter.py").read_text("utf-8")
+    forbidden = [
+        "compute_ebr_decomposition",
+        "irrep.ebrs",
+        "from irrep2",
+        "import irrep2",
+    ]
+    for f in forbidden:
+        assert f not in src, f"adapter must not reference {f!r}"

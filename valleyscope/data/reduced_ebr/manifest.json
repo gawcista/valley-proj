@@ -1,6 +1,8 @@
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "description": "Reviewed reduced-dimensional ValleyScope EBR package-data catalog",
+  "convention_source": "Bilbao/irreptables",
+  "convention_source_description": "Production irrep/EBR convention source is Bilbao/irreptables. Legacy C2/C3 phase-label tables and their aliases are validation fixtures only and are marked with convention_source: \"irreptables_reduced_legacy_phase_label\" to distinguish them from irreptables-derived production tables.",
   "tables": [
     {
       "name": "P321_C3_like_GammaM_KM_spinful_v1",
@@ -10,7 +12,8 @@
       "review_date": "2026-06-14",
       "review_method": "Codex condensed-matter review of Bilbao-derived irreptables SG150 spinful character data, C3 signoff packet, and pinned reduced-vector tests",
       "source_reference": "Bilbao Crystallographic Server SG150 spinful irreps and EBRs via public irreptables",
-      "note": "Legacy name retained for backward compatibility. Prefer P3_GammaM_KM_spinful_v1 for new work."
+      "convention_source": "irreptables_reduced_legacy_phase_label",
+      "note": "Legacy name retained for backward compatibility. Prefer P3_GammaM_KM_spinful_v1 for new work. This table uses legacy C3 phase labels, not Bilbao/irreptables irrep labels."
     },
     {
       "name": "P3_GammaM_KM_spinful_v1",
@@ -20,7 +23,8 @@
       "review_date": "2026-06-22",
       "review_method": "Codex condensed-matter review of the existing SG150/P321 parent-table reduced vectors as a P3 valley-projected subspace basis alias",
       "source_reference": "Bilbao Crystallographic Server SG150 spinful irreps and EBRs via public irreptables; reviewed parent-to-subspace reduction restricted to the P3 valley-preserving subgroup",
-      "note": "Physical P3 subspace-space-group identity alias. The table subspace_group_candidate is P3, while table provenance.space_group_number remains 150 because this is the reviewed SG150 parent-to-P3 reduced table, not an independently reviewed SG143 source table."
+      "convention_source": "irreptables_reduced_legacy_phase_label",
+      "note": "Physical P3 subspace-space-group identity alias. The table subspace_group_candidate is P3, while table provenance.space_group_number remains 150 because this is the reviewed SG150 parent-to-P3 reduced table, not an independently reviewed SG143 source table. Uses legacy C3 phase labels via reviewed basis map."
     }
   ],
   "basis_maps": [
@@ -32,7 +36,8 @@
       "reviewer": "cc-physics-review",
       "review_date": "2026-06-22",
       "review_method": "Character-based mapping of SG143 spinful irreps to legacy C3 phase labels; verified against generic P3 validation benchmark",
-      "source_reference": "Bilbao Crystallographic Server SG143 spinful irreps via public irreptables"
+      "source_reference": "Bilbao Crystallographic Server SG143 spinful irreps via public irreptables",
+      "convention_source": "irreptables_reduced_legacy_phase_label"
     }
   ]
 }
