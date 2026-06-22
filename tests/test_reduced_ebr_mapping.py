@@ -839,9 +839,9 @@ def test_package_data_skeleton_structure_and_manifest():
         assert (root / name).exists(), f"missing {name}"
     m = load_reduced_ebr_manifest()
     assert isinstance(m.get("schema_version"), str) and m["schema_version"]
-    assert len(m["tables"]) == 1
+    assert len(m["tables"]) == 2
     assert m["tables"][0]["name"] == "P321_C3_like_GammaM_KM_spinful_v1"
-    assert len(list_reviewed_reduced_ebr_tables()) == 1
+    assert len(list_reviewed_reduced_ebr_tables()) == 2
     json_names = {f.name for f in root.glob("*.json")}
     assert json_names == {"manifest.json", "P321_C3_like_GammaM_KM_spinful_v1.json"}, f"unexpected JSON: {json_names}"
 
@@ -850,7 +850,7 @@ def test_package_data_readme_and_no_forbidden_imports():
     """README documents the shipped reviewed table; core package files avoid forbidden imports."""
     from valleyscope.data.reduced_ebr.catalog import package_data_root
     readme = (package_data_root() / "README.md").read_text(encoding="utf-8").lower()
-    assert "one reviewed table is currently shipped" in readme
+    assert "two manifest entries ship one reviewed table" in readme
     assert "p321_c3_like_gammam_km_spinful_v1" in readme
     assert "no reviewed tables are currently shipped" not in readme
     assert "load_reviewed_reduced_ebr_table" in readme
@@ -913,7 +913,7 @@ def test_real_manifest_lists_one_reviewed_table(monkeypatch):
     """Real repo manifest now lists one reviewed C3 table."""
     from valleyscope.data.reduced_ebr.catalog import list_reviewed_reduced_ebr_tables
     tables = list_reviewed_reduced_ebr_tables()
-    assert len(tables) == 1
+    assert len(tables) == 2
     assert tables[0]["name"] == "P321_C3_like_GammaM_KM_spinful_v1"
 
 
@@ -2038,7 +2038,7 @@ def test_real_manifest_has_one_reviewed_table():
         load_reviewed_reduced_ebr_table,
     )
     tables = list_reviewed_reduced_ebr_tables()
-    assert len(tables) == 1
+    assert len(tables) == 2
     name = tables[0]["name"]
     assert name == "P321_C3_like_GammaM_KM_spinful_v1"
     # Load through the reviewed gate.

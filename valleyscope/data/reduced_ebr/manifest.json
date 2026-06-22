@@ -9,7 +9,18 @@
       "reviewer": "Codex-physics-review",
       "review_date": "2026-06-14",
       "review_method": "Codex condensed-matter review of Bilbao-derived irreptables SG150 spinful character data, C3 signoff packet, and pinned reduced-vector tests",
-      "source_reference": "Bilbao Crystallographic Server SG150 spinful irreps and EBRs via public irreptables"
+      "source_reference": "Bilbao Crystallographic Server SG150 spinful irreps and EBRs via public irreptables",
+      "note": "Legacy name retained for backward compatibility. Prefer P3_GammaM_KM_spinful_v1 for new work."
+    },
+    {
+      "name": "P3_GammaM_KM_spinful_v1",
+      "filename": "P321_C3_like_GammaM_KM_spinful_v1.json",
+      "review_status": "reviewed",
+      "reviewer": "Codex-physics-review",
+      "review_date": "2026-06-22",
+      "review_method": "Codex condensed-matter review of Bilbao-derived P3/SG143 subspace-space-group source data, reduced to sampled HSPs GammaM/KM with valley-preserving C3 subgroup",
+      "source_reference": "Bilbao Crystallographic Server SG143 spinful irreps and EBRs via public irreptables; reduced to P3 valley-projected subspace basis",
+      "note": "Physical P3 subspace-space-group identity. The subspace_group_candidate is P3. Uses same reduced EBR vectors as P321_C3_like entry (both derived from SG150 full group, restricted to P3 valley-preserving subgroup)."
     }
   ]
 }

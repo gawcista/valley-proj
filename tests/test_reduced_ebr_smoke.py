@@ -506,3 +506,62 @@ def test_analyze_hsp_uses_reviewed_package_table_by_name(tmp_path):
 
 
 # -----------------------------------------------------------------------
+
+
+def test_p3_reviewed_table_by_name_e2e():
+    """Load reviewed P3 reduced EBR table by manifest name, verify identity,
+    and reach exact solver from a generic P3 export bundle shape."""
+    from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
+    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
+
+    # 1. Load reviewed table by P3 physical manifest name.
+    table = load_reviewed_reduced_ebr_table("P3_GammaM_KM_spinful_v1")
+    assert table["subspace_group_candidate"] == "P3"
+    assert table["expected_hsps"] == ["GammaM", "KM"]
+    assert "provenance" in table
+    prov = table["provenance"]
+    assert prov.get("subspace_group_candidate") == "P3"
+    assert prov.get("data_source") == "irreptables"
+    assert prov.get("valleyscope_reduction") == "sampled_hsp_valley_preserving"
+    # No C3_like label as physical table identity.
+    assert table.get("subspace_group_candidate") != "C3_like"
+
+    # 2. Build a generic P3 export bundle shape matching the table's HSPs.
+    bundle = {
+        "bundles": [{
+            "bundle_id": "bundle_test_p3",
+            "source_instance_id": "inst_001",
+            "valley": "K_valley",
+            "subspace_group_candidate": "P3",
+            "workflow_path": "direct_qcut",
+            "readiness_level": "trusted",
+            "irreps_by_kpoint": {
+                "GammaM": ["C3_spinor_phase_+1/2"],
+                "KM": ["C3_spinor_phase_+1/2"],
+            },
+            "operations_by_kpoint": {
+                "GammaM": [1],
+                "KM": [1],
+            },
+            "expected_hsps": ["GammaM", "KM"],
+            "optional_hsps": [],
+            "missing_optional_hsps": [],
+            "ready_for_external_solver": True,
+        }],
+        "excluded_instances": [],
+    }
+
+    # 3. Solve — must reach exact integer mapping.
+    result = build_reduced_ebr_mapping(
+        ebr_export_bundle=bundle, table=table,
+    )
+    assert result["mapping_status"] == "solved_exact"
+    solution = result["solutions"][0]
+    assert solution["subspace_group_candidate"] == "P3"
+    assert solution["classification"] == "atomic-compatible-candidate"
+
+    # 4. Legacy compatibility: same table loads by legacy name.
+    legacy_table = load_reviewed_reduced_ebr_table(
+        "P321_C3_like_GammaM_KM_spinful_v1"
+    )
+    assert legacy_table["subspace_group_candidate"] == "P3"

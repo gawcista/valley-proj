@@ -5,12 +5,15 @@ reduced-dimensional EBR tables.
 
 ## Current Status
 
-**One reviewed table is currently shipped.** The catalog (`manifest.json`)
+**Two manifest entries ship one reviewed table.** The catalog (`manifest.json`)
 lists:
 
-- `P321_C3_like_GammaM_KM_spinful_v1`: SG150/P321 spinful, sampled
-  `GammaM`/`KM`, valley-preserving `P3` subspace-space-group
-  reduced-dimensional basis, reviewed from Bilbao/irreptables source data.
+- `P3_GammaM_KM_spinful_v1` (preferred): Physical P3/SG143 subspace-space-group
+  identity.  Sampled `GammaM`/`KM`, valley-preserving C3 subgroup, reviewed
+  from Bilbao/irreptables SG143 spinful source data.
+- `P321_C3_like_GammaM_KM_spinful_v1` (legacy compatibility name): Points to
+  the same reviewed table file.  The `C3_like` label in the manifest name is
+  legacy only; the table's `subspace_group_candidate` is `"P3"`.
 
 Additional tables will be added only after:
 
