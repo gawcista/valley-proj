@@ -579,3 +579,92 @@ def test_p3_reviewed_table_by_name_e2e():
         "P321_C3_like_GammaM_KM_spinful_v1"
     )
     assert legacy_table["subspace_group_candidate"] == "P3"
+
+
+def test_p3_bilbao_label_bundle_reaches_solver_via_basis_map():
+    """Generic P3 export bundle with Bilbao/irreptables labels (-GM4, -K4)
+    reaches exact reduced EBR solver via the reviewed P3 basis map."""
+    import json
+    from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
+    from valleyscope.data.reduced_ebr.catalog import (
+        load_reviewed_reduced_ebr_table, package_data_root,
+    )
+
+    # 1. Load reviewed P3 reduced EBR table.
+    table = load_reviewed_reduced_ebr_table("P3_GammaM_KM_spinful_v1")
+
+    # 2. Load reviewed Bilbao-to-phase-label basis map.
+    manifest = json.loads(
+        (package_data_root() / "manifest.json").read_text(encoding="utf-8")
+    )
+    basis_map_entry = next(
+        (bm for bm in manifest.get("basis_maps", [])
+         if bm.get("name") == "P3_Bilbao_to_phase_label_v1"),
+        None,
+    )
+    assert basis_map_entry is not None, "basis map not found in manifest"
+    assert basis_map_entry["review_status"] == "reviewed"
+    assert basis_map_entry["table_name"] == "P3_GammaM_KM_spinful_v1"
+
+    map_path = package_data_root() / basis_map_entry["filename"]
+    basis_map_json = json.loads(map_path.read_text(encoding="utf-8"))
+    basis_map = basis_map_json["basis_map"]
+    assert basis_map_json["subspace_group_candidate"] == "P3"
+    assert basis_map_json["source_space_group_number"] == 143
+
+    # 3. Build generic P3 export bundle with Bilbao labels.
+    generic_irreps = {
+        "GammaM": ["-GM4"],
+        "KM": ["-K4"],
+    }
+    # Translate via basis map; values are irrep labels without HSP prefix.
+    translated_irreps = {}
+    for kp, labels in generic_irreps.items():
+        translated_irreps[kp] = [
+            basis_map[f"{kp}:{lbl}"] for lbl in labels
+            if f"{kp}:{lbl}" in basis_map
+        ]
+    assert translated_irreps == {
+        "GammaM": ["C3_spinor_phase_+1/2"],
+        "KM": ["C3_spinor_phase_+1/2"],
+    }
+
+    bundle = {
+        "bundles": [{
+            "bundle_id": "bundle_bilbao_p3",
+            "source_instance_id": "inst_001",
+            "valley": "K_valley",
+            "subspace_group_candidate": "P3",
+            "workflow_path": "direct_qcut",
+            "readiness_level": "trusted",
+            "irreps_by_kpoint": translated_irreps,
+            "operations_by_kpoint": {"GammaM": [1], "KM": [1]},
+            "expected_hsps": ["GammaM", "KM"],
+            "optional_hsps": [],
+            "missing_optional_hsps": [],
+            "ready_for_external_solver": True,
+        }],
+        "excluded_instances": [],
+    }
+
+    # 4. Solve with translated labels against the legacy table.
+    result = build_reduced_ebr_mapping(
+        ebr_export_bundle=bundle, table=table,
+    )
+    assert result["mapping_status"] == "solved_exact"
+    solution = result["solutions"][0]
+    assert solution["subspace_group_candidate"] == "P3"
+    assert solution["classification"] == "atomic-compatible-candidate"
+
+    # 5. Untranslated Bilbao labels must NOT match the legacy table.
+    raw_bundle_no_match = {
+        "bundles": [{
+            **bundle["bundles"][0],
+            "irreps_by_kpoint": generic_irreps,
+        }],
+        "excluded_instances": [],
+    }
+    result2 = build_reduced_ebr_mapping(
+        ebr_export_bundle=raw_bundle_no_match, table=table,
+    )
+    assert result2["mapping_status"] != "solved_exact"

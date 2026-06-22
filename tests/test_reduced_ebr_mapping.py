@@ -843,7 +843,7 @@ def test_package_data_skeleton_structure_and_manifest():
     assert m["tables"][0]["name"] == "P321_C3_like_GammaM_KM_spinful_v1"
     assert len(list_reviewed_reduced_ebr_tables()) == 2
     json_names = {f.name for f in root.glob("*.json")}
-    assert json_names == {"manifest.json", "P321_C3_like_GammaM_KM_spinful_v1.json"}, f"unexpected JSON: {json_names}"
+    assert json_names == {"manifest.json", "P321_C3_like_GammaM_KM_spinful_v1.json", "P3_Bilbao_to_phase_label_basis_map_v1.json"}, f"unexpected JSON: {json_names}"
 
 
 def test_package_data_readme_and_no_forbidden_imports():

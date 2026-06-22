@@ -22,5 +22,17 @@
       "source_reference": "Bilbao Crystallographic Server SG150 spinful irreps and EBRs via public irreptables; reviewed parent-to-subspace reduction restricted to the P3 valley-preserving subgroup",
       "note": "Physical P3 subspace-space-group identity alias. The table subspace_group_candidate is P3, while table provenance.space_group_number remains 150 because this is the reviewed SG150 parent-to-P3 reduced table, not an independently reviewed SG143 source table."
     }
+  ],
+  "basis_maps": [
+    {
+      "name": "P3_Bilbao_to_phase_label_v1",
+      "filename": "P3_Bilbao_to_phase_label_basis_map_v1.json",
+      "table_name": "P3_GammaM_KM_spinful_v1",
+      "review_status": "reviewed",
+      "reviewer": "cc-physics-review",
+      "review_date": "2026-06-22",
+      "review_method": "Character-based mapping of SG143 spinful irreps to legacy C3 phase labels; verified against generic P3 validation benchmark",
+      "source_reference": "Bilbao Crystallographic Server SG143 spinful irreps via public irreptables"
+    }
   ]
 }
