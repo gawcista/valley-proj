@@ -15,6 +15,41 @@ from __future__ import annotations
 from typing import Any
 
 
+def load_raw_ebr_data(
+    space_group_number: int | str,
+    spinful: bool,
+) -> dict:
+    """Load raw irreptables EBR data dict (backward-compatible shape).
+
+    Returns the original irreptables EBR data dict with keys ``basis`` and
+    ``ebrs``.  Use ``load_ebr_source_data`` for the normalized payload.
+
+    This is the single production import boundary for
+    ``irreptables.ebrs.load_ebr_data``.  No other production module should
+    import it directly.
+    """
+    try:
+        from irreptables.ebrs import load_ebr_data
+    except ImportError as exc:
+        raise RuntimeError(
+            "irreptables package is required for EBR source data. "
+            f"ImportError: {exc}"
+        ) from exc
+
+    try:
+        raw = load_ebr_data(space_group_number, spinful)
+    except Exception as exc:
+        raise RuntimeError(
+            f"failed to load irreptables EBR data for "
+            f"space_group_number={space_group_number!r}, "
+            f"spinful={spinful}: {type(exc).__name__}: {exc}"
+        ) from exc
+
+    if not isinstance(raw, dict):
+        raise ValueError("irreptables returned non-dict data")
+    return raw
+
+
 def load_ebr_source_data(
     space_group_number: int | str,
     spinful: bool,
@@ -36,23 +71,7 @@ def load_ebr_source_data(
     installed or ``load_ebr_data`` fails.  Raises ``ValueError`` for
     malformed source data.
     """
-    try:
-        from irreptables.ebrs import load_ebr_data
-    except ImportError as exc:
-        raise RuntimeError(
-            "irreptables package is required for EBR source data. "
-            f"ImportError: {exc}"
-        ) from exc
-
-    try:
-        raw = load_ebr_data(space_group_number, spinful)
-    except Exception as exc:
-        raise RuntimeError(
-            f"failed to load irreptables EBR data for "
-            f"space_group_number={space_group_number!r}, "
-            f"spinful={spinful}: {type(exc).__name__}: {exc}"
-        ) from exc
-
+    raw = load_raw_ebr_data(space_group_number, spinful)
     return _normalize_ebr_data(raw, space_group_number, spinful)
 
 

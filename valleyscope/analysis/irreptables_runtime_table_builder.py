@@ -99,14 +99,8 @@ def _load_ebr_data_from_irreptables(
     space_group_number: int | str,
     spinful: bool,
 ) -> Mapping[str, object]:
-    try:
-        from irreptables.ebrs import load_ebr_data
-    except Exception as exc:
-        raise RuntimeError(
-            "cannot import public irreptables.ebrs.load_ebr_data: "
-            f"{type(exc).__name__}: {exc}"
-        ) from exc
-    return load_ebr_data(space_group_number, spinful)
+    from valleyscope.irreps.ebr_data_adapter import load_raw_ebr_data
+    return load_raw_ebr_data(space_group_number, spinful)
 
 
 def _resolve_space_group_number(

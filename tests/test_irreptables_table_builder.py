@@ -172,7 +172,7 @@ def test_default_loader_missing_import_reports_clear_runtimeerror(monkeypatch):
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", guarded_import)
-    with pytest.raises(RuntimeError, match="cannot import public irreptables"):
+    with pytest.raises(RuntimeError, match="irreptables package is required"):
         _load_ebr_data_from_irreptables(150, True)
 
 

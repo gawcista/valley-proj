@@ -142,10 +142,8 @@ def inspect_irreptables_source_basis_from_args(
 # ---------------------------------------------------------------------------
 
 def _default_irreptables_loader(sg: int, spinful: bool) -> Mapping[str, Any]:
-    from valleyscope.analysis.irreptables_runtime_table_builder import (
-        _load_ebr_data_from_irreptables,
-    )
-    return _load_ebr_data_from_irreptables(sg, spinful)
+    from valleyscope.irreps.ebr_data_adapter import load_raw_ebr_data
+    return dict(load_raw_ebr_data(sg, spinful))
 
 
 def _exact_positive_int(value: Any, field: str) -> int:

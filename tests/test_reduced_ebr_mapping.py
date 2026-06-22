@@ -2423,3 +2423,143 @@ def test_irreptables_ebr_adapter_no_raw_3d_decomposition_imports():
     ]
     for f in forbidden:
         assert f not in src, f"adapter must not reference {f!r}"
+
+
+# -----------------------------------------------------------------------
+# Irreptables data boundary consolidation
+# -----------------------------------------------------------------------
+
+def test_no_production_file_imports_irreptables_ebrs_directly():
+    """No production file outside the adapter may import
+    irreptables.ebrs.load_ebr_data directly."""
+    from pathlib import Path
+    import os
+
+    adapter_rel = "valleyscope/irreps/ebr_data_adapter.py"
+    adapter_abs = Path(adapter_rel).resolve()
+    forbidden = ["from irreptables.ebrs import", "import irreptables.ebrs"]
+
+    production_dirs = [
+        "valleyscope/analysis",
+        "valleyscope/irreps",
+        "valleyscope/reports",
+        "valleyscope/workflows",
+    ]
+    for prod_dir in production_dirs:
+        for dirpath, _dirnames, filenames in os.walk(prod_dir):
+            for fname in filenames:
+                if not fname.endswith(".py"):
+                    continue
+                fpath = Path(dirpath) / fname
+                if fpath.resolve() == adapter_abs:
+                    continue  # adapter is the boundary
+                src = fpath.read_text("utf-8")
+                for f in forbidden:
+                    rel = str(Path(*fpath.parts[1:]))
+                    assert f not in src, (
+                        f"{rel} must not directly import irreptables.ebrs; "
+                        f"use valleyscope.irreps.ebr_data_adapter instead"
+                    )
+
+
+def test_existing_fake_loader_builder_behavior_unchanged():
+    """build_reduced_table_from_irreptables with fake source_loader
+    still works after adapter consolidation."""
+    from valleyscope.analysis.irreptables_runtime_table_builder import (
+        build_reduced_table_from_irreptables,
+    )
+
+    fake_data = {
+        "basis": {"irrep_labels": ["-GM4", "-GM5"]},
+        "ebrs": [
+            {"ebr_name": "EBR_A", "vector": [1, 0]},
+            {"ebr_name": "EBR_B", "vector": [0, 1]},
+        ],
+    }
+
+    def _fake_loader(sg, spin):
+        return fake_data
+
+    table = build_reduced_table_from_irreptables(
+        space_group_number=143,
+        spinful=True,
+        source_loader=_fake_loader,
+        source_hsp_by_irrep={"-GM4": "GammaM", "-GM5": "GammaM"},
+        valleyscope_key_by_source_irrep={
+            "-GM4": "GammaM:C3_spinor_phase_+1/2",
+            "-GM5": "GammaM:C3_spinor_phase_-1/6",
+        },
+        expected_hsps=["GammaM"],
+        allowed_irrep_keys=[
+            "GammaM:C3_spinor_phase_+1/2",
+            "GammaM:C3_spinor_phase_-1/6",
+        ],
+        subspace_group_candidate="P3",
+    )
+    assert table["subspace_group_candidate"] == "P3"
+    assert table["expected_hsps"] == ["GammaM"]
+    assert len(table["irreps"]) == 2
+    provenance = table.get("provenance", {})
+    assert provenance.get("data_source") == "irreptables"
+
+
+def test_adapter_load_raw_returns_irreptables_shape():
+    """Adapter load_raw_ebr_data returns raw irreptables dict shape."""
+    from valleyscope.irreps.ebr_data_adapter import load_raw_ebr_data
+    try:
+        raw = load_raw_ebr_data(143, spinful=True)
+    except RuntimeError:
+        import pytest
+        pytest.skip("irreptables not available")
+
+    assert isinstance(raw, dict)
+    assert "basis" in raw
+    assert "ebrs" in raw
+    assert isinstance(raw["ebrs"], list)
+    assert len(raw["ebrs"]) > 0
+    assert isinstance(raw["basis"]["irrep_labels"], list)
+
+
+def test_adapter_raw_and_normalized_consistent():
+    """Raw and normalized loader return consistent data for same SG."""
+    from valleyscope.irreps.ebr_data_adapter import (
+        load_raw_ebr_data, load_ebr_source_data,
+    )
+    try:
+        raw = load_raw_ebr_data(143, spinful=True)
+        norm = load_ebr_source_data(143, spinful=True)
+    except RuntimeError:
+        import pytest
+        pytest.skip("irreptables not available")
+
+    assert norm["source_basis_count"] == len(raw["basis"]["irrep_labels"])
+    assert norm["source_basis_labels"] == list(raw["basis"]["irrep_labels"])
+    assert len(norm["source_ebrs"]) == len(raw["ebrs"])
+    assert norm["data_source"] == "irreptables"
+
+
+def test_adapter_rejects_invalid_data():
+    """Adapter validation rejects malformed irreptables data."""
+    from valleyscope.irreps.ebr_data_adapter import _normalize_ebr_data
+    import pytest
+
+    # Non-dict
+    with pytest.raises(ValueError, match="dict"):
+        _normalize_ebr_data([], 143, True)
+
+    # Missing basis
+    with pytest.raises(ValueError, match="basis"):
+        _normalize_ebr_data({}, 143, True)
+
+    # Empty irrep_labels
+    with pytest.raises(ValueError, match="non-empty"):
+        _normalize_ebr_data(
+            {"basis": {"irrep_labels": []}, "ebrs": []}, 143, True,
+        )
+
+    # Missing ebr_name
+    with pytest.raises(ValueError, match="ebr_name"):
+        _normalize_ebr_data(
+            {"basis": {"irrep_labels": ["A"]},
+             "ebrs": [{"vector": [1]}]}, 143, True,
+        )
