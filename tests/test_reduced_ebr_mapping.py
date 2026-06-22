@@ -2563,3 +2563,19 @@ def test_adapter_rejects_invalid_data():
             {"basis": {"irrep_labels": ["A"]},
              "ebrs": [{"vector": [1]}]}, 143, True,
         )
+
+    # Non-integer vector entries
+    with pytest.raises(ValueError, match="nonnegative integer"):
+        _normalize_ebr_data(
+            {"basis": {"irrep_labels": ["A"]},
+             "ebrs": [{"ebr_name": "E", "vector": [0.5]}]},
+            143, True,
+        )
+
+    # Negative vector entries
+    with pytest.raises(ValueError, match="nonnegative integer"):
+        _normalize_ebr_data(
+            {"basis": {"irrep_labels": ["A"]},
+             "ebrs": [{"ebr_name": "E", "vector": [-1]}]},
+            143, True,
+        )

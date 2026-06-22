@@ -12,6 +12,7 @@ ValleyScope's responsibility.
 
 from __future__ import annotations
 
+from numbers import Integral, Real
 from typing import Any
 
 
@@ -126,10 +127,11 @@ def _normalize_ebr_data(
                 f"EBR {ebr_label!r} vector length {len(vector)} != "
                 f"basis length {len(irrep_labels)}"
             )
+        vector_ints = _nonnegative_integer_vector(vector, ebr_label)
         source_ebrs.append({
             "ebr_label": qualified,
             "wyckoff_position": wp if wp else None,
-            "vector": list(vector),
+            "vector": vector_ints,
         })
 
     return {
@@ -140,3 +142,27 @@ def _normalize_ebr_data(
         "space_group_number": space_group_number,
         "spinful": spinful,
     }
+
+
+def _nonnegative_integer_vector(vector: list[Any], ebr_label: str) -> list[int]:
+    """Validate and normalize one irreptables EBR vector."""
+    out: list[int] = []
+    for i, value in enumerate(vector):
+        if isinstance(value, bool):
+            raise ValueError(
+                f"EBR {ebr_label!r} vector[{i}] must be a nonnegative integer"
+            )
+        if isinstance(value, Integral):
+            resolved = int(value)
+        elif isinstance(value, Real) and float(value).is_integer():
+            resolved = int(value)
+        else:
+            raise ValueError(
+                f"EBR {ebr_label!r} vector[{i}] must be a nonnegative integer"
+            )
+        if resolved < 0:
+            raise ValueError(
+                f"EBR {ebr_label!r} vector[{i}] must be a nonnegative integer"
+            )
+        out.append(resolved)
+    return out
