@@ -104,7 +104,9 @@ def match_valley_irrep(
     operation_order : int
         Order of the operation (2 or 3).
     subspace_group_candidate : str or None
-        e.g. ``C3_like``, ``C2_like``.  Used to select the irrep table.
+        e.g. ``"P3"``, ``"P2"``.  Used to select the irrep table.  Legacy
+        ``"C2_like"`` / ``"C3_like"`` labels are accepted for backward
+        compatibility only.
     readiness_level : str
         Must be ``trusted``, ``usable_with_caution``, or ``blocked``.
     allow_caution : bool

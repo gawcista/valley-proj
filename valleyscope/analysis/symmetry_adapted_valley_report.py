@@ -543,11 +543,12 @@ def _build_subspace_group(
     effective_order = max(vp_orders) if vp_orders else 1
     epg = f"C{effective_order}" if effective_order > 1 else "C1"
 
-    # Subspace group candidate
+    # Subspace group candidate — uses physical P{n} form, not legacy C{n}_like.
+    # The C{n}_like hint is preserved only in legacy provenance fields.
     if effective_order == 2:
-        candidate = "C2_like"
+        candidate = "P2"
     elif effective_order >= 3:
-        candidate = f"C{effective_order}_like"
+        candidate = f"P{effective_order}"
     else:
         candidate = None
 
@@ -653,7 +654,7 @@ def _subspace_group_candidate_from_orders(
     ]
     if not non_identity_orders:
         return None
-    return f"C{max(non_identity_orders)}_like"
+    return f"P{max(non_identity_orders)}"
 
 
 def _blocked_subspace_group(

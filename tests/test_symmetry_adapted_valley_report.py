@@ -134,8 +134,8 @@ def test_subspace_group_uses_operation_order_not_matrix_rank():
     )
 
     assert report["subspace_group"]["effective_point_group"] == "C2"
-    assert report["subspace_group"]["subspace_group_candidate"] == "C2_like"
-    assert report["ebr_mapping_input"]["subspace_group_candidate"] == "C2_like"
+    assert report["subspace_group"]["subspace_group_candidate"] == "P2"
+    assert report["ebr_mapping_input"]["subspace_group_candidate"] == "P2"
 
 
 def test_ebr_mapping_uses_configurable_seed_overlap_threshold():
@@ -706,9 +706,9 @@ def test_valley_preserving_subspace_reports_keep_three_mstar_p2_subspaces():
     assert reports[1]["valley_preserving_representations"]["valley_preserving_operations"]["M2"] == [0, 3]
     assert reports[2]["valley_preserving_representations"]["valley_preserving_operations"]["M3"] == [0, 5]
     assert [report["subspace_group"]["subspace_group_candidate"] for report in reports] == [
-        "C2_like",
-        "C2_like",
-        "C2_like",
+        "P2",
+        "P2",
+        "P2",
     ]
     assert [report["subspace_space_group"]["candidate_space_group_symbol"] for report in reports] == [
         "P2",
