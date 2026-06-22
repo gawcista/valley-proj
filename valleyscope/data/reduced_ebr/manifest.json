@@ -18,9 +18,9 @@
       "review_status": "reviewed",
       "reviewer": "Codex-physics-review",
       "review_date": "2026-06-22",
-      "review_method": "Codex condensed-matter review of Bilbao-derived P3/SG143 subspace-space-group source data, reduced to sampled HSPs GammaM/KM with valley-preserving C3 subgroup",
-      "source_reference": "Bilbao Crystallographic Server SG143 spinful irreps and EBRs via public irreptables; reduced to P3 valley-projected subspace basis",
-      "note": "Physical P3 subspace-space-group identity. The subspace_group_candidate is P3. Uses same reduced EBR vectors as P321_C3_like entry (both derived from SG150 full group, restricted to P3 valley-preserving subgroup)."
+      "review_method": "Codex condensed-matter review of the existing SG150/P321 parent-table reduced vectors as a P3 valley-projected subspace basis alias",
+      "source_reference": "Bilbao Crystallographic Server SG150 spinful irreps and EBRs via public irreptables; reviewed parent-to-subspace reduction restricted to the P3 valley-preserving subgroup",
+      "note": "Physical P3 subspace-space-group identity alias. The table subspace_group_candidate is P3, while table provenance.space_group_number remains 150 because this is the reviewed SG150 parent-to-P3 reduced table, not an independently reviewed SG143 source table."
     }
   ]
 }

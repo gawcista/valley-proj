@@ -512,9 +512,22 @@ def test_p3_reviewed_table_by_name_e2e():
     """Load reviewed P3 reduced EBR table by manifest name, verify identity,
     and reach exact solver from a generic P3 export bundle shape."""
     from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
-    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
+    from valleyscope.data.reduced_ebr.catalog import (
+        load_reduced_ebr_manifest,
+        load_reviewed_reduced_ebr_table,
+    )
 
     # 1. Load reviewed table by P3 physical manifest name.
+    manifest = load_reduced_ebr_manifest()
+    p3_entry = next(
+        entry for entry in manifest["tables"]
+        if entry["name"] == "P3_GammaM_KM_spinful_v1"
+    )
+    p3_source = p3_entry["source_reference"].lower()
+    assert "sg150" in p3_source
+    assert "restricted to the p3 valley-preserving subgroup" in p3_source
+    assert "sg143" not in p3_source
+
     table = load_reviewed_reduced_ebr_table("P3_GammaM_KM_spinful_v1")
     assert table["subspace_group_candidate"] == "P3"
     assert table["expected_hsps"] == ["GammaM", "KM"]
@@ -523,6 +536,7 @@ def test_p3_reviewed_table_by_name_e2e():
     assert prov.get("subspace_group_candidate") == "P3"
     assert prov.get("data_source") == "irreptables"
     assert prov.get("valleyscope_reduction") == "sampled_hsp_valley_preserving"
+    assert prov.get("space_group_number") == 150
     # No C3_like label as physical table identity.
     assert table.get("subspace_group_candidate") != "C3_like"
 
