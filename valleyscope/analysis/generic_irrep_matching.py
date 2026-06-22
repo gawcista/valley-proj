@@ -207,7 +207,9 @@ def match_restricted_characters(
 
     # 2. Identity/dimension consistency:
     #    chi_sub(e) = sum_i n_i * dim(rho_i)
-    identity_vs_id = _find_identity_vs_id(vp_ids, computed_characters)
+    identity_vs_id = _find_identity_vs_id(
+        vp_ids, computed_characters, source_operation_map=omap,
+    )
     if identity_vs_id is not None:
         total_dim = _round_int(
             computed_characters[identity_vs_id].real, tol,
@@ -351,6 +353,8 @@ def _diagnostic(
 def _find_identity_vs_id(
     vp_ids: list[int],
     computed_characters: Mapping[int, complex],
+    *,
+    source_operation_map: Mapping[int, int] | None = None,
 ) -> int | None:
     """Find the ValleyScope identity operation ID in the VP set.
 
@@ -358,7 +362,12 @@ def _find_identity_vs_id(
     dimension (real positive integer) and is always present as op 0
     or mapped from source op 1.
     """
-    # Heuristic: identity is op 0 or the lowest op with real character > 1
+    if source_operation_map is not None:
+        for op in vp_ids:
+            if source_operation_map.get(op) == 1 and op in computed_characters:
+                return op
+
+    # Fallback heuristic: identity is op 0 or the lowest op with real character > 1.
     for op in vp_ids:
         if op == 0 and op in computed_characters:
             return 0
