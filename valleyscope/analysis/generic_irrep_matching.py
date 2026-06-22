@@ -173,6 +173,94 @@ def match_restricted_characters(
             per_irrep_results=results if results else None,
         )
 
+    # --- Multiplicity consistency checks ---
+    # 1. Non-unique restricted decomposition (before dimension check):
+    #    When source irreps have identical restricted characters on G_k^(a)
+    #    and could contribute non-trivially, the decomposition is ambiguous.
+    restricted_signatures: dict[tuple, list[str]] = {}
+    for irr_label, src_chars in source_irrep_characters.items():
+        if not isinstance(src_chars, Mapping):
+            continue
+        sig = tuple(
+            _round_complex(src_chars.get(omap[op], 0j), tol)
+            for op in vp_ids
+        )
+        restricted_signatures.setdefault(sig, []).append(irr_label)
+
+    ambiguous_pairs: list[str] = []
+    for sig, labels in restricted_signatures.items():
+        if len(labels) > 1:
+            contribs = [aggregate.get(l, 0) for l in labels]
+            if any(c > 0 for c in contribs):
+                ambiguous_pairs.append(
+                    f"{sig}: {labels} (multiplicities {contribs})"
+                )
+    if ambiguous_pairs:
+        return _diagnostic(
+            "nonunique_restricted_irrep_decomposition",
+            "source irreps with identical restricted characters "
+            "cannot be uniquely decomposed on G_k^(a): "
+            + "; ".join(ambiguous_pairs),
+            multiplicities=aggregate,
+            per_irrep_results=results if results else None,
+        )
+
+    # 2. Identity/dimension consistency:
+    #    chi_sub(e) = sum_i n_i * dim(rho_i)
+    identity_vs_id = _find_identity_vs_id(vp_ids, computed_characters)
+    if identity_vs_id is not None:
+        total_dim = _round_int(
+            computed_characters[identity_vs_id].real, tol,
+        )
+        if total_dim is not None:
+            source_dim_sum = 0
+            for irr_label, mult in aggregate.items():
+                src_chars = source_irrep_characters.get(irr_label, {})
+                src_id = omap.get(identity_vs_id)
+                if src_id is not None and src_id in src_chars:
+                    dim_i = _round_int(src_chars[src_id].real, tol)
+                    if dim_i is not None:
+                        source_dim_sum += mult * dim_i
+            if source_dim_sum != total_dim:
+                return _diagnostic(
+                    "dimension_mismatch",
+                    f"aggregate multiplicity dimension {source_dim_sum} "
+                    f"≠ subspace dimension {total_dim} "
+                    f"(chi_sub(e) = {total_dim})",
+                    multiplicities=aggregate,
+                    per_irrep_results=results if results else None,
+                )
+
+    # 3. Character reconstruction check:
+    #    chi_sub(g) = sum_i n_i * chi_i(g) for all g in G_k^(a)
+    reconstruction_blocked = False
+    reconstruction_reasons: list[str] = []
+    for op in vp_ids:
+        computed = computed_characters[op]
+        reconstructed = 0.0j
+        for irr_label, mult in aggregate.items():
+            src_chars = source_irrep_characters.get(irr_label, {})
+            src_id = omap.get(op)
+            if src_id is not None and src_id in src_chars:
+                reconstructed += complex(mult * src_chars[src_id])
+        if abs(complex(computed) - reconstructed) > tol:
+            reconstruction_blocked = True
+            reconstruction_reasons.append(
+                f"op {op}: computed {_fmt_char(computed)} ≠ "
+                f"reconstructed {_fmt_char(reconstructed)}"
+            )
+    if reconstruction_blocked:
+        reason = (
+            "character_reconstruction_mismatch: "
+            + "; ".join(reconstruction_reasons)
+        )
+        return _diagnostic(
+            "character_reconstruction_mismatch",
+            reason,
+            multiplicities=aggregate,
+            per_irrep_results=results if results else None,
+        )
+
     return {
         "matching_status": "matched",
         "matching_strategy": "bilbao_restricted_character",
@@ -258,3 +346,44 @@ def _diagnostic(
     if per_irrep_results is not None:
         result["per_irrep_results"] = per_irrep_results
     return result
+
+
+def _find_identity_vs_id(
+    vp_ids: list[int],
+    computed_characters: Mapping[int, complex],
+) -> int | None:
+    """Find the ValleyScope identity operation ID in the VP set.
+
+    Uses the fact that identity has character equal to the subspace
+    dimension (real positive integer) and is always present as op 0
+    or mapped from source op 1.
+    """
+    # Heuristic: identity is op 0 or the lowest op with real character > 1
+    for op in vp_ids:
+        if op == 0 and op in computed_characters:
+            return 0
+    for op in sorted(vp_ids):
+        if op in computed_characters:
+            c = computed_characters[op]
+            if abs(c.imag) < 1e-12 and c.real > 1.0:
+                return op
+    return None
+
+
+def _round_int(value: float, tol: float) -> int | None:
+    """Round to int if within tolerance, else None."""
+    rounded = round(value)
+    if abs(value - rounded) <= tol:
+        return rounded
+    return None
+
+
+def _round_complex(c: complex, tol: float) -> tuple[float, float]:
+    """Round complex to tolerance for signature comparison."""
+    re = round(c.real, 6) if abs(c.real) > tol else 0.0
+    im = round(c.imag, 6) if abs(c.imag) > tol else 0.0
+    return (re, im)
+
+
+def _fmt_char(c: complex) -> str:
+    return f"{c.real:.6f}{c.imag:+.6f}j"

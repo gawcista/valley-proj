@@ -611,7 +611,7 @@ def test_p321_restricted_to_c3_is_ambiguous_negative_control():
     # but the current matcher does not enforce total-dimension consistency.
     # This is a separate issue — the matcher correctly identifies that
     # individual source irreps can match, even if the aggregate is overcomplete.
-    assert gm["matching_status"] == "matched"
+    assert gm["matching_status"] == "diagnostic"
     assert gm["valley_preserving_operation_ids"] == [0, 1, 2]
     assert gm["hsp_little_group_operation_ids"] == [0, 1, 2]
     mults = gm["irrep_multiplicities"]
@@ -684,7 +684,7 @@ def test_p3_subspace_source_matches_trusted_c3_rows():
     # Both -GM4 and -GM5 have character -1 on C3 ops, so they are
     # indistinguishable on the restricted character set. The matcher
     # produces matches for both (with consistent multiplicities for each).
-    assert gm["matching_status"] == "matched"
+    assert gm["matching_status"] == "diagnostic"
     assert gm["valley_preserving_operation_ids"] == [0, 1, 2]
     assert gm["hsp_little_group_operation_ids"] == [0, 1, 2]
     mults = gm["irrep_multiplicities"]
