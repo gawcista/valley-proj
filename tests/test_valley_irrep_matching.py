@@ -538,6 +538,8 @@ def test_identity_only_gk_a_does_not_fail_on_missing_c3_chars():
     assert gm["matching_status"] == "matched"
     assert gm["irrep_multiplicities"] == {"-M2": 1}
     assert gm["subspace_group_candidate"] == "P3"
+    assert gm["valley_preserving_operation_ids"] == [0]
+    assert gm["hsp_little_group_operation_ids"] == [0]
 
 
 def test_p321_restricted_to_c3_is_ambiguous_negative_control():
@@ -610,6 +612,8 @@ def test_p321_restricted_to_c3_is_ambiguous_negative_control():
     # This is a separate issue — the matcher correctly identifies that
     # individual source irreps can match, even if the aggregate is overcomplete.
     assert gm["matching_status"] == "matched"
+    assert gm["valley_preserving_operation_ids"] == [0, 1, 2]
+    assert gm["hsp_little_group_operation_ids"] == [0, 1, 2]
     mults = gm["irrep_multiplicities"]
     assert mults.get("-GM4") == 2
     assert mults.get("-GM5") == 2
@@ -681,6 +685,8 @@ def test_p3_subspace_source_matches_trusted_c3_rows():
     # indistinguishable on the restricted character set. The matcher
     # produces matches for both (with consistent multiplicities for each).
     assert gm["matching_status"] == "matched"
+    assert gm["valley_preserving_operation_ids"] == [0, 1, 2]
+    assert gm["hsp_little_group_operation_ids"] == [0, 1, 2]
     mults = gm["irrep_multiplicities"]
     assert mults.get("-GM4") == 2
     assert mults.get("-GM5") == 2

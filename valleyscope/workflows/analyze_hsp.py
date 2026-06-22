@@ -541,6 +541,11 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                                         "table_name": table.name,
                                         "table_spinor": table.spinor,
                                         "valley_preserving_operation_ids": list(vp_ids),
+                                        "hsp_little_group_operation_ids": (
+                                            list(hsp_lg_ids)
+                                            if isinstance(hsp_lg_ids, list)
+                                            else list(vp_ids)
+                                        ),
                                         "provenance": payload.get("provenance", {}),
                                         "blocker_reasons": payload["blocker_reasons"],
                                     })

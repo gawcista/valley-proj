@@ -525,6 +525,7 @@ def build_valley_irrep_matching_report(
                         sa.get("hsp_preserving_operation_ids")
                     )
                 )
+                hsp_ids_fl = hsp_lg_fl or vp_ids_fl
                 if hsp_lg_fl:
                     vp_ids_fl = [op for op in vp_ids_fl if op in hsp_lg_fl]
                 if not vp_ids_fl or not computed_fl or not isinstance(op_map, Mapping) or not op_map:
@@ -534,6 +535,7 @@ def build_valley_irrep_matching_report(
                         "irrep_multiplicities": {},
                         "source_operation_map": dict(op_map) if isinstance(op_map, Mapping) else {},
                         "valley_preserving_operation_ids": vp_ids_fl,
+                        "hsp_little_group_operation_ids": hsp_ids_fl,
                         "diagnostic_only": True,
                         "reason": "no_computed_character_data_or_operation_map",
                         "workflow_path": path_wf,
@@ -555,6 +557,7 @@ def build_valley_irrep_matching_report(
                         "irrep_multiplicities": {},
                         "source_operation_map": dict(op_map),
                         "valley_preserving_operation_ids": vp_ids_fl,
+                        "hsp_little_group_operation_ids": hsp_ids_fl,
                         "diagnostic_only": True,
                         "reason": f"readiness_level={readiness} is not trusted",
                         "workflow_path": path_wf,
@@ -574,6 +577,7 @@ def build_valley_irrep_matching_report(
                     source_irrep_characters=per_row_chars,
                     valley_preserving_operation_ids=vp_ids_fl,
                     source_operation_map=dict(op_map),
+                    hsp_little_group_operation_ids=hsp_ids_fl,
                 )
                 generic_matches.setdefault(kp_name, {})[v_name] = {
                     "matching_status": g_result["matching_status"],
@@ -581,6 +585,7 @@ def build_valley_irrep_matching_report(
                     "irrep_multiplicities": g_result.get("irrep_multiplicities", {}),
                     "source_operation_map": g_result.get("source_operation_map", {}),
                     "valley_preserving_operation_ids": vp_ids_fl,
+                    "hsp_little_group_operation_ids": hsp_ids_fl,
                     "diagnostic_only": g_result.get("diagnostic_only", False),
                     "reason": g_result.get("reason", ""),
                     "workflow_path": path_wf,
@@ -626,6 +631,9 @@ def build_valley_irrep_matching_report(
                 else {},
                 "valley_preserving_operation_ids": _operation_ids_from_value(
                     row.get("valley_preserving_operation_ids", [])
+                ),
+                "hsp_little_group_operation_ids": _operation_ids_from_value(
+                    row.get("hsp_little_group_operation_ids", [])
                 ),
                 "diagnostic_only": True,
                 "reason": reason,
@@ -682,6 +690,8 @@ def build_valley_irrep_matching_report(
                     _operation_ids_from_value(sa.get("hsp_preserving_operation_ids"))
                     or vp_ids
                 )
+                if hsp_ids:
+                    vp_ids = [op for op in vp_ids if op in hsp_ids]
                 generic_matches.setdefault(kp_name, {})[v_name] = {
                     "matching_status": "blocked",
                     "matching_strategy": "bilbao_restricted_character",
