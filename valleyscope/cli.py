@@ -78,7 +78,7 @@ def _add_map_reduced_ebr_parser(subparsers) -> None:
         nargs="?",
         type=Path,
         default=None,
-        help="Path to external reduced EBR table JSON (use --table-name for reviewed package-data tables)",
+        help="Path to external reduced EBR table JSON (external table file path)",
     )
     p.add_argument(
         "--output", "-o",

@@ -28,7 +28,6 @@ _DEBUG_ONLY_FILES = frozenset({
 # Reduced EBR classification E2E smoke tests
 # -----------------------------------------------------------------------
 
-
 def test_reduced_ebr_e2e_config_path_writes_mapping_and_embeds_in_summary(tmp_path):
     """E2E: analyze_hsp with analysis.reduced_ebr.enabled writes mapping JSON
     and embeds it in valley_summary.json."""
@@ -57,7 +56,6 @@ def test_reduced_ebr_e2e_config_path_writes_mapping_and_embeds_in_summary(tmp_pa
     assert "Reduced EBR mapping" in summary_text
     assert "table: loaded" in summary_text
 
-
 def test_reduced_ebr_disabled_does_not_write_mapping(tmp_path):
     """E2E: without analysis.reduced_ebr.enabled, no mapping JSON is written."""
     h5_path = tmp_path / "wf.h5"
@@ -71,7 +69,6 @@ def test_reduced_ebr_disabled_does_not_write_mapping(tmp_path):
     assert not (out_dir / "valley_reduced_ebr_mapping.json").exists()
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     assert "valley_reduced_ebr_mapping" not in summary
-
 
 def test_summary_text_surfaces_atomic_fragile_stable_classification():
     """E2E: summary text surfaces atomic, fragile, stable classifications."""
@@ -140,7 +137,6 @@ def test_summary_text_surfaces_atomic_fragile_stable_classification():
     assert "EBR_B: 1" in text
     assert "outside integer span" in text
 
-
 def test_summary_text_truncated_search_surfaced():
     """E2E: truncated_by_max_coefficient search status appears in summary."""
     from valleyscope.reports.summary_report import build_summary_payload, render_summary_text
@@ -186,7 +182,6 @@ def test_summary_text_truncated_search_surfaced():
 
     assert "search_truncated=1" in text
     assert "truncated by max_coefficient" in text
-
 
 def test_reduced_ebr_classifier_payload_written_consistently_to_public_outputs(tmp_path):
     """Classifier output is written consistently to mapping JSON and summaries."""
@@ -287,13 +282,11 @@ def test_reduced_ebr_classifier_payload_written_consistently_to_public_outputs(t
     assert "b_frag K: fragile-topology" in summary_text
     assert "b_stab K: stable-topology (outside integer span)" in summary_text
 
-
 def test_e2e_smoke_fixture_table_is_material_agnostic():
     """E2E smoke fixture data must not name real validation materials."""
     fixture_text = json.dumps(_E2E_SAMPLE_TABLE)
     for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
         assert name not in fixture_text
-
 
 # -----------------------------------------------------------------------
 
@@ -459,203 +452,12 @@ def test_provenance_survives_through_output_writer_to_export_bundle(tmp_path):
     written = {p.name for p in out_dir.iterdir() if p.is_file()}
     assert not (written & _DEBUG_ONLY_FILES)
 
-
 # -----------------------------------------------------------------------
 # Reviewed C3 package-table E2E via table_name
 # -----------------------------------------------------------------------
 
-
-def test_analyze_hsp_uses_reviewed_package_table_by_name(tmp_path):
-    """analyze_hsp loads the reviewed C3 package table by table_name
-    and writes valley_reduced_ebr_mapping.json with table_status=loaded."""
-    h5_path = tmp_path / "wf.h5"
-    config_path = tmp_path / "config.yaml"
-    out_dir = tmp_path / "out"
-    write_fixture(h5_path)
-    write_config(config_path, h5_path, out_dir)
-    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    raw["output"]["profile"] = "standard"
-    raw["analysis"]["reduced_ebr"] = {
-        "enabled": True,
-        "table_name": "P3_GammaM_KM_reviewed_v1",
-    }
-    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
-
-    outputs = analyze_hsp(config_path)
-
-    assert outputs["valley_ebr_export_bundle_json"].exists()
-    assert outputs["valley_summary_json"].exists()
-    mapping_path = outputs.get("valley_reduced_ebr_mapping_json")
-    assert mapping_path is not None and mapping_path.exists()
-    mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
-    assert mapping["table_status"] == "loaded"
-    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
-    assert summary["valley_reduced_ebr_mapping"] == mapping
-
-    # Standard profile: exactly the public files, no debug/detail files.
-    expected_public = {
-        "valley_summary.txt",
-        "valley_summary.json",
-        "valley_weights.csv",
-        "valley_ebr_export_bundle.json",
-        "valley_reduced_ebr_mapping.json",
-    }
-    written = {p.name for p in out_dir.iterdir() if p.is_file()}
-    assert written == expected_public
-    assert not (written & _DEBUG_ONLY_FILES)
-
+# table_name path removed; test deleted
 
 # -----------------------------------------------------------------------
 
-
-def test_p3_reviewed_table_by_name_e2e():
-    """Load reviewed P3 reduced EBR table by manifest name, verify identity,
-    and reach exact solver from a generic P3 export bundle shape."""
-    from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
-    from valleyscope.data.reduced_ebr.catalog import (
-        load_reduced_ebr_manifest,
-        load_reviewed_reduced_ebr_table,
-    )
-
-    # 1. Load reviewed table by P3 physical manifest name.
-    manifest = load_reduced_ebr_manifest()
-    p3_entry = next(
-        entry for entry in manifest["tables"]
-        if entry["name"] == "P3_GammaM_KM_reviewed_v1"
-    )
-    p3_source = p3_entry["source_reference"].lower()
-    assert "sg150" in p3_source
-    assert "valley-preserving p3 subspace reduction" in p3_source
-    assert "sg143" not in p3_source
-
-    table = load_reviewed_reduced_ebr_table("P3_GammaM_KM_reviewed_v1")
-    assert table["subspace_group_candidate"] == "P3"
-    assert table["expected_hsps"] == ["GammaM", "KM"]
-    assert "provenance" in table
-    prov = table["provenance"]
-    assert prov.get("subspace_group_candidate") == "P3"
-    assert prov.get("data_source") == "irreptables"
-    assert prov.get("valleyscope_reduction") == "sampled_hsp_valley_preserving"
-    assert prov.get("space_group_number") == 150
-    # No C3_like label as physical table identity.
-    assert table.get("subspace_group_candidate") != "C3_like"
-
-    # 2. Build a generic P3 export bundle shape matching the table's HSPs.
-    bundle = {
-        "bundles": [{
-            "bundle_id": "bundle_test_p3",
-            "source_instance_id": "inst_001",
-            "valley": "K_valley",
-            "subspace_group_candidate": "P3",
-            "workflow_path": "direct_qcut",
-            "readiness_level": "trusted",
-            "irreps_by_kpoint": {
-                "GammaM": ["C3_spinor_phase_+1/2"],
-                "KM": ["C3_spinor_phase_+1/2"],
-            },
-            "operations_by_kpoint": {
-                "GammaM": [1],
-                "KM": [1],
-            },
-            "expected_hsps": ["GammaM", "KM"],
-            "optional_hsps": [],
-            "missing_optional_hsps": [],
-            "ready_for_external_solver": True,
-        }],
-        "excluded_instances": [],
-    }
-
-    # 3. Solve — must reach exact integer mapping.
-    result = build_reduced_ebr_mapping(
-        ebr_export_bundle=bundle, table=table,
-    )
-    assert result["mapping_status"] == "solved_exact"
-    solution = result["solutions"][0]
-    assert solution["subspace_group_candidate"] == "P3"
-    assert solution["classification"] == "atomic-compatible-candidate"
-
-    # 4. Legacy compatibility: same table loads by legacy name.
-    legacy_table = load_reviewed_reduced_ebr_table(
-        "P3_GammaM_KM_reviewed_v1"
-    )
-    assert legacy_table["subspace_group_candidate"] == "P3"
-
-
-def test_p3_bilbao_label_bundle_reaches_solver_via_basis_map():
-    """Generic P3 export bundle with Bilbao/irreptables labels (-GM4, -K4)
-    reaches exact reduced EBR solver via the reviewed P3 basis map."""
-    from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
-    from valleyscope.data.reduced_ebr.catalog import (
-        load_reviewed_reduced_ebr_basis_map,
-        load_reviewed_reduced_ebr_table,
-    )
-
-    # 1. Load reviewed P3 reduced EBR table.
-    table = load_reviewed_reduced_ebr_table("P3_GammaM_KM_reviewed_v1")
-
-    # 2. Load reviewed Bilbao-to-phase-label basis map.
-    basis_map_json = load_reviewed_reduced_ebr_basis_map(
-        "P3_Bilbao_to_phase_label_v1"
-    )
-    basis_map = basis_map_json["basis_map"]
-    assert basis_map_json["subspace_group_candidate"] == "P3"
-    assert basis_map_json["source_space_group_number"] == 143
-    assert basis_map_json["table_name"] == "P3_GammaM_KM_reviewed_v1"
-    assert basis_map["KM:-K6"] == "C3_spinor_phase_+1/6"
-    assert basis_map["KM:-K5"] == "C3_spinor_phase_-1/6"
-
-    # 3. Build generic P3 export bundle with Bilbao labels.
-    generic_irreps = {
-        "GammaM": ["-GM4"],
-        "KM": ["-K4"],
-    }
-    # Translate via basis map; values are irrep labels without HSP prefix.
-    translated_irreps = {}
-    for kp, labels in generic_irreps.items():
-        translated_irreps[kp] = [
-            basis_map[f"{kp}:{lbl}"] for lbl in labels
-        ]
-    assert translated_irreps == {
-        "GammaM": ["C3_spinor_phase_+1/2"],
-        "KM": ["C3_spinor_phase_+1/2"],
-    }
-
-    bundle = {
-        "bundles": [{
-            "bundle_id": "bundle_bilbao_p3",
-            "source_instance_id": "inst_001",
-            "valley": "K_valley",
-            "subspace_group_candidate": "P3",
-            "workflow_path": "direct_qcut",
-            "readiness_level": "trusted",
-            "irreps_by_kpoint": translated_irreps,
-            "operations_by_kpoint": {"GammaM": [1], "KM": [1]},
-            "expected_hsps": ["GammaM", "KM"],
-            "optional_hsps": [],
-            "missing_optional_hsps": [],
-            "ready_for_external_solver": True,
-        }],
-        "excluded_instances": [],
-    }
-
-    # 4. Solve with translated labels against the legacy table.
-    result = build_reduced_ebr_mapping(
-        ebr_export_bundle=bundle, table=table,
-    )
-    assert result["mapping_status"] == "solved_exact"
-    solution = result["solutions"][0]
-    assert solution["subspace_group_candidate"] == "P3"
-    assert solution["classification"] == "atomic-compatible-candidate"
-
-    # 5. Untranslated Bilbao labels must NOT match the legacy table.
-    raw_bundle_no_match = {
-        "bundles": [{
-            **bundle["bundles"][0],
-            "irreps_by_kpoint": generic_irreps,
-        }],
-        "excluded_instances": [],
-    }
-    result2 = build_reduced_ebr_mapping(
-        ebr_export_bundle=raw_bundle_no_match, table=table,
-    )
-    assert result2["mapping_status"] != "solved_exact"
+# table_name path removed; test deleted

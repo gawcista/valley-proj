@@ -12,10 +12,8 @@ from valleyscope.analysis.reduced_ebr_mapping import (
 )
 from valleyscope.io.config import load_config
 
-
 def _write_table(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data), encoding="utf-8")
-
 
 _SAMPLE_TABLE = {
     "schema_version": "1.0.0",
@@ -32,7 +30,6 @@ _SAMPLE_TABLE = {
     ],
 }
 
-
 def _bundle():
     return {
         "bundles": [{
@@ -47,7 +44,6 @@ def _bundle():
         }],
     }
 
-
 # -----------------------------------------------------------------------
 # 1. Table loading
 # -----------------------------------------------------------------------
@@ -57,12 +53,10 @@ def test_load_valid_table(tmp_path):
     t = load_reduced_ebr_table(tmp_path / "t.json")
     assert t["subspace_group_candidate"] == "C3_like"
 
-
 def test_load_missing_keys_raises(tmp_path):
     _write_table(tmp_path / "t.json", {"irreps": [], "ebrs": []})
     with pytest.raises(ValueError, match="missing keys"):
         load_reduced_ebr_table(tmp_path / "t.json")
-
 
 def test_load_mismatched_vector_raises(tmp_path):
     bad = dict(_SAMPLE_TABLE)
@@ -71,14 +65,12 @@ def test_load_mismatched_vector_raises(tmp_path):
     with pytest.raises(ValueError, match="vector length"):
         load_reduced_ebr_table(tmp_path / "t.json")
 
-
 def test_load_negative_vector_raises(tmp_path):
     bad = dict(_SAMPLE_TABLE)
     bad["ebrs"] = [{"label": "X", "vector": [1, -1, 0]}]
     _write_table(tmp_path / "t.json", bad)
     with pytest.raises(ValueError, match="nonnegative"):
         load_reduced_ebr_table(tmp_path / "t.json")
-
 
 def test_load_duplicate_irreps_raises(tmp_path):
     bad = dict(_SAMPLE_TABLE)
@@ -90,7 +82,6 @@ def test_load_duplicate_irreps_raises(tmp_path):
     _write_table(tmp_path / "t.json", bad)
     with pytest.raises(ValueError, match="unique"):
         load_reduced_ebr_table(tmp_path / "t.json")
-
 
 # -----------------------------------------------------------------------
 # 2. Exact solution
@@ -120,7 +111,6 @@ def test_exact_solution_found():
     labels = {e["label"] for e in s["ebr_decomposition"]}
     assert labels == {"EBR_A", "EBR_B"}
 
-
 # -----------------------------------------------------------------------
 # 3. No exact solution
 # -----------------------------------------------------------------------
@@ -139,7 +129,6 @@ def test_no_exact_solution():
     r = build_reduced_ebr_mapping(ebr_export_bundle=b, table=_SAMPLE_TABLE)
     assert r["status"] == "no_exact_solution"
 
-
 # -----------------------------------------------------------------------
 # 4. Missing table
 # -----------------------------------------------------------------------
@@ -148,7 +137,6 @@ def test_missing_table():
     r = build_reduced_ebr_mapping(ebr_export_bundle=_bundle(), table=None)
     assert r["status"] == "missing_table"
     assert r["table_status"] == "not_provided"
-
 
 # -----------------------------------------------------------------------
 # 5. Null input
@@ -159,7 +147,6 @@ def test_null_bundle():
     assert r["status"] == "not_evaluated"
     assert r["mapping_status"] == "not_evaluated"
     assert r["solutions"] == []
-
 
 # -----------------------------------------------------------------------
 # 6. Mismatched group
@@ -179,7 +166,6 @@ def test_group_mismatch_excluded():
     assert len(ex) == 1
     assert "table group" in ex[0]["reason"]
 
-
 # -----------------------------------------------------------------------
 # 7. Schema
 # -----------------------------------------------------------------------
@@ -190,12 +176,10 @@ def test_schema_fields():
               "solutions", "excluded_bundles", "solver"]:
         assert k in r, f"missing: {k}"
 
-
 def test_json_serializable():
     r = build_reduced_ebr_mapping(ebr_export_bundle=_bundle(), table=_SAMPLE_TABLE)
     encoded = json.dumps(r)
     assert len(encoded) > 0
-
 
 def test_no_forbidden_terms():
     r = build_reduced_ebr_mapping(ebr_export_bundle=_bundle(), table=_SAMPLE_TABLE)
@@ -203,7 +187,6 @@ def test_no_forbidden_terms():
     for forbidden in ["covariance", "equivariance", "stabilizer",
                       "valley_little_group"]:
         assert forbidden not in encoded.lower()
-
 
 # -----------------------------------------------------------------------
 # 8. Not ready excluded
@@ -223,7 +206,6 @@ def test_not_ready_excluded():
     assert len(ex) == 1
     assert "not ready" in ex[0]["reason"]
 
-
 def test_unknown_irrep_label_is_not_matched_by_hsp_only():
     table = dict(_SAMPLE_TABLE)
     table["expected_hsps"] = ["GammaM"]
@@ -242,7 +224,6 @@ def test_unknown_irrep_label_is_not_matched_by_hsp_only():
     r = build_reduced_ebr_mapping(ebr_export_bundle=b, table=table)
     assert r["status"] == "not_evaluated"
     assert "could not resolve" in r["excluded_bundles"][0]["reason"]
-
 
 def test_unique_operation_suffix_fallback_does_not_double_count():
     table = {
@@ -264,7 +245,6 @@ def test_unique_operation_suffix_fallback_does_not_double_count():
     r = build_reduced_ebr_mapping(ebr_export_bundle=b, table=table)
     assert r["status"] == "solved_exact"
     assert r["solutions"][0]["irrep_vector"] == [1]
-
 
 def test_ambiguous_operation_suffix_fallback_is_excluded():
     table = {
@@ -290,7 +270,6 @@ def test_ambiguous_operation_suffix_fallback_is_excluded():
     assert r["status"] == "not_evaluated"
     assert "could not resolve" in r["excluded_bundles"][0]["reason"]
 
-
 def test_negative_max_coefficient_raises():
     with pytest.raises(ValueError, match="max_coefficient"):
         build_reduced_ebr_mapping(
@@ -298,7 +277,6 @@ def test_negative_max_coefficient_raises():
             table=_SAMPLE_TABLE,
             max_coefficient=-1,
         )
-
 
 def test_reduced_ebr_table_file_resolves_relative_to_config(tmp_path):
     table_dir = tmp_path / "tables"
@@ -341,7 +319,6 @@ def test_reduced_ebr_table_file_resolves_relative_to_config(tmp_path):
     assert loaded.reduced_ebr.max_coefficient == 2
     assert loaded.reduced_ebr.table_file == table_path
 
-
 # -----------------------------------------------------------------------
 # 9. schema_version validation
 # -----------------------------------------------------------------------
@@ -353,7 +330,6 @@ def test_missing_schema_version_raises(tmp_path):
     with pytest.raises(ValueError, match="missing keys"):
         load_reduced_ebr_table(tmp_path / "t.json")
 
-
 def test_empty_schema_version_raises(tmp_path):
     bad = dict(_SAMPLE_TABLE)
     bad["schema_version"] = ""
@@ -361,14 +337,12 @@ def test_empty_schema_version_raises(tmp_path):
     with pytest.raises(ValueError, match="schema_version"):
         load_reduced_ebr_table(tmp_path / "t.json")
 
-
 def test_non_string_schema_version_raises(tmp_path):
     bad = dict(_SAMPLE_TABLE)
     bad["schema_version"] = 1
     _write_table(tmp_path / "t.json", bad)
     with pytest.raises(ValueError, match="schema_version"):
         load_reduced_ebr_table(tmp_path / "t.json")
-
 
 # -----------------------------------------------------------------------
 # 10. expected_hsps validation
@@ -381,7 +355,6 @@ def test_empty_expected_hsps_raises(tmp_path):
     with pytest.raises(ValueError, match="expected_hsps must be a non-empty list"):
         load_reduced_ebr_table(tmp_path / "t.json")
 
-
 def test_duplicate_expected_hsps_raises(tmp_path):
     bad = dict(_SAMPLE_TABLE)
     bad["expected_hsps"] = ["GammaM", "KM", "GammaM"]
@@ -389,14 +362,12 @@ def test_duplicate_expected_hsps_raises(tmp_path):
     with pytest.raises(ValueError, match="unique"):
         load_reduced_ebr_table(tmp_path / "t.json")
 
-
 def test_non_string_expected_hsp_raises(tmp_path):
     bad = dict(_SAMPLE_TABLE)
     bad["expected_hsps"] = ["GammaM", 123]
     _write_table(tmp_path / "t.json", bad)
     with pytest.raises(ValueError, match="expected_hsps entries must be non-empty"):
         load_reduced_ebr_table(tmp_path / "t.json")
-
 
 # -----------------------------------------------------------------------
 # 11. EBR label uniqueness
@@ -412,7 +383,6 @@ def test_duplicate_ebr_labels_raises(tmp_path):
     with pytest.raises(ValueError, match="unique"):
         load_reduced_ebr_table(tmp_path / "t.json")
 
-
 # -----------------------------------------------------------------------
 # 12. empty EBR vector
 # -----------------------------------------------------------------------
@@ -426,7 +396,6 @@ def test_empty_ebr_vector_raises(tmp_path):
     _write_table(tmp_path / "t.json", bad)
     with pytest.raises(ValueError, match="non-empty"):
         load_reduced_ebr_table(tmp_path / "t.json")
-
 
 # -----------------------------------------------------------------------
 # 13. irrep key format validation
@@ -447,7 +416,6 @@ def test_invalid_irrep_key_format_raises(tmp_path, bad_key):
     with pytest.raises(ValueError, match="invalid irrep key format"):
         load_reduced_ebr_table(tmp_path / "t.json")
 
-
 @pytest.mark.parametrize("good_key", [
     "GammaM:C3_spinor_phase_+1/2",
     "KM:C3_spinor_phase_-1/6",
@@ -462,7 +430,6 @@ def test_valid_irrep_key_formats_accepted(tmp_path, good_key):
     _write_table(tmp_path / "t.json", tbl)
     loaded = load_reduced_ebr_table(tmp_path / "t.json")
     assert loaded["irreps"][0] == good_key
-
 
 # -----------------------------------------------------------------------
 # 14. schema/doc contract
@@ -483,7 +450,6 @@ def test_table_schema_doc_contract():
     assert "no built-in" in doc.lower()
     assert "no heuristic" in doc.lower()
 
-
 def test_table_schema_doc_expected_hsps_basis_contract():
     """Schema doc must state expected_hsps is enforced as the EBR basis contract."""
     doc_text = Path("docs/reduced_ebr_table_schema.md").read_text(encoding="utf-8")
@@ -491,7 +457,6 @@ def test_table_schema_doc_expected_hsps_basis_contract():
     assert "bundle `expected_hsps`" in doc_text
     assert "`bundle.irreps_by_kpoint`" in doc_text
     assert "Missing, extra, malformed, or inferred HSP data is not accepted" in doc_text
-
 
 def test_schema_md_labels_use_physical_subspace_space_group():
     """Verify docs/schema.md uses physical subspace-space-group symbols as primary EBR table keys.
@@ -510,7 +475,6 @@ def test_schema_md_labels_use_physical_subspace_space_group():
     assert '"subspace_group_candidate": "C3_like"' not in schema_text
     assert '"subspace_group_candidate": "C2_like"' not in schema_text
 
-
 def test_schema_docs_describe_reviewed_table_name_config():
     """Schema docs must document reviewed package-data table_name loading."""
     schema = Path("docs/schema.md").read_text(encoding="utf-8")
@@ -522,7 +486,6 @@ def test_schema_docs_describe_reviewed_table_name_config():
         assert "analysis.reduced_ebr.table_file" in doc
         assert "load_reviewed_reduced_ebr_table" in doc
         assert "mutually exclusive" in doc
-
 
 def test_reviewed_table_docs_describe_identity_provenance_gate():
     """Reviewed package-data docs must describe physical identity provenance."""
@@ -545,7 +508,6 @@ def test_reviewed_table_docs_describe_identity_provenance_gate():
         for term in required:
             assert term in doc, f"{path} missing {term}"
 
-
 # -----------------------------------------------------------------------
 # 15. map-reduced-ebr CLI
 # -----------------------------------------------------------------------
@@ -562,14 +524,12 @@ def _write_bundle(path: Path, bundles: list[dict]) -> None:
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
 
-
 def _cli(bundle: Path, table: Path, output: Path, *extra) -> int:
     from valleyscope.cli import main
     return main([
         "map-reduced-ebr", str(bundle), str(table),
         "-o", str(output), *extra,
     ])
-
 
 def test_cli_solved_exact(tmp_path):
     """CLI solves an exact-match toy bundle and writes the mapping JSON."""
@@ -597,7 +557,6 @@ def test_cli_solved_exact(tmp_path):
     labels = {e["label"] for e in s["ebr_decomposition"]}
     assert labels == {"EBR_A", "EBR_B"}
 
-
 def test_cli_no_exact_solution(tmp_path):
     """CLI reports no_exact_solution for an unsolvable toy bundle."""
     out = tmp_path / "out.json"
@@ -620,7 +579,6 @@ def test_cli_no_exact_solution(tmp_path):
     assert mapping["status"] == "no_exact_solution"
     assert mapping["solutions"][0]["status"] == "no_exact_solution"
 
-
 def test_cli_stdout_includes_status_and_output_path(capsys, tmp_path):
     """CLI stdout includes solved_exact and the output path."""
     out = tmp_path / "out.json"
@@ -641,7 +599,6 @@ def test_cli_stdout_includes_status_and_output_path(capsys, tmp_path):
     captured = capsys.readouterr().out
     assert "solved_exact" in captured
     assert str(out) in captured
-
 
 def test_cli_invalid_table_fails_without_writing_output(tmp_path):
     """CLI fails on invalid table and does not write a misleading output file."""
@@ -666,7 +623,6 @@ def test_cli_invalid_table_fails_without_writing_output(tmp_path):
     assert rc != 0, "CLI should fail on invalid table"
     assert not out.exists(), "Must not write output for invalid table"
 
-
 @pytest.mark.parametrize("missing,mode", [
     ("table", lambda d: (_write_bundle(d / "bundle.json", []), d / "bundle.json", d / "nonexistent.json")),
     ("bundle", lambda d: (_write_table(d / "table.json", _SAMPLE_TABLE), d / "nonexistent.json", d / "table.json")),
@@ -680,7 +636,6 @@ def test_cli_missing_file_fails(missing, mode):
         rc = _cli(bundle_path, table_path, d / "out.json")
         assert rc != 0, f"CLI should fail on missing {missing}"
         assert not (d / "out.json").exists()
-
 
 def test_cli_respects_max_coefficient(tmp_path):
     """CLI passes --max-coefficient through to the solver."""
@@ -711,7 +666,6 @@ def test_cli_respects_max_coefficient(tmp_path):
     assert rc == 0
     mapping = json.loads(out.read_text(encoding="utf-8"))
     assert mapping["status"] == "solved_exact"
-
 
 def test_cli_analyze_hsp_reduced_ebr_unchanged(tmp_path):
     """Existing analyze-hsp reduced-EBR behavior is unchanged by CLI addition."""
@@ -754,7 +708,6 @@ def test_cli_analyze_hsp_reduced_ebr_unchanged(tmp_path):
         "analyze-hsp must still write valley_reduced_ebr_mapping.json when enabled"
     )
 
-
 def test_cli_module_entrypoint_help_lists_map_reduced_ebr():
     """python -m valleyscope.cli must dispatch to argparse, not silently exit."""
     result = subprocess.run(
@@ -767,7 +720,6 @@ def test_cli_module_entrypoint_help_lists_map_reduced_ebr():
 
     assert result.returncode == 0
     assert "map-reduced-ebr" in result.stdout
-
 
 # -----------------------------------------------------------------------
 # 16. Reduced-dimensional irrep/EBR data model doc contract
@@ -811,7 +763,6 @@ def test_data_model_design_doc_contract():
     for forbidden in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
         assert forbidden not in doc, f"material name '{forbidden}' in design doc"
 
-
 def test_agents_plan_irrep_boundary_and_package_name():
     """AGENTS/PLAN must encode irrep runtime boundary and use correct package name."""
     combined_lower = (
@@ -825,7 +776,6 @@ def test_agents_plan_irrep_boundary_and_package_name():
     plan = Path("PLAN.md").read_text(encoding="utf-8")
     assert "`irrep`" in agents and "`irreps`" not in agents
     assert "irrep" in plan.lower()
-
 
 # -----------------------------------------------------------------------
 # 17. Package-data skeleton
@@ -844,15 +794,11 @@ def test_package_data_skeleton_structure_and_manifest():
         assert (root / name).exists(), f"missing {name}"
     m = load_reduced_ebr_manifest()
     assert isinstance(m.get("schema_version"), str) and m["schema_version"]
-    assert len(m["tables"]) == 1
-    assert m["tables"][0]["name"] == "P3_GammaM_KM_reviewed_v1"
-    assert len(list_reviewed_reduced_ebr_tables()) == 1
-    basis_maps = list_reviewed_reduced_ebr_basis_maps()
-    assert len(basis_maps) == 1
-    assert basis_maps[0]["name"] == "P3_Bilbao_to_phase_label_v1"
+    assert len(m["tables"]) == 0
+    assert len(list_reviewed_reduced_ebr_tables()) == 0
+    assert len(list_reviewed_reduced_ebr_basis_maps()) == 0
     json_names = {f.name for f in root.glob("*.json")}
-    assert json_names == {"manifest.json", "P3_GammaM_KM_reviewed_v1.json", "P3_Bilbao_to_phase_label_basis_map_v1.json"}, f"unexpected JSON: {json_names}"
-
+    assert json_names == {"manifest.json"}, f"unexpected JSON: {json_names}"
 
 def test_package_data_readme_and_no_forbidden_imports():
     """README documents legacy fixture status; core files avoid forbidden imports."""
@@ -880,7 +826,6 @@ def test_package_data_readme_and_no_forbidden_imports():
         for p in patterns:
             assert p not in src, f"{fname} must not import {p!r}"
 
-
 def test_package_data_no_material_names():
     """Package-data files must not contain real material names."""
     import os
@@ -895,7 +840,6 @@ def test_package_data_no_material_names():
             for name in forbidden:
                 assert name not in text, f"{fpath} contains {name!r}"
                 assert name not in fname, f"filename {fname!r} contains {name!r}"
-
 
 # -----------------------------------------------------------------------
 # 18. Loader integration — catalog manifest validation
@@ -913,20 +857,16 @@ def _make_fake_catalog_root(tmp_path: Path) -> Path:
     }))
     return root
 
-
 def _set_fake_root(monkeypatch, root: Path):
     """Monkeypatch package_data_root to return a fake directory."""
     from valleyscope.data.reduced_ebr import catalog
     monkeypatch.setattr(catalog, "package_data_root", lambda: root)
 
-
-def test_real_manifest_lists_one_reviewed_table(monkeypatch):
-    """Real repo manifest now lists one reviewed C3 table."""
+def test_real_manifest_has_zero_reviewed_tables(monkeypatch):
+    """After static table removal, real manifest has zero reviewed tables."""
     from valleyscope.data.reduced_ebr.catalog import list_reviewed_reduced_ebr_tables
     tables = list_reviewed_reduced_ebr_tables()
-    assert len(tables) == 1
-    assert tables[0]["name"] == "P3_GammaM_KM_reviewed_v1"
-
+    assert tables == []
 
 def _reviewed_table_entry(name: str, filename: str) -> dict:
     """Return a manifest entry with full reviewed provenance."""
@@ -938,7 +878,6 @@ def _reviewed_table_entry(name: str, filename: str) -> dict:
         "review_method": "literature C3 character table",
         "source_reference": "P321 spinful character table",
     }
-
 
 def _reviewed_basis_map_entry(name: str, filename: str, table_name: str) -> dict:
     """Return a manifest basis-map entry with reviewed provenance."""
@@ -952,7 +891,6 @@ def _reviewed_basis_map_entry(name: str, filename: str, table_name: str) -> dict
         "review_method": "explicit reviewed basis map",
         "source_reference": "SG143 spinful irreps",
     }
-
 
 def _reviewed_basis_map_payload(table_name: str = "toy") -> dict:
     """Return a reviewed basis-map payload."""
@@ -969,7 +907,6 @@ def _reviewed_basis_map_payload(table_name: str = "toy") -> dict:
         "source_reference": "SG143 spinful irreps",
         "basis_map": {"GammaM:-GM4": "C3_spinor_phase_+1/2"},
     }
-
 
 def _reviewed_table_provenance() -> dict:
     """Return a provenance block for a reviewed table."""
@@ -989,7 +926,6 @@ def _reviewed_table_provenance() -> dict:
         "subspace_group_candidate": "P3",
         "central_sign_convention": "chi(C3)=chi(op2), chi(C3^2)=-chi(op3)",
     }
-
 
 def test_valid_fake_manifest_lists_entries(monkeypatch, tmp_path):
     """A valid fake manifest with reviewed entries returns them."""
@@ -1015,7 +951,6 @@ def test_valid_fake_manifest_lists_entries(monkeypatch, tmp_path):
     loaded = load_reviewed_reduced_ebr_table("toy")
     assert loaded["subspace_group_candidate"] == "P3"
 
-
 def test_valid_fake_manifest_loads_reviewed_basis_map(monkeypatch, tmp_path):
     """A valid fake manifest with reviewed basis-map entries loads them."""
     root = _make_fake_catalog_root(tmp_path)
@@ -1039,7 +974,6 @@ def test_valid_fake_manifest_loads_reviewed_basis_map(monkeypatch, tmp_path):
     assert loaded["basis_map"] == {"GammaM:-GM4": "C3_spinor_phase_+1/2"}
     assert loaded["table_name"] == "toy"
 
-
 def test_basis_map_payload_table_name_mismatch_raises(monkeypatch, tmp_path):
     """Basis-map payload table_name must match the manifest entry."""
     root = _make_fake_catalog_root(tmp_path)
@@ -1059,7 +993,6 @@ def test_basis_map_payload_table_name_mismatch_raises(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="table_name"):
         load_reviewed_reduced_ebr_basis_map("basis")
 
-
 def test_fake_table_fails_same_validation_as_external(monkeypatch, tmp_path):
     """Invalid fake table raises the same validation error as external path."""
     root = _make_fake_catalog_root(tmp_path)
@@ -1078,7 +1011,6 @@ def test_fake_table_fails_same_validation_as_external(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="vector length"):
         load_reviewed_reduced_ebr_table("bad")
 
-
 def test_manifest_not_dict_raises(monkeypatch, tmp_path):
     root = _make_fake_catalog_root(tmp_path)
     (root / "manifest.json").write_text("[]")
@@ -1087,7 +1019,6 @@ def test_manifest_not_dict_raises(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="JSON object"):
         load_reduced_ebr_manifest()
 
-
 def test_manifest_missing_schema_version_raises(monkeypatch, tmp_path):
     root = _make_fake_catalog_root(tmp_path)
     (root / "manifest.json").write_text(json.dumps({"tables": []}))
@@ -1095,7 +1026,6 @@ def test_manifest_missing_schema_version_raises(monkeypatch, tmp_path):
     from valleyscope.data.reduced_ebr.catalog import load_reduced_ebr_manifest
     with pytest.raises(ValueError, match="schema_version"):
         load_reduced_ebr_manifest()
-
 
 def test_manifest_non_list_tables_raises(monkeypatch, tmp_path):
     root = _make_fake_catalog_root(tmp_path)
@@ -1106,7 +1036,6 @@ def test_manifest_non_list_tables_raises(monkeypatch, tmp_path):
     from valleyscope.data.reduced_ebr.catalog import load_reduced_ebr_manifest
     with pytest.raises(ValueError, match="'tables' must be a list"):
         load_reduced_ebr_manifest()
-
 
 def test_manifest_duplicate_names_raises(monkeypatch, tmp_path):
     root = _make_fake_catalog_root(tmp_path)
@@ -1123,7 +1052,6 @@ def test_manifest_duplicate_names_raises(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="duplicate"):
         load_reduced_ebr_manifest()
 
-
 def test_manifest_entry_not_dict_raises(monkeypatch, tmp_path):
     root = _make_fake_catalog_root(tmp_path)
     (root / "manifest.json").write_text(json.dumps({
@@ -1134,7 +1062,6 @@ def test_manifest_entry_not_dict_raises(monkeypatch, tmp_path):
     from valleyscope.data.reduced_ebr.catalog import load_reduced_ebr_manifest
     with pytest.raises(ValueError, match="JSON object"):
         load_reduced_ebr_manifest()
-
 
 def test_manifest_entry_missing_name_raises(monkeypatch, tmp_path):
     root = _make_fake_catalog_root(tmp_path)
@@ -1147,7 +1074,6 @@ def test_manifest_entry_missing_name_raises(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="'name'"):
         load_reduced_ebr_manifest()
 
-
 def test_manifest_entry_missing_filename_raises(monkeypatch, tmp_path):
     root = _make_fake_catalog_root(tmp_path)
     (root / "manifest.json").write_text(json.dumps({
@@ -1158,7 +1084,6 @@ def test_manifest_entry_missing_filename_raises(monkeypatch, tmp_path):
     from valleyscope.data.reduced_ebr.catalog import load_reduced_ebr_manifest
     with pytest.raises(ValueError, match="'filename'"):
         load_reduced_ebr_manifest()
-
 
 @pytest.mark.parametrize("filename,error_match", [
     ("/etc/passwd", "relative"),
@@ -1180,7 +1105,6 @@ def test_manifest_unsafe_filename_rejected(filename, error_match, monkeypatch, t
     with pytest.raises(ValueError, match=error_match):
         load_reduced_ebr_manifest()
 
-
 def test_missing_table_file_raises(monkeypatch, tmp_path):
     root = _make_fake_catalog_root(tmp_path)
     (root / "manifest.json").write_text(json.dumps({
@@ -1192,18 +1116,15 @@ def test_missing_table_file_raises(monkeypatch, tmp_path):
     with pytest.raises(FileNotFoundError):
         load_reviewed_reduced_ebr_table("ghost")
 
-
 def test_load_nonexistent_name_raises(monkeypatch):
     from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
     with pytest.raises(ValueError, match="no reviewed reduced EBR package table"):
         load_reviewed_reduced_ebr_table("nonexistent")
 
-
 def test_load_empty_name_raises(monkeypatch):
     from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
     with pytest.raises(ValueError, match="non-empty"):
         load_reviewed_reduced_ebr_table("")
-
 
 def test_catalog_loader_integration_does_not_import_irrep2():
     """catalog.py must not import irrep2 (private reference-only repo)."""
@@ -1212,14 +1133,12 @@ def test_catalog_loader_integration_does_not_import_irrep2():
     for forbidden in ["import irrep2", "from irrep2"]:
         assert forbidden not in src, f"catalog.py must not import {forbidden}"
 
-
 def test_empty_manifest_still_lists_empty(monkeypatch, tmp_path):
     """A fake root with empty manifest still returns []."""
     root = _make_fake_catalog_root(tmp_path)
     _set_fake_root(monkeypatch, root)
     from valleyscope.data.reduced_ebr.catalog import list_reviewed_reduced_ebr_tables
     assert list_reviewed_reduced_ebr_tables() == []
-
 
 # -----------------------------------------------------------------------
 # 19. Reduced EBR basis compatibility gate
@@ -1236,7 +1155,6 @@ def _bundle_with_hsps(expected, irreps_by_kp, g="C3_like", ready=True):
         }],
     }
 
-
 def test_matching_basis_solves_exact():
     """Matching expected_hsps and irreps_by_kpoint keys still produces solution."""
     b = _bundle_with_hsps(
@@ -1250,7 +1168,6 @@ def test_matching_basis_solves_exact():
     assert r["status"] == "solved_exact"
     assert r["solutions"][0]["status"] == "solved_exact"
 
-
 def test_table_extra_hsp_excludes_bundle():
     """Table expects more HSPs than bundle has → excluded."""
     b = _bundle_with_hsps(
@@ -1260,7 +1177,6 @@ def test_table_extra_hsp_excludes_bundle():
     r = build_reduced_ebr_mapping(ebr_export_bundle=b, table=_SAMPLE_TABLE)
     assert len(r["excluded_bundles"]) == 1
     assert "expected_hsps mismatch" in r["excluded_bundles"][0]["reason"]
-
 
 def test_bundle_extra_hsp_excludes_bundle():
     """Bundle has more HSPs than table → excluded."""
@@ -1276,7 +1192,6 @@ def test_bundle_extra_hsp_excludes_bundle():
     assert len(r["excluded_bundles"]) == 1
     assert "expected_hsps mismatch" in r["excluded_bundles"][0]["reason"]
 
-
 def test_irrep_keys_mismatch_excludes():
     """Bundle irreps_by_kpoint keys don't match table expected_hsps → excluded."""
     b = _bundle_with_hsps(
@@ -1291,7 +1206,6 @@ def test_irrep_keys_mismatch_excludes():
     reasons = " ".join(e["reason"] for e in r["excluded_bundles"])
     assert "irrep HSP basis mismatch" in reasons
 
-
 def test_malformed_declared_expected_hsps_excludes():
     """Declared expected_hsps must be a unique list, not legacy fallback."""
     b = _bundle_with_hsps(
@@ -1304,7 +1218,6 @@ def test_malformed_declared_expected_hsps_excludes():
     r = build_reduced_ebr_mapping(ebr_export_bundle=b, table=_SAMPLE_TABLE)
     assert len(r["excluded_bundles"]) == 1
     assert "malformed expected_hsps" in r["excluded_bundles"][0]["reason"]
-
 
 def test_legacy_bundle_without_expected_hsps_still_works():
     """Legacy bundle without expected_hsps derives basis from irreps_by_kpoint keys."""
@@ -1322,7 +1235,6 @@ def test_legacy_bundle_without_expected_hsps_still_works():
     r = build_reduced_ebr_mapping(ebr_export_bundle=b, table=_SAMPLE_TABLE)
     assert r["status"] == "solved_exact"
 
-
 def test_legacy_bundle_without_expected_hsps_fails_when_keys_mismatch():
     """Legacy bundle without expected_hsps fails when irreps_by_kpoint keys mismatch table."""
     b = {
@@ -1338,7 +1250,6 @@ def test_legacy_bundle_without_expected_hsps_fails_when_keys_mismatch():
     reason = r["excluded_bundles"][0]["reason"]
     assert "expected_hsps mismatch" in reason or "irrep HSP basis mismatch" in reason
 
-
 def test_basis_gate_before_group_check():
     """Basis mismatch excludes even when group matches."""
     b = _bundle_with_hsps(
@@ -1350,14 +1261,12 @@ def test_basis_gate_before_group_check():
     assert len(r["excluded_bundles"]) == 1
     assert "expected_hsps mismatch" in r["excluded_bundles"][0]["reason"]
 
-
 def test_reduced_ebr_mapping_no_material_names_or_irrep2():
     """reduced_ebr_mapping.py must not contain material names or import irrep2."""
     src = Path("valleyscope/analysis/reduced_ebr_mapping.py").read_text(encoding="utf-8")
     for forbidden in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
         assert forbidden not in src, f"contains {forbidden!r}"
     assert "irrep2" not in src, "must not import irrep2"
-
 
 # -----------------------------------------------------------------------
 # 20. Integer-span classifier
@@ -1380,7 +1289,6 @@ def test_atomic_compatible_classification():
     assert s["nonnegative_solution_status"] == "solved_exact"
     assert "ebr_decomposition" in s
     assert len(s["ebr_decomposition"]) > 0
-
 
 def test_fragile_topology_classification():
     """Target in integer span but needs negative coefficient -> fragile-topology."""
@@ -1412,7 +1320,6 @@ def test_fragile_topology_classification():
     assert coeffs.get("EBR_A") == -1
     assert coeffs.get("EBR_B") == 1
 
-
 def test_stable_topology_classification():
     """Target outside integer span -> stable-topology-candidate."""
     # EBR columns: [2,0] (A), [0,2] (B)
@@ -1438,7 +1345,6 @@ def test_stable_topology_classification():
     assert s["integer_span_status"] == "outside_integer_span"
     assert s["nonnegative_solution_status"] == "no_nonnegative_solution"
 
-
 def test_zero_ebr_vector_rejected_at_load(tmp_path):
     """Zero EBR vector raises ValueError at table load time."""
     bad = dict(_SAMPLE_TABLE)
@@ -1446,7 +1352,6 @@ def test_zero_ebr_vector_rejected_at_load(tmp_path):
     _write_table(tmp_path / "t.json", bad)
     with pytest.raises(ValueError, match="positive"):
         load_reduced_ebr_table(tmp_path / "t.json")
-
 
 def test_nonnegative_search_uses_physical_bounds():
     """Nonnegative search finds solution when coeff exceeds old default max_coeff."""
@@ -1477,7 +1382,6 @@ def test_nonnegative_search_uses_physical_bounds():
     assert s["classification"] == "atomic-compatible-candidate"
     assert "search_status" not in s  # not truncated
 
-
 def test_max_coefficient_truncation_reported():
     """When max_coefficient truncates a derived bound, search_status is set."""
     # EBR: [1,0] (A), [0,1] (B). Target [10,10] needs c_A=10, c_B=10
@@ -1504,7 +1408,6 @@ def test_max_coefficient_truncation_reported():
     s = r["solutions"][0]
     assert s["search_status"] == "truncated_by_max_coefficient"
 
-
 def test_classification_fields_on_existing_tests():
     """All solutions must carry classification, integer_span_status,
     and nonnegative_solution_status."""
@@ -1517,7 +1420,6 @@ def test_classification_fields_on_existing_tests():
         }
         assert s["integer_span_status"] in {"in_integer_span", "outside_integer_span"}
         assert s["nonnegative_solution_status"] in {"solved_exact", "no_nonnegative_solution"}
-
 
 def test_cli_shows_classification_counts(tmp_path, capsys):
     """CLI stdout includes classification counts when present."""
@@ -1541,7 +1443,6 @@ def test_cli_shows_classification_counts(tmp_path, capsys):
     captured = capsys.readouterr().out
     assert "atomic-compatible" in captured
 
-
 def test_schema_fields_include_classification():
     """Top-level schema must still include all required fields."""
     r = build_reduced_ebr_mapping(ebr_export_bundle=_bundle(), table=_SAMPLE_TABLE)
@@ -1550,19 +1451,16 @@ def test_schema_fields_include_classification():
         assert k in r, f"missing top-level key: {k}"
     assert r["solver"] == "smith_normal_form_plus_bounded_nonnegative_search"
 
-
 def test_pyproject_lists_sympy_dependency_for_integer_span_classifier():
     """Smith normal form is a runtime path, so sympy must be a project dependency."""
     text = Path("pyproject.toml").read_text(encoding="utf-8")
     assert '"sympy"' in text
-
 
 def test_schema_doc_uses_current_reduced_ebr_solver_name():
     """Public schema should not document the old brute-force-only solver name."""
     schema_text = Path("docs/schema.md").read_text(encoding="utf-8")
     assert "smith_normal_form_plus_bounded_nonnegative_search" in schema_text
     assert "brute_force_exact_integer" not in schema_text
-
 
 # -----------------------------------------------------------------------
 # 21. Summary text rendering of classification
@@ -1573,7 +1471,6 @@ def _render_reduced_ebr_text(report: dict) -> str:
     lines: list[str] = []
     _render_reduced_ebr_mapping(lines, report)
     return "\n".join(lines)
-
 
 def test_summary_renders_atomic_classification():
     """Summary text shows atomic-compatible with decomposition."""
@@ -1597,7 +1494,6 @@ def test_summary_renders_atomic_classification():
     assert "atomic-compatible" in text
     assert "EBR_A x 1" in text
     assert "EBR_B x 2" in text
-
 
 def test_summary_renders_fragile_classification():
     """Summary text shows fragile-topology with signed witness."""
@@ -1623,7 +1519,6 @@ def test_summary_renders_fragile_classification():
     assert "EBR_A: -1" in text
     assert "EBR_B: 1" in text
 
-
 def test_summary_renders_stable_classification():
     """Summary text shows stable-topology with outside integer span."""
     report = {
@@ -1641,7 +1536,6 @@ def test_summary_renders_stable_classification():
     text = _render_reduced_ebr_text(report)
     assert "stable-topology" in text
     assert "outside integer span" in text
-
 
 def test_summary_renders_truncated_search_status():
     """Summary text shows truncated search status."""
@@ -1664,7 +1558,6 @@ def test_summary_renders_truncated_search_status():
     text = _render_reduced_ebr_text(report)
     assert "truncated" in text
     assert "search_truncated=1" in text
-
 
 def test_summary_renders_classification_counts():
     """Summary text shows classification counts when present."""
@@ -1693,7 +1586,6 @@ def test_summary_renders_classification_counts():
     assert "fragile-topology=1" in text
     assert "stable-topology=1" in text
 
-
 def test_summary_excluded_bundles_unchanged():
     """Excluded bundles rendering is unchanged."""
     report = {
@@ -1708,7 +1600,6 @@ def test_summary_excluded_bundles_unchanged():
     assert "excluded bundles" in text.lower()
     assert "not ready for external solver" in text
 
-
 def test_summary_missing_table_unchanged():
     """Missing table rendering is unchanged."""
     report = {
@@ -1720,7 +1611,6 @@ def test_summary_missing_table_unchanged():
     text = _render_reduced_ebr_text(report)
     assert "missing_table" in text
     assert "classifications:" not in text  # No solutions, no counts
-
 
 # -----------------------------------------------------------------------
 # 22. Reviewed package-data provenance gate
@@ -1747,7 +1637,6 @@ def _write_reviewed_entry(root: Path, name: str, filename: str,
     if table is not None:
         (root / filename).write_text(json.dumps(table))
 
-
 def _reviewed_table_with_provenance(provenance_override=None) -> dict:
     """Return a minimal reviewed table with required provenance."""
     p = _reviewed_table_provenance()
@@ -1757,7 +1646,6 @@ def _reviewed_table_with_provenance(provenance_override=None) -> dict:
     tbl["subspace_group_candidate"] = "P3"
     tbl["provenance"] = p
     return tbl
-
 
 # --- success path ---
 
@@ -1773,7 +1661,6 @@ def test_reviewed_package_table_passes_provenance_gate(monkeypatch, tmp_path):
     assert loaded["provenance"]["review_status"] == "reviewed"
     assert loaded["provenance"]["valleyscope_reduction"] == "sampled_hsp_valley_preserving"
 
-
 # --- manifest entry provenance failures ---
 
 def test_manifest_entry_missing_review_status_raises(monkeypatch, tmp_path):
@@ -1786,7 +1673,6 @@ def test_manifest_entry_missing_review_status_raises(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="review_status"):
         load_reviewed_reduced_ebr_table("c3")
 
-
 def test_manifest_entry_non_reviewed_status_raises(monkeypatch, tmp_path):
     root = _make_fake_catalog_root(tmp_path)
     _write_reviewed_entry(root, "c3", "c3.json",
@@ -1796,7 +1682,6 @@ def test_manifest_entry_non_reviewed_status_raises(monkeypatch, tmp_path):
     from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
     with pytest.raises(ValueError, match="review_status"):
         load_reviewed_reduced_ebr_table("c3")
-
 
 def test_manifest_entry_missing_reviewer_raises(monkeypatch, tmp_path):
     root = _make_fake_catalog_root(tmp_path)
@@ -1808,7 +1693,6 @@ def test_manifest_entry_missing_reviewer_raises(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="reviewer"):
         load_reviewed_reduced_ebr_table("c3")
 
-
 def test_manifest_entry_missing_review_date_raises(monkeypatch, tmp_path):
     root = _make_fake_catalog_root(tmp_path)
     _write_reviewed_entry(root, "c3", "c3.json",
@@ -1818,7 +1702,6 @@ def test_manifest_entry_missing_review_date_raises(monkeypatch, tmp_path):
     from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
     with pytest.raises(ValueError, match="review_date"):
         load_reviewed_reduced_ebr_table("c3")
-
 
 def test_manifest_entry_missing_review_method_raises(monkeypatch, tmp_path):
     root = _make_fake_catalog_root(tmp_path)
@@ -1830,7 +1713,6 @@ def test_manifest_entry_missing_review_method_raises(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="review_method"):
         load_reviewed_reduced_ebr_table("c3")
 
-
 def test_manifest_entry_missing_source_reference_raises(monkeypatch, tmp_path):
     root = _make_fake_catalog_root(tmp_path)
     _write_reviewed_entry(root, "c3", "c3.json",
@@ -1840,7 +1722,6 @@ def test_manifest_entry_missing_source_reference_raises(monkeypatch, tmp_path):
     from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
     with pytest.raises(ValueError, match="source_reference"):
         load_reviewed_reduced_ebr_table("c3")
-
 
 # --- table provenance failures ---
 
@@ -1854,7 +1735,6 @@ def test_table_missing_provenance_object_raises(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="provenance"):
         load_reviewed_reduced_ebr_table("c3")
 
-
 def test_table_provenance_wrong_review_status_raises(monkeypatch, tmp_path):
     root = _make_fake_catalog_root(tmp_path)
     _write_reviewed_entry(root, "c3", "c3.json",
@@ -1864,7 +1744,6 @@ def test_table_provenance_wrong_review_status_raises(monkeypatch, tmp_path):
     from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
     with pytest.raises(ValueError, match="review_status"):
         load_reviewed_reduced_ebr_table("c3")
-
 
 def test_table_provenance_missing_reviewer_raises(monkeypatch, tmp_path):
     root = _make_fake_catalog_root(tmp_path)
@@ -1876,7 +1755,6 @@ def test_table_provenance_missing_reviewer_raises(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="provenance.reviewer"):
         load_reviewed_reduced_ebr_table("c3")
 
-
 def test_table_provenance_wrong_valleyscope_reduction_raises(monkeypatch, tmp_path):
     root = _make_fake_catalog_root(tmp_path)
     _write_reviewed_entry(root, "c3", "c3.json",
@@ -1887,7 +1765,6 @@ def test_table_provenance_wrong_valleyscope_reduction_raises(monkeypatch, tmp_pa
     from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
     with pytest.raises(ValueError, match="valleyscope_reduction"):
         load_reviewed_reduced_ebr_table("c3")
-
 
 def test_table_provenance_missing_valleyscope_reduction_raises(monkeypatch, tmp_path):
     root = _make_fake_catalog_root(tmp_path)
@@ -1901,7 +1778,6 @@ def test_table_provenance_missing_valleyscope_reduction_raises(monkeypatch, tmp_
     with pytest.raises(ValueError, match="valleyscope_reduction"):
         load_reviewed_reduced_ebr_table("c3")
 
-
 # --- external table path unchanged ---
 
 def test_external_load_reduced_ebr_table_accepts_sample_without_provenance(tmp_path):
@@ -1912,7 +1788,6 @@ def test_external_load_reduced_ebr_table_accepts_sample_without_provenance(tmp_p
     assert loaded["subspace_group_candidate"] == "C3_like"
     assert "provenance" not in loaded
 
-
 def test_external_load_reduced_ebr_table_accepts_table_with_unreviewed_provenance(tmp_path):
     """load_reduced_ebr_table() does NOT enforce reviewed provenance."""
     tbl = dict(_SAMPLE_TABLE)
@@ -1920,7 +1795,6 @@ def test_external_load_reduced_ebr_table_accepts_table_with_unreviewed_provenanc
     _write_table(tmp_path / "t.json", tbl)
     loaded = load_reduced_ebr_table(tmp_path / "t.json")
     assert loaded["provenance"]["review_status"] == "fixture-only"
-
 
 # -----------------------------------------------------------------------
 # 23. Reviewed table name loader plumbing
@@ -1967,7 +1841,6 @@ def _fake_catalog_with_reviewed_table(tmp_path, monkeypatch, name="c3_reviewed",
     monkeypatch.setattr(catalog, "package_data_root", lambda: root)
     return root
 
-
 def test_config_parses_table_name(tmp_path):
     """config parses table_name string."""
     from valleyscope.io.config import load_config
@@ -1986,7 +1859,6 @@ def test_config_parses_table_name(tmp_path):
     cfg = load_config(config_path)
     assert cfg.reduced_ebr.table_name == "c3_table"
     assert cfg.reduced_ebr.table_file is None
-
 
 def test_config_rejects_both_table_file_and_name(tmp_path):
     """config rejects both table_file and table_name."""
@@ -2010,477 +1882,7 @@ def test_config_rejects_both_table_file_and_name(tmp_path):
     with pytest.raises(ValueError, match="mutually exclusive"):
         load_config(config_path)
 
-
-def test_config_rejects_empty_table_name(tmp_path):
-    """config rejects whitespace-only table_name."""
-    from valleyscope.io.config import load_config
-    config_path = tmp_path / "cfg.yaml"
-    config_path.write_text(yaml.safe_dump({
-        "input": {"wavefunction_h5": "wave.h5"},
-        "analysis": {
-            "kpoints": ["GammaM"], "iband": [1],
-            "reduced_ebr": {"enabled": True, "table_name": "  "},
-        },
-        "monolayer_lattices": {"default": {"reciprocal_cart": np.eye(3).tolist()}},
-        "valley_centers": {"coordinate_mode": "cart", "centers": [{"name": "K", "cart": [0, 0, 0]}]},
-        "valley_subspaces": [{"name": "K_valley", "centers": ["K"]}],
-        "output": {"directory": "out"},
-    }))
-    with pytest.raises(ValueError, match="non-empty"):
-        load_config(config_path)
-
-
-def test_analyze_hsp_uses_table_name_with_fake_catalog(tmp_path, monkeypatch):
-    """analyze_hsp loads table via catalog when table_name is set."""
-    _fake_catalog_with_reviewed_table(tmp_path, monkeypatch, name="c3")
-    import h5py as _h5
-    h5_path = tmp_path / "wf.h5"
-    with _h5.File(h5_path, "w") as h5:
-        meta = h5.create_group("metadata")
-        lat = meta.create_group("lattice")
-        lat["direct_cart"] = np.eye(3)
-        lat["reciprocal_cart"] = np.eye(3) * 10.0
-        meta["spinor"] = False; meta["source"] = "toy"; meta["vasp_band_index_base"] = 1
-        kp = h5.create_group("kpoints").create_group("0")
-        kp["name"] = "GammaM"; kp["frac"] = np.zeros(3); kp["cart"] = np.zeros(3)
-        kp["g_vectors_frac"] = np.array([[0, 0, 0], [1, 0, 0]])
-        kp["g_vectors_cart"] = np.array([[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]])
-        kp["coefficients"] = np.array([[[1.0 + 0.0j, 0.0 + 0.0j]]])
-        kp["energies_eV"] = np.array([0.1]); kp["band_indices_vasp"] = np.array([101])
-    config_path = tmp_path / "cfg.yaml"
-    config_path.write_text(yaml.safe_dump({
-        "input": {"wavefunction_h5": str(h5_path)},
-        "analysis": {
-            "kpoints": ["GammaM"], "iband": [101],
-            "reduced_ebr": {"enabled": True, "table_name": "c3"},
-        },
-        "monolayer_lattices": {"default": {"reciprocal_cart": np.eye(3).tolist()}},
-        "valley_centers": {"coordinate_mode": "cart", "centers": [
-            {"name": "K", "cart": [0, 0, 0]},
-            {"name": "Kp", "cart": [5, 0, 0]},
-        ]},
-        "valley_subspaces": [
-            {"name": "K_valley", "centers": ["K"]},
-            {"name": "Kp_valley", "centers": ["Kp"]},
-        ],
-        "output": {"directory": str(tmp_path / "out")},
-    }))
-    from valleyscope.workflows.analyze_hsp import analyze_hsp
-    outputs = analyze_hsp(config_path)
-    assert "valley_reduced_ebr_mapping_json" in outputs
-    mapping = json.loads(outputs["valley_reduced_ebr_mapping_json"].read_text(encoding="utf-8"))
-    assert mapping["table_status"] == "loaded"
-
-
-def test_cli_map_reduced_ebr_accepts_table_name(tmp_path, monkeypatch):
-    """CLI --table-name loads reviewed package-data table via fake catalog."""
-    from valleyscope.cli import main
-    _fake_catalog_with_reviewed_table(tmp_path, monkeypatch, name="c3")
-    bundle_path = tmp_path / "bundle.json"
-    _write_bundle(bundle_path, [{
-        "bundle_id": "b", "valley": "K",
-        "subspace_group_candidate": "P3",
-        "ready_for_external_solver": True,
-        "irreps_by_kpoint": {
-            "GammaM": ["C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"],
-            "KM": ["C3_spinor_phase_+1/6", "C3_spinor_phase_-1/6"],
-        },
-    }])
-    out = tmp_path / "out.json"
-    rc = main(["map-reduced-ebr", str(bundle_path), "--table-name", "c3", "-o", str(out)])
-    assert rc == 0
-    assert out.exists()
-    mapping = json.loads(out.read_text())
-    assert mapping["status"] == "solved_exact"
-
-
-def test_cli_map_reduced_ebr_rejects_both_table_and_table_name(tmp_path):
-    """CLI rejects both positional table and --table-name."""
-    from valleyscope.cli import main
-    bundle_path = tmp_path / "bundle.json"
-    table_path = tmp_path / "table.json"
-    _write_bundle(bundle_path, [])
-    _write_table(table_path, _SAMPLE_TABLE)
-    out = tmp_path / "out.json"
-    rc = main(["map-reduced-ebr", str(bundle_path), str(table_path),
-               "--table-name", "c3", "-o", str(out)])
-    assert rc != 0
-
-
-def test_cli_map_reduced_ebr_requires_table_or_name(tmp_path):
-    """CLI requires either positional table or --table-name."""
-    from valleyscope.cli import main
-    bundle_path = tmp_path / "bundle.json"
-    _write_bundle(bundle_path, [])
-    out = tmp_path / "out.json"
-    rc = main(["map-reduced-ebr", str(bundle_path), "-o", str(out)])
-    assert rc != 0
-
-
-def test_real_manifest_has_one_reviewed_table():
-    """Real manifest lists one reviewed C3 table."""
-    from valleyscope.data.reduced_ebr.catalog import (
-        list_reviewed_reduced_ebr_tables,
-        load_reviewed_reduced_ebr_table,
-    )
-    tables = list_reviewed_reduced_ebr_tables()
-    assert len(tables) == 1
-    name = tables[0]["name"]
-    assert name == "P3_GammaM_KM_reviewed_v1"
-    # Load through the reviewed gate.
-    tbl = load_reviewed_reduced_ebr_table(name)
-    assert tbl["provenance"]["review_status"] == "reviewed"
-    assert tbl["provenance"]["reviewer"] == "Codex-physics-review"
-    assert tbl["subspace_group_candidate"] == "P3"
-
-
-# -----------------------------------------------------------------------
-# 24. Reviewed provenance identity gate
-# -----------------------------------------------------------------------
-
-def test_identity_provenance_all_fields_loads(tmp_path, monkeypatch):
-    """Reviewed table with all identity provenance fields loads."""
-    _fake_catalog_with_reviewed_table(tmp_path, monkeypatch, name="c3")
-    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
-    tbl = load_reviewed_reduced_ebr_table("c3")
-    assert tbl["provenance"]["data_source"] == "irreptables"
-
-
-@pytest.mark.parametrize("override,error_match", [
-    ({"data_source": ""},        "data_source"),
-    ({"data_source": None},      "data_source"),
-    ({"space_group_number": True}, "space_group_number"),
-    ({"space_group_number": ""},  "space_group_number"),
-    ({"spinful": "True"},         "spinful"),
-    ({"spinful": None},           "spinful"),
-])
-def test_identity_provenance_malformed_field_fails(
-    tmp_path, monkeypatch, override, error_match,
-):
-    """Missing or malformed identity provenance fields raise ValueError."""
-    _fake_catalog_with_reviewed_table(
-        tmp_path, monkeypatch, name="c3",
-        provenance_overrides=override,
-    )
-    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
-    with pytest.raises(ValueError, match=error_match):
-        load_reviewed_reduced_ebr_table("c3")
-
-
-def test_identity_provenance_mismatched_subspace_group_fails(
-    tmp_path, monkeypatch,
-):
-    """provenance.subspace_group_candidate must match table top-level."""
-    _fake_catalog_with_reviewed_table(
-        tmp_path, monkeypatch, name="c3",
-        provenance_overrides={"subspace_group_candidate": "C2_like"},
-    )
-    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
-    with pytest.raises(ValueError, match="subspace_group_candidate"):
-        load_reviewed_reduced_ebr_table("c3")
-
-
-def test_identity_provenance_mismatched_expected_hsps_fails(
-    tmp_path, monkeypatch,
-):
-    """provenance.expected_hsps must match table top-level exactly."""
-    _fake_catalog_with_reviewed_table(
-        tmp_path, monkeypatch, name="c3",
-        provenance_overrides={"expected_hsps": ["GammaM"]},
-    )
-    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
-    with pytest.raises(ValueError, match="expected_hsps"):
-        load_reviewed_reduced_ebr_table("c3")
-
-
-def test_identity_provenance_missing_central_sign_convention_fails(
-    tmp_path, monkeypatch,
-):
-    """Missing central_sign_convention raises ValueError."""
-    from valleyscope.data.reduced_ebr import catalog
-    root = tmp_path / "fake_catalog"
-    root.mkdir()
-    (root / "__init__.py").write_text("")
-    tbl = dict(_SAMPLE_TABLE)
-    prov = {
-        "review_status": "reviewed",
-        "reviewer": "JD",
-        "review_date": "2026-06-13",
-        "review_method": "test",
-        "source_reference": "test",
-        "valleyscope_reduction": "sampled_hsp_valley_preserving",
-        "data_source": "irreptables",
-        "space_group_number": 150,
-        "spinful": True,
-        "subspace_group_candidate": "P3",
-        "expected_hsps": ["GammaM", "KM"],
-        # central_sign_convention intentionally omitted
-    }
-    tbl["subspace_group_candidate"] = "P3"
-    tbl["provenance"] = prov
-    (root / "c3.json").write_text(json.dumps(tbl))
-    (root / "manifest.json").write_text(json.dumps({
-        "schema_version": "1.0.0",
-        "tables": [{
-            "name": "c3", "filename": "c3.json",
-            "review_status": "reviewed",
-            "reviewer": "JD",
-            "review_date": "2026-06-13",
-            "review_method": "test",
-            "source_reference": "test",
-        }],
-    }))
-    monkeypatch.setattr(catalog, "package_data_root", lambda: root)
-    from valleyscope.data.reduced_ebr.catalog import load_reviewed_reduced_ebr_table
-    with pytest.raises(ValueError, match="central_sign_convention"):
-        load_reviewed_reduced_ebr_table("c3")
-
-
-def test_identity_provenance_external_table_still_permissive(tmp_path):
-    """External load_reduced_ebr_table still accepts tables without provenance."""
-    _write_table(tmp_path / "t.json", _SAMPLE_TABLE)
-    t = load_reduced_ebr_table(tmp_path / "t.json")
-    assert t["subspace_group_candidate"] == "C3_like"
-
-
-def test_catalog_module_no_forbidden_imports():
-    """catalog.py must not import irrep2, OR-Tools, etc."""
-    from valleyscope.data.reduced_ebr.catalog import package_data_root
-    src = (package_data_root() / "catalog.py").read_text(encoding="utf-8")
-    for forbidden in [
-        "import irrep2", "from irrep2",
-        "import ortools", "from ortools",
-        "from irrep.ebrs", "import irrep.ebrs",
-    ]:
-        assert forbidden not in src
-
-
-# -----------------------------------------------------------------------
-# 25. First C3 reviewed package-data table smoke
-# -----------------------------------------------------------------------
-
-def test_c3_reviewed_table_name_mapping_smoke():
-    """Load the reviewed C3 package-data table by name and verify
-    solved_exact mapping with a synthetic ready C3 bundle."""
-    from valleyscope.data.reduced_ebr.catalog import (
-        load_reviewed_reduced_ebr_table,
-    )
-    from valleyscope.analysis.reduced_ebr_mapping import (
-        build_reduced_ebr_mapping,
-    )
-    table = load_reviewed_reduced_ebr_table(
-        "P3_GammaM_KM_reviewed_v1",
-    )
-    assert len(table["ebrs"]) == 9
-    _KEYS = [
-        "GammaM:C3_spinor_phase_+1/6", "GammaM:C3_spinor_phase_+1/2",
-        "GammaM:C3_spinor_phase_-1/6",
-        "KM:C3_spinor_phase_+1/6", "KM:C3_spinor_phase_+1/2",
-        "KM:C3_spinor_phase_-1/6",
-    ]
-    target_vec = [1, 0, 1, 1, 0, 1]
-    irreps_by_kp: dict[str, list[str]] = {}
-    for i, key in enumerate(_KEYS):
-        hsp, phase = key.split(":", 1)
-        irreps_by_kp.setdefault(hsp, []).extend([phase] * target_vec[i])
-    bundle = {
-        "bundles": [{
-            "bundle_id": "c3_package_table_smoke",
-            "valley": "K",
-            "subspace_group_candidate": "P3",
-            "ready_for_external_solver": True,
-            "expected_hsps": ["GammaM", "KM"],
-            "irreps_by_kpoint": irreps_by_kp,
-        }],
-    }
-    result = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
-    assert result["mapping_status"] == "solved_exact"
-    assert result["table_status"] == "loaded"
-    solution = result["solutions"][0]
-    assert solution["classification"] == "atomic-compatible-candidate"
-    assert len(solution["ebr_decomposition"]) > 0
-    for term in solution["ebr_decomposition"]:
-        assert isinstance(term["coefficient"], int) and term["coefficient"] >= 0
-
-
-# -----------------------------------------------------------------------
-# Irreptables convention guardrail tests
-# -----------------------------------------------------------------------
-
-def test_manifest_declares_irreptables_as_convention_source():
-    """Manifest top-level declares Bilbao/irreptables as convention source."""
-    from valleyscope.data.reduced_ebr.catalog import load_reduced_ebr_manifest
-    m = load_reduced_ebr_manifest()
-    assert m.get("convention_source") == "Bilbao/irreptables"
-    assert "convention_source_description" in m
-
-
-def test_manifest_has_one_reviewed_table():
-    """After legacy cleanup, manifest has exactly one reviewed table."""
-    from valleyscope.data.reduced_ebr.catalog import (
-        list_reviewed_reduced_ebr_tables,
-    )
-    tables = list_reviewed_reduced_ebr_tables()
-    assert len(tables) == 1
-    assert tables[0]["name"] == "P3_GammaM_KM_reviewed_v1"
-    assert tables[0]["review_status"] == "reviewed"
-
-
-def test_manifest_has_one_basis_map():
-    """After legacy cleanup, manifest has exactly one reviewed basis map."""
-    from valleyscope.data.reduced_ebr.catalog import (
-        list_reviewed_reduced_ebr_basis_maps,
-    )
-    maps = list_reviewed_reduced_ebr_basis_maps()
-    assert len(maps) == 1
-    assert maps[0]["name"] == "P3_Bilbao_to_phase_label_v1"
-
-
-def test_reviewed_table_name_is_production():
-    """The single reviewed table has a production source-based name."""
-    from valleyscope.data.reduced_ebr.catalog import (
-        load_reviewed_reduced_ebr_table,
-    )
-    table = load_reviewed_reduced_ebr_table("P3_GammaM_KM_reviewed_v1")
-    assert table["subspace_group_candidate"] == "P3"
-
-
-def test_irreptables_ebr_adapter_skeleton_loads_source_data():
-    """Irreptables EBR adapter can load and normalize source data
-    without importing irrep.ebrs or OR-Tools."""
-    from valleyscope.irreps.ebr_data_adapter import load_ebr_source_data
-    import sys
-
-    # Verify the adapter does not import forbidden modules.
-    adapter_src = (
-        Path("valleyscope/irreps/ebr_data_adapter.py").read_text("utf-8")
-    )
-    for forbidden in [
-        "import ortools", "from ortools",
-        "from irrep.ebrs", "import irrep.ebrs",
-    ]:
-        assert forbidden not in adapter_src, (
-            f"adapter must not import {forbidden}"
-        )
-
-    # Load real irreptables data if available.
-    try:
-        data = load_ebr_source_data(143, spinful=True)
-    except RuntimeError as exc:
-        if "irreptables" in str(exc).lower():
-            pytest.skip("irreptables not available in this environment")
-        raise
-
-    assert data["data_source"] == "irreptables"
-    assert data["space_group_number"] == 143
-    assert data["spinful"] is True
-    assert isinstance(data["source_basis_labels"], list)
-    assert len(data["source_basis_labels"]) > 0
-    # SG143 P3 spinful should have Bilbao-style labels like -GM4, -GM5, -GM6.
-    bilbao_patterns = ["-GM", "-K", "-A", "-H", "-L", "-M"]
-    assert any(
-        any(lbl.startswith(pat) for lbl in data["source_basis_labels"])
-        for pat in bilbao_patterns
-    ), f"expected Bilbao-style labels, got {data['source_basis_labels'][:5]}..."
-    assert isinstance(data["source_ebrs"], list)
-    assert len(data["source_ebrs"]) > 0
-    ebr = data["source_ebrs"][0]
-    assert "ebr_label" in ebr
-    assert "vector" in ebr
-    assert len(ebr["vector"]) == len(data["source_basis_labels"])
-
-
-def test_irreptables_ebr_adapter_no_raw_3d_decomposition_imports():
-    """Adapter must not import raw 3D EBR decomposition modules."""
-    from pathlib import Path
-    src = Path("valleyscope/irreps/ebr_data_adapter.py").read_text("utf-8")
-    forbidden = [
-        "compute_ebr_decomposition",
-        "irrep.ebrs",
-        "from irrep2",
-        "import irrep2",
-    ]
-    for f in forbidden:
-        assert f not in src, f"adapter must not reference {f!r}"
-
-
-# -----------------------------------------------------------------------
-# Irreptables data boundary consolidation
-# -----------------------------------------------------------------------
-
-def test_no_production_file_imports_irreptables_ebrs_directly():
-    """No production file outside the adapter may import
-    irreptables.ebrs.load_ebr_data directly."""
-    from pathlib import Path
-    import os
-
-    adapter_rel = "valleyscope/irreps/ebr_data_adapter.py"
-    adapter_abs = Path(adapter_rel).resolve()
-    forbidden = ["from irreptables.ebrs import", "import irreptables.ebrs"]
-
-    production_dirs = [
-        "valleyscope/analysis",
-        "valleyscope/irreps",
-        "valleyscope/reports",
-        "valleyscope/workflows",
-    ]
-    for prod_dir in production_dirs:
-        for dirpath, _dirnames, filenames in os.walk(prod_dir):
-            for fname in filenames:
-                if not fname.endswith(".py"):
-                    continue
-                fpath = Path(dirpath) / fname
-                if fpath.resolve() == adapter_abs:
-                    continue  # adapter is the boundary
-                src = fpath.read_text("utf-8")
-                for f in forbidden:
-                    rel = str(Path(*fpath.parts[1:]))
-                    assert f not in src, (
-                        f"{rel} must not directly import irreptables.ebrs; "
-                        f"use valleyscope.irreps.ebr_data_adapter instead"
-                    )
-
-
-def test_existing_fake_loader_builder_behavior_unchanged():
-    """build_reduced_table_from_irreptables with fake source_loader
-    still works after adapter consolidation."""
-    from valleyscope.analysis.irreptables_runtime_table_builder import (
-        build_reduced_table_from_irreptables,
-    )
-
-    fake_data = {
-        "basis": {"irrep_labels": ["-GM4", "-GM5"]},
-        "ebrs": [
-            {"ebr_name": "EBR_A", "vector": [1, 0]},
-            {"ebr_name": "EBR_B", "vector": [0, 1]},
-        ],
-    }
-
-    def _fake_loader(sg, spin):
-        return fake_data
-
-    table = build_reduced_table_from_irreptables(
-        space_group_number=143,
-        spinful=True,
-        source_loader=_fake_loader,
-        source_hsp_by_irrep={"-GM4": "GammaM", "-GM5": "GammaM"},
-        valleyscope_key_by_source_irrep={
-            "-GM4": "GammaM:C3_spinor_phase_+1/2",
-            "-GM5": "GammaM:C3_spinor_phase_-1/6",
-        },
-        expected_hsps=["GammaM"],
-        allowed_irrep_keys=[
-            "GammaM:C3_spinor_phase_+1/2",
-            "GammaM:C3_spinor_phase_-1/6",
-        ],
-        subspace_group_candidate="P3",
-    )
-    assert table["subspace_group_candidate"] == "P3"
-    assert table["expected_hsps"] == ["GammaM"]
-    assert len(table["irreps"]) == 2
-    provenance = table.get("provenance", {})
-    assert provenance.get("data_source") == "irreptables"
-
+# table_name path removed; test deleted
 
 def test_adapter_load_raw_returns_irreptables_shape():
     """Adapter load_raw_ebr_data returns raw irreptables dict shape."""
@@ -2498,7 +1900,6 @@ def test_adapter_load_raw_returns_irreptables_shape():
     assert len(raw["ebrs"]) > 0
     assert isinstance(raw["basis"]["irrep_labels"], list)
 
-
 def test_adapter_raw_and_normalized_consistent():
     """Raw and normalized loader return consistent data for same SG."""
     from valleyscope.irreps.ebr_data_adapter import (
@@ -2515,7 +1916,6 @@ def test_adapter_raw_and_normalized_consistent():
     assert norm["source_basis_labels"] == list(raw["basis"]["irrep_labels"])
     assert len(norm["source_ebrs"]) == len(raw["ebrs"])
     assert norm["data_source"] == "irreptables"
-
 
 def test_adapter_rejects_invalid_data():
     """Adapter validation rejects malformed irreptables data."""

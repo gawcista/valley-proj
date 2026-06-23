@@ -584,7 +584,7 @@ def _parse_reduced_ebr_config(base: Path, raw: dict[str, Any]) -> ReducedEbrConf
     if table_name_raw is not None:
         if not isinstance(table_name_raw, str) or not table_name_raw.strip():
             raise ValueError(
-                "analysis.reduced_ebr.table_name must be a non-empty string"
+                "analysis.reduced_ebr.table_name is deprecated; use table_file"
             )
         table_name = table_name_raw.strip()
     return ReducedEbrConfig(
