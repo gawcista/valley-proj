@@ -81,12 +81,6 @@ def _add_map_reduced_ebr_parser(subparsers) -> None:
         help="Path to external reduced EBR table JSON (use --table-name for reviewed package-data tables)",
     )
     p.add_argument(
-        "--table-name",
-        type=str,
-        default=None,
-        help="Name of a reviewed package-data table (loads via catalog; mutually exclusive with positional table)",
-    )
-    p.add_argument(
         "--output", "-o",
         type=Path,
         default=Path("valley_reduced_ebr_mapping.json"),
@@ -107,17 +101,9 @@ def _map_reduced_ebr(args) -> int:
 
     # --- Resolve table source ---
     table_path = args.table
-    table_name = args.table_name
-    if table_path is not None and table_name is not None:
+    if table_path is None:
         print(
-            "error: positional table and --table-name are mutually exclusive",
-            file=sys.stderr,
-        )
-        return 1
-    if table_path is None and table_name is None:
-        print(
-            "error: either a positional external table path or "
-            "--table-name is required",
+            "error: a positional external table path is required",
             file=sys.stderr,
         )
         return 1
@@ -130,23 +116,12 @@ def _map_reduced_ebr(args) -> int:
         return 1
 
     # Load table.
-    if table_path is not None:
-        try:
-            table = load_reduced_ebr_table(table_path)
-        except (FileNotFoundError, json.JSONDecodeError, ValueError) as exc:
-            print(f"error: cannot load external reduced EBR table "
-                  f"'{table_path}': {exc}", file=sys.stderr)
-            return 1
-    else:
-        try:
-            from valleyscope.data.reduced_ebr.catalog import (
-                load_reviewed_reduced_ebr_table,
-            )
-            table = load_reviewed_reduced_ebr_table(table_name)
-        except (FileNotFoundError, ValueError) as exc:
-            print(f"error: cannot load reviewed package-data table "
-                  f"{table_name!r}: {exc}", file=sys.stderr)
-            return 1
+    try:
+        table = load_reduced_ebr_table(table_path)
+    except (FileNotFoundError, json.JSONDecodeError, ValueError) as exc:
+        print(f"error: cannot load external reduced EBR table "
+              f"'{table_path}': {exc}", file=sys.stderr)
+        return 1
 
     # Compute mapping.
     mapping = build_reduced_ebr_mapping(

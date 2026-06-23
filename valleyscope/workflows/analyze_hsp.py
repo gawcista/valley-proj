@@ -594,13 +594,8 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         table = None
         if config.reduced_ebr.table_file:
             table = load_reduced_ebr_table(config.reduced_ebr.table_file)
-        elif config.reduced_ebr.table_name:
-            from valleyscope.data.reduced_ebr.catalog import (
-                load_reviewed_reduced_ebr_table,
-            )
-            table = load_reviewed_reduced_ebr_table(
-                config.reduced_ebr.table_name
-            )
+        # Production reduced EBR uses the irreptable-based runtime reducer.
+        # Static package-data reviewed tables are removed.
         reduced_ebr_mapping = build_reduced_ebr_mapping(
             ebr_export_bundle=ebr_export_bundle,
             table=table,

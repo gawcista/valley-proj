@@ -1,31 +1,7 @@
 {
   "schema_version": "1.1.0",
-  "description": "Reviewed reduced-dimensional ValleyScope EBR package-data catalog",
+  "description": "Reduced-dimensional EBR package-data catalog. Production reduced EBR data comes from the irreptable-based runtime reducer (valleyscope/analysis/irreptables_runtime_table_builder.py), not from static physical tables shipped in this directory.",
   "convention_source": "Bilbao/irreptables",
-  "convention_source_description": "Production irrep/EBR convention source is Bilbao/irreptables. Tables here are reviewed reduced-dimensional tables derived from irreptables source data with ValleyScope valley-preserving restriction.",
-  "tables": [
-    {
-      "name": "P3_GammaM_KM_reviewed_v1",
-      "filename": "P3_GammaM_KM_reviewed_v1.json",
-      "review_status": "reviewed",
-      "reviewer": "Codex-physics-review",
-      "review_date": "2026-06-22",
-      "review_method": "Codex condensed-matter review of irreptables SG150 spinful data, reduced to P3 valley-preserving subspace basis with sampled HSPs GammaM/KM",
-      "source_reference": "Bilbao Crystallographic Server SG150 spinful irreps and EBRs via public irreptables; valley-preserving P3 subspace reduction",
-      "note": "Reviewed P3 subspace-space-group reduced table. subspace_group_candidate is P3. Table provenance.space_group_number is 150 because source data comes from SG150/P321 parent group, restricted to the P3 valley-preserving subgroup."
-    }
-  ],
-  "basis_maps": [
-    {
-      "name": "P3_Bilbao_to_phase_label_v1",
-      "filename": "P3_Bilbao_to_phase_label_basis_map_v1.json",
-      "table_name": "P3_GammaM_KM_reviewed_v1",
-      "review_status": "reviewed",
-      "reviewer": "cc-physics-review",
-      "review_date": "2026-06-22",
-      "review_method": "Character-based mapping of SG143 spinful irreps to phase labels",
-      "source_reference": "Bilbao Crystallographic Server SG143 spinful irreps via public irreptables",
-      "note": "Basis map for translating Bilbao/irreptables labels to phase labels in the reviewed P3 reduced table."
-    }
-  ]
+  "tables": [],
+  "basis_maps": []
 }
