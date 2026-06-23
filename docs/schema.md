@@ -162,9 +162,9 @@ Each `representation_records` entry:
 | `blocking_reasons` | list[string] | Blocking reasons for the grouped record |
 | `irrep_matching` | object\|null | Irrep matching status (when available) |
 | `irrep_matching.matching_status` | string | `"matched"`, `"incomplete"`, `"not_matched"` |
-| `irrep_matching.matching_strategy` | string | `"bilbao_restricted_character"` or `"legacy_phase_table"` |
+| `irrep_matching.matching_strategy` | string | `"bilbao_restricted_character"` (generic path) or `"legacy_phase_table"` (legacy fallback; debug/provenance only, not a production irrep identity) |
 | `irrep_matching.irrep_multiplicities` | object | Irrep label → integer multiplicity |
-| `legacy_subspace_group_candidate` | string | Legacy `C{n}_like` hint (provenance only) |
+| `legacy_subspace_group_candidate` | string | **Deprecated.** Legacy `C{n}_like` hint for provenance/compatibility only. Must not be used as a physical subspace identity. Standard outputs should prefer `subspace_space_group.candidate_space_group_symbol`. |
 
 The `representation_records` are the primary group-agnostic irrep input:
 the physical identifier is `subspace_space_group.candidate_space_group_symbol`,

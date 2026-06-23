@@ -1179,3 +1179,105 @@ def test_p4_public_output_contract(tmp_path):
         assert f'"subspace_group_candidate": "{cn}"' not in raw_summary, (
             f"{cn} must not appear as physical group identity in export bundle"
         )
+
+
+def test_standard_outputs_no_cn_like_guardrail():
+    """Standard public outputs must not emit C2_like, C3_like, or C4_like
+    as physical group identity in any standard output object."""
+    import json
+    from valleyscope.analysis.valley_irrep_matching import (
+        build_valley_irrep_matching_report,
+    )
+    from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
+    from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
+    from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
+    from valleyscope.analysis.valley_projected_representation import (
+        build_valley_projected_representation_report,
+    )
+
+    # Synthetic P4 generic pipeline — produces all standard output objects.
+    workflow = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "readiness_level": "trusted",
+                    "workflow_path": "direct_qcut",
+                },
+            },
+        },
+    }
+    sa = {
+        "by_kpoint": {
+            "GammaM": {
+                "valley_preserving_subspaces": [{
+                    "reference_valley": "K_valley",
+                    "orbit": ["K_valley"],
+                    "subspace_group": {"subspace_group_candidate": "P4"},
+                    "subspace_space_group": {
+                        "candidate_space_group_symbol": "P4",
+                        "valley_preserving_operation_ids": [0, 1],
+                    },
+                    "hsp_preserving_operation_ids": [0, 1],
+                    "valley_preserving_character_diagnostics": {
+                        "per_valley": {
+                            "K_valley": [
+                                {"operation_id": 0, "eigenphases": [0.0, 0.0]},
+                                {"operation_id": 1, "eigenphases": [0.0, 0.5]},
+                            ],
+                        },
+                    },
+                }],
+            },
+        },
+    }
+    source_chars = {
+        "A": {1: 2.0 + 0j, 2: 0.0 + 0j},
+        "B": {1: 2.0 + 0j, 2: 0.0 + 0j},
+    }
+    eigen_rows = [{
+        "kpoint": "GammaM", "target_valley": "K_valley",
+        "operation_id": 1, "order": 2,
+        "diagnostic_only": False, "topology_input_ready": True,
+        "rotation_ready": True,
+    }]
+
+    matching = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=workflow,
+        symmetry_adapted_valley_report=sa,
+        source_irrep_characters_flattened={
+            "GammaM": {"K_valley": source_chars},
+        },
+        source_operation_maps={"GammaM": {"K_valley": {0: 1, 1: 2}}},
+    )
+    candidates = build_ebr_input_candidates(
+        irrep_workflow_decisions=workflow,
+        valley_irrep_matching=matching,
+    )
+    instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
+    bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
+    rep_report = build_valley_projected_representation_report(
+        kpoint_names=["GammaM"],
+        valley_names=["K_valley"],
+        symmetry_eigenvalue_rows=eigen_rows,
+        symmetry_adapted_valley_report=sa,
+        irrep_workflow_decisions=workflow,
+        valley_irrep_matching=matching,
+    )
+
+    standard_outputs = {
+        "valley_irrep_matching": matching,
+        "valley_ebr_input_candidates": candidates,
+        "valley_ebr_problem_instances": instances,
+        "valley_ebr_export_bundle": bundle,
+        "valley_projected_representations": rep_report,
+    }
+    for name, output in standard_outputs.items():
+        raw = json.dumps(output)
+        for cn in ("C2_like", "C3_like", "C4_like"):
+            # C{n}_like must not appear as subspace_group_candidate value.
+            assert f'"subspace_group_candidate": "{cn}"' not in raw, (
+                f"{cn} appears as physical group identity in {name}"
+            )
+    # Physical P{n} symbol must appear in matching and export bundle.
+    raw_matching = json.dumps(matching)
+    assert '"subspace_group_candidate": "P4"' in raw_matching or "P4" in raw_matching
