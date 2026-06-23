@@ -103,7 +103,7 @@ def test_ebr_problem_instances_ready_from_actual():
         "status": "has_candidates",
         "candidates": [{
             "kpoint": "GammaM", "valley": "K_valley",
-            "subspace_group_candidate": "C3_like",
+            "subspace_group_candidate": "P3",
             "workflow_path": "direct_qcut",
             "readiness_level": "trusted",
             "matched_irrep": "C3_spinor_phase_+1/2",
@@ -152,7 +152,7 @@ def test_ebr_export_bundle_preserves_hsp_and_irrep_fields():
         "instances": [{
             "instance_id": "ebr_instance_001",
             "valley": "K_valley",
-            "subspace_group_candidate": "C3_like",
+            "subspace_group_candidate": "P3",
             "workflow_path": "direct_qcut",
             "readiness_level": "trusted",
             "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
@@ -168,7 +168,7 @@ def test_ebr_export_bundle_preserves_hsp_and_irrep_fields():
     assert report["bundle_count"] == 1
     bundle = report["bundles"][0]
     assert bundle["ready_for_external_solver"] is True
-    assert bundle["subspace_group_candidate"] == "C3_like"
+    assert bundle["subspace_group_candidate"] == "P3"
     assert bundle["expected_hsps"] == ["GammaM", "KM"]
     assert bundle["optional_hsps"] == ["MM"]
     assert bundle["missing_optional_hsps"] == ["MM"]
@@ -184,7 +184,7 @@ def test_ebr_export_bundle_excludes_non_ready():
         "instances": [{
             "instance_id": "ebr_instance_001",
             "valley": "K_valley",
-            "subspace_group_candidate": "C3_like",
+            "subspace_group_candidate": "P3",
             "status": "partial",
             "ready_for_ebr_decomposition": False,
             "blocked_by": ["missing required HSPs: [KM]"],
@@ -203,7 +203,7 @@ def test_reduced_ebr_mapping_rejects_hsp_mismatch():
 
     table = {
         "schema_version": "1.0.0",
-        "subspace_group_candidate": "C3_like",
+        "subspace_group_candidate": "P3",
         "expected_hsps": ["GammaM", "KM"],
         "irreps": ["GammaM:C3_spinor_phase_+1/2", "KM:C3_spinor_phase_+1/6"],
         "ebrs": [{"label": "EBR_A", "vector": [1, 0]}, {"label": "EBR_B", "vector": [0, 1]}],
@@ -212,7 +212,7 @@ def test_reduced_ebr_mapping_rejects_hsp_mismatch():
     bundle = {
         "bundles": [{
             "bundle_id": "b_001", "valley": "K",
-            "subspace_group_candidate": "C3_like",
+            "subspace_group_candidate": "P3",
             "ready_for_external_solver": True,
             "expected_hsps": ["GammaM"],
             "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
@@ -353,7 +353,7 @@ def test_ready_export_bundle_maps_to_public_reduced_ebr_outputs_only(tmp_path):
 
     table = {
         "schema_version": "1.0.0",
-        "subspace_group_candidate": "C3_like",
+        "subspace_group_candidate": "P3",
         "expected_hsps": ["GammaM", "KM"],
         "irreps": [
             "GammaM:C3_spinor_phase_+1/2",
@@ -370,7 +370,7 @@ def test_ready_export_bundle_maps_to_public_reduced_ebr_outputs_only(tmp_path):
             "instances": [{
                 "instance_id": "ebr_instance_001",
                 "valley": "K_valley",
-                "subspace_group_candidate": "C3_like",
+                "subspace_group_candidate": "P3",
                 "workflow_path": "direct_qcut",
                 "readiness_level": "trusted",
                 "irreps_by_kpoint": {
@@ -1181,7 +1181,7 @@ def test_p4_public_output_contract(tmp_path):
         )
 
 
-def test_standard_outputs_no_cn_like_guardrail():
+def test_standard_outputs_no_cn_like_guardrail(tmp_path):
     """Standard public outputs must not emit C2_like, C3_like, or C4_like
     as physical group identity in any standard output object."""
     import json
@@ -1194,6 +1194,7 @@ def test_standard_outputs_no_cn_like_guardrail():
     from valleyscope.analysis.valley_projected_representation import (
         build_valley_projected_representation_report,
     )
+    from valleyscope.reports.summary_report import build_summary_payload
 
     # Synthetic P4 generic pipeline — produces all standard output objects.
     workflow = {
@@ -1212,7 +1213,10 @@ def test_standard_outputs_no_cn_like_guardrail():
                 "valley_preserving_subspaces": [{
                     "reference_valley": "K_valley",
                     "orbit": ["K_valley"],
-                    "subspace_group": {"subspace_group_candidate": "P4"},
+                    "subspace_group": {
+                        "subspace_group_candidate": "P4",
+                        "legacy_subspace_group_candidate": "C4_like",
+                    },
                     "subspace_space_group": {
                         "candidate_space_group_symbol": "P4",
                         "valley_preserving_operation_ids": [0, 1],
@@ -1222,7 +1226,7 @@ def test_standard_outputs_no_cn_like_guardrail():
                         "per_valley": {
                             "K_valley": [
                                 {"operation_id": 0, "eigenphases": [0.0, 0.0]},
-                                {"operation_id": 1, "eigenphases": [0.0, 0.5]},
+                                {"operation_id": 1, "eigenphases": [0.25, -0.25]},
                             ],
                         },
                     },
@@ -1230,13 +1234,14 @@ def test_standard_outputs_no_cn_like_guardrail():
             },
         },
     }
+    i = 1j
     source_chars = {
-        "A": {1: 2.0 + 0j, 2: 0.0 + 0j},
-        "B": {1: 2.0 + 0j, 2: 0.0 + 0j},
+        "GM_plus_1over4": {1: 1.0 + 0j, 2: i},
+        "GM_minus_1over4": {1: 1.0 + 0j, 2: -i},
     }
     eigen_rows = [{
         "kpoint": "GammaM", "target_valley": "K_valley",
-        "operation_id": 1, "order": 2,
+        "operation_id": 1, "order": 4,
         "diagnostic_only": False, "topology_input_ready": True,
         "rotation_ready": True,
     }]
@@ -1263,21 +1268,45 @@ def test_standard_outputs_no_cn_like_guardrail():
         irrep_workflow_decisions=workflow,
         valley_irrep_matching=matching,
     )
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    config = load_config(config_path)
+    summary = build_summary_payload(
+        config=config,
+        qcut=0.5,
+        subspace_payload={"kpoints": {}},
+        symmetry_payload={
+            "status": "skipped",
+            "reason": "unit test",
+            "detected_operations": [],
+            "candidate_rotations": [],
+            "little_group_check": {"status": "not_run"},
+            "valley_preservation_check": {"status": "not_run"},
+        },
+        symmetry_rows=[],
+        output_paths={},
+        valley_irrep_matching=matching,
+        ebr_input_candidates=candidates,
+        ebr_problem_instances=instances,
+        ebr_export_bundle=bundle,
+        valley_projected_representation=rep_report,
+    )
 
     standard_outputs = {
-        "valley_irrep_matching": matching,
-        "valley_ebr_input_candidates": candidates,
-        "valley_ebr_problem_instances": instances,
         "valley_ebr_export_bundle": bundle,
-        "valley_projected_representations": rep_report,
+        "valley_summary": summary,
     }
     for name, output in standard_outputs.items():
         raw = json.dumps(output)
         for cn in ("C2_like", "C3_like", "C4_like"):
-            # C{n}_like must not appear as subspace_group_candidate value.
-            assert f'"subspace_group_candidate": "{cn}"' not in raw, (
-                f"{cn} appears as physical group identity in {name}"
+            assert cn not in raw, (
+                f"{cn} appears in standard public output {name}"
             )
-    # Physical P{n} symbol must appear in matching and export bundle.
+    # Physical P{n} symbol must remain available in matching and export bundle.
     raw_matching = json.dumps(matching)
     assert '"subspace_group_candidate": "P4"' in raw_matching or "P4" in raw_matching
+    assert "P4" in json.dumps(bundle)
+    assert "P4" in json.dumps(summary)

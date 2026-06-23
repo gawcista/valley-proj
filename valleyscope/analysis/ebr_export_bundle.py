@@ -53,7 +53,9 @@ def build_ebr_export_bundle(
                 "expected_hsps": inst.get("expected_hsps", []),
                 "optional_hsps": inst.get("optional_hsps", []),
                 "missing_optional_hsps": inst.get("missing_optional_hsps", []),
-                "irrep_records_by_kpoint": inst.get("irrep_records_by_kpoint", {}),
+                "irrep_records_by_kpoint": _strip_public_legacy_fields(
+                    inst.get("irrep_records_by_kpoint", {})
+                ),
                 "ready_for_external_solver": True,
             })
             continue
@@ -124,3 +126,16 @@ def _empty(reason: str) -> dict[str, object]:
         "bundles": [],
         "excluded_instances": [],
     }
+
+
+def _strip_public_legacy_fields(value: object) -> object:
+    """Remove deprecated Cn-like provenance from public export records."""
+    if isinstance(value, dict):
+        return {
+            key: _strip_public_legacy_fields(item)
+            for key, item in value.items()
+            if key != "legacy_subspace_group_candidate"
+        }
+    if isinstance(value, list):
+        return [_strip_public_legacy_fields(item) for item in value]
+    return value

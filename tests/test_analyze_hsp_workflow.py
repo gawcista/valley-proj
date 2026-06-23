@@ -329,7 +329,7 @@ def test_write_analysis_outputs_plumbs_hsp_star_reports_to_summary(tmp_path):
                     "1": {
                         "workflow_path": "direct_qcut",
                         "readiness_level": "trusted",
-                        "subspace_group_candidate": "C3_like",
+                        "subspace_group_candidate": "P3",
                         "operation_id": 1,
                         "operation_order": 3,
                         "matched_irrep": "C3_spinor_phase_+1/2",
@@ -363,7 +363,7 @@ def test_write_analysis_outputs_plumbs_hsp_star_reports_to_summary(tmp_path):
             {
                 "bundle_id": "bundle_ebr_instance_001",
                 "valley": "K_valley",
-                "subspace_group_candidate": "C3_like",
+                "subspace_group_candidate": "P3",
                 "workflow_path": "direct_qcut",
                 "expected_hsps": ["GammaM", "KM"],
                 "optional_hsps": ["MM"],
@@ -405,7 +405,10 @@ def test_write_analysis_outputs_plumbs_hsp_star_reports_to_summary(tmp_path):
     assert payload["hsp_star_conjugation"] == hsp_star_conjugation
     assert payload["hsp_star_derived_characters"] == hsp_star_derived
     assert payload["irrep_workflow_decisions"] == irrep_workflow_decisions
-    assert payload["valley_irrep_matching"] == valley_irrep_matching
+    assert "C3_like" not in json.dumps(payload)
+    assert payload["valley_irrep_matching"]["by_kpoint"]["Gamma"]["K_valley"]["1"][
+        "subspace_group_candidate"
+    ] == "P3"
     assert payload["valley_ebr_input_candidates"] == ebr_input_candidates
     assert payload["valley_ebr_problem_instances"] == ebr_problem_instances
     assert payload["valley_ebr_export_bundle"] == ebr_export_bundle
@@ -938,7 +941,7 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
                         "candidate_space_group_symbol": "P4",
                     },
                     "subspace_group": {
-                        "subspace_group_candidate": "C2_like",
+                        "subspace_group_candidate": "P4",
                         "operation_orders": {"0": 1, "4": 2},
                     },
                     "valley_preserving_character_diagnostics": {
@@ -1090,22 +1093,17 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     rep_recs = vpr.get("representation_records", [])
     assert len(rep_recs) == 1
     assert rep_recs[0]["subspace_space_group"]["candidate_space_group_symbol"] == "P4"
-    assert rep_recs[0]["legacy_subspace_group_candidate"] == "C2_like"
     assert rep_recs[0]["irrep_matching"]["matching_strategy"] == "bilbao_restricted_character"
-    # Generic public output must not promote Cn-like as physical group identity.
-    for field in ("valley_irrep_matching",):
-        if field in summary:
-            raw = json.dumps(summary[field])
-            for cn in ("C2_like", "C3_like", "C4_like"):
-                assert f'"subspace_group_candidate": "{cn}"' not in raw, (
-                    f"{cn} must not appear as physical group identity in {field}"
-                )
+    # Public summary must not emit deprecated Cn-like provenance.
+    raw_summary = json.dumps(summary)
+    assert "legacy_subspace_group_candidate" not in raw_summary
+    for cn in ("C2_like", "C3_like", "C4_like"):
+        assert cn not in raw_summary
     assert summary["valley_ebr_input_candidates"]["candidate_count"] == 2
     assert summary["valley_ebr_problem_instances"]["instance_count"] == 1
     inst = summary["valley_ebr_problem_instances"]["instances"][0]
     assert inst["ready_for_ebr_decomposition"] is True
     assert inst["subspace_group_candidate"] == "P4"
-    assert inst["legacy_subspace_group_candidate"] == "C2_like"
     assert inst["expected_hsps"] == ["GammaM"]
     assert summary["valley_ebr_export_bundle"]["bundle_count"] == 1
     b = summary["valley_ebr_export_bundle"]["bundles"][0]

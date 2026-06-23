@@ -123,7 +123,7 @@ def build_summary_payload(
         payload["folded_center_report"] = folded_center_payload
     if sampled_k_coverage is not None:
         payload["sampled_k_coverage"] = sampled_k_coverage
-    return payload
+    return _strip_summary_deprecated_fields(payload)
 
 
 def render_summary_text(summary: dict[str, Any]) -> str:
@@ -609,6 +609,23 @@ def write_summary_json(path: str | Path, summary: dict[str, Any]) -> Path:
     out = Path(path)
     out.write_text(json.dumps(summary, indent=2, default=_json_default), encoding="utf-8")
     return out
+
+
+def _strip_summary_deprecated_fields(value: Any) -> Any:
+    """Remove deprecated legacy Cn-like provenance from summary payloads."""
+    deprecated_keys = {
+        "legacy_subspace_group_candidate",
+        "legacy_subspace_group_candidate_counts",
+    }
+    if isinstance(value, dict):
+        return {
+            key: _strip_summary_deprecated_fields(item)
+            for key, item in value.items()
+            if key not in deprecated_keys
+        }
+    if isinstance(value, list):
+        return [_strip_summary_deprecated_fields(item) for item in value]
+    return value
 
 
 def _projection_rows(subspace_payload: dict[str, Any]) -> list[dict[str, Any]]:
