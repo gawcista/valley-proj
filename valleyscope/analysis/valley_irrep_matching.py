@@ -75,9 +75,9 @@ def _match_phases_to_table(
 
 
 def _candidate_matches_order(candidate: str | None, operation_order: int) -> bool:
-    if candidate in ("C3_like", "P3"):
+    if candidate == "P3":
         return operation_order == 3
-    if candidate in ("C2_like", "P2"):
+    if candidate == "P2":
         return operation_order == 2
     return False
 

@@ -362,7 +362,7 @@ def _build_representation_records(
                                 if isinstance(op_result, dict)
                                 and op_result.get("matching_strategy")
                             ),
-                            "legacy_phase_table",
+                            None,
                         )
                     ),
                 }

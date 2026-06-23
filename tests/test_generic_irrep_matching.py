@@ -254,7 +254,7 @@ def test_generic_matching_via_build_report():
                         },
                     },
                     "subspace_group": {
-                        "subspace_group_candidate": "C3_like",
+                        "subspace_group_candidate": "P3",
                         "operation_orders": {"1": 1, "2": 3, "3": 3},
                     },
                 }],
@@ -328,7 +328,7 @@ def test_incomplete_source_map_diagnostic():
                         },
                     },
                     "subspace_group": {
-                        "subspace_group_candidate": "C3_like",
+                        "subspace_group_candidate": "P3",
                         "operation_orders": {"1": 1, "2": 3},
                     },
                 }],
@@ -550,7 +550,7 @@ def test_legacy_phase_table_still_works():
     result = match_valley_irrep(
         eigenphases=[0.5],
         operation_order=3,
-        subspace_group_candidate="C3_like",
+        subspace_group_candidate="P3",
         readiness_level="trusted",
     )
     assert result["matching_status"] == "matched"
@@ -638,7 +638,7 @@ def test_generic_mode_suppresses_legacy_for_covered_rows():
                             },
                         },
                         "subspace_group": {
-                            "subspace_group_candidate": "C3_like",
+                            "subspace_group_candidate": "P3",
                             "operation_orders": {"1": 1, "2": 3},
                         },
                     },
@@ -653,7 +653,7 @@ def test_generic_mode_suppresses_legacy_for_covered_rows():
                             },
                         },
                         "subspace_group": {
-                            "subspace_group_candidate": "C3_like",
+                            "subspace_group_candidate": "P3",
                             "operation_orders": {"1": 1, "2": 3},
                         },
                     },
@@ -709,7 +709,7 @@ def test_legacy_only_mode_preserves_by_kpoint():
                         },
                     },
                     "subspace_group": {
-                        "subspace_group_candidate": "C2_like",
+                        "subspace_group_candidate": "P2",
                         "operation_orders": {"4": 2},
                     },
                 }],
@@ -757,7 +757,7 @@ def test_representation_record_reflects_generic_blocked():
                             "status": "candidate",
                         },
                         "subspace_group": {
-                            "subspace_group_candidate": "C2_like",
+                            "subspace_group_candidate": "P2",
                         },
                     }],
                 }
@@ -825,7 +825,7 @@ def test_source_payload_blocked_no_legacy_fallback():
                         },
                     },
                     "subspace_group": {
-                        "subspace_group_candidate": "C2_like",
+                        "subspace_group_candidate": "P2",
                         "operation_orders": {"4": 2},
                     },
                 }],
@@ -896,7 +896,7 @@ def test_source_op_map_without_chars_blocked_no_legacy():
                         },
                     },
                     "subspace_group": {
-                        "subspace_group_candidate": "C3_like",
+                        "subspace_group_candidate": "P3",
                         "operation_orders": {"1": 1, "2": 3},
                     },
                 }],
@@ -942,7 +942,7 @@ def test_ebr_candidates_generic_mode_no_legacy_promotion():
                         "matching_status": "matched",
                         "matched_irrep": "C3_spinor_phase_+1/2",
                         "operation_order": 3,
-                        "subspace_group_candidate": "C3_like",
+                        "subspace_group_candidate": "P3",
                         "eigenphases": [0.5],
                         "readiness_level": "trusted",
                     },
@@ -981,7 +981,7 @@ def test_ebr_candidates_legacy_mode_promotes():
                         "matching_status": "matched",
                         "matched_irrep": "C3_spinor_phase_+1/2",
                         "operation_order": 3,
-                        "subspace_group_candidate": "C3_like",
+                        "subspace_group_candidate": "P3",
                         "eigenphases": [0.5],
                         "readiness_level": "trusted",
                     },
@@ -1027,7 +1027,7 @@ def test_representation_record_no_legacy_fallback_in_generic_mode():
                             "status": "candidate",
                         },
                         "subspace_group": {
-                            "subspace_group_candidate": "C2_like",
+                            "subspace_group_candidate": "P2",
                         },
                     }],
                 }
@@ -1052,7 +1052,7 @@ def test_representation_record_no_legacy_fallback_in_generic_mode():
                             "matching_status": "matched",
                             "matched_irrep": "C2_spinor_phase_+1/4",
                             "operation_order": 2,
-                            "subspace_group_candidate": "C2_like",
+                            "subspace_group_candidate": "P2",
                             "eigenphases": [0.25],
                             "readiness_level": "trusted",
                             "matching_strategy": "legacy_phase_table",
@@ -1065,7 +1065,7 @@ def test_representation_record_no_legacy_fallback_in_generic_mode():
     rec = report["representation_records"][0]
     # In generic mode, no legacy fallback — irrep_matching is None.
     assert rec["irrep_matching"] is None
-    assert rec["legacy_subspace_group_candidate"] == "C2_like"
+    assert rec["legacy_subspace_group_candidate"] == "P2"
 
 
 def test_summary_text_generic_first_legacy_explicit():
