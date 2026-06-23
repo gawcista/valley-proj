@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "description": "Explicit Bilbao/irreptables SG143 P3 label to legacy C3 phase-table label basis map for the reviewed P3_GammaM_KM_spinful_v1 (alias P321_C3_like_GammaM_KM_spinful_v1) reduced EBR table",
+  "description": "Explicit Bilbao/irreptables SG143 P3 label to legacy C3 phase-table label basis map for the reviewed P3_GammaM_KM_spinful_v1 (using the reviewed P3 table) reduced EBR table",
   "table_name": "P3_GammaM_KM_reviewed_v1",
   "subspace_group_candidate": "P3",
   "source_space_group_number": 143,

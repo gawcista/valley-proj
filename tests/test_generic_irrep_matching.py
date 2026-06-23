@@ -295,7 +295,7 @@ def test_missing_source_payload_falls_back_to_legacy():
         symmetry_adapted_valley_report=None,
     )
     assert "generic_matches_by_kpoint" not in report
-    assert report["legacy_tables_implemented"] == ["spinful_C3", "spinful_C2"]
+    
 
 
 def test_incomplete_source_map_diagnostic():
@@ -725,8 +725,8 @@ def test_no_workflow_decisions_returns_matching_mode():
         symmetry_adapted_valley_report=None,
     )
     assert report["status"] == "not_evaluated"
-    assert report["matching_mode"] in ("generic", "legacy")
-    assert report["legacy_tables_implemented"] == ["spinful_C3", "spinful_C2"]
+    assert report["matching_mode"] in ("generic", "not_evaluated")
+    
     assert "by_kpoint" in report
     assert report["by_kpoint"] == {}
 

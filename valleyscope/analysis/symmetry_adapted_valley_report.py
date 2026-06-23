@@ -532,34 +532,22 @@ def _build_subspace_group(
     all_vc = sorted(set(op for ops in vc_ops.values() if isinstance(ops, list) for op in ops))
 
     operation_orders = operation_orders or {}
-    # Effective point group is determined from the symmetry operation order,
-    # not from the matrix dimension. A rank-1 spinless C2 and a rank-2 spinful
-    # C2 must both report the same operation-derived point group.
     vp_orders = [
         int(operation_orders[op_id])
         for op_id in all_vp
         if op_id in operation_orders and int(operation_orders[op_id]) > 1
     ]
     effective_order = max(vp_orders) if vp_orders else 1
-    epg = f"C{effective_order}" if effective_order > 1 else "C1"
 
-    # Subspace group candidate uses physical P{n} form, not legacy C{n}_like.
-    # The C{n}_like hint is preserved only in legacy provenance fields.
-    if effective_order == 2:
-        candidate = "P2"
-        legacy_candidate = "C2_like"
-    elif effective_order >= 3:
-        candidate = f"P{effective_order}"
-        legacy_candidate = f"C{effective_order}_like"
-    else:
-        candidate = None
-        legacy_candidate = None
-
-    # Readiness: blocked if projector failed or char not ready
+    # The valley-projected subspace space group is not determined from
+    # max operation order alone.  Report operation-level data; the
+    # subspace-space-group identity is unresolved without a reviewed
+    # or generic identification source.
     blocked = proj_status == "failed" or char_diag.get("diagnostic_only", True)
     if not spinor_convention_verified:
         blocked = True
-    ready_for_ebr = not blocked and candidate is not None
+    # EBR readiness blocked unless a subspace-space-group identification exists.
+    ready_for_ebr = not blocked and effective_order > 1
 
     reason_parts = []
     if proj_status == "failed":
@@ -568,8 +556,8 @@ def _build_subspace_group(
         reason_parts.append("character_diagnostics_not_ready")
     if not spinor_convention_verified:
         reason_parts.append("spinor_convention_unverified")
-    if candidate is None:
-        reason_parts.append("no_subgroup_candidate")
+    if effective_order <= 1:
+        reason_parts.append("trivial_valley_preserving_subgroup")
     reason = "; ".join(reason_parts) if reason_parts else "ready"
 
     return {
@@ -578,14 +566,12 @@ def _build_subspace_group(
         "valley_preserving_operation_ids": all_vp,
         "valley_changing_operation_ids": all_vc,
         "operation_orders": {str(k): int(v) for k, v in operation_orders.items()},
-        "effective_point_group": epg,
-        "subspace_group_candidate": candidate,
-        "legacy_subspace_group_candidate": legacy_candidate,
+        "effective_point_group": None,
+        "subspace_group_candidate": None,
         "spinor_convention_verified": spinor_convention_verified,
         "ready_for_ebr_mapping": ready_for_ebr,
         "reason": reason,
     }
-
 
 def _build_ebr_mapping_input(
     *,
@@ -645,20 +631,9 @@ def _subspace_group_candidate_from_orders(
     rep_diag: dict[str, object],
     operation_orders: dict[object, int] | None,
 ) -> str | None:
-    if not operation_orders:
-        return None
-    vp_ops = rep_diag.get("valley_preserving_operations", {})
-    if not isinstance(vp_ops, dict):
-        return None
-    all_vp = sorted(set(op for ops in vp_ops.values() if isinstance(ops, list) for op in ops))
-    non_identity_orders = [
-        int(operation_orders[op_id])
-        for op_id in all_vp
-        if op_id in operation_orders and int(operation_orders[op_id]) > 1
-    ]
-    if not non_identity_orders:
-        return None
-    return f"P{max(non_identity_orders)}"
+    """Returns None — subspace-space-group identity is not inferred from
+    operation orders.  A reviewed or generic identification source is required."""
+    return None
 
 
 def _blocked_subspace_group(

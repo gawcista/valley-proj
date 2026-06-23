@@ -124,7 +124,6 @@ Top-level fields within `valley_projected_representations`:
 | `representation_records` | list[object] | Per-`(kpoint, valley)` grouped records |
 | `grouped_record_count` | int | Number of grouped records |
 | `subspace_space_group_counts` | object | Counts by `candidate_space_group_symbol` |
-| `legacy_subspace_group_candidate_counts` | object | Counts by legacy `C{n}_like` label |
 | `trusted_representation_count` | int | Count of trusted rows |
 | `blocked_representation_count` | int | Count of blocked rows |
 | `diagnostic_only_count` | int | Count of diagnostic-only rows |
@@ -162,7 +161,7 @@ Each `representation_records` entry:
 | `blocking_reasons` | list[string] | Blocking reasons for the grouped record |
 | `irrep_matching` | object\|null | Irrep matching status (when available) |
 | `irrep_matching.matching_status` | string | `"matched"`, `"incomplete"`, `"not_matched"` |
-| `irrep_matching.matching_strategy` | string | `"bilbao_restricted_character"` (generic path) or `"legacy_phase_table"` (legacy fallback; debug/provenance only, not a production irrep identity) |
+| `irrep_matching.matching_strategy` | string | `"bilbao_restricted_character"` (generic restricted-character path) |
 | `irrep_matching.irrep_multiplicities` | object | Irrep label → integer multiplicity |
 | `legacy_subspace_group_candidate` | string | **Deprecated debug/provenance field.** Legacy `C{n}_like` hint for compatibility only. It is omitted from `valley_summary` / export outputs and must not be used as a physical subspace identity. Use `subspace_space_group.candidate_space_group_symbol`. |
 
@@ -170,7 +169,7 @@ The `representation_records` are the primary group-agnostic irrep input:
 the physical identifier is `subspace_space_group.candidate_space_group_symbol`,
 not `legacy_subspace_group_candidate`.  Irrep matching data reflects the
 full `G_k^(a)` restricted-character matching where available; legacy
-phase-table results are included as `legacy_phase_table` strategy only
+matching results use the generic restricted-character strategy
 when the generic Bilbao path is not active.
 
 ---
@@ -368,7 +367,7 @@ Each `valley_irrep_records` entry:
 | `source_bundle_id` | string | Source export bundle ID |
 | `source_instance_id` | string | Source EBR problem instance ID |
 | `irrep_multiplicity` | int | Optional; multiplicity from generic restricted-character matching |
-| `matching_strategy` | string | Optional; `"bilbao_restricted_character"` or `"legacy_phase_table"` |
+| `matching_strategy` | string | Optional; `"bilbao_restricted_character"` |
 | `subspace_space_group` | object | Optional; physical subspace space group provenance |
 | `legacy_subspace_group_candidate` | string | Optional; legacy C2_like/C3_like hint |
 | `valley_preserving_operation_ids` | list[int] | Optional; operation IDs in G_k^(a) |

@@ -1,10 +1,9 @@
-"""[PROTOTYPE_LEGACY] Minimal valley-preserving character-table matching for C3 and C2 spinful irreps.
+"""Valley-preserving irrep matching report builder.
 
-Matches already-computed valley-preserving eigenphases to named irrep labels
-using validated package-data phase tables.  Only ``trusted`` readiness enables
-matching; ``usable_with_caution`` produces ``diagnostic_only`` output.
-
-Non-goals: no reduced EBR, no compatibility relations, no full induced rep logic.
+Builds the irrep matching report from workflow decisions, symmetry-adapted
+valley analysis, and optional generic Bilbao/irreptables restricted-character
+source data.  The generic restricted-character path is the production matching
+strategy.  No legacy C2/C3 phase-table matching is available.
 """
 
 from __future__ import annotations
@@ -46,19 +45,9 @@ def build_valley_irrep_matching_report(
     Cross-references the workflow decision report with character diagnostics
     from the symmetry-adapted valley analysis.
 
-    Strategy boundary:
-
-    - **Generic mode** (``source_irrep_characters``,
-      ``source_irrep_characters_flattened``, ``source_operation_maps``, or
-      ``source_payload_blocked_rows`` supplied): uses the generic
-      ``match_restricted_characters`` strategy.
-      Legacy ``by_kpoint`` phase-table entries are suppressed for any
-      ``(kpoint, valley)`` that has generic coverage (including blocked rows),
-      because the generic source is the authoritative matching path.
-
-    - **Legacy mode** (no generic source attempted): uses the legacy
-      C2/C3 phase-table fallback exclusively.  ``generic_matches_by_kpoint``
-      is absent.
+    When generic source data is supplied, uses the generic
+    ``match_restricted_characters`` strategy.  When no generic source is
+    available, returns ``not_evaluated`` with no legacy phase-table fallback.
     """
     _generic_mode = (
         source_irrep_characters is not None
@@ -70,10 +59,8 @@ def build_valley_irrep_matching_report(
     if irrep_workflow_decisions is None:
         return {
             "status": "not_evaluated",
-            "matching_mode": "generic" if _generic_mode else "legacy",
+            "matching_mode": "generic" if _generic_mode else "not_evaluated",
             "matching_statuses": list(MATCHING_STATUSES),
-            "tables_implemented": ["spinful_C3", "spinful_C2"],
-            "legacy_tables_implemented": ["spinful_C3", "spinful_C2"],
             "by_kpoint": {},
         }
 
@@ -479,8 +466,6 @@ def build_valley_irrep_matching_report(
         "status": "ok" if (by_kpoint or generic_matches) else "not_evaluated",
         "matching_mode": "generic" if _generic_mode else "legacy",
         "matching_statuses": list(MATCHING_STATUSES),
-        "tables_implemented": ["spinful_C3", "spinful_C2"],
-        "legacy_tables_implemented": ["spinful_C3", "spinful_C2"],
         "by_kpoint": by_kpoint,
         **({"generic_matches_by_kpoint": generic_matches}
            if generic_matches else {}),

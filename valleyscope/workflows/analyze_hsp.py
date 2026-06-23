@@ -1767,18 +1767,21 @@ def _build_subspace_space_group_for_valley(
         if op_id in operation_orders and int(operation_orders[op_id]) > 1
     ]
     effective_order = max(non_identity_orders) if non_identity_orders else 1
-    point_group = f"C{effective_order}" if effective_order > 1 else "C1"
-    space_group = f"P{effective_order}" if effective_order > 1 else "P1"
-    status = "candidate" if effective_order > 1 else "trivial"
+    # The valley-projected subspace space group cannot be determined from
+    # the max operation order alone.  Report the operation-level data and
+    # mark the subspace-space-group identity as unresolved pending a
+    # reviewed or generic identification source.
+    status = "unresolved" if effective_order > 1 else "trivial"
     reason = (
-        f"{space_group} candidate from valley-preserving operation order {effective_order}"
+        "subspace-space-group identity is unresolved: no reviewed or generic "
+        "identification source is available for the valley-preserving operation set"
         if effective_order > 1 else
         "only identity preserves this valley in the detected space group"
     )
     return {
         "status": status,
-        "candidate_space_group_symbol": space_group,
-        "candidate_point_group": point_group,
+        "candidate_space_group_symbol": None,
+        "candidate_point_group": None,
         "valley_preserving_operation_ids": preserving_ops,
         "valley_changing_operation_ids": changing_ops,
         "operation_orders": {
