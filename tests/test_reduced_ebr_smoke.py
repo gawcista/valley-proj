@@ -477,7 +477,7 @@ def test_analyze_hsp_uses_reviewed_package_table_by_name(tmp_path):
     raw["output"]["profile"] = "standard"
     raw["analysis"]["reduced_ebr"] = {
         "enabled": True,
-        "table_name": "P321_C3_like_GammaM_KM_spinful_v1",
+        "table_name": "P3_GammaM_KM_reviewed_v1",
     }
     config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
 
@@ -521,14 +521,14 @@ def test_p3_reviewed_table_by_name_e2e():
     manifest = load_reduced_ebr_manifest()
     p3_entry = next(
         entry for entry in manifest["tables"]
-        if entry["name"] == "P3_GammaM_KM_spinful_v1"
+        if entry["name"] == "P3_GammaM_KM_reviewed_v1"
     )
     p3_source = p3_entry["source_reference"].lower()
     assert "sg150" in p3_source
-    assert "restricted to the p3 valley-preserving subgroup" in p3_source
+    assert "valley-preserving p3 subspace reduction" in p3_source
     assert "sg143" not in p3_source
 
-    table = load_reviewed_reduced_ebr_table("P3_GammaM_KM_spinful_v1")
+    table = load_reviewed_reduced_ebr_table("P3_GammaM_KM_reviewed_v1")
     assert table["subspace_group_candidate"] == "P3"
     assert table["expected_hsps"] == ["GammaM", "KM"]
     assert "provenance" in table
@@ -576,7 +576,7 @@ def test_p3_reviewed_table_by_name_e2e():
 
     # 4. Legacy compatibility: same table loads by legacy name.
     legacy_table = load_reviewed_reduced_ebr_table(
-        "P321_C3_like_GammaM_KM_spinful_v1"
+        "P3_GammaM_KM_reviewed_v1"
     )
     assert legacy_table["subspace_group_candidate"] == "P3"
 
@@ -591,7 +591,7 @@ def test_p3_bilbao_label_bundle_reaches_solver_via_basis_map():
     )
 
     # 1. Load reviewed P3 reduced EBR table.
-    table = load_reviewed_reduced_ebr_table("P3_GammaM_KM_spinful_v1")
+    table = load_reviewed_reduced_ebr_table("P3_GammaM_KM_reviewed_v1")
 
     # 2. Load reviewed Bilbao-to-phase-label basis map.
     basis_map_json = load_reviewed_reduced_ebr_basis_map(
@@ -600,7 +600,7 @@ def test_p3_bilbao_label_bundle_reaches_solver_via_basis_map():
     basis_map = basis_map_json["basis_map"]
     assert basis_map_json["subspace_group_candidate"] == "P3"
     assert basis_map_json["source_space_group_number"] == 143
-    assert basis_map_json["table_name"] == "P3_GammaM_KM_spinful_v1"
+    assert basis_map_json["table_name"] == "P3_GammaM_KM_reviewed_v1"
     assert basis_map["KM:-K6"] == "C3_spinor_phase_+1/6"
     assert basis_map["KM:-K5"] == "C3_spinor_phase_-1/6"
 

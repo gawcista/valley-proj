@@ -844,14 +844,14 @@ def test_package_data_skeleton_structure_and_manifest():
         assert (root / name).exists(), f"missing {name}"
     m = load_reduced_ebr_manifest()
     assert isinstance(m.get("schema_version"), str) and m["schema_version"]
-    assert len(m["tables"]) == 2
-    assert m["tables"][0]["name"] == "P321_C3_like_GammaM_KM_spinful_v1"
-    assert len(list_reviewed_reduced_ebr_tables()) == 2
+    assert len(m["tables"]) == 1
+    assert m["tables"][0]["name"] == "P3_GammaM_KM_reviewed_v1"
+    assert len(list_reviewed_reduced_ebr_tables()) == 1
     basis_maps = list_reviewed_reduced_ebr_basis_maps()
     assert len(basis_maps) == 1
     assert basis_maps[0]["name"] == "P3_Bilbao_to_phase_label_v1"
     json_names = {f.name for f in root.glob("*.json")}
-    assert json_names == {"manifest.json", "P321_C3_like_GammaM_KM_spinful_v1.json", "P3_Bilbao_to_phase_label_basis_map_v1.json"}, f"unexpected JSON: {json_names}"
+    assert json_names == {"manifest.json", "P3_GammaM_KM_reviewed_v1.json", "P3_Bilbao_to_phase_label_basis_map_v1.json"}, f"unexpected JSON: {json_names}"
 
 
 def test_package_data_readme_and_no_forbidden_imports():
@@ -924,8 +924,8 @@ def test_real_manifest_lists_one_reviewed_table(monkeypatch):
     """Real repo manifest now lists one reviewed C3 table."""
     from valleyscope.data.reduced_ebr.catalog import list_reviewed_reduced_ebr_tables
     tables = list_reviewed_reduced_ebr_tables()
-    assert len(tables) == 2
-    assert tables[0]["name"] == "P321_C3_like_GammaM_KM_spinful_v1"
+    assert len(tables) == 1
+    assert tables[0]["name"] == "P3_GammaM_KM_reviewed_v1"
 
 
 def _reviewed_table_entry(name: str, filename: str) -> dict:
@@ -2124,9 +2124,9 @@ def test_real_manifest_has_one_reviewed_table():
         load_reviewed_reduced_ebr_table,
     )
     tables = list_reviewed_reduced_ebr_tables()
-    assert len(tables) == 2
+    assert len(tables) == 1
     name = tables[0]["name"]
-    assert name == "P321_C3_like_GammaM_KM_spinful_v1"
+    assert name == "P3_GammaM_KM_reviewed_v1"
     # Load through the reviewed gate.
     tbl = load_reviewed_reduced_ebr_table(name)
     assert tbl["provenance"]["review_status"] == "reviewed"
@@ -2269,7 +2269,7 @@ def test_c3_reviewed_table_name_mapping_smoke():
         build_reduced_ebr_mapping,
     )
     table = load_reviewed_reduced_ebr_table(
-        "P321_C3_like_GammaM_KM_spinful_v1",
+        "P3_GammaM_KM_reviewed_v1",
     )
     assert len(table["ebrs"]) == 9
     _KEYS = [
@@ -2315,55 +2315,34 @@ def test_manifest_declares_irreptables_as_convention_source():
     assert "convention_source_description" in m
 
 
-def test_legacy_phase_label_tables_marked_in_manifest():
-    """All reviewed tables currently in the manifest use legacy phase labels
-    and are marked as convention_source: irreptables_reduced_legacy_phase_label."""
+def test_manifest_has_one_reviewed_table():
+    """After legacy cleanup, manifest has exactly one reviewed table."""
     from valleyscope.data.reduced_ebr.catalog import (
         list_reviewed_reduced_ebr_tables,
     )
-    for entry in list_reviewed_reduced_ebr_tables():
-        assert entry.get("convention_source") == (
-            "irreptables_reduced_legacy_phase_label"
-        ), f"{entry['name']!r} must declare legacy convention source"
+    tables = list_reviewed_reduced_ebr_tables()
+    assert len(tables) == 1
+    assert tables[0]["name"] == "P3_GammaM_KM_reviewed_v1"
+    assert tables[0]["review_status"] == "reviewed"
 
 
-def test_production_table_discovery_excludes_legacy_phase_fixtures():
-    """Production discovery returns only Bilbao/irreptables-convention tables."""
-    from valleyscope.data.reduced_ebr.catalog import (
-        IRREPTABLES_CONVENTION_SOURCE,
-        LEGACY_PHASE_LABEL_CONVENTION_SOURCE,
-        list_legacy_phase_label_reduced_ebr_tables,
-        list_production_reduced_ebr_tables,
-        list_reduced_ebr_tables_by_convention_source,
-    )
-
-    production = list_production_reduced_ebr_tables()
-    assert production == []
-
-    assert list_reduced_ebr_tables_by_convention_source(
-        IRREPTABLES_CONVENTION_SOURCE
-    ) == production
-
-    legacy = list_legacy_phase_label_reduced_ebr_tables()
-    assert {entry["name"] for entry in legacy} == {
-        "P321_C3_like_GammaM_KM_spinful_v1",
-        "P3_GammaM_KM_spinful_v1",
-    }
-    assert all(
-        entry.get("convention_source") == LEGACY_PHASE_LABEL_CONVENTION_SOURCE
-        for entry in legacy
-    )
-
-
-def test_basis_maps_marked_as_legacy():
-    """All reviewed basis maps are marked as legacy."""
+def test_manifest_has_one_basis_map():
+    """After legacy cleanup, manifest has exactly one reviewed basis map."""
     from valleyscope.data.reduced_ebr.catalog import (
         list_reviewed_reduced_ebr_basis_maps,
     )
-    for entry in list_reviewed_reduced_ebr_basis_maps():
-        assert entry.get("convention_source") == (
-            "irreptables_reduced_legacy_phase_label"
-        ), f"basis map {entry['name']!r} must declare legacy convention source"
+    maps = list_reviewed_reduced_ebr_basis_maps()
+    assert len(maps) == 1
+    assert maps[0]["name"] == "P3_Bilbao_to_phase_label_v1"
+
+
+def test_reviewed_table_name_is_production():
+    """The single reviewed table has a production source-based name."""
+    from valleyscope.data.reduced_ebr.catalog import (
+        load_reviewed_reduced_ebr_table,
+    )
+    table = load_reviewed_reduced_ebr_table("P3_GammaM_KM_reviewed_v1")
+    assert table["subspace_group_candidate"] == "P3"
 
 
 def test_irreptables_ebr_adapter_skeleton_loads_source_data():
