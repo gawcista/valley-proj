@@ -325,9 +325,9 @@ def _build_representation_records(
         # In generic mode, only the generic restricted-character path is
         # authoritative; legacy phase-table matches are never attached.
         matching_mode = (
-            str(valley_irrep_matching.get("matching_mode", "legacy"))
+            str(valley_irrep_matching.get("matching_mode", "not_evaluated"))
             if isinstance(valley_irrep_matching, dict)
-            else "legacy"
+            else "not_evaluated"
         )
         irrep_matching: dict[str, Any] | None = None
         gm = generic_by_kp.get(kpoint, {}).get(valley)

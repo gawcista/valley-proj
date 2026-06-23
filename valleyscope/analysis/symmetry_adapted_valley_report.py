@@ -546,8 +546,9 @@ def _build_subspace_group(
     blocked = proj_status == "failed" or char_diag.get("diagnostic_only", True)
     if not spinor_convention_verified:
         blocked = True
-    # EBR readiness blocked unless a subspace-space-group identification exists.
-    ready_for_ebr = not blocked and effective_order > 1
+    # Subspace-space-group identity is unresolved — EBR readiness blocked.
+    blocked = True
+    ready_for_ebr = False
 
     reason_parts = []
     if proj_status == "failed":
@@ -556,12 +557,11 @@ def _build_subspace_group(
         reason_parts.append("character_diagnostics_not_ready")
     if not spinor_convention_verified:
         reason_parts.append("spinor_convention_unverified")
-    if effective_order <= 1:
-        reason_parts.append("trivial_valley_preserving_subgroup")
-    reason = "; ".join(reason_parts) if reason_parts else "ready"
+    reason_parts.append("subspace_space_group_unresolved")
+    reason = "; ".join(reason_parts) if reason_parts else "subspace_space_group_unresolved"
 
     return {
-        "status": "candidate" if ready_for_ebr else "blocked",
+        "status": "blocked",
         "hsp_little_group_operation_ids": all_vp + all_vc,
         "valley_preserving_operation_ids": all_vp,
         "valley_changing_operation_ids": all_vc,

@@ -1498,7 +1498,7 @@ def _render_valley_irrep_matching(
 ) -> None:
     _section(lines, "Valley irrep matching")
     lines.append(f"status: {report.get('status', 'not_evaluated')}")
-    matching_mode = str(report.get("matching_mode", "legacy"))
+    matching_mode = str(report.get("matching_mode", "not_evaluated"))
     lines.append(f"mode: {matching_mode}")
     legacy_tables = report.get("legacy_tables_implemented")
     if not isinstance(legacy_tables, list):

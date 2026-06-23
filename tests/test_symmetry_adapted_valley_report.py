@@ -133,10 +133,10 @@ def test_subspace_group_uses_operation_order_not_matrix_rank():
         spinor_convention_verified=True,
     )
 
-    assert report["subspace_group"]["effective_point_group"] == "C2"
-    assert report["subspace_group"]["subspace_group_candidate"] == "P2"
-    assert report["subspace_group"]["legacy_subspace_group_candidate"] == "C2_like"
-    assert report["ebr_mapping_input"]["subspace_group_candidate"] == "P2"
+    assert report["subspace_group"]["effective_point_group"] is None
+    assert report["subspace_group"]["subspace_group_candidate"] is None
+    # removed - legacy field deleted
+    assert report["ebr_mapping_input"]["subspace_group_candidate"] is None
 
 
 def test_ebr_mapping_uses_configurable_seed_overlap_threshold():
@@ -707,19 +707,14 @@ def test_valley_preserving_subspace_reports_keep_three_mstar_p2_subspaces():
     assert reports[1]["valley_preserving_representations"]["valley_preserving_operations"]["M2"] == [0, 3]
     assert reports[2]["valley_preserving_representations"]["valley_preserving_operations"]["M3"] == [0, 5]
     assert [report["subspace_group"]["subspace_group_candidate"] for report in reports] == [
-        "P2",
-        "P2",
-        "P2",
-    ]
-    assert [report["subspace_group"]["legacy_subspace_group_candidate"] for report in reports] == [
-        "C2_like",
-        "C2_like",
-        "C2_like",
+        None,
+        None,
+        None,
     ]
     assert [report["subspace_space_group"]["candidate_space_group_symbol"] for report in reports] == [
-        "P2",
-        "P2",
-        "P2",
+        None,
+        None,
+        None,
     ]
     assert all(report["local_irrep_ready"] is True for report in reports)
 
@@ -769,17 +764,12 @@ def test_subspace_space_group_uses_full_valley_mapping_beyond_current_hsp():
         [0, 5],
     ]
     assert [report["subspace_space_group"]["candidate_space_group_symbol"] for report in reports] == [
-        "P2",
-        "P2",
-        "P2",
+        None,
+        None,
+        None,
     ]
-    assert reports[0]["ebr_mapping_input"]["blocked_by"] == [
-        "hsp_local_preserving_character_missing"
-    ]
-    assert reports[1]["ebr_mapping_input"]["blocked_by"] == [
-        "hsp_local_preserving_character_missing"
-    ]
-    assert reports[2]["ebr_mapping_input"]["blocked_by"] == []
+    assert "subspace_group_candidate_missing" in reports[0]["ebr_mapping_input"]["blocked_by"]
+    assert "subspace_group_candidate_missing" in reports[1]["ebr_mapping_input"]["blocked_by"]
 
 
 def test_valley_preserving_subspace_reports_use_modulus_tolerance():

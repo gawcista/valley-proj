@@ -128,7 +128,7 @@ def build_ebr_input_candidates(
     # Legacy phase-table matching: only active in true legacy mode.
     # In generic mode, legacy by_kpoint rows are never promoted to EBR
     # candidates; generic_matches_by_kpoint is the sole authoritative source.
-    matching_mode = str(valley_irrep_matching.get("matching_mode", "legacy"))
+    matching_mode = str(valley_irrep_matching.get("matching_mode", "not_evaluated"))
 
     if matching_mode != "generic":
         _collect_legacy_candidates(

@@ -858,10 +858,10 @@ def test_package_data_readme_and_no_forbidden_imports():
     """README documents legacy fixture status; core files avoid forbidden imports."""
     from valleyscope.data.reduced_ebr.catalog import package_data_root
     readme = (package_data_root() / "README.md").read_text(encoding="utf-8").lower()
-    assert "two manifest entries ship one reviewed legacy validation fixture" in readme
+    assert "single reviewed p3 reduced table" in readme
     assert "production convention source" in readme
     assert "bilbao/irreptables" in readme
-    assert "p321_c3_like_gammam_km_spinful_v1" in readme
+    assert "p3_gammam_km_reviewed_v1" in readme
     assert "no reviewed tables are currently shipped" not in readme
     assert "list_production_reduced_ebr_tables" in readme
     assert "load_reviewed_reduced_ebr_table" in readme

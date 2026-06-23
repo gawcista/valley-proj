@@ -464,7 +464,7 @@ def build_valley_irrep_matching_report(
 
     return {
         "status": "ok" if (by_kpoint or generic_matches) else "not_evaluated",
-        "matching_mode": "generic" if _generic_mode else "legacy",
+        "matching_mode": "generic" if _generic_mode else "not_evaluated",
         "matching_statuses": list(MATCHING_STATUSES),
         "by_kpoint": by_kpoint,
         **({"generic_matches_by_kpoint": generic_matches}
