@@ -534,7 +534,7 @@ def _build_subspace_group(
     operation_orders = operation_orders or {}
     # Effective point group is determined from the symmetry operation order,
     # not from the matrix dimension. A rank-1 spinless C2 and a rank-2 spinful
-    # C2 must both report C2-like.
+    # C2 must both report the same operation-derived point group.
     vp_orders = [
         int(operation_orders[op_id])
         for op_id in all_vp
@@ -543,14 +543,17 @@ def _build_subspace_group(
     effective_order = max(vp_orders) if vp_orders else 1
     epg = f"C{effective_order}" if effective_order > 1 else "C1"
 
-    # Subspace group candidate — uses physical P{n} form, not legacy C{n}_like.
+    # Subspace group candidate uses physical P{n} form, not legacy C{n}_like.
     # The C{n}_like hint is preserved only in legacy provenance fields.
     if effective_order == 2:
         candidate = "P2"
+        legacy_candidate = "C2_like"
     elif effective_order >= 3:
         candidate = f"P{effective_order}"
+        legacy_candidate = f"C{effective_order}_like"
     else:
         candidate = None
+        legacy_candidate = None
 
     # Readiness: blocked if projector failed or char not ready
     blocked = proj_status == "failed" or char_diag.get("diagnostic_only", True)
@@ -577,6 +580,7 @@ def _build_subspace_group(
         "operation_orders": {str(k): int(v) for k, v in operation_orders.items()},
         "effective_point_group": epg,
         "subspace_group_candidate": candidate,
+        "legacy_subspace_group_candidate": legacy_candidate,
         "spinor_convention_verified": spinor_convention_verified,
         "ready_for_ebr_mapping": ready_for_ebr,
         "reason": reason,
@@ -670,6 +674,7 @@ def _blocked_subspace_group(
         "operation_orders": {},
         "effective_point_group": "C1",
         "subspace_group_candidate": None,
+        "legacy_subspace_group_candidate": None,
         "spinor_convention_verified": bool(spinor_convention_verified),
         "ready_for_ebr_mapping": False,
         "reason": reason,

@@ -39,7 +39,8 @@ def test_representation_report_uses_subspace_space_group_as_primary():
                                 "status": "candidate",
                             },
                             "subspace_group": {
-                                "subspace_group_candidate": "C2_like",
+                                "subspace_group_candidate": "P2",
+                                "legacy_subspace_group_candidate": "C2_like",
                             },
                         }
                     ],

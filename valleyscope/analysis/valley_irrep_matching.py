@@ -791,8 +791,8 @@ def _generic_group_identity(
 
     In generic mode, ``subspace_group_candidate`` should use the physical
     ``candidate_space_group_symbol`` from ``subspace_space_group`` when
-    available, falling back to the legacy ``subspace_group_candidate``
-    only when no physical symbol exists.
+    available, falling back to ``subspace_group_candidate`` only when no
+    physical symbol exists.
     """
     if isinstance(ssg, Mapping):
         physical = ssg.get("candidate_space_group_symbol")
@@ -808,6 +808,9 @@ def _generic_group_identity(
 def _legacy_group_identity(sg: object) -> str | None:
     if not isinstance(sg, Mapping):
         return None
+    explicit = sg.get("legacy_subspace_group_candidate")
+    if explicit and isinstance(explicit, str):
+        return str(explicit)
     legacy = sg.get("subspace_group_candidate")
     if legacy and isinstance(legacy, str):
         return str(legacy)

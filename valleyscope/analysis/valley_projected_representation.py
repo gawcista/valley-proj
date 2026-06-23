@@ -95,6 +95,10 @@ def build_valley_projected_representation_report(
             # Build representation record.
             diag_only = bool(row.get("diagnostic_only", False))
             topology_ready = bool(row.get("topology_input_ready", False))
+            legacy_sgc = (
+                subspace_group_data.get("legacy_subspace_group_candidate")
+                or subspace_group_data.get("subspace_group_candidate")
+            )
             rec: dict[str, Any] = {
                 "kpoint": kp,
                 "valley": valley,
@@ -127,9 +131,7 @@ def build_valley_projected_representation_report(
                 "root_deviation": row.get("root_deviation"),
                 "basis": row.get("basis", ""),
                 "blocking_reasons": _blocking_reasons(row, wf_data, diag_only),
-                "legacy_subspace_group_candidate": subspace_group_data.get(
-                    "subspace_group_candidate",
-                ),
+                "legacy_subspace_group_candidate": legacy_sgc,
             }
             rows.append(rec)
 
@@ -140,9 +142,8 @@ def build_valley_projected_representation_report(
                 subspace_space_group_counts[key] = (
                     subspace_space_group_counts.get(key, 0) + 1
                 )
-            sgc = subspace_group_data.get("subspace_group_candidate", "")
-            if sgc:
-                key = str(sgc)
+            if legacy_sgc:
+                key = str(legacy_sgc)
                 legacy_subspace_counts[key] = legacy_subspace_counts.get(key, 0) + 1
             if diag_only:
                 diagnostic_count += 1
