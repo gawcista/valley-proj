@@ -472,8 +472,8 @@ def test_schema_md_labels_use_physical_subspace_space_group():
     assert "C3_like" in schema_text
     assert "C2_like" in schema_text
     # Must not use C{n}_like as subspace_group_candidate examples anymore.
-    assert '"subspace_group_candidate": "P3"' not in schema_text
-    assert '"subspace_group_candidate": "P2"' not in schema_text
+    assert '"subspace_group_candidate": "C3_like"' not in schema_text
+    assert '"subspace_group_candidate": "C2_like"' not in schema_text
 
 def test_public_docs_do_not_advertise_static_package_selector():
     """Current public docs must not expose static package-data EBR selectors."""

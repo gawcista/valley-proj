@@ -557,7 +557,7 @@ def test_irrep_records_preserve_generic_fields():
                     "irrep_multiplicity": 2,
                     "matching_strategy": "bilbao_restricted_character",
                     "subspace_space_group": {"candidate_space_group_symbol": "P3"},
-                    "legacy_subspace_group_candidate": "P3",
+                    "legacy_subspace_group_candidate": "C3_like",
                     "valley_preserving_operation_ids": [0, 2, 3],
                     "source_operation_map": {0: 1, 2: 2, 3: 3},
                 }],
@@ -633,7 +633,7 @@ def test_database_index_preserves_generic_irrep_fields_with_run_provenance():
             "irrep_multiplicity": 2,
             "matching_strategy": "bilbao_restricted_character",
             "subspace_space_group": {"candidate_space_group_symbol": "P3"},
-            "legacy_subspace_group_candidate": "P3",
+            "legacy_subspace_group_candidate": "C3_like",
             "valley_preserving_operation_ids": [0, 2, 3],
             "source_operation_map": {0: 1, 2: 2, 3: 3},
         }],
@@ -658,6 +658,6 @@ def test_database_index_preserves_generic_irrep_fields_with_run_provenance():
     assert ir["irrep_multiplicity"] == 2
     assert ir["matching_strategy"] == "bilbao_restricted_character"
     assert ir["subspace_space_group"] == {"candidate_space_group_symbol": "P3"}
-    assert ir["legacy_subspace_group_candidate"] == "P3"
+    assert ir["legacy_subspace_group_candidate"] == "C3_like"
     assert ir["valley_preserving_operation_ids"] == [0, 2, 3]
     assert ir["source_operation_map"] == {0: 1, 2: 2, 3: 3}
