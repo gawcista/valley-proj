@@ -14,24 +14,8 @@ Without a table, the interface reports `status: missing_table`.
 External user tables are validated by
 `valleyscope.analysis.reduced_ebr_mapping.load_reduced_ebr_table()` and do
 not need package-data review metadata. They are selected with
-`analysis.reduced_ebr.table_file`. Reviewed package-data tables are a
-stricter path selected with `analysis.reduced_ebr.table_file` and loaded by
-`valleyscope.data.reduced_ebr.reduced_ebr_mapping.load_reduced_ebr_table()`;
-that path requires reviewed metadata in both `manifest.json` and the table's
-top-level `provenance` object, including `review_status: "reviewed"`,
-`reviewer`, `review_date`, `review_method`, `source_reference`, and
-`valleyscope_reduction: "sampled_hsp_valley_preserving"`.
-Reviewed package-data tables also require physical identity provenance in the
-table `provenance` block: `data_source`, `space_group_number`, `spinful`,
-`subspace_group_candidate`, `expected_hsps`, and
-`central_sign_convention`. The `subspace_group_candidate` and `expected_hsps`
-provenance values must match the table top-level fields exactly, so the table
-identity stays tied to the sampled HSP little group and valley-preserving
-subgroup reduction rather than to a material name. Valley-changing operation
-and valley sewing matrix data must remain outside the reduced EBR vector basis
-unless a future reviewed table explicitly defines a different valley mapping
-problem.
-`analysis.reduced_ebr.table_file` (external user-supplied table).
+`analysis.reduced_ebr.table_file` (external user-supplied table). No
+comes from the irreptables runtime reducer.
 
 ## Required Table Keys
 
@@ -183,20 +167,17 @@ valleyscope map-reduced-ebr \
 
 valleyscope map-reduced-ebr \
   valley_ebr_export_bundle.json \
-  --table-name reviewed_table_file \
+  
   --output valley_reduced_ebr_mapping.json
 ```
 
 Arguments:
 - `bundle` — path to `valley_ebr_export_bundle.json` (required)
 - `table` — path to external reduced EBR table JSON
-- `--table-name` — name of a reviewed package-data table loaded through
-  `load_reviewed_reduced_ebr_table`
+- `  `load_reviewed_reduced_ebr_table`
 - `--output`, `-o` — output path (default: `valley_reduced_ebr_mapping.json`)
 - `--max-coefficient` — max coefficient per EBR in brute-force search (default: 6)
 
-Exactly one of positional `table` or `--table-name` is required; they are
-mutually exclusive. No default table name is implied.
 
 Stdout summary example:
 ```
