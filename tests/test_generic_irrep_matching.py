@@ -295,7 +295,6 @@ def test_missing_source_payload_falls_back_to_legacy():
         symmetry_adapted_valley_report=None,
     )
     assert "generic_matches_by_kpoint" not in report
-    
 
 
 def test_incomplete_source_map_diagnostic():
@@ -726,7 +725,6 @@ def test_no_workflow_decisions_returns_matching_mode():
     )
     assert report["status"] == "not_evaluated"
     assert report["matching_mode"] in ("generic", "not_evaluated")
-    
     assert "by_kpoint" in report
     assert report["by_kpoint"] == {}
 
