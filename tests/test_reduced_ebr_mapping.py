@@ -778,30 +778,7 @@ def test_agents_plan_irrep_boundary_and_package_name():
 # Catalog API test removed
 
 # -----------------------------------------------------------------------
-# 18. Loader integration — catalog manifest validation
-# -----------------------------------------------------------------------
-
-def _make_fake_catalog_root(tmp_path: Path) -> Path:
-    """Create a fake package-data root with minimal manifest."""
-    root = tmp_path / "fake_reduced_ebr"
-    root.mkdir()
-    (root / "__init__.py").write_text("")
-    (root / "manifest.json").write_text(json.dumps({
-        "schema_version": "1.0.0",
-        "description": "test catalog",
-        "tables": [],
-    }))
-    return root
-
-def _set_fake_root(monkeypatch, root: Path):
-    """Monkeypatch package_data_root to return a fake directory.
-    After catalog deletion, this is a no-op — no catalog API to monkeypatch."""
-    pass  # catalog.py deleted; no production code imports it
-
-# Catalog API test removed
-
-# -----------------------------------------------------------------------
-# 19. Reduced EBR basis compatibility gate
+# 18. Reduced EBR basis compatibility gate
 # -----------------------------------------------------------------------
 
 def _bundle_with_hsps(expected, irreps_by_kp, g="C3_like", ready=True):
@@ -1306,56 +1283,6 @@ def _reviewed_table_with_provenance(provenance_override=None) -> dict:
     tbl["subspace_group_candidate"] = "P3"
     tbl["provenance"] = p
     return tbl
-
-# --- success path ---
-
-# Catalog API test removed
-
-# -----------------------------------------------------------------------
-# 23. Reviewed table name loader plumbing
-# -----------------------------------------------------------------------
-
-def _fake_catalog_with_reviewed_table(tmp_path, monkeypatch, name="c3_reviewed",
-                                      provenance_overrides=None):
-    """Set up a fake catalog root with one reviewed table entry.
-    Catalog deleted; helper retained for backward-compat only."""
-    pass  # catalog.py deleted
-    root = tmp_path / "fake_catalog"
-    root.mkdir()
-    (root / "__init__.py").write_text("")
-    tbl = dict(_SAMPLE_TABLE)
-    prov = {
-        "review_status": "reviewed",
-        "reviewer": "JD",
-        "review_date": "2026-06-13",
-        "review_method": "test",
-        "source_reference": "test",
-        "valleyscope_reduction": "sampled_hsp_valley_preserving",
-        "data_source": "irreptables",
-        "space_group_number": 150,
-        "spinful": True,
-        "subspace_group_candidate": "P3",
-        "expected_hsps": ["GammaM", "KM"],
-        "central_sign_convention": "chi(C3)=chi(op2), chi(C3^2)=-chi(op3)",
-    }
-    if provenance_overrides is not None:
-        prov.update(provenance_overrides)
-    tbl["subspace_group_candidate"] = "P3"
-    tbl["provenance"] = prov
-    (root / f"{name}.json").write_text(json.dumps(tbl))
-    (root / "manifest.json").write_text(json.dumps({
-        "schema_version": "1.0.0",
-        "tables": [{
-            "name": name, "filename": f"{name}.json",
-            "review_status": "reviewed",
-            "reviewer": "JD",
-            "review_date": "2026-06-13",
-            "review_method": "test",
-            "source_reference": "test",
-        }],
-    }))
-    monkeypatch.setattr(catalog, "package_data_root", lambda: root)
-    return root
 
 def test_config_rejects_table_name(tmp_path):
     """config rejects table_name with clear error."""

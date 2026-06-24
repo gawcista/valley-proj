@@ -206,7 +206,7 @@ def build_valley_irrep_matching_report(
                     "subspace_group_candidate": _generic_group_identity(
                         sg=sg, ssg=ssg,
                     ),
-                                        "subspace_space_group": dict(ssg)
+                    "subspace_space_group": dict(ssg)
                     if isinstance(ssg, Mapping) else {},
                 }
 

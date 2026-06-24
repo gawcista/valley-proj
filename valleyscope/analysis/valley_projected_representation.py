@@ -2,9 +2,7 @@
 
 Builds a serializable representation summary from existing workflow data
 without reimplementing projector or symmetry-adapted math.  The primary
-physical identifier is ``subspace_space_group``; legacy C2_like/C3_like
-hints are carried under ``legacy_subspace_group_candidate`` and must not
-be treated as final physical labels.
+physical identifier is ``subspace_space_group``.
 """
 
 from __future__ import annotations
