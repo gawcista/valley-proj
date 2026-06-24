@@ -1531,6 +1531,7 @@ def _build_valley_resolved_irreps(
                 "irrep_multiplicities": dict(irrep_mults) if isinstance(irrep_mults, dict) else {},
                 "readiness_level": gm.get("readiness_level"),
                 "workflow_path": gm.get("workflow_path"),
+                "diagnostic_only": bool(gm.get("diagnostic_only", False)),
                 "reason": str(gm.get("reason", ""))[:120] if gm.get("reason") else "",
             }
             rows.append(row)

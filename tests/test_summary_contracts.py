@@ -362,6 +362,7 @@ def test_summary_text_renders_generic_irrep_matching_without_legacy_rows(tmp_pat
                     "valley_preserving_operation_ids": [0, 2],
                     "reason": "restricted character match",
                     "readiness_level": "trusted",
+                    "diagnostic_only": False,
                 },
             },
         },
@@ -383,7 +384,14 @@ def test_summary_text_renders_generic_irrep_matching_without_legacy_rows(tmp_pat
         valley_irrep_matching=matching,
     )
 
+    assert "valley_resolved_irreps" in summary
+    resolved = summary["valley_resolved_irreps"]
+    assert resolved["status"] == "ok"
+    assert resolved["rows"][0]["subspace_space_group"] == "P3"
+    assert resolved["rows"][0]["diagnostic_only"] is False
+
     text = render_summary_text(summary)
+    assert "Valley-resolved irreps" in text
     assert "Valley irrep matching" in text
     assert "mode: generic" in text
     assert "legacy phase tables: spinful_C3, spinful_C2" in text
@@ -1327,6 +1335,19 @@ def test_summary_valley_resolved_irreps():
                     "hsp_little_group_operation_ids": [0, 1, 2],
                     "readiness_level": "trusted",
                     "workflow_path": "direct_qcut",
+                    "diagnostic_only": False,
+                },
+                "Kp_valley": {
+                    "matching_status": "diagnostic_only",
+                    "matching_strategy": "bilbao_restricted_character",
+                    "irrep_multiplicities": {},
+                    "subspace_space_group": {"candidate_space_group_symbol": "P3"},
+                    "valley_preserving_operation_ids": [0],
+                    "hsp_little_group_operation_ids": [0, 1, 2],
+                    "readiness_level": "usable_with_caution",
+                    "workflow_path": "symmetry_adapted",
+                    "diagnostic_only": True,
+                    "reason": "spinor_convention_unverified",
                 },
             },
         },
@@ -1334,9 +1355,13 @@ def test_summary_valley_resolved_irreps():
     r = _build_valley_resolved_irreps(matching)
     assert r["status"] == "ok"
     assert r["matched_count"] == 1
+    assert r["diagnostic_count"] == 1
     assert r["rows"][0]["subspace_space_group"] == "P3"
     assert r["rows"][0]["matching_strategy"] == "bilbao_restricted_character"
     assert r["rows"][0]["irrep_multiplicities"] == {"-GM4": 1}
+    assert r["rows"][0]["diagnostic_only"] is False
+    assert r["rows"][1]["diagnostic_only"] is True
+    assert r["rows"][1]["reason"] == "spinor_convention_unverified"
     assert "C2_like" not in json.dumps(r)
     assert "C3_like" not in json.dumps(r)
 
