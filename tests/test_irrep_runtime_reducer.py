@@ -48,9 +48,9 @@ def test_happy_path_reduces_3d_to_sampled_hsps():
         source_payload=_source_payload(),
         expected_hsps=_HSP,
         allowed_irrep_keys=_KEYS,
-        subspace_group_candidate="C3_like",
+        subspace_group_candidate="P3",
     )
-    assert result["subspace_group_candidate"] == "C3_like"
+    assert result["subspace_group_candidate"] == "P3"
     assert result["expected_hsps"] == ["GammaM", "KM"]
     assert result["irreps"] == _KEYS
     # Vectors reduced from 4 -> 3 (A@H filtered out).
@@ -64,12 +64,12 @@ def test_happy_path_output_passes_load_reduced_ebr_table(tmp_path):
         source_payload=_source_payload(),
         expected_hsps=_HSP,
         allowed_irrep_keys=_KEYS,
-        subspace_group_candidate="C3_like",
+        subspace_group_candidate="P3",
     )
     path = tmp_path / "table.json"
     path.write_text(json.dumps(result), encoding="utf-8")
     loaded = load_reduced_ebr_table(path)
-    assert loaded["subspace_group_candidate"] == "C3_like"
+    assert loaded["subspace_group_candidate"] == "P3"
     assert loaded["irreps"] == _KEYS
 
 
@@ -82,7 +82,7 @@ def test_empty_basis_raises():
         build_reduced_table_from_runtime_source(
             source_payload=_source_payload(basis=[], ebrs=[]),
             expected_hsps=_HSP, allowed_irrep_keys=_KEYS,
-            subspace_group_candidate="C3_like",
+            subspace_group_candidate="P3",
         )
 
 
@@ -105,7 +105,7 @@ def test_partial_missing_allowed_irrep_key_mapping_raises():
             source_payload=_source_payload(basis=_SAMPLE_BASIS[:-2], ebrs=partial_ebrs),
             expected_hsps=_HSP,
             allowed_irrep_keys=_KEYS,
-            subspace_group_candidate="C3_like",
+            subspace_group_candidate="P3",
         )
 
 
@@ -115,7 +115,7 @@ def test_expected_hsp_order_is_preserved_in_output():
         source_payload=_source_payload(),
         expected_hsps=["KM", "GammaM"],
         allowed_irrep_keys=_KEYS,
-        subspace_group_candidate="C3_like",
+        subspace_group_candidate="P3",
     )
     assert result["expected_hsps"] == ["KM", "GammaM"]
     assert result["provenance"]["expected_hsps"] == ["KM", "GammaM"]
@@ -132,7 +132,7 @@ def test_allowed_irrep_key_order_controls_reduced_basis_order():
         source_payload=_source_payload(basis=shuffled_basis, ebrs=shuffled_ebrs),
         expected_hsps=_HSP,
         allowed_irrep_keys=_KEYS,
-        subspace_group_candidate="C3_like",
+        subspace_group_candidate="P3",
     )
     assert result["irreps"] == _KEYS
     assert result["ebrs"][0]["vector"] == [1, 0, 1]
@@ -160,7 +160,7 @@ def test_duplicate_basis_key_aggregated():
         ),
         expected_hsps=["GammaM"],
         allowed_irrep_keys=["GammaM:C3_spinor_phase_+1/2"],
-        subspace_group_candidate="C3_like",
+        subspace_group_candidate="P3",
     )
     assert result["ebrs"][0]["vector"] == [2]
 
@@ -176,7 +176,7 @@ def test_ebr_vector_length_mismatch_raises():
         build_reduced_table_from_runtime_source(
             source_payload=_source_payload(ebrs=bad_ebrs),
             expected_hsps=_HSP, allowed_irrep_keys=_KEYS,
-            subspace_group_candidate="C3_like",
+            subspace_group_candidate="P3",
         )
 
 
@@ -202,7 +202,7 @@ def test_reduced_zero_vector_skipped_with_provenance():
         source_payload=_source_payload(basis=basis, ebrs=ebrs),
         expected_hsps=["GammaM"],
         allowed_irrep_keys=["GammaM:C3_spinor_phase_+1/2"],
-        subspace_group_candidate="C3_like",
+        subspace_group_candidate="P3",
     )
     labels = {e["label"] for e in result["ebrs"]}
     assert labels == {"Real"}
@@ -220,7 +220,7 @@ def test_provenance_included_in_output():
     result = build_reduced_table_from_runtime_source(
         source_payload=_source_payload(),
         expected_hsps=_HSP, allowed_irrep_keys=_KEYS,
-        subspace_group_candidate="C3_like",
+        subspace_group_candidate="P3",
         provenance=provenance,
     )
     assert result["provenance"]["package"] == "irrep"
@@ -254,7 +254,7 @@ def test_output_has_no_raw_3d_decomposition_fields():
     result = build_reduced_table_from_runtime_source(
         source_payload=_source_payload(),
         expected_hsps=_HSP, allowed_irrep_keys=_KEYS,
-        subspace_group_candidate="C3_like",
+        subspace_group_candidate="P3",
     )
     encoded = json.dumps(result)
     for forbidden in ["decomposition", "3d_ebr", "raw_ebr", "irrep_decomposition"]:
@@ -269,7 +269,7 @@ def test_ebr_vectors_preserve_exact_nonnegative_integers():
     result = build_reduced_table_from_runtime_source(
         source_payload=_source_payload(),
         expected_hsps=_HSP, allowed_irrep_keys=_KEYS,
-        subspace_group_candidate="C3_like",
+        subspace_group_candidate="P3",
     )
     ebr_a = result["ebrs"][0]
     assert ebr_a["label"] == "EBR_A"

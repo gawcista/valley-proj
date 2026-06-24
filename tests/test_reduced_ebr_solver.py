@@ -17,7 +17,7 @@ from valleyscope.analysis.reduced_ebr_solver import (
 
 _TABLE = {
     "schema_version": "1.0.0",
-    "subspace_group_candidate": "C3_like",
+    "subspace_group_candidate": "P3",
     "expected_hsps": ["GammaM", "KM"],
     "irreps": [
         "GammaM:C3_spinor_phase_+1/2",

@@ -3,7 +3,7 @@
   "data_source": "irreptables",
   "space_group_number": 149,
   "spinful": true,
-  "subspace_group_candidate": "C2_like",
+  "subspace_group_candidate": "P2",
   "expected_hsps": ["MM"],
   "allowed_irrep_keys": [
     "MM:C2_spinor_phase_-1/4",
@@ -26,7 +26,7 @@
     "data_source": "irreptables",
     "space_group_number": 149,
     "spinful": true,
-    "subspace_group_candidate": "C2_like",
+    "subspace_group_candidate": "P2",
     "expected_hsps": ["MM"],
     "valleyscope_reduction": "sampled_hsp_valley_preserving",
     "source_op_assignment": "Bilbao M/op6 -> ValleyScope MM/M3_valley/op5, limited dry-run premise",

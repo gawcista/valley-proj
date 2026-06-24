@@ -17,7 +17,7 @@ def _write_table(path: Path, data: dict) -> None:
 
 _SAMPLE_TABLE = {
     "schema_version": "1.0.0",
-    "subspace_group_candidate": "C3_like",
+    "subspace_group_candidate": "P3",
     "expected_hsps": ["GammaM", "KM"],
     "irreps": [
         "GammaM:C3_spinor_phase_+1/2",
@@ -35,7 +35,7 @@ def _bundle():
         "bundles": [{
             "bundle_id": "bundle_ebr_instance_001",
             "valley": "K_valley",
-            "subspace_group_candidate": "C3_like",
+            "subspace_group_candidate": "P3",
             "ready_for_external_solver": True,
             "irreps_by_kpoint": {
                 "GammaM": ["C3_spinor_phase_+1/2"],
@@ -51,7 +51,7 @@ def _bundle():
 def test_load_valid_table(tmp_path):
     _write_table(tmp_path / "t.json", _SAMPLE_TABLE)
     t = load_reduced_ebr_table(tmp_path / "t.json")
-    assert t["subspace_group_candidate"] == "C3_like"
+    assert t["subspace_group_candidate"] == "P3"
 
 def test_load_missing_keys_raises(tmp_path):
     _write_table(tmp_path / "t.json", {"irreps": [], "ebrs": []})
@@ -99,7 +99,7 @@ def test_exact_solution_found():
     b = {
         "bundles": [{
             "bundle_id": "b_001", "valley": "K",
-            "subspace_group_candidate": "C3_like",
+            "subspace_group_candidate": "P3",
             "ready_for_external_solver": True,
             "irreps_by_kpoint": bundle_vec,
         }],
@@ -121,7 +121,7 @@ def test_no_exact_solution():
     b = {
         "bundles": [{
             "bundle_id": "b_001", "valley": "K",
-            "subspace_group_candidate": "C3_like",
+            "subspace_group_candidate": "P3",
             "ready_for_external_solver": True,
             "irreps_by_kpoint": bundle_vec,
         }],
@@ -156,7 +156,7 @@ def test_group_mismatch_excluded():
     b = {
         "bundles": [{
             "bundle_id": "b_001", "valley": "M1",
-            "subspace_group_candidate": "C2_like",
+            "subspace_group_candidate": "P2",
             "ready_for_external_solver": True,
             "irreps_by_kpoint": {"GammaM": ["C2_spinor_phase_+1/4"]},
         }],
@@ -196,7 +196,7 @@ def test_not_ready_excluded():
     b = {
         "bundles": [{
             "bundle_id": "b_001", "valley": "K",
-            "subspace_group_candidate": "C3_like",
+            "subspace_group_candidate": "P3",
             "ready_for_external_solver": False,
             "irreps_by_kpoint": {},
         }],
@@ -215,7 +215,7 @@ def test_unknown_irrep_label_is_not_matched_by_hsp_only():
         "bundles": [{
             "bundle_id": "b_001",
             "valley": "K",
-            "subspace_group_candidate": "C3_like",
+            "subspace_group_candidate": "P3",
             "ready_for_external_solver": True,
             "expected_hsps": ["GammaM"],
             "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
@@ -228,7 +228,7 @@ def test_unknown_irrep_label_is_not_matched_by_hsp_only():
 def test_unique_operation_suffix_fallback_does_not_double_count():
     table = {
         "schema_version": "1.0.0",
-        "subspace_group_candidate": "C3_like",
+        "subspace_group_candidate": "P3",
         "expected_hsps": ["GammaM"],
         "irreps": ["GammaM:C3_spinor_phase_+1/2:op1"],
         "ebrs": [{"label": "EBR_A", "vector": [1]}],
@@ -237,7 +237,7 @@ def test_unique_operation_suffix_fallback_does_not_double_count():
         "bundles": [{
             "bundle_id": "b_001",
             "valley": "K",
-            "subspace_group_candidate": "C3_like",
+            "subspace_group_candidate": "P3",
             "ready_for_external_solver": True,
             "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
         }],
@@ -249,7 +249,7 @@ def test_unique_operation_suffix_fallback_does_not_double_count():
 def test_ambiguous_operation_suffix_fallback_is_excluded():
     table = {
         "schema_version": "1.0.0",
-        "subspace_group_candidate": "C3_like",
+        "subspace_group_candidate": "P3",
         "expected_hsps": ["GammaM"],
         "irreps": [
             "GammaM:C3_spinor_phase_+1/2:op1",
@@ -261,7 +261,7 @@ def test_ambiguous_operation_suffix_fallback_is_excluded():
         "bundles": [{
             "bundle_id": "b_001",
             "valley": "K",
-            "subspace_group_candidate": "C3_like",
+            "subspace_group_candidate": "P3",
             "ready_for_external_solver": True,
             "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
         }],
@@ -472,8 +472,8 @@ def test_schema_md_labels_use_physical_subspace_space_group():
     assert "C3_like" in schema_text
     assert "C2_like" in schema_text
     # Must not use C{n}_like as subspace_group_candidate examples anymore.
-    assert '"subspace_group_candidate": "C3_like"' not in schema_text
-    assert '"subspace_group_candidate": "C2_like"' not in schema_text
+    assert '"subspace_group_candidate": "P3"' not in schema_text
+    assert '"subspace_group_candidate": "P2"' not in schema_text
 
 def test_public_docs_do_not_advertise_static_package_selector():
     """Current public docs must not expose static package-data EBR selectors."""
@@ -532,7 +532,7 @@ def test_cli_solved_exact(tmp_path):
     table_path = tmp_path / "table.json"
     _write_bundle(bundle_path, [{
         "bundle_id": "b_001", "valley": "K",
-        "subspace_group_candidate": "C3_like",
+        "subspace_group_candidate": "P3",
         "ready_for_external_solver": True,
         "irreps_by_kpoint": {
             "GammaM": ["C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"],
@@ -558,7 +558,7 @@ def test_cli_no_exact_solution(tmp_path):
     table_path = tmp_path / "table.json"
     _write_bundle(bundle_path, [{
         "bundle_id": "b_001", "valley": "K",
-        "subspace_group_candidate": "C3_like",
+        "subspace_group_candidate": "P3",
         "ready_for_external_solver": True,
         "irreps_by_kpoint": {
             "GammaM": ["C3_spinor_phase_+1/2"] * 5,
@@ -580,7 +580,7 @@ def test_cli_stdout_includes_status_and_output_path(capsys, tmp_path):
     table_path = tmp_path / "table.json"
     _write_bundle(bundle_path, [{
         "bundle_id": "b_001", "valley": "K",
-        "subspace_group_candidate": "C3_like",
+        "subspace_group_candidate": "P3",
         "ready_for_external_solver": True,
         "irreps_by_kpoint": {
             "GammaM": ["C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"],
@@ -607,7 +607,7 @@ def test_cli_invalid_table_fails_without_writing_output(tmp_path):
     ]
     _write_bundle(bundle_path, [{
         "bundle_id": "b_001", "valley": "K",
-        "subspace_group_candidate": "C3_like",
+        "subspace_group_candidate": "P3",
         "ready_for_external_solver": True,
         "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"], "KM": []},
     }])
@@ -639,7 +639,7 @@ def test_cli_respects_max_coefficient(tmp_path):
     # Bundle with large count that needs max_coeff >= 6
     _write_bundle(bundle_path, [{
         "bundle_id": "b_001", "valley": "K",
-        "subspace_group_candidate": "C3_like",
+        "subspace_group_candidate": "P3",
         "ready_for_external_solver": True,
         "irreps_by_kpoint": {
             "GammaM": ["C3_spinor_phase_+1/2"] * 6,
@@ -648,7 +648,7 @@ def test_cli_respects_max_coefficient(tmp_path):
     }])
     table = {
         "schema_version": "1.0.0",
-        "subspace_group_candidate": "C3_like",
+        "subspace_group_candidate": "P3",
         "expected_hsps": ["GammaM", "KM"],
         "irreps": ["GammaM:C3_spinor_phase_+1/2", "KM:C3_spinor_phase_+1/6"],
         "ebrs": [{"label": "EBR_X", "vector": [1, 1]}],
@@ -781,7 +781,7 @@ def test_agents_plan_irrep_boundary_and_package_name():
 # 18. Reduced EBR basis compatibility gate
 # -----------------------------------------------------------------------
 
-def _bundle_with_hsps(expected, irreps_by_kp, g="C3_like", ready=True):
+def _bundle_with_hsps(expected, irreps_by_kp, g="P3", ready=True):
     return {
         "bundles": [{
             "bundle_id": "b_001", "valley": "K",
@@ -861,7 +861,7 @@ def test_legacy_bundle_without_expected_hsps_still_works():
     b = {
         "bundles": [{
             "bundle_id": "b_001", "valley": "K",
-            "subspace_group_candidate": "C3_like",
+            "subspace_group_candidate": "P3",
             "ready_for_external_solver": True,
             "irreps_by_kpoint": {
                 "GammaM": ["C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"],
@@ -877,7 +877,7 @@ def test_legacy_bundle_without_expected_hsps_fails_when_keys_mismatch():
     b = {
         "bundles": [{
             "bundle_id": "b_001", "valley": "K",
-            "subspace_group_candidate": "C3_like",
+            "subspace_group_candidate": "P3",
             "ready_for_external_solver": True,
             "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
         }],
@@ -892,7 +892,7 @@ def test_basis_gate_before_group_check():
     b = _bundle_with_hsps(
         expected=["GammaM"],
         irreps_by_kp={"GammaM": ["C3_spinor_phase_+1/2"]},
-        g="C3_like",  # group matches table
+        g="P3",  # group matches table
     )
     r = build_reduced_ebr_mapping(ebr_export_bundle=b, table=_SAMPLE_TABLE)
     assert len(r["excluded_bundles"]) == 1
@@ -1066,7 +1066,7 @@ def test_cli_shows_classification_counts(tmp_path, capsys):
     table_path = tmp_path / "table.json"
     _write_bundle(bundle_path, [{
         "bundle_id": "b_001", "valley": "K",
-        "subspace_group_candidate": "C3_like",
+        "subspace_group_candidate": "P3",
         "ready_for_external_solver": True,
         "expected_hsps": ["GammaM", "KM"],
         "irreps_by_kpoint": {

@@ -208,7 +208,7 @@ def test_summary_text_renders_symmetry_adapted_valley_subspaces(tmp_path):
                                 "valley_preserving_operation_ids": [0, 4],
                             },
                             "subspace_group": {
-                                "subspace_group_candidate": "C2_like",
+                                "subspace_group_candidate": "P2",
                             },
                             "symmetry_adapted_projectors": {
                                 "selected_rank": 2,

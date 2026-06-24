@@ -69,7 +69,7 @@ def _build_with_fake_loader(**overrides):
         "valleyscope_key_by_source_irrep": _VALLEYSCOPE_KEY_BY_SOURCE_IRREP,
         "expected_hsps": _EXPECTED_HSPS,
         "allowed_irrep_keys": _ALLOWED_KEYS,
-        "subspace_group_candidate": "C3_like",
+        "subspace_group_candidate": "P3",
     }
     kwargs.update(overrides)
     return build_reduced_table_from_irreptables(**kwargs), calls
@@ -85,7 +85,7 @@ def _canonical_spec(**overrides):
         "valleyscope_key_by_source_irrep": _VALLEYSCOPE_KEY_BY_SOURCE_IRREP,
         "expected_hsps": _EXPECTED_HSPS,
         "allowed_irrep_keys": _ALLOWED_KEYS,
-        "subspace_group_candidate": "C3_like",
+        "subspace_group_candidate": "P3",
         "provenance": {"review_status": "fixture-only"},
     }
     spec.update(overrides)
@@ -95,7 +95,7 @@ def _canonical_spec(**overrides):
 def test_builder_fake_loader_produces_loadable_reduced_table(tmp_path):
     table, calls = _build_with_fake_loader()
     assert calls == [(150, True)]
-    assert table["subspace_group_candidate"] == "C3_like"
+    assert table["subspace_group_candidate"] == "P3"
     assert table["expected_hsps"] == _EXPECTED_HSPS
     assert table["irreps"] == _ALLOWED_KEYS
     assert [ebr["label"] for ebr in table["ebrs"]] == ["EBR_A", "EBR_B"]
@@ -119,7 +119,7 @@ def test_builder_provenance_marks_public_source_and_reduction_contract():
     assert provenance["space_group_number"] == 150
     assert provenance["spinful"] is True
     assert provenance["expected_hsps"] == _EXPECTED_HSPS
-    assert provenance["subspace_group_candidate"] == "C3_like"
+    assert provenance["subspace_group_candidate"] == "P3"
     assert provenance["valleyscope_reduction"] == "sampled_hsp_valley_preserving"
     assert provenance["review_status"] == "fixture-only"
 
@@ -213,7 +213,7 @@ def test_spec_file_table_feeds_reduced_ebr_mapping_e2e(tmp_path):
             {
                 "bundle_id": "synthetic_bundle",
                 "valley": "K",
-                "subspace_group_candidate": "C3_like",
+                "subspace_group_candidate": "P3",
                 "ready_for_external_solver": True,
                 "expected_hsps": _EXPECTED_HSPS,
                 "irreps_by_kpoint": {
@@ -255,7 +255,7 @@ def test_spec_file_helper_requires_canonical_keys(tmp_path):
         "valleyscope_key_by_source_irrep": _VALLEYSCOPE_KEY_BY_SOURCE_IRREP,
         "expected_hsps": _EXPECTED_HSPS,
         "allowed_irrep_keys": _ALLOWED_KEYS,
-        "subspace_group_candidate": "C3_like",
+        "subspace_group_candidate": "P3",
     }
     spec_path = tmp_path / "legacy_spec.json"
     spec_path.write_text(json.dumps(legacy_spec), encoding="utf-8")
@@ -530,7 +530,7 @@ _VALID_SPEC = {
         "KM:C3_spinor_phase_-1/6",
         "A:C1_spinor",
     ],
-    "subspace_group_candidate": "C3_like",
+    "subspace_group_candidate": "P3",
 }
 
 
@@ -758,7 +758,7 @@ _PREFLIGHT_VALID_SPEC = {
         "GammaM:C3_spinor_phase_+1/2", "KM:C3_spinor_phase_+1/6",
         "KM:C3_spinor_phase_-1/6", "A:C1_spinor",
     ],
-    "subspace_group_candidate": "C3_like",
+    "subspace_group_candidate": "P3",
 }
 
 
@@ -1581,7 +1581,7 @@ def test_multiplicity_aware_reducer_produces_correct_vector():
         source_payload=payload,
         expected_hsps=_C3_EXPECTED_HSPS,
         allowed_irrep_keys=_C3_ALLOWED_KEYS,
-        subspace_group_candidate="C3_like",
+        subspace_group_candidate="P3",
     )
     assert table["irreps"] == _C3_ALLOWED_KEYS
     # Source vector: all ones over [-GM4,-GM5,-GM6,-K4,-K5,-K6]
@@ -1609,7 +1609,7 @@ def test_multiplicity_aware_builder_v1_1_spec(tmp_path):
         "valleyscope_irrep_multiplicity_by_source_irrep": _C3_MULTIPLICITIES,
         "expected_hsps": _C3_EXPECTED_HSPS,
         "allowed_irrep_keys": _C3_ALLOWED_KEYS,
-        "subspace_group_candidate": "C3_like",
+        "subspace_group_candidate": "P3",
     }
     spec_path = tmp_path / "spec_v11.json"
     spec_path.write_text(json.dumps(spec))
@@ -1649,7 +1649,7 @@ def test_multiplicity_aware_builder_filters_unmapped_nonsampled_source_labels(tm
         "valleyscope_irrep_multiplicity_by_source_irrep": _C3_MULTIPLICITIES,
         "expected_hsps": _C3_EXPECTED_HSPS,
         "allowed_irrep_keys": _C3_ALLOWED_KEYS,
-        "subspace_group_candidate": "C3_like",
+        "subspace_group_candidate": "P3",
     }
     spec_path = tmp_path / "spec_v11_partial.json"
     spec_path.write_text(json.dumps(spec))
@@ -1809,7 +1809,7 @@ _V1_1_VALID_SPEC = {
         "KM:C3_spinor_phase_+1/6",
         "KM:C3_spinor_phase_-1/6",
     ],
-    "subspace_group_candidate": "C3_like",
+    "subspace_group_candidate": "P3",
 }
 
 
@@ -2008,7 +2008,7 @@ def test_build_preflight_v1_1_passes_for_valid_spec(tmp_path, capsys, monkeypatc
             "KM:C3_spinor_phase_+1/6",
             "KM:C3_spinor_phase_-1/6",
         ],
-        "subspace_group_candidate": "C3_like",
+        "subspace_group_candidate": "P3",
     }
     spec_path = tmp_path / "spec.json"
     spec_path.write_text(json.dumps(v1_1_preflight_spec))
@@ -2174,7 +2174,7 @@ def test_c3_real_source_v1_1_workflow_smoke(tmp_path):
         "valleyscope_irrep_multiplicity_by_source_irrep": _REAL_C3_MULT,
         "expected_hsps": ["GammaM", "KM"],
         "allowed_irrep_keys": _REAL_C3_KEYS,
-        "subspace_group_candidate": "C3_like",
+        "subspace_group_candidate": "P3",
     }
 
     # 3. Validate spec against source basis.
@@ -2188,7 +2188,7 @@ def test_c3_real_source_v1_1_workflow_smoke(tmp_path):
 
     # 5. Assert table properties.
     assert table["schema_version"] == "1.0.0"  # table output format, not spec version
-    assert table["subspace_group_candidate"] == "C3_like"
+    assert table["subspace_group_candidate"] == "P3"
     assert table["expected_hsps"] == ["GammaM", "KM"]
     assert table["irreps"] == _REAL_C3_KEYS
     assert len(table["irreps"]) == 6
@@ -2210,7 +2210,7 @@ def test_c3_real_source_v1_1_workflow_smoke(tmp_path):
     assert provenance["data_source"] == "irreptables"
     assert provenance["space_group_number"] == 150
     assert provenance["spinful"] is True
-    assert provenance["subspace_group_candidate"] == "C3_like"
+    assert provenance["subspace_group_candidate"] == "P3"
     assert provenance["valleyscope_reduction"] == "sampled_hsp_valley_preserving"
 
     # Table is valid per load_reduced_ebr_table.
@@ -2290,7 +2290,7 @@ def test_c3_real_source_pins_vector_reference(tmp_path):
         "valleyscope_irrep_multiplicity_by_source_irrep": _REAL_C3_MULT,
         "expected_hsps": ["GammaM", "KM"],
         "allowed_irrep_keys": _REAL_C3_KEYS,
-        "subspace_group_candidate": "C3_like",
+        "subspace_group_candidate": "P3",
     }
     spec_path = tmp_path / "spec.json"
     spec_path.write_text(json.dumps(spec))
@@ -2329,7 +2329,7 @@ def test_c3_real_source_mapping_e2e_solved_exact(tmp_path):
         "valleyscope_irrep_multiplicity_by_source_irrep": _REAL_C3_MULT,
         "expected_hsps": ["GammaM", "KM"],
         "allowed_irrep_keys": _REAL_C3_KEYS,
-        "subspace_group_candidate": "C3_like",
+        "subspace_group_candidate": "P3",
     }
     spec_path = tmp_path / "spec.json"
     spec_path.write_text(json.dumps(spec))
@@ -2346,7 +2346,7 @@ def test_c3_real_source_mapping_e2e_solved_exact(tmp_path):
         "bundles": [{
             "bundle_id": "c3_real_source_smoke_bundle",
             "valley": "K",
-            "subspace_group_candidate": "C3_like",
+            "subspace_group_candidate": "P3",
             "ready_for_external_solver": True,
             "expected_hsps": ["GammaM", "KM"],
             "irreps_by_kpoint": irreps_by_kp,
@@ -2403,7 +2403,7 @@ def test_c2_mm_m3_dry_run_spec_and_build():
     for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
         assert name not in json.dumps(spec)
 
-    assert spec["subspace_group_candidate"] == "C2_like"
+    assert spec["subspace_group_candidate"] == "P2"
     assert spec["expected_hsps"] == ["MM"]
 
     # Validate against real SG149 source basis.
@@ -2413,7 +2413,7 @@ def test_c2_mm_m3_dry_run_spec_and_build():
 
     # Build temporary table.
     table = build_reduced_table_from_spec_file(str(spec_path))
-    assert table["subspace_group_candidate"] == "C2_like"
+    assert table["subspace_group_candidate"] == "P2"
     assert table["expected_hsps"] == ["MM"]
     assert table["irreps"] == [
         "MM:C2_spinor_phase_-1/4",
@@ -2482,7 +2482,7 @@ def test_c2_mm_m3_dry_run_mapping_e2e_solved_exact():
         "bundles": [{
             "bundle_id": "c2_mm_m3_dry_run_bundle",
             "valley": "M3",
-            "subspace_group_candidate": "C2_like",
+            "subspace_group_candidate": "P2",
             "ready_for_external_solver": True,
             "expected_hsps": ["MM"],
             "irreps_by_kpoint": irreps_by_kp,
@@ -2555,7 +2555,7 @@ def test_c2_mm_m3_dry_run_cli_build_and_map_e2e(tmp_path):
         "bundles": [{
             "bundle_id": "c2_cli_dry_run",
             "valley": "M3",
-            "subspace_group_candidate": "C2_like",
+            "subspace_group_candidate": "P2",
             "ready_for_external_solver": True,
             "expected_hsps": ["MM"],
             "irreps_by_kpoint": irreps_by_kp,

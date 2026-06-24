@@ -177,7 +177,7 @@ def test_normalizer_output_feeds_reducer_and_table_loader(tmp_path):
         source_payload=source_payload,
         expected_hsps=_HSP,
         allowed_irrep_keys=_KEYS,
-        subspace_group_candidate="C3_like",
+        subspace_group_candidate="P3",
     )
     assert table["provenance"]["package"] == "irreptables"
     path = tmp_path / "reduced_table.json"

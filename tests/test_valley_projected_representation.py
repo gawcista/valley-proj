@@ -134,7 +134,7 @@ def test_representation_records_group_by_kpoint_valley():
                                 "status": "candidate",
                             },
                             "subspace_group": {
-                                "subspace_group_candidate": "C3_like",
+                                "subspace_group_candidate": "P3",
                             },
                         }
                     ],
@@ -216,7 +216,7 @@ def test_representation_records_aggregate_rank_two_operation_data():
                                 "status": "candidate",
                             },
                             "subspace_group": {
-                                "subspace_group_candidate": "C2_like",
+                                "subspace_group_candidate": "P2",
                             },
                         }
                     ],
@@ -280,7 +280,7 @@ def test_representation_records_with_generic_irrep_matching():
                                 "status": "candidate",
                             },
                             "subspace_group": {
-                                "subspace_group_candidate": "C3_like",
+                                "subspace_group_candidate": "P3",
                             },
                         }
                     ],

@@ -4,7 +4,7 @@
   "data_source": "irreptables",
   "space_group_number": "150",
   "spinful": true,
-  "subspace_group_candidate": "C3_like",
+  "subspace_group_candidate": "P3",
   "expected_hsps": ["GammaM", "KM"],
   "allowed_irrep_keys": [
     "GammaM:C3_spinor_phase_+1/6",

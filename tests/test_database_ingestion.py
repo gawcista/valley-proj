@@ -36,7 +36,7 @@ def test_ingestion_record_with_ready_bundle():
     bundle = {
         "bundles": [{
             "bundle_id": "b_001", "source_instance_id": "ebr_001",
-            "subspace_group_candidate": "C3_like",
+            "subspace_group_candidate": "P3",
             "ready_for_external_solver": True,
             "irrep_records_by_kpoint": {
                 "GammaM": [{"valley": "K_valley", "operation_id": 1,
@@ -61,7 +61,7 @@ def test_ingestion_record_with_ready_bundle():
     r = records[0]
     assert r["kpoint"] == "GammaM"
     assert r["valley"] == "K_valley"
-    assert r["subspace_group_candidate"] == "C3_like"
+    assert r["subspace_group_candidate"] == "P3"
     assert r["matched_irrep"] == "C3_spinor_phase_+1/2"
     assert r["source_bundle_id"] == "b_001"
 
@@ -238,14 +238,14 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
             {
                 "bundle_id": "b_001", "source_instance_id": "ebr_001",
                 "valley": "K_valley",
-                "subspace_group_candidate": "C3_like",
+                "subspace_group_candidate": "P3",
                 "ready_for_external_solver": True,
                 "irrep_records_by_kpoint": c3_records,
             },
             {
                 "bundle_id": "b_002", "source_instance_id": "ebr_002",
                 "valley": "Kp_valley",
-                "subspace_group_candidate": "C3_like",
+                "subspace_group_candidate": "P3",
                 "ready_for_external_solver": True,
                 "irrep_records_by_kpoint": c3p_records,
             },
@@ -257,7 +257,7 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
         "solutions": [
             {
                 "bundle_id": "b_001", "valley": "K_valley",
-                "subspace_group_candidate": "C3_like",
+                "subspace_group_candidate": "P3",
                 "status": "solved_exact",
                 "classification": "atomic-compatible-candidate",
                 "integer_span_status": "in_integer_span",
@@ -267,7 +267,7 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
             },
             {
                 "bundle_id": "b_002", "valley": "Kp_valley",
-                "subspace_group_candidate": "C3_like",
+                "subspace_group_candidate": "P3",
                 "status": "solved_exact",
                 "classification": "atomic-compatible-candidate",
                 "integer_span_status": "in_integer_span",
@@ -341,11 +341,11 @@ def _make_ingestion_record(status="has_ready_ebr_bundles", run_id="run_0000"):
         "ready_bundle_count": 2,
         "valley_irrep_records": [
             {"kpoint": "GammaM", "valley": "K_valley",
-             "subspace_group_candidate": "C3_like"},
+             "subspace_group_candidate": "P3"},
         ],
         "reduced_ebr_records": [
             {"bundle_id": "b_001", "valley": "K_valley",
-             "subspace_group_candidate": "C3_like",
+             "subspace_group_candidate": "P3",
              "status": "solved_exact",
              "classification": "atomic-compatible-candidate",
              "irrep_vector": [0, 2, 0, 1, 0, 1],
@@ -443,7 +443,7 @@ def test_ingestion_record_includes_excluded_ebr_records():
         "excluded_instances": [
             {
                 "source_instance_id": "ebr_001", "valley": "M3_valley",
-                "subspace_group_candidate": "C2_like",
+                "subspace_group_candidate": "P2",
                 "status": "blocked",
                 "ready_for_ebr_decomposition": False,
                 "exclusion_reasons": [
@@ -557,7 +557,7 @@ def test_irrep_records_preserve_generic_fields():
                     "irrep_multiplicity": 2,
                     "matching_strategy": "bilbao_restricted_character",
                     "subspace_space_group": {"candidate_space_group_symbol": "P3"},
-                    "legacy_subspace_group_candidate": "C3_like",
+                    "legacy_subspace_group_candidate": "P3",
                     "valley_preserving_operation_ids": [0, 2, 3],
                     "source_operation_map": {0: 1, 2: 2, 3: 3},
                 }],
@@ -584,7 +584,7 @@ def test_legacy_records_still_ingest_without_generic_fields():
     bundle = {
         "bundles": [{
             "bundle_id": "b_001",
-            "subspace_group_candidate": "C3_like",
+            "subspace_group_candidate": "P3",
             "ready_for_external_solver": True,
             "irrep_records_by_kpoint": {
                 "GammaM": [{
@@ -633,7 +633,7 @@ def test_database_index_preserves_generic_irrep_fields_with_run_provenance():
             "irrep_multiplicity": 2,
             "matching_strategy": "bilbao_restricted_character",
             "subspace_space_group": {"candidate_space_group_symbol": "P3"},
-            "legacy_subspace_group_candidate": "C3_like",
+            "legacy_subspace_group_candidate": "P3",
             "valley_preserving_operation_ids": [0, 2, 3],
             "source_operation_map": {0: 1, 2: 2, 3: 3},
         }],
@@ -658,6 +658,6 @@ def test_database_index_preserves_generic_irrep_fields_with_run_provenance():
     assert ir["irrep_multiplicity"] == 2
     assert ir["matching_strategy"] == "bilbao_restricted_character"
     assert ir["subspace_space_group"] == {"candidate_space_group_symbol": "P3"}
-    assert ir["legacy_subspace_group_candidate"] == "C3_like"
+    assert ir["legacy_subspace_group_candidate"] == "P3"
     assert ir["valley_preserving_operation_ids"] == [0, 2, 3]
     assert ir["source_operation_map"] == {0: 1, 2: 2, 3: 3}

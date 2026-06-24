@@ -40,12 +40,12 @@ def test_ebr_input_candidates_excludes_non_trusted():
             "GammaM": {
                 "K_valley": {
                     "1": {"matching_status": "matched", "matched_irrep": "C3_spinor_phase_+1/2",
-                          "subspace_group_candidate": "C3_like", "operation_order": 3,
+                          "subspace_group_candidate": "P3", "operation_order": 3,
                           "eigenphases": [0.5], "diagnostic_only": False},
                 },
                 "Kp_valley": {
                     "1": {"matching_status": "matched", "matched_irrep": "C3_spinor_phase_-1/2",
-                          "subspace_group_candidate": "C3_like", "operation_order": 3,
+                          "subspace_group_candidate": "P3", "operation_order": 3,
                           "eigenphases": [-0.5], "diagnostic_only": True},
                 },
             },
@@ -127,12 +127,12 @@ def test_ebr_problem_instances_complete_hsp_is_ready():
         "status": "has_candidates",
         "candidates": [
             {"kpoint": "GammaM", "valley": "K_valley",
-             "subspace_group_candidate": "C3_like",
+             "subspace_group_candidate": "P3",
              "workflow_path": "direct_qcut", "readiness_level": "trusted",
              "matched_irrep": "C3_spinor_phase_+1/2", "operation_id": 1,
              "ready_for_ebr_input": True},
             {"kpoint": "KM", "valley": "K_valley",
-             "subspace_group_candidate": "C3_like",
+             "subspace_group_candidate": "P3",
              "workflow_path": "direct_qcut", "readiness_level": "trusted",
              "matched_irrep": "C3_spinor_phase_+1/6", "operation_id": 1,
              "ready_for_ebr_input": True},
@@ -443,7 +443,7 @@ def test_ebr_problem_instances_include_irrep_records():
         "status": "has_candidates",
         "candidates": [
             {"kpoint": "GammaM", "valley": "K_valley",
-             "subspace_group_candidate": "C3_like",
+             "subspace_group_candidate": "P3",
              "workflow_path": "direct_qcut", "readiness_level": "trusted",
              "matched_irrep": "C3_spinor_phase_+1/2", "operation_id": 1,
              "operation_order": 3, "eigenphases": [0.5],
@@ -451,7 +451,7 @@ def test_ebr_problem_instances_include_irrep_records():
              "source": "valley_irrep_matching/GammaM/K_valley",
              "ready_for_ebr_input": True},
             {"kpoint": "KM", "valley": "K_valley",
-             "subspace_group_candidate": "C3_like",
+             "subspace_group_candidate": "P3",
              "workflow_path": "direct_qcut", "readiness_level": "trusted",
              "matched_irrep": "C3_spinor_phase_+1/6", "operation_id": 1,
              "operation_order": 3, "eigenphases": [0.166667],
@@ -496,7 +496,7 @@ def test_export_bundle_copies_irrep_records():
         "instances": [{
             "instance_id": "ebr_instance_001",
             "valley": "K_valley",
-            "subspace_group_candidate": "C3_like",
+            "subspace_group_candidate": "P3",
             "workflow_path": "direct_qcut",
             "readiness_level": "trusted",
             "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
@@ -533,10 +533,10 @@ def test_non_trusted_rows_excluded_from_irrep_records():
             "GammaM": {
                 "K_valley": {
                     "1": {"matching_status": "matched", "matched_irrep": "C3_spinor_phase_+1/2",
-                          "subspace_group_candidate": "C3_like", "operation_order": 3,
+                          "subspace_group_candidate": "P3", "operation_order": 3,
                           "eigenphases": [0.5], "diagnostic_only": False},
                     "2": {"matching_status": "matched", "matched_irrep": "C3_spinor_phase_+1/2",
-                          "subspace_group_candidate": "C3_like", "operation_order": 3,
+                          "subspace_group_candidate": "P3", "operation_order": 3,
                           "eigenphases": [-0.5], "diagnostic_only": True},
                 },
             },
@@ -562,7 +562,7 @@ def test_reduced_ebr_mapping_ignores_irrep_records():
 
     table = {
         "schema_version": "1.0.0",
-        "subspace_group_candidate": "C3_like",
+        "subspace_group_candidate": "P3",
         "expected_hsps": ["GammaM", "KM"],
         "irreps": ["GammaM:C3_spinor_phase_+1/2", "KM:C3_spinor_phase_+1/6"],
         "ebrs": [{"label": "EBR_A", "vector": [1, 0]}, {"label": "EBR_B", "vector": [0, 1]}],
@@ -574,7 +574,7 @@ def test_reduced_ebr_mapping_ignores_irrep_records():
     bundle = {
         "bundles": [{
             "bundle_id": "b_001", "valley": "K",
-            "subspace_group_candidate": "C3_like",
+            "subspace_group_candidate": "P3",
             "ready_for_external_solver": True,
             "expected_hsps": ["GammaM", "KM"],
             "irreps_by_kpoint": {

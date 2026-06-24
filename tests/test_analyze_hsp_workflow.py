@@ -1197,7 +1197,7 @@ def test_unmock_generic_source_adapter_positive_full_pipeline():
                         "candidate_space_group_symbol": "P3",
                     },
                     "subspace_group": {
-                        "subspace_group_candidate": "C3_like",
+                        "subspace_group_candidate": "P3",
                         "operation_orders": {"1": 1, "2": 3, "3": 3},
                     },
                     "valley_preserving_character_diagnostics": {
