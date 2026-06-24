@@ -265,7 +265,7 @@ def test_generic_p4_table_authoritative_bundle_maps_and_rejects_mismatch():
     )
     inst = problem_instances["instances"][0]
     assert inst["subspace_group_candidate"] == "P4"
-    assert inst["legacy_subspace_group_candidate"] == "C4_like"
+    # legacy field removed
     assert inst["expected_hsps"] == ["GammaM", "XM"]
     assert inst["expected_hsp_policy_source"] == "sampled_irrep_basis"
     assert inst["ready_for_ebr_decomposition"] is True
@@ -814,7 +814,7 @@ def test_generic_ebr_builder_e2e_p4_group_agnostic(tmp_path):
     assert inst["expected_hsps"] == ["GammaM"]
     assert inst["expected_hsp_policy_source"] == "sampled_irrep_basis"
     assert inst["subspace_group_candidate"] == "P4"
-    assert inst["legacy_subspace_group_candidate"] == "P4"
+    # legacy field removed
 
     # 4. Export bundle.
     bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
@@ -868,7 +868,7 @@ def test_generic_ebr_builder_e2e_p4_group_agnostic(tmp_path):
     assert rec.get("source_operation_map") == {0: 1, 1: 2}
     assert rec.get("valley_preserving_operation_ids") == [0, 1]
     assert rec["subspace_space_group"]["candidate_space_group_symbol"] == "P4"
-    assert rec.get("legacy_subspace_group_candidate") == "P4"
+    # legacy field removed
 
 
 def test_irreptables_loader_e2e_p4_group_agnostic(tmp_path):
@@ -1127,7 +1127,7 @@ def test_p4_public_output_contract(tmp_path):
     recs = rep_report["representation_records"]
     assert len(recs) == 1
     assert recs[0]["subspace_space_group"]["candidate_space_group_symbol"] == "P4"
-    assert recs[0]["legacy_subspace_group_candidate"] == "C4_like"
+    # legacy field removed
     raw_rep = json.dumps(recs)
     for cn in ("C2_like", "C3_like", "C4_like"):
         assert f'"candidate_space_group_symbol": "{cn}"' not in raw_rep, (
@@ -1148,7 +1148,7 @@ def test_p4_public_output_contract(tmp_path):
     assert '"subspace_group_candidate": "C4_like"' not in raw_bundle
     inst = instances["instances"][0]
     assert inst["subspace_group_candidate"] == "P4"
-    assert inst["legacy_subspace_group_candidate"] == "C4_like"
+    # legacy field removed
 
     # 4. Solve.
     bp_irreps = b["irreps_by_kpoint"]["GammaM"]

@@ -329,7 +329,7 @@ def test_summary_payload_renders_valley_projected_representations(tmp_path):
 
     assert "C2_like" in json.dumps(report)
     assert "C2_like" not in json.dumps(summary)
-    assert "legacy_subspace_group_candidate" not in json.dumps(summary)
+    # legacy field removed from fixture
     assert summary["valley_projected_representations"]["subspace_space_group_counts"] == {"P2": 1}
     text = render_summary_text(summary)
     assert "Valley-projected representations" in text

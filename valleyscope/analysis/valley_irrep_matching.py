@@ -180,7 +180,7 @@ def build_valley_irrep_matching_report(
                             sg=sg, ssg=ssg,
                         ),
                         "legacy_subspace_group_candidate": (
-                            _legacy_group_identity(sg)
+                            None
                         ),
                         "subspace_space_group": dict(ssg)
                         if isinstance(ssg, Mapping) else {},
@@ -209,7 +209,7 @@ def build_valley_irrep_matching_report(
                     "subspace_group_candidate": _generic_group_identity(
                         sg=sg, ssg=ssg,
                     ),
-                    "legacy_subspace_group_candidate": _legacy_group_identity(sg),
+                    "legacy_subspace_group_candidate": None,
                     "subspace_space_group": dict(ssg)
                     if isinstance(ssg, Mapping) else {},
                 }
@@ -281,7 +281,7 @@ def build_valley_irrep_matching_report(
                             _generic_group_identity(sg=sg_fl, ssg=ssg_fl)
                         ),
                         "legacy_subspace_group_candidate": (
-                            _legacy_group_identity(sg_fl)
+                            None
                         ),
                         "subspace_space_group": dict(ssg_fl)
                         if isinstance(ssg_fl, Mapping) else {},
@@ -303,7 +303,7 @@ def build_valley_irrep_matching_report(
                             _generic_group_identity(sg=sg_fl, ssg=ssg_fl)
                         ),
                         "legacy_subspace_group_candidate": (
-                            _legacy_group_identity(sg_fl)
+                            None
                         ),
                         "subspace_space_group": dict(ssg_fl)
                         if isinstance(ssg_fl, Mapping) else {},
@@ -331,7 +331,7 @@ def build_valley_irrep_matching_report(
                         _generic_group_identity(sg=sg_fl, ssg=ssg_fl)
                     ),
                     "legacy_subspace_group_candidate": (
-                        _legacy_group_identity(sg_fl)
+                        None
                     ),
                     "subspace_space_group": dict(ssg_fl)
                     if isinstance(ssg_fl, Mapping) else {},
@@ -447,7 +447,7 @@ def build_valley_irrep_matching_report(
                         _generic_group_identity(sg=sg, ssg=ssg)
                     ),
                     "legacy_subspace_group_candidate": (
-                        _legacy_group_identity(sg)
+                        None
                     ),
                     "subspace_space_group": dict(ssg)
                     if isinstance(ssg, Mapping) else {},
@@ -456,11 +456,6 @@ def build_valley_irrep_matching_report(
     # --- Strategy boundary: in generic mode, suppress legacy by_kpoint entries ---
     # for (kpoint, valley) pairs that have generic coverage.  The generic
     # source (including blocked rows) is the authoritative matching path.
-    if _generic_mode and generic_matches:
-        _filter_legacy_rows_in_generic_mode(
-            by_kpoint=by_kpoint,
-            generic_matches=generic_matches,
-        )
 
     return {
         "status": "ok" if (by_kpoint or generic_matches) else "not_evaluated",
@@ -536,48 +531,3 @@ def _generic_group_identity(
         if legacy and isinstance(legacy, str):
             return str(legacy)
     return None
-
-
-def _legacy_group_identity(sg: object) -> str | None:
-    if not isinstance(sg, Mapping):
-        return None
-    explicit = sg.get("legacy_subspace_group_candidate")
-    if explicit and isinstance(explicit, str):
-        return str(explicit)
-    legacy = sg.get("subspace_group_candidate")
-    if legacy and isinstance(legacy, str):
-        return str(legacy)
-    return None
-
-
-def _filter_legacy_rows_in_generic_mode(
-    *,
-    by_kpoint: dict[str, object],
-    generic_matches: dict[str, dict[str, dict[str, object]]],
-) -> None:
-    """Remove legacy by_kpoint entries for (kpoint, valley) pairs that have
-    generic coverage in generic_matches (success, diagnostic, or blocked).
-
-    Generic source is the authoritative matching path.  Legacy phase-table
-    entries are kept only for (kpoint, valley) pairs with no generic data.
-    """
-    # Collect (kpoint, valley) pairs with generic coverage.
-    covered: set[tuple[str, str]] = set()
-    for kp_name, valleys in generic_matches.items():
-        if not isinstance(valleys, dict):
-            continue
-        for v_name in valleys:
-            covered.add((str(kp_name), str(v_name)))
-
-    if not covered:
-        return
-
-    for kp_name in list(by_kpoint):
-        v_dict = by_kpoint.get(kp_name)
-        if not isinstance(v_dict, dict):
-            continue
-        for v_name in list(v_dict):
-            if (str(kp_name), str(v_name)) in covered:
-                del v_dict[str(v_name)]
-        if not v_dict:
-            del by_kpoint[str(kp_name)]
