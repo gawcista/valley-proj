@@ -260,7 +260,6 @@ def _extract_irrep_records(
                 "irrep_multiplicity",
                 "matching_strategy",
                 "subspace_space_group",
-                "legacy_subspace_group_candidate",
                 "valley_preserving_operation_ids",
                 "source_operation_map",
             ):

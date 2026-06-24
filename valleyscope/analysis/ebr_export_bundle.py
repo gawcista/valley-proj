@@ -134,7 +134,6 @@ def _strip_public_legacy_fields(value: object) -> object:
         return {
             key: _strip_public_legacy_fields(item)
             for key, item in value.items()
-            if key != "legacy_subspace_group_candidate"
         }
     if isinstance(value, list):
         return [_strip_public_legacy_fields(item) for item in value]

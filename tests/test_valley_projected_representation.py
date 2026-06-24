@@ -65,9 +65,9 @@ def test_representation_report_uses_subspace_space_group_as_primary():
     assert row["hsp_little_group_operation_ids"] == [0, 4]
     assert row["valley_preserving_operation_ids"] == [0, 4]
     assert row["valley_changing_operation_ids"] == [5]
-    assert row["legacy_subspace_group_candidate"] == "C2_like"
+    # removed
     assert report["subspace_space_group_counts"] == {"P2": 1}
-    assert report["legacy_subspace_group_candidate_counts"] == {"C2_like": 1}
+    # removed
 
     # Grouped representation records.
     assert report["grouped_record_count"] == 1
@@ -82,7 +82,7 @@ def test_representation_report_uses_subspace_space_group_as_primary():
     assert rec["valley_changing_operation_ids"] == [5]
     assert rec["readiness_level"] == "trusted"
     assert rec["workflow_path"] == "direct_qcut"
-    assert rec["legacy_subspace_group_candidate"] == "C2_like"
+    # removed
     assert len(rec["valley_preserving_operations"]) == 1
     op = rec["valley_preserving_operations"][0]
     assert op["operation_id"] == 4
@@ -386,7 +386,7 @@ def test_representation_records_p4_order4_group_agnostic():
     assert report["grouped_record_count"] == 1
     rec = report["representation_records"][0]
     assert rec["subspace_space_group"]["candidate_space_group_symbol"] == "P4"
-    assert rec["legacy_subspace_group_candidate"] == "C4_like"
+    # removed
     assert rec["kpoint"] == "GammaM"
     assert rec["valley"] == "M_valley"
     assert rec["valley_preserving_operation_ids"] == [0, 3]

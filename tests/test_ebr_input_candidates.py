@@ -403,5 +403,4 @@ def test_generic_matches_produce_ebr_candidates():
         assert c["matching_strategy"] == "bilbao_restricted_character"
         assert c["ready_for_ebr_input"] is True
         assert c["subspace_group_candidate"] == "P3"
-        assert c["legacy_subspace_group_candidate"] == "C3_like"
         assert c["subspace_space_group"]["candidate_space_group_symbol"] == "P3"

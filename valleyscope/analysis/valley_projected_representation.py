@@ -32,7 +32,6 @@ def build_valley_projected_representation_report(
     """
     rows: list[dict[str, Any]] = []
     subspace_space_group_counts: dict[str, int] = {}
-    legacy_subspace_counts: dict[str, int] = {}
     trusted_count: int = 0
     blocked_count: int = 0
     diagnostic_count: int = 0
@@ -95,10 +94,6 @@ def build_valley_projected_representation_report(
             # Build representation record.
             diag_only = bool(row.get("diagnostic_only", False))
             topology_ready = bool(row.get("topology_input_ready", False))
-            legacy_sgc = (
-                subspace_group_data.get("legacy_subspace_group_candidate")
-                or subspace_group_data.get("subspace_group_candidate")
-            )
             rec: dict[str, Any] = {
                 "kpoint": kp,
                 "valley": valley,
@@ -131,7 +126,6 @@ def build_valley_projected_representation_report(
                 "root_deviation": row.get("root_deviation"),
                 "basis": row.get("basis", ""),
                 "blocking_reasons": _blocking_reasons(row, wf_data, diag_only),
-                "legacy_subspace_group_candidate": legacy_sgc,
             }
             rows.append(rec)
 
@@ -142,9 +136,6 @@ def build_valley_projected_representation_report(
                 subspace_space_group_counts[key] = (
                     subspace_space_group_counts.get(key, 0) + 1
                 )
-            if legacy_sgc:
-                key = str(legacy_sgc)
-                legacy_subspace_counts[key] = legacy_subspace_counts.get(key, 0) + 1
             if diag_only:
                 diagnostic_count += 1
             elif wf_data.get("readiness_level") == "trusted":
@@ -163,7 +154,6 @@ def build_valley_projected_representation_report(
         "representation_records": representation_records,
         "grouped_record_count": len(representation_records),
         "subspace_space_group_counts": subspace_space_group_counts,
-        "legacy_subspace_group_candidate_counts": legacy_subspace_counts,
         "trusted_representation_count": trusted_count,
         "blocked_representation_count": blocked_count,
         "diagnostic_only_count": diagnostic_count,
@@ -385,9 +375,6 @@ def _build_representation_records(
             "workflow_path": first.get("workflow_path", "?"),
             "blocking_reasons": first.get("blocking_reasons", []),
             "irrep_matching": irrep_matching,
-            "legacy_subspace_group_candidate": first.get(
-                "legacy_subspace_group_candidate"
-            ),
         }
         records.append(record)
 

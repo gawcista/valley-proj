@@ -273,7 +273,6 @@ def test_summary_payload_renders_valley_projected_representations(tmp_path):
                 "readiness_level": "trusted",
                 "workflow_path": "direct_qcut",
                 "blocking_reasons": [],
-                "legacy_subspace_group_candidate": "C2_like",
             },
         ],
         "representation_records": [
@@ -299,12 +298,10 @@ def test_summary_payload_renders_valley_projected_representations(tmp_path):
                 "workflow_path": "direct_qcut",
                 "blocking_reasons": [],
                 "irrep_matching": None,
-                "legacy_subspace_group_candidate": "C2_like",
             },
         ],
         "grouped_record_count": 1,
         "subspace_space_group_counts": {"P2": 1},
-        "legacy_subspace_group_candidate_counts": {"C2_like": 1},
         "trusted_representation_count": 1,
         "blocked_representation_count": 0,
         "diagnostic_only_count": 0,
@@ -327,9 +324,8 @@ def test_summary_payload_renders_valley_projected_representations(tmp_path):
         valley_projected_representation=report,
     )
 
-    assert "C2_like" in json.dumps(report)
+    assert "P2" in json.dumps(report)
     assert "C2_like" not in json.dumps(summary)
-    # legacy field removed from fixture
     assert summary["valley_projected_representations"]["subspace_space_group_counts"] == {"P2": 1}
     text = render_summary_text(summary)
     assert "Valley-projected representations" in text

@@ -1257,7 +1257,7 @@ def test_unmock_generic_source_adapter_positive_full_pipeline():
     inst = instances["instances"][0]
     assert inst["ready_for_ebr_decomposition"] is True
     assert inst["subspace_group_candidate"] == "P3"
-    # legacy field removed
+    # removed
 
     # 4. Export bundle.
     ebr_bundle = build_ebr_export_bundle(ebr_problem_instances=instances)

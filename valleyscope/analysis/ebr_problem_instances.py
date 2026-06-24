@@ -44,7 +44,7 @@ def build_ebr_problem_instances(
             if isinstance(ssg, dict) else None
         )
         sg = str(sg_symbol) if sg_symbol else str(c.get("subspace_group_candidate", ""))
-        legacy_sg = str(c.get("legacy_subspace_group_candidate", ""))
+        legacy_sg = ""
         valley = str(c.get("valley", ""))
         workflow_path = str(c.get("workflow_path", ""))
         readiness_level = str(c.get("readiness_level", ""))
@@ -91,7 +91,6 @@ def build_ebr_problem_instances(
             for key in (
                 "matching_strategy",
                 "subspace_space_group",
-                "legacy_subspace_group_candidate",
                 "valley_preserving_operation_ids",
                 "source_operation_map",
             ):
@@ -113,7 +112,6 @@ def build_ebr_problem_instances(
             "instance_id": instance_id,
             "valley": valley,
             "subspace_group_candidate": sg,
-            "legacy_subspace_group_candidate": legacy_sg if legacy_sg else sg,
             "workflow_path": workflow_path,
             "readiness_level": readiness_level,
             "irreps_by_kpoint": {k: v for k, v in sorted(irreps_by_kpoint.items())},

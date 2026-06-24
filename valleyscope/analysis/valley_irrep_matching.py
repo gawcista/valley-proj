@@ -179,9 +179,6 @@ def build_valley_irrep_matching_report(
                         "subspace_group_candidate": _generic_group_identity(
                             sg=sg, ssg=ssg,
                         ),
-                        "legacy_subspace_group_candidate": (
-                            None
-                        ),
                         "subspace_space_group": dict(ssg)
                         if isinstance(ssg, Mapping) else {},
                     }
@@ -209,8 +206,7 @@ def build_valley_irrep_matching_report(
                     "subspace_group_candidate": _generic_group_identity(
                         sg=sg, ssg=ssg,
                     ),
-                    "legacy_subspace_group_candidate": None,
-                    "subspace_space_group": dict(ssg)
+                                        "subspace_space_group": dict(ssg)
                     if isinstance(ssg, Mapping) else {},
                 }
 
@@ -280,9 +276,6 @@ def build_valley_irrep_matching_report(
                         "subspace_group_candidate": (
                             _generic_group_identity(sg=sg_fl, ssg=ssg_fl)
                         ),
-                        "legacy_subspace_group_candidate": (
-                            None
-                        ),
                         "subspace_space_group": dict(ssg_fl)
                         if isinstance(ssg_fl, Mapping) else {},
                     }
@@ -301,9 +294,6 @@ def build_valley_irrep_matching_report(
                         "readiness_level": readiness,
                         "subspace_group_candidate": (
                             _generic_group_identity(sg=sg_fl, ssg=ssg_fl)
-                        ),
-                        "legacy_subspace_group_candidate": (
-                            None
                         ),
                         "subspace_space_group": dict(ssg_fl)
                         if isinstance(ssg_fl, Mapping) else {},
@@ -329,9 +319,6 @@ def build_valley_irrep_matching_report(
                     "readiness_level": readiness,
                     "subspace_group_candidate": (
                         _generic_group_identity(sg=sg_fl, ssg=ssg_fl)
-                    ),
-                    "legacy_subspace_group_candidate": (
-                        None
                     ),
                     "subspace_space_group": dict(ssg_fl)
                     if isinstance(ssg_fl, Mapping) else {},
@@ -445,9 +432,6 @@ def build_valley_irrep_matching_report(
                     "readiness_level": readiness,
                     "subspace_group_candidate": (
                         _generic_group_identity(sg=sg, ssg=ssg)
-                    ),
-                    "legacy_subspace_group_candidate": (
-                        None
                     ),
                     "subspace_space_group": dict(ssg)
                     if isinstance(ssg, Mapping) else {},

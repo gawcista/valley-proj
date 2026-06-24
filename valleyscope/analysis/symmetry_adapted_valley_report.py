@@ -649,7 +649,6 @@ def _blocked_subspace_group(
         "operation_orders": {},
         "effective_point_group": "C1",
         "subspace_group_candidate": None,
-        "legacy_subspace_group_candidate": None,
         "spinor_convention_verified": bool(spinor_convention_verified),
         "ready_for_ebr_mapping": False,
         "reason": reason,

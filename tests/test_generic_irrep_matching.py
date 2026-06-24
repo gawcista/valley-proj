@@ -928,7 +928,6 @@ def test_representation_record_no_legacy_fallback_in_generic_mode():
     rec = report["representation_records"][0]
     # In generic mode, no legacy fallback — irrep_matching is None.
     assert rec["irrep_matching"] is None
-    assert rec["legacy_subspace_group_candidate"] == "P2"
 
 
 def test_summary_text_generic_first_legacy_explicit():
