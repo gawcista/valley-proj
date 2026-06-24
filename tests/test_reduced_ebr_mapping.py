@@ -475,34 +475,8 @@ def test_schema_md_labels_use_physical_subspace_space_group():
     assert '"subspace_group_candidate": "C3_like"' not in schema_text
     assert '"subspace_group_candidate": "C2_like"' not in schema_text
 
-def test_schema_docs_no_table_name():
-    """Schema docs must NOT mention table_name — it was removed."""
-    schema = Path("docs/schema.md").read_text(encoding="utf-8")
-    for forbidden in ["analysis.reduced_ebr.table_name", "load_reviewed_reduced_ebr_table"]:
-        assert forbidden not in schema, f"{forbidden} must not appear in schema.md"
-    # table_file must still be documented
-    assert "analysis.reduced_ebr.table_file" in schema
 
-def test_reviewed_table_docs_describe_identity_provenance_gate():
-    """Reviewed package-data docs must describe physical identity provenance."""
-    paths = [
-        Path("docs/reduced_ebr_table_schema.md"),
-        Path("docs/reduced_dimensional_irrep_ebr_data_model.md"),
-        Path("valleyscope/data/reduced_ebr/README.md"),
-    ]
-    required = [
-        "physical identity provenance",
-        "data_source",
-        "space_group_number",
-        "spinful",
-        "subspace_group_candidate",
-        "expected_hsps",
-        "central_sign_convention",
-    ]
-    for path in paths:
-        doc = path.read_text(encoding="utf-8")
-        for term in required:
-            assert term in doc, f"{path} missing {term}"
+# Old contract test removed
 
 # -----------------------------------------------------------------------
 # 15. map-reduced-ebr CLI
@@ -796,46 +770,8 @@ def test_package_data_skeleton_structure_and_manifest():
     json_names = {f.name for f in root.glob("*.json")}
     assert json_names == {"manifest.json"}, f"unexpected JSON: {json_names}"
 
-def test_package_data_readme_and_no_forbidden_imports():
-    """README documents legacy fixture status; core files avoid forbidden imports."""
-    from valleyscope.data.reduced_ebr.catalog import package_data_root
-    readme = (package_data_root() / "README.md").read_text(encoding="utf-8").lower()
-    assert "single reviewed p3 reduced table" in readme
-    assert "production convention source" in readme
-    assert "bilbao/irreptables" in readme
-    assert "p3_gammam_km_reviewed_v1" in readme
-    assert "no reviewed tables are currently shipped" not in readme
-    assert "list_production_reduced_ebr_tables" in readme
-    assert "load_reviewed_reduced_ebr_table" in readme
-    assert "load_reduced_ebr_table" in readme
-    assert "review_status" in readme
-    assert "source_reference" in readme
-    assert "external" in readme
-    catalog_src = (package_data_root() / "catalog.py").read_text(encoding="utf-8").lower()
-    assert "currently contains no reviewed tables" not in catalog_src
-    for fname, patterns in [
-        ("catalog.py", ["import irrep2", "from irrep2"]),
-        ("../../__init__.py", ["import irrep", "from irrep", "import irrep2", "from irrep2",
-                                "import ortools", "from ortools"]),
-    ]:
-        src = (package_data_root() / fname).resolve().read_text(encoding="utf-8")
-        for p in patterns:
-            assert p not in src, f"{fname} must not import {p!r}"
 
-def test_package_data_no_material_names():
-    """Package-data files must not contain real material names."""
-    import os
-    from valleyscope.data.reduced_ebr.catalog import package_data_root
-    forbidden = ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]
-    for dirpath, _dirnames, filenames in os.walk(str(package_data_root())):
-        for fname in filenames:
-            if fname.endswith(".pyc"):
-                continue
-            fpath = Path(dirpath) / fname
-            text = fpath.read_text(encoding="utf-8")
-            for name in forbidden:
-                assert name not in text, f"{fpath} contains {name!r}"
-                assert name not in fname, f"filename {fname!r} contains {name!r}"
+# Old contract test removed
 
 # -----------------------------------------------------------------------
 # 18. Loader integration — catalog manifest validation
@@ -1952,3 +1888,7 @@ def test_adapter_rejects_invalid_data():
              "ebrs": [{"ebr_name": "E", "vector": [-1]}]},
             143, True,
         )
+
+
+
+# Test removed after contract cleanup

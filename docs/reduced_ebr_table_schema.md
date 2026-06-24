@@ -170,7 +170,7 @@ Given a bundle with irrep count vector `[2, 1, 1]`:
 
 A standalone CLI entry performs exact-integer reduced EBR mapping from an
 existing `valley_ebr_export_bundle.json` plus either a user-supplied validated
-external table or a reviewed package-data table name. This separates Layer 2
+external table file. This separates Layer 2
 export-bundle generation from Layer 3 table-dependent mapping for
 high-throughput workflows.
 
