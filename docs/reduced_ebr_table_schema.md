@@ -15,8 +15,8 @@ External user tables are validated by
 `valleyscope.analysis.reduced_ebr_mapping.load_reduced_ebr_table()` and do
 not need package-data review metadata. They are selected with
 `analysis.reduced_ebr.table_file`. Reviewed package-data tables are a
-stricter path selected with `analysis.reduced_ebr.table_name` and loaded by
-`valleyscope.data.reduced_ebr.catalog.load_reviewed_reduced_ebr_table()`;
+stricter path selected with `analysis.reduced_ebr.table_file` and loaded by
+`valleyscope.data.reduced_ebr.reduced_ebr_mapping.load_reduced_ebr_table()`;
 that path requires reviewed metadata in both `manifest.json` and the table's
 top-level `provenance` object, including `review_status: "reviewed"`,
 `reviewer`, `review_date`, `review_method`, `source_reference`, and
@@ -31,8 +31,7 @@ subgroup reduction rather than to a material name. Valley-changing operation
 and valley sewing matrix data must remain outside the reduced EBR vector basis
 unless a future reviewed table explicitly defines a different valley mapping
 problem.
-`analysis.reduced_ebr.table_file` and `analysis.reduced_ebr.table_name` are
-mutually exclusive.
+`analysis.reduced_ebr.table_file` (external user-supplied table).
 
 ## Required Table Keys
 
@@ -51,7 +50,7 @@ mutually exclusive.
 | Status | Meaning |
 |--------|---------|
 | `not_evaluated` | No export bundle available |
-| `missing_table` | `analysis.reduced_ebr.enabled: true` but no `table_file` or `table_name` provided |
+| `missing_table` | `analysis.reduced_ebr.enabled: true` but no `table_file` provided |
 | `solved_exact` | All bundles classified as `atomic-compatible-candidate` |
 | `no_exact_solution` | At least one bundle classified as fragile or stable |
 
@@ -184,7 +183,7 @@ valleyscope map-reduced-ebr \
 
 valleyscope map-reduced-ebr \
   valley_ebr_export_bundle.json \
-  --table-name reviewed_table_name \
+  --table-name reviewed_table_file \
   --output valley_reduced_ebr_mapping.json
 ```
 

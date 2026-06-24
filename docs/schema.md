@@ -229,10 +229,8 @@ compatibility hint, not the final contract.
 Exact-integer reduced EBR decomposition. **Default-off**; produced only when
 `analysis.reduced_ebr.enabled: true`. A validated reduced EBR table is
 required for `solved_exact` / `no_exact_solution` decomposition attempts:
-external user tables use `analysis.reduced_ebr.table_file` and reviewed
-package-data tables use `analysis.reduced_ebr.table_name`, which loads through
-`load_reviewed_reduced_ebr_table`. `analysis.reduced_ebr.table_file` and
-`analysis.reduced_ebr.table_name` are mutually exclusive. Without either
+external user tables use `analysis.reduced_ebr.table_file`. Production
+reduced EBR data comes from the irreptables runtime reducer. Without a
 table input the output carries `status: missing_table`.
 
 Top-level fields (always present):

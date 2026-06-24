@@ -352,10 +352,10 @@ valleyscope map-reduced-ebr \
 
 The existing `analysis.reduced_ebr.enabled` + `table_file` config path
 remains the external user-table path.  Reviewed package-data tables use
-`analysis.reduced_ebr.table_name`, which resolves through
-`load_reviewed_reduced_ebr_table` and therefore requires catalog-reviewed
+`analysis.reduced_ebr.table_file` (external user-supplied table).
+`load_reduced_ebr_table` and therefore requires catalog-reviewed
 manifest metadata plus reviewed table provenance.  `analysis.reduced_ebr.table_file`
-and `analysis.reduced_ebr.table_name` are mutually exclusive.
+
 
 ### 6.3 Public Schema Preservation
 

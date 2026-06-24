@@ -475,17 +475,13 @@ def test_schema_md_labels_use_physical_subspace_space_group():
     assert '"subspace_group_candidate": "C3_like"' not in schema_text
     assert '"subspace_group_candidate": "C2_like"' not in schema_text
 
-def test_schema_docs_describe_reviewed_table_name_config():
-    """Schema docs must document reviewed package-data table_name loading."""
+def test_schema_docs_no_table_name():
+    """Schema docs must NOT mention table_name — it was removed."""
     schema = Path("docs/schema.md").read_text(encoding="utf-8")
-    table_schema = Path("docs/reduced_ebr_table_schema.md").read_text(encoding="utf-8")
-    data_model = Path("docs/reduced_dimensional_irrep_ebr_data_model.md").read_text(encoding="utf-8")
-
-    for doc in [schema, table_schema, data_model]:
-        assert "analysis.reduced_ebr.table_name" in doc
-        assert "analysis.reduced_ebr.table_file" in doc
-        assert "load_reviewed_reduced_ebr_table" in doc
-        assert "mutually exclusive" in doc
+    for forbidden in ["analysis.reduced_ebr.table_name", "load_reviewed_reduced_ebr_table"]:
+        assert forbidden not in schema, f"{forbidden} must not appear in schema.md"
+    # table_file must still be documented
+    assert "analysis.reduced_ebr.table_file" in schema
 
 def test_reviewed_table_docs_describe_identity_provenance_gate():
     """Reviewed package-data docs must describe physical identity provenance."""
@@ -1841,9 +1837,8 @@ def _fake_catalog_with_reviewed_table(tmp_path, monkeypatch, name="c3_reviewed",
     monkeypatch.setattr(catalog, "package_data_root", lambda: root)
     return root
 
-def test_config_parses_table_name(tmp_path):
-    """config parses table_name string."""
-    from valleyscope.io.config import load_config
+def test_config_rejects_table_name(tmp_path):
+    """config rejects table_name with clear error."""
     config_path = tmp_path / "cfg.yaml"
     config_path.write_text(yaml.safe_dump({
         "input": {"wavefunction_h5": "wave.h5"},
@@ -1855,13 +1850,12 @@ def test_config_parses_table_name(tmp_path):
         "valley_centers": {"coordinate_mode": "cart", "centers": [{"name": "K", "cart": [0, 0, 0]}]},
         "valley_subspaces": [{"name": "K_valley", "centers": ["K"]}],
         "output": {"directory": "out"},
-    }))
-    cfg = load_config(config_path)
-    assert cfg.reduced_ebr.table_name == "c3_table"
-    assert cfg.reduced_ebr.table_file is None
+    }), encoding="utf-8")
+    with pytest.raises(ValueError, match="table_name was removed"):
+        load_config(config_path)
 
-def test_config_rejects_both_table_file_and_name(tmp_path):
-    """config rejects both table_file and table_name."""
+def test_config_rejects_table_name_regardless_of_table_file(tmp_path):
+    """config rejects table_name even when table_file is also present."""
     from valleyscope.io.config import load_config
     config_path = tmp_path / "cfg.yaml"
     config_path.write_text(yaml.safe_dump({
@@ -1879,7 +1873,7 @@ def test_config_rejects_both_table_file_and_name(tmp_path):
         "valley_subspaces": [{"name": "K_valley", "centers": ["K"]}],
         "output": {"directory": "out"},
     }))
-    with pytest.raises(ValueError, match="mutually exclusive"):
+    with pytest.raises(ValueError, match="table_name was removed"):
         load_config(config_path)
 
 # table_name path removed; test deleted
