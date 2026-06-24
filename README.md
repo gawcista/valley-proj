@@ -642,7 +642,8 @@ by `output.profile`:
 - `debug`: full diagnostic file set.
 
 Set `output.profile: debug` to enable all detailed diagnostic files. The
-frozen public schema is documented in [`docs/schema.md`](docs/schema.md).
+public output schema is summarized below; internal development schema notes are
+kept outside the public repository.
 
 ### Main User Entry
 
@@ -680,9 +681,9 @@ valleyscope map-reduced-ebr \
   --output valley_reduced_ebr_mapping.json
 ```
 
-The table path is required — no built-in EBR tables are provided.
-See `docs/reduced_ebr_table_schema.md` for the table format and
-`docs/schema.md` for the public output schema.
+The table path is required — no built-in EBR tables are provided. The external
+table is a JSON object with `schema_version`, `subspace_group_candidate`,
+`expected_hsps`, `irreps`, and `ebrs` keys.
 
 ### Debug / Detail Outputs (debug profile only)
 

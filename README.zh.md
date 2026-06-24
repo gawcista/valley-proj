@@ -606,8 +606,8 @@ Valley-preserving gate 为：
 - `standard`（默认）：仅公共用户输出。
 - `debug`：完整诊断文件集。
 
-设置 `output.profile: debug` 以启用所有详细诊断文件。冻结的公共 schema 定义在
-[`docs/schema.md`](docs/schema.md)。
+设置 `output.profile: debug` 以启用所有详细诊断文件。公共输出 schema 在下文概述；
+内部开发 schema 说明不放入公开仓库。
 
 ### 主入口
 
@@ -644,8 +644,9 @@ valleyscope map-reduced-ebr \
   --output valley_reduced_ebr_mapping.json
 ```
 
-表路径是必需的——不内置任何 EBR 表。
-参见 `docs/reduced_ebr_table_schema.md`（表格式）和 `docs/schema.md`（公共输出 schema）。
+表路径是必需的——不内置任何 EBR 表。外部表是 JSON 对象，包含
+`schema_version`、`subspace_group_candidate`、`expected_hsps`、`irreps` 和
+`ebrs` 等键。
 
 ### Debug / 详细输出（仅 debug profile）
 

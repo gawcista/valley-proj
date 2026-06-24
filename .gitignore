@@ -20,12 +20,8 @@ dist/
 
 # Markdown policy: keep only public README
 *.md
-!README.md
-!README.zh.md
-!CLAUDE.md
-!docs/
-!docs/**/*.md
-!.codex_cc_handoff.template.md
+!/README.md
+!/README.zh.md
 
 # VASP large files and generated analysis data
 /real_tests/
