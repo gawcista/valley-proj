@@ -407,11 +407,13 @@ def test_write_analysis_outputs_plumbs_hsp_star_reports_to_summary(tmp_path):
     assert payload["irrep_workflow_decisions"] == irrep_workflow_decisions
     assert "C3_like" not in json.dumps(payload)
     # valley_irrep_matching moved to debug profile; standard uses valley_resolved_irreps
+    assert "valley_irrep_matching" not in payload
     assert payload["valley_resolved_irreps"]["status"] in ("ok", "no_generic_irrep_data")
     assert payload["valley_ebr_input_candidates"] == ebr_input_candidates
     assert payload["valley_ebr_problem_instances"] == ebr_problem_instances
     assert payload["valley_ebr_export_bundle"] == ebr_export_bundle
     assert "Valley-resolved irreps" in outputs["summary_text"]
+    assert "Valley irrep matching" not in outputs["summary_text"]
     assert "EBR export bundle" in outputs["summary_text"]
     assert "bundle_ebr_instance_001" in outputs["summary_text"]
 
@@ -1351,15 +1353,15 @@ def test_spinful_p3_analyze_hsp_unmocked_feasibility(tmp_path):
 
     outputs = analyze_hsp(config_path)
     summary = json.loads(outputs["valley_summary_json"].read_text())
-    vm = summary.get("valley_irrep_matching", {})
-    gm = vm.get("generic_matches_by_kpoint", {})
+    assert "valley_irrep_matching" not in summary
+    resolved = summary["valley_resolved_irreps"]
 
     # Document the blocker: toy fixture cannot produce trusted generic matches.
-    matched_count = 0
-    for kp_data in gm.values() if isinstance(gm, dict) else []:
-        for v_data in kp_data.values() if isinstance(kp_data, dict) else []:
-            if isinstance(v_data, dict) and v_data.get("matching_status") == "matched":
-                matched_count += 1
+    matched_count = sum(
+        1
+        for row in resolved.get("rows", [])
+        if isinstance(row, dict) and row.get("matching_status") == "matched"
+    )
 
     # Blocker assertion: no matched generic rows from toy spinful fixture.
     assert matched_count == 0, (

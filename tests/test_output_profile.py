@@ -52,6 +52,7 @@ def test_default_standard_profile_writes_only_public_outputs(tmp_path):
     summary_json = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     assert summary_json.get("output_profile") == "standard"
     assert "valley_projected_representations" in summary_json
+    assert "valley_irrep_matching" not in summary_json
 
 
 def test_debug_profile_writes_all_detailed_files(tmp_path):
@@ -427,4 +428,3 @@ def test_debug_profile_writes_all_expected_detail_files(tmp_path):
     # Summary must NOT mention suppression.
     summary_text = outputs["valley_summary_txt"].read_text(encoding="utf-8")
     assert "Debug/detail outputs suppressed" not in summary_text
-
