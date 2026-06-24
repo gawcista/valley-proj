@@ -984,10 +984,70 @@ def test_summary_text_generic_first_legacy_explicit():
     text = render_summary_text(summary)
     # Generic-first language.
     assert "generic restricted-character matches" in text
-    # Legacy tables are labeled explicitly.
-# legacy phase tables label removed from summary text
-    # Legacy by_kpoint section header is present only when generic rows exist.
-# legacy prototype fallback rows label removed
+    # Dead legacy table inventory is no longer advertised.
+    assert "legacy phase tables" not in text
+    assert "tables implemented:" not in text
+
+
+def test_summary_text_labels_legacy_rows_as_compatibility_only():
+    """Legacy by_kpoint rows remain explicit compatibility-only diagnostics."""
+    from valleyscope.reports.summary_report import render_summary_text
+
+    summary = {
+        "input": {
+            "wavefunction_h5": "/none",
+            "operation_structure_file": None,
+            "operation_detection_backend": "spglib",
+            "spinor_convention": "vasp_up_down_saxis_z",
+            "spinor_convention_verified": False,
+            "spinor_benchmark": None,
+        },
+        "target_kpoints": ["GammaM"],
+        "iband": [1],
+        "valley_subspaces": [],
+        "qcut": {"projector_mode": "fixed_center", "mode": "absolute", "value_Ainv": 0.05, "scan": []},
+        "valley_projection_summary": [],
+        "valley_subspace_analysis": [],
+        "valley_projector_quality": [],
+        "symmetry_analysis": {
+            "status": "ok",
+            "operation_detection_backend": "spglib",
+            "structure_file": None,
+            "detected_operation_count": 0,
+            "detected_operations": [],
+            "candidate_rotations": [],
+            "symprec_scan_summary": [],
+            "little_group_check": {"required": True, "status": "not_run"},
+            "valley_preservation_check": {"required": True, "status": "not_run"},
+        },
+        "symmetry_eigenvalues": [],
+        "symmetry_characters": [],
+        "rotation_readiness_thresholds": {},
+        "warnings": [],
+        "output_profile": "standard",
+        "output_files": {},
+        "legend": {"topology_input_ready": "explanation"},
+        "valley_irrep_matching": {
+            "status": "ok",
+            "matching_mode": "legacy",
+            "by_kpoint": {
+                "GammaM": {
+                    "K_valley": {
+                        "2": {
+                            "matching_status": "matched",
+                            "matched_irrep": "C2_spinor_phase_+1/4",
+                            "subspace_group_candidate": "P2",
+                            "eigenphases": [0.25],
+                            "readiness_level": "trusted",
+                        },
+                    },
+                },
+            },
+        },
+    }
+    text = render_summary_text(summary)
+    assert "compatibility-only legacy fallback rows:" in text
+    assert "C2_spinor_phase_+1/4" in text
 
 
 # -----------------------------------------------------------------------

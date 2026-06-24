@@ -1662,6 +1662,7 @@ def _render_valley_irrep_matching(
                     m.get("readiness_level", ""),
                 ])
     if rows:
+        lines.append("compatibility-only legacy fallback rows:")
         lines.extend(
             _table(
                 ["kpoint", "valley", "op", "group", "status",
