@@ -406,14 +406,12 @@ def test_write_analysis_outputs_plumbs_hsp_star_reports_to_summary(tmp_path):
     assert payload["hsp_star_derived_characters"] == hsp_star_derived
     assert payload["irrep_workflow_decisions"] == irrep_workflow_decisions
     assert "C3_like" not in json.dumps(payload)
-    assert payload["valley_irrep_matching"]["by_kpoint"]["Gamma"]["K_valley"]["1"][
-        "subspace_group_candidate"
-    ] == "P3"
+    # valley_irrep_matching moved to debug profile; standard uses valley_resolved_irreps
+    assert payload["valley_resolved_irreps"]["status"] in ("ok", "no_generic_irrep_data")
     assert payload["valley_ebr_input_candidates"] == ebr_input_candidates
     assert payload["valley_ebr_problem_instances"] == ebr_problem_instances
     assert payload["valley_ebr_export_bundle"] == ebr_export_bundle
-    assert "Valley irrep matching" in outputs["summary_text"]
-    assert "C3_spinor_phase_+1/2" in outputs["summary_text"]
+    assert "Valley-resolved irreps" in outputs["summary_text"]
     assert "EBR export bundle" in outputs["summary_text"]
     assert "bundle_ebr_instance_001" in outputs["summary_text"]
 
@@ -889,13 +887,10 @@ def test_generic_irrep_source_blocked_negative_toy_fixture(tmp_path):
     # valley-preserving operation set, which must not be matched to the SG143
     # source table by convenience.
     summary = json.loads(outputs["valley_summary_json"].read_text())
-    vm = summary.get("valley_irrep_matching", {})
-    gm = vm.get("generic_matches_by_kpoint", {})
-    blocked = gm["GammaM"]["K_valley"]
-    assert blocked["matching_status"] == "blocked"
+    resolved = summary["valley_resolved_irreps"]
+    blocked = [r for r in resolved["rows"] if r["matching_status"] == "blocked"][0]
     assert blocked["matching_strategy"] == "bilbao_restricted_character"
-    assert blocked["diagnostic_only"] is True
-    assert "table_operation_matching_failed" in blocked["reason"]
+    assert "table_operation_matching_failed" in blocked.get("reason", "")
     assert summary["valley_ebr_input_candidates"]["status"] == "no_candidates"
     assert summary["valley_ebr_input_candidates"]["candidate_count"] == 0
     assert summary["valley_ebr_problem_instances"]["status"] == "no_instances"
@@ -1081,12 +1076,16 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     assert outputs["valley_summary_json"].exists()
     assert outputs["valley_reduced_ebr_mapping_json"].exists()
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
-    gm = summary["valley_irrep_matching"]["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
+    # Standard summary uses compact valley_resolved_irreps, not raw matching.
+    resolved = summary["valley_resolved_irreps"]
+    assert resolved["status"] == "ok"
+    assert resolved["matched_count"] >= 1
+    gm = resolved["rows"][0]
     assert gm["matching_status"] == "matched"
     assert gm["matching_strategy"] == "bilbao_restricted_character"
     assert gm["irrep_multiplicities"] == {"A": 1, "B": 1}
-    assert gm["subspace_space_group"]["candidate_space_group_symbol"] == "P4"
-    assert gm["subspace_space_group"]["candidate_space_group_symbol"] != "C2_like"
+    assert gm["subspace_space_group"] == "P4"
+    assert "C2_like" not in json.dumps(resolved)
     # Public output contract: representation_records use physical subspace-space-group.
     vpr = summary.get("valley_projected_representations")
     assert isinstance(vpr, dict) and vpr

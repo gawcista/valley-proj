@@ -108,10 +108,14 @@ def build_summary_payload(
     if irrep_workflow_decisions is not None:
         payload["irrep_workflow_decisions"] = irrep_workflow_decisions
     if valley_irrep_matching is not None:
-        payload["valley_irrep_matching"] = valley_irrep_matching
         payload["valley_resolved_irreps"] = _build_valley_resolved_irreps(
             valley_irrep_matching,
         )
+        # Full valley_irrep_matching is a debug diagnostic; not exposed
+        # in standard profile to avoid duplicating the valley_resolved_irreps
+        # compact irrep surface.
+        if config.output.profile == "debug":
+            payload["valley_irrep_matching"] = valley_irrep_matching
     if ebr_input_candidates is not None:
         payload["valley_ebr_input_candidates"] = ebr_input_candidates
     if ebr_problem_instances is not None:
