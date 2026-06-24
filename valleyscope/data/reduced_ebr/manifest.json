@@ -1,7 +1,0 @@
-{
-  "schema_version": "1.1.0",
-  "description": "Reduced-dimensional EBR package-data catalog. Production reduced EBR data comes from the irreptable-based runtime reducer (valleyscope/analysis/irreptables_runtime_table_builder.py), not from static physical tables shipped in this directory.",
-  "convention_source": "Bilbao/irreptables",
-  "tables": [],
-  "basis_maps": []
-}
