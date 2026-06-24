@@ -475,7 +475,42 @@ def test_schema_md_labels_use_physical_subspace_space_group():
     assert '"subspace_group_candidate": "C3_like"' not in schema_text
     assert '"subspace_group_candidate": "C2_like"' not in schema_text
 
-# Old contract test removed
+def test_public_docs_do_not_advertise_static_package_selector():
+    """Current public docs must not expose static package-data EBR selectors."""
+    checked_paths = [
+        Path("docs/schema.md"),
+        Path("docs/reduced_ebr_table_schema.md"),
+        Path("docs/reduced_dimensional_irrep_ebr_data_model.md"),
+        Path("valleyscope/data/reduced_ebr/README.md"),
+    ]
+    forbidden_terms = [
+        "--table-name",
+        "load_reviewed_reduced_ebr_table",
+        "list_production_reduced_ebr_tables",
+        "single reviewed P3",
+        "reviewed package-data table path",
+    ]
+    for path in checked_paths:
+        text = path.read_text(encoding="utf-8")
+        for term in forbidden_terms:
+            assert term not in text, f"{path} must not mention {term!r}"
+
+
+def test_reduced_ebr_catalog_exposes_only_inert_manifest_helpers():
+    """Package-data catalog must not select static EBR tables by name."""
+    from valleyscope.data.reduced_ebr import catalog
+
+    assert hasattr(catalog, "package_data_root")
+    assert hasattr(catalog, "load_reduced_ebr_manifest")
+    for removed in [
+        "load_reviewed_reduced_ebr_table",
+        "list_reviewed_reduced_ebr_tables",
+        "list_production_reduced_ebr_tables",
+        "list_legacy_phase_label_reduced_ebr_tables",
+        "load_reviewed_reduced_ebr_basis_map",
+        "list_reviewed_reduced_ebr_basis_maps",
+    ]:
+        assert not hasattr(catalog, removed), f"removed selector still present: {removed}"
 
 # -----------------------------------------------------------------------
 # 15. map-reduced-ebr CLI

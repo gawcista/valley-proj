@@ -352,7 +352,10 @@ valleyscope map-reduced-ebr \
 
 The existing `analysis.reduced_ebr.enabled` + `table_file` config path
 is the external user-table path.  No static reviewed package-data tables are
-shipped.  `analysis.reduced_ebr.table_file`
+shipped, and no config key selects built-in reduced EBR package data by name.
+Bilbao/irreptables-derived reduced tables are built through the runtime
+reducer and may be supplied explicitly through
+`analysis.reduced_ebr.table_file`.
 
 
 ### 6.3 Public Schema Preservation
@@ -440,12 +443,13 @@ concepts.  Previous versions of this handoff incorrectly used `irreps`
 1. ~~**This design document**~~ — reviewed and approved (commit `12135c4`).
 2. ~~**Stub data directory**~~ — `valleyscope/data/reduced_ebr/` skeleton
    created with empty manifest, README, and catalog module. No table data.
-3. **Loader** — `valleyscope/data/loader.py` with `list_available_tables()`,
-   `load_table(name_or_path)`, validation against schema.
-4. **First reviewed tables** — for a generic reviewed `C3_like` (GammaM, KM)
-   reduced-dimensional table only after literature review and benchmark
-   validation against real-material fixtures. The table identity must remain
-   symmetry/data-model based, not material-name based.
-5. **Convenience CLI** — `--builtin <name>` flag for `map-reduced-ebr`.
+3. **Runtime/external loader** — use
+   `valleyscope.analysis.reduced_ebr_mapping.load_reduced_ebr_table()` for
+   explicit external table files and the irreptables runtime reducer for
+   Bilbao-derived reduced tables.
+4. ~~**Static reviewed package-data tables**~~ — removed from the current
+   production path. Static JSON payloads remain only as test fixtures.
+5. ~~**Convenience CLI builtin selector**~~ — no CLI selector is provided for
+   static package data.
 6. ~~**Config integration**~~ — `analysis.reduced_ebr.table_name` was
    removed. Use external `table_file` or the irreptables runtime reducer.

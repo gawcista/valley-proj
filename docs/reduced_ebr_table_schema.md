@@ -14,8 +14,10 @@ Without a table, the interface reports `status: missing_table`.
 External user tables are validated by
 `valleyscope.analysis.reduced_ebr_mapping.load_reduced_ebr_table()` and do
 not need package-data review metadata. They are selected with
-`analysis.reduced_ebr.table_file` (external user-supplied table). No
-comes from the irreptables runtime reducer.
+`analysis.reduced_ebr.table_file` (external user-supplied table). ValleyScope
+does not ship static reduced EBR package-data tables; Bilbao/irreptables-derived
+reduced tables are built through the runtime reducer and may be supplied
+explicitly as external table files.
 
 ## Required Table Keys
 
@@ -164,17 +166,11 @@ valleyscope map-reduced-ebr \
   external_reduced_ebr_table.json \
   --output valley_reduced_ebr_mapping.json \
   --max-coefficient 6
-
-valleyscope map-reduced-ebr \
-  valley_ebr_export_bundle.json \
-  
-  --output valley_reduced_ebr_mapping.json
 ```
 
 Arguments:
 - `bundle` — path to `valley_ebr_export_bundle.json` (required)
 - `table` — path to external reduced EBR table JSON
-- `  `load_reviewed_reduced_ebr_table`
 - `--output`, `-o` — output path (default: `valley_reduced_ebr_mapping.json`)
 - `--max-coefficient` — max coefficient per EBR in brute-force search (default: 6)
 
