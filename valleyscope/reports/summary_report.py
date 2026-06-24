@@ -1600,18 +1600,7 @@ def _render_valley_irrep_matching(
 ) -> None:
     _section(lines, "Valley irrep matching")
     lines.append(f"status: {report.get('status', 'not_evaluated')}")
-    matching_mode = str(report.get("matching_mode", "not_evaluated"))
-    lines.append(f"mode: {matching_mode}")
-    legacy_tables = report.get("legacy_tables_implemented")
-    if not isinstance(legacy_tables, list):
-        legacy_tables = report.get("tables_implemented", [])
-    if isinstance(legacy_tables, list) and legacy_tables:
-        label = (
-            "legacy phase tables"
-            if matching_mode == "generic"
-            else "tables implemented"
-        )
-        lines.append(f"{label}: {', '.join(str(item) for item in legacy_tables)}")
+    lines.append(f"mode: {report.get('matching_mode', 'not_evaluated')}")
 
     generic_by_kpoint = report.get("generic_matches_by_kpoint", {})
     generic_rows: list[list[Any]] = []
@@ -1673,8 +1662,6 @@ def _render_valley_irrep_matching(
                     m.get("readiness_level", ""),
                 ])
     if rows:
-        if generic_rows:
-            lines.append("legacy prototype fallback rows:")
         lines.extend(
             _table(
                 ["kpoint", "valley", "op", "group", "status",

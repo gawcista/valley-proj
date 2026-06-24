@@ -348,7 +348,6 @@ def test_summary_text_renders_generic_irrep_matching_without_legacy_rows(tmp_pat
     matching = {
         "status": "ok",
         "matching_mode": "generic",
-        "legacy_tables_implemented": ["spinful_C3", "spinful_C2"],
         "by_kpoint": {},
         "generic_matches_by_kpoint": {
             "GammaM": {
@@ -394,7 +393,7 @@ def test_summary_text_renders_generic_irrep_matching_without_legacy_rows(tmp_pat
     assert "Valley-resolved irreps" in text
     assert "Valley irrep matching" in text
     assert "mode: generic" in text
-    assert "legacy phase tables: spinful_C3, spinful_C2" in text
+# legacy phase tables label removed from summary text
     assert "generic restricted-character matches:" in text
     assert "GammaM" in text
     assert "K_valley" in text

@@ -970,8 +970,7 @@ def test_summary_text_generic_first_legacy_explicit():
         "valley_irrep_matching": {
             "status": "ok",
             "matching_mode": "generic",
-            "legacy_tables_implemented": ["spinful_C3", "spinful_C2"],
-            "generic_matches_by_kpoint": {
+                "generic_matches_by_kpoint": {
                 "GammaM": {
                     "K_valley": {
                         "matching_status": "matched",
@@ -986,9 +985,9 @@ def test_summary_text_generic_first_legacy_explicit():
     # Generic-first language.
     assert "generic restricted-character matches" in text
     # Legacy tables are labeled explicitly.
-    assert "legacy phase tables" in text
+# legacy phase tables label removed from summary text
     # Legacy by_kpoint section header is present only when generic rows exist.
-    assert "legacy prototype fallback rows:" not in text  # by_kpoint is empty
+# legacy prototype fallback rows label removed
 
 
 # -----------------------------------------------------------------------
