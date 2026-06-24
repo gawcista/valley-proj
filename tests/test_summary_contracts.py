@@ -1309,3 +1309,42 @@ def test_schema_doc_covers_public_outputs_and_reduced_ebr_statuses():
         assert phrase not in schema_text, (
             f"docs/schema.md contains stale phrase: '{phrase}'"
         )
+
+
+def test_summary_valley_resolved_irreps():
+    """valley_summary includes compact valley_resolved_irreps from generic matching."""
+    from valleyscope.reports.summary_report import _build_valley_resolved_irreps
+    matching = {
+        "matching_mode": "generic",
+        "generic_matches_by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "matching_status": "matched",
+                    "matching_strategy": "bilbao_restricted_character",
+                    "irrep_multiplicities": {"-GM4": 1},
+                    "subspace_space_group": {"candidate_space_group_symbol": "P3"},
+                    "valley_preserving_operation_ids": [0, 1, 2],
+                    "hsp_little_group_operation_ids": [0, 1, 2],
+                    "readiness_level": "trusted",
+                    "workflow_path": "direct_qcut",
+                },
+            },
+        },
+    }
+    r = _build_valley_resolved_irreps(matching)
+    assert r["status"] == "ok"
+    assert r["matched_count"] == 1
+    assert r["rows"][0]["subspace_space_group"] == "P3"
+    assert r["rows"][0]["matching_strategy"] == "bilbao_restricted_character"
+    assert r["rows"][0]["irrep_multiplicities"] == {"-GM4": 1}
+    assert "C2_like" not in json.dumps(r)
+    assert "C3_like" not in json.dumps(r)
+
+
+def test_valley_resolved_irreps_no_data():
+    """valley_resolved_irreps reports no_generic_irrep_data when empty."""
+    from valleyscope.reports.summary_report import _build_valley_resolved_irreps
+    r = _build_valley_resolved_irreps({"generic_matches_by_kpoint": {}})
+    assert r["status"] == "no_generic_irrep_data"
+    assert r["matched_count"] == 0
+    assert r["rows"] == []

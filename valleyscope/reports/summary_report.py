@@ -109,6 +109,9 @@ def build_summary_payload(
         payload["irrep_workflow_decisions"] = irrep_workflow_decisions
     if valley_irrep_matching is not None:
         payload["valley_irrep_matching"] = valley_irrep_matching
+        payload["valley_resolved_irreps"] = _build_valley_resolved_irreps(
+            valley_irrep_matching,
+        )
     if ebr_input_candidates is not None:
         payload["valley_ebr_input_candidates"] = ebr_input_candidates
     if ebr_problem_instances is not None:
@@ -550,6 +553,10 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     irrep_matching = summary.get("valley_irrep_matching")
     if isinstance(irrep_matching, dict):
         _render_valley_irrep_matching(lines, irrep_matching)
+
+    resolved_irreps = summary.get("valley_resolved_irreps")
+    if isinstance(resolved_irreps, dict):
+        _render_valley_resolved_irreps(lines, resolved_irreps)
 
     projected_reps = summary.get("valley_projected_representations")
     if isinstance(projected_reps, dict):
@@ -1472,6 +1479,113 @@ def _render_irrep_workflow_decisions(
                 rows,
             )
         )
+    lines.append("")
+
+
+def _build_valley_resolved_irreps(
+    matching: dict[str, Any],
+) -> dict[str, Any]:
+    """Build compact valley-resolved irrep summary from generic matching data.
+
+    Extracts generic restricted-character matches and summarizes per-(kpoint, valley)
+    rows with subspace space group, HSP little group, valley-preserving subgroup,
+    matching strategy/status, and irrep multiplicities.
+    """
+    generic_by_kp = matching.get("generic_matches_by_kpoint", {})
+    if not isinstance(generic_by_kp, dict) or not generic_by_kp:
+        return {
+            "status": "no_generic_irrep_data",
+            "matched_count": 0,
+            "blocked_count": 0,
+            "diagnostic_count": 0,
+            "rows": [],
+        }
+
+    rows: list[dict[str, Any]] = []
+    matched = 0
+    blocked = 0
+    diagnostic = 0
+
+    for kp_name in sorted(generic_by_kp):
+        valleys = generic_by_kp.get(kp_name, {})
+        if not isinstance(valleys, dict):
+            continue
+        for v_name in sorted(valleys):
+            gm = valleys.get(v_name, {})
+            if not isinstance(gm, dict):
+                continue
+            status = str(gm.get("matching_status", ""))
+            irrep_mults = gm.get("irrep_multiplicities", {})
+            ssg = gm.get("subspace_space_group", {})
+            vp_ids = gm.get("valley_preserving_operation_ids", [])
+            hsp_ids = gm.get("hsp_little_group_operation_ids", vp_ids)
+
+            row: dict[str, Any] = {
+                "kpoint": kp_name,
+                "valley": v_name,
+                "subspace_space_group": ssg.get("candidate_space_group_symbol") if isinstance(ssg, dict) else None,
+                "hsp_little_group_operation_ids": list(hsp_ids) if isinstance(hsp_ids, list) else [],
+                "valley_preserving_operation_ids": list(vp_ids) if isinstance(vp_ids, list) else [],
+                "matching_strategy": gm.get("matching_strategy"),
+                "matching_status": status,
+                "irrep_multiplicities": dict(irrep_mults) if isinstance(irrep_mults, dict) else {},
+                "readiness_level": gm.get("readiness_level"),
+                "workflow_path": gm.get("workflow_path"),
+                "reason": str(gm.get("reason", ""))[:120] if gm.get("reason") else "",
+            }
+            rows.append(row)
+            if status == "matched":
+                matched += 1
+            elif status == "blocked":
+                blocked += 1
+            else:
+                diagnostic += 1
+
+    return {
+        "status": "ok",
+        "matching_mode": matching.get("matching_mode", "not_evaluated"),
+        "matched_count": matched,
+        "blocked_count": blocked,
+        "diagnostic_count": diagnostic,
+        "rows": rows,
+    }
+
+
+def _render_valley_resolved_irreps(
+    lines: list[str],
+    report: dict[str, Any],
+) -> None:
+    _section(lines, "Valley-resolved irreps")
+    lines.append(f"status: {report.get('status', 'no_data')}")
+    lines.append(f"matched: {report.get('matched_count', 0)}")
+    lines.append(f"blocked: {report.get('blocked_count', 0)}")
+    lines.append(f"diagnostic-only: {report.get('diagnostic_count', 0)}")
+    rows = report.get("rows", [])
+    if not rows:
+        lines.append("(no generic irrep data)")
+        lines.append("")
+        return
+    table_rows: list[list[Any]] = []
+    for row in rows:
+        table_rows.append([
+            row.get("kpoint", ""),
+            row.get("valley", ""),
+            row.get("subspace_space_group") or "?",
+            _short_list(row.get("valley_preserving_operation_ids", [])),
+            row.get("matching_strategy", ""),
+            row.get("matching_status", ""),
+            _short_irrep_multiplicities(row.get("irrep_multiplicities")),
+            row.get("readiness_level", ""),
+            row.get("workflow_path", ""),
+            row.get("reason", "")[:80],
+        ])
+    lines.extend(
+        _table(
+            ["kpoint", "valley", "subspace_sg", "vp_ops", "strategy",
+             "status", "irreps", "readiness", "path", "reason"],
+            table_rows,
+        )
+    )
     lines.append("")
 
 
