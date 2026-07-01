@@ -31,7 +31,6 @@ def build_valley_irrep_matching_report(
     irrep_workflow_decisions: dict[str, object] | None,
     symmetry_adapted_valley_report: dict[str, object] | None,
     allow_caution: bool = False,
-    source_irrep_characters: Mapping[str, Mapping[int, complex]] | None = None,
     source_operation_maps: (
         Mapping[str, Mapping[str, Mapping[int, int]]] | None
     ) = None,
@@ -43,15 +42,12 @@ def build_valley_irrep_matching_report(
     """Build per-(kpoint, valley) irrep matching results.
 
     Cross-references the workflow decision report with character diagnostics
-    from the symmetry-adapted valley analysis.
-
-    When generic source data is supplied, uses the generic
-    ``match_restricted_characters`` strategy.  When no generic source is
-    available, returns ``not_evaluated`` with no legacy phase-table fallback.
+    from the symmetry-adapted valley analysis using the generic
+    ``match_restricted_characters`` strategy over ``G_k^(a)``.
+    When no generic source is available, returns ``not_evaluated``.
     """
     _generic_mode = (
-        source_irrep_characters is not None
-        or source_irrep_characters_flattened is not None
+        source_irrep_characters_flattened is not None
         or source_operation_maps is not None
         or (source_payload_blocked_rows is not None and len(source_payload_blocked_rows) > 0)
     )
@@ -95,120 +91,7 @@ def build_valley_irrep_matching_report(
                     ),
                 }
 
-    # --- Generic restricted-character matching (optional) ---
     generic_matches: dict[str, dict[str, dict[str, object]]] = {}
-    if source_irrep_characters is not None and source_operation_maps is not None:
-        from valleyscope.analysis.generic_irrep_matching import (
-            match_restricted_characters,
-        )
-        for kp_name, v_maps in source_operation_maps.items():
-            if not isinstance(v_maps, Mapping):
-                continue
-            for v_name, op_map in v_maps.items():
-                if not isinstance(op_map, Mapping):
-                    continue
-                # Collect ValleyScope computed characters from character
-                # diagnostics for this (kpoint, valley).
-                sa = sa_by_kp.get(kp_name, {}).get(v_name, {})
-                sg = sa.get("subspace_group", {})
-                ssg = sa.get("subspace_space_group", {})
-                decision = (
-                    decisions_by_kp.get(kp_name, {}).get(v_name, {})
-                    if isinstance(decisions_by_kp.get(kp_name, {}), dict)
-                    else {}
-                )
-                readiness = (
-                    str(decision.get("readiness_level", ""))
-                    if isinstance(decision, dict)
-                    else ""
-                )
-                path = (
-                    str(decision.get("workflow_path", ""))
-                    if isinstance(decision, dict)
-                    else ""
-                )
-                char_diag_g = sa.get("char_diag", {})
-                per_valley_g = char_diag_g.get("per_valley", {})
-                items = (
-                    per_valley_g.get(v_name, [])
-                    if isinstance(per_valley_g, dict)
-                    else []
-                )
-                computed, item_op_ids = _computed_characters_from_items(items)
-                vp_ids = (
-                    _operation_ids_from_value(
-                        ssg.get("valley_preserving_operation_ids")
-                        if isinstance(ssg, Mapping)
-                        else None
-                    )
-                    or item_op_ids
-                )
-                # G_k^(a) = HSP little-group ops ∩ valley-preserving ops.
-                # At HSPs where VP ops move k to another star rep,
-                # the local valley-preserving subgroup is smaller.
-                hsp_lg_raw = (
-                    _operation_ids_from_value(
-                        sa.get("hsp_preserving_operation_ids")
-                    )
-                )
-                if hsp_lg_raw:
-                    vp_ids = [op for op in vp_ids if op in hsp_lg_raw]
-                    hsp_ids = hsp_lg_raw
-                else:
-                    hsp_ids = vp_ids
-                if not vp_ids or not computed:
-                    continue
-
-                if readiness != READINESS_TRUSTED:
-                    status = (
-                        "blocked"
-                        if readiness == READINESS_BLOCKED
-                        else "diagnostic_only"
-                    )
-                    generic_matches.setdefault(kp_name, {})[v_name] = {
-                        "matching_status": status,
-                        "matching_strategy": "bilbao_restricted_character",
-                        "irrep_multiplicities": {},
-                        "source_operation_map": dict(op_map),
-                        "valley_preserving_operation_ids": vp_ids,
-                        "hsp_little_group_operation_ids": hsp_ids,
-                        "diagnostic_only": True,
-                        "reason": f"readiness_level={readiness} is not trusted",
-                        "workflow_path": path,
-                        "readiness_level": readiness,
-                        "subspace_group_candidate": _generic_group_identity(
-                            sg=sg, ssg=ssg,
-                        ),
-                        "subspace_space_group": dict(ssg)
-                        if isinstance(ssg, Mapping) else {},
-                    }
-                    continue
-
-                # Run generic matcher.
-                g_result = match_restricted_characters(
-                    computed_characters=computed,
-                    source_irrep_characters=source_irrep_characters,
-                    valley_preserving_operation_ids=vp_ids,
-                    source_operation_map=dict(op_map),
-                    hsp_little_group_operation_ids=hsp_ids,
-                )
-                generic_matches.setdefault(kp_name, {})[v_name] = {
-                    "matching_status": g_result["matching_status"],
-                    "matching_strategy": g_result["matching_strategy"],
-                    "irrep_multiplicities": g_result.get("irrep_multiplicities", {}),
-                    "source_operation_map": g_result.get("source_operation_map", {}),
-                    "valley_preserving_operation_ids": vp_ids,
-                    "hsp_little_group_operation_ids": hsp_ids,
-                    "diagnostic_only": g_result.get("diagnostic_only", False),
-                    "reason": g_result.get("reason", ""),
-                    "workflow_path": path,
-                    "readiness_level": readiness,
-                    "subspace_group_candidate": _generic_group_identity(
-                        sg=sg, ssg=ssg,
-                    ),
-                    "subspace_space_group": dict(ssg)
-                    if isinstance(ssg, Mapping) else {},
-                }
 
     # --- Generic matching from flattened per-row source payloads ---
     if source_irrep_characters_flattened is not None:

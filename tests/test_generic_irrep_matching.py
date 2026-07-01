@@ -270,13 +270,10 @@ def test_generic_matching_via_build_report():
     report = build_valley_irrep_matching_report(
         irrep_workflow_decisions=decisions,
         symmetry_adapted_valley_report=sa_report,
-        source_irrep_characters=source_chars,
+        source_irrep_characters_flattened={"GammaM": {"K_valley": source_chars}},
         source_operation_maps=op_maps,
     )
-    # Strategy boundary: generic mode suppresses legacy by_kpoint for covered rows.
     assert report["matching_mode"] == "generic"
-    assert "GammaM" not in report["by_kpoint"] or "K_valley" not in report["by_kpoint"].get("GammaM", {})
-    # Generic matches present and authoritative.
     gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
     assert gm["matching_strategy"] == "bilbao_restricted_character"
     assert gm["matching_status"] == "matched"
@@ -340,7 +337,7 @@ def test_incomplete_source_map_diagnostic():
     report = build_valley_irrep_matching_report(
         irrep_workflow_decisions=decisions,
         symmetry_adapted_valley_report=sa_report,
-        source_irrep_characters=source_chars,
+        source_irrep_characters_flattened={"GammaM": {"K_valley": source_chars}},
         source_operation_maps=op_maps,
     )
     gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
@@ -397,7 +394,7 @@ def test_generic_wiring_includes_identity_zero_for_reducible_character():
     report = build_valley_irrep_matching_report(
         irrep_workflow_decisions=decisions,
         symmetry_adapted_valley_report=sa_report,
-        source_irrep_characters=source_chars,
+        source_irrep_characters_flattened={"GammaM": {"K_valley": source_chars}},
         source_operation_maps=op_maps,
     )
     gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
@@ -450,7 +447,7 @@ def test_generic_wiring_blocks_non_trusted_readiness():
     report = build_valley_irrep_matching_report(
         irrep_workflow_decisions=decisions,
         symmetry_adapted_valley_report=sa_report,
-        source_irrep_characters={"B": {1: 1.0 + 0j, 2: -1.0 + 0j}},
+        source_irrep_characters_flattened={"GammaM": {"K_valley": {"B": {1: 1.0 + 0j, 2: -1.0 + 0j}}}},
         source_operation_maps={"GammaM": {"K_valley": {0: 1, 4: 2}}},
     )
     gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
@@ -505,7 +502,7 @@ def test_generic_wiring_uses_current_valley_only():
     report = build_valley_irrep_matching_report(
         irrep_workflow_decisions=decisions,
         symmetry_adapted_valley_report=sa_report,
-        source_irrep_characters={"B": {1: 1.0 + 0j, 2: -1.0 + 0j}},
+        source_irrep_characters_flattened={"GammaM": {"K_valley": {"B": {1: 1.0 + 0j, 2: -1.0 + 0j}}}},
         source_operation_maps={"GammaM": {"K_valley": {0: 1, 4: 2}}},
     )
     gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]

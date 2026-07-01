@@ -452,131 +452,169 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             valley_names=valley_names,
             spinor_convention_verified=config.spinor.convention_verified,
         )
-    # --- Generic irrep source preflight (optional, default-off) ---
+    # --- Generic irrep matching preflight ---
+    # Auto-derives the source irrep table from the computed
+    # subspace_space_group when available.  The explicit
+    # generic_irrep_source config block remains as an optional override
+    # for debug / non-standard HSP mappings.
     generic_source_payloads: dict[str, Any] | None = None
     generic_source_blocked_rows: list[dict[str, Any]] = []
+
+    # --- Resolve subspace-space-group identity ---
+    sg_number: int | None = None
+    spinor_flag: bool | None = None
+    source_hsp_override: dict[str, dict[str, str]] | None = None
+
     if config.generic_irrep_source.enabled:
         gis_cfg = config.generic_irrep_source
-        if gis_cfg.spacegroup_number is not None and gis_cfg.spinor is not None:
-            try:
-                table = load_standard_irrep_table(
-                    gis_cfg.spacegroup_number, spinor=gis_cfg.spinor,
-                )
-            except Exception as exc:
-                for kp_name, valley_map in gis_cfg.source_hsp_labels.items():
-                    for v_name, src_hsp in valley_map.items():
-                        generic_source_blocked_rows.append({
-                            "kpoint": kp_name,
-                            "valley": v_name,
-                            "source_hsp_label": src_hsp,
-                            "table_sg_number": gis_cfg.spacegroup_number,
-                            "table_spinor": gis_cfg.spinor,
-                            "reason": f"load_standard_irrep_table failed: {exc}",
-                        })
-                table = None
-            if table is not None:
-                # Build per-(kpoint, valley) source payloads using actual
-                # G_k^(a) VP operation IDs from symmetry_adapted_valley_report.
-                src_chars = {}
-                src_op_maps = {}
-                if isinstance(symmetry_adapted_valley_report, dict):
-                    by_kp = symmetry_adapted_valley_report.get("by_kpoint", {})
-                    if isinstance(by_kp, dict):
-                        for kp_name, kp_data in by_kp.items():
-                            vp_subspaces = kp_data.get(
-                                "valley_preserving_subspaces", [],
-                            ) if isinstance(kp_data, dict) else []
-                            for vs in vp_subspaces if isinstance(vp_subspaces, list) else []:
-                                if not isinstance(vs, dict):
-                                    continue
-                                orbit = vs.get("orbit", [])
-                                if not orbit:
-                                    continue
-                                v_name = str(orbit[0])
-                                # G_k^(a) = HSP little-group ops ∩ valley-preserving ops.
-                                # At HSPs where valley-preserving operations move k
-                                # to another star representative (e.g. MM with C3),
-                                # the local valley-preserving subgroup is identity-only.
-                                ssg = vs.get("subspace_space_group", {})
-                                full_vp_ids = ssg.get(
-                                    "valley_preserving_operation_ids", [],
-                                ) if isinstance(ssg, dict) else []
-                                hsp_lg_ids = vs.get(
-                                    "hsp_preserving_operation_ids", [],
-                                )
-                                if isinstance(hsp_lg_ids, list) and hsp_lg_ids:
-                                    vp_ids = [op for op in full_vp_ids if op in hsp_lg_ids]
-                                else:
-                                    vp_ids = list(full_vp_ids)
-                                if not vp_ids:
-                                    continue
-                                # Source HSP label for this (kpoint, valley).
-                                src_hsp = gis_cfg.source_hsp_labels.get(
-                                    kp_name, {},
-                                ).get(v_name) if isinstance(
-                                    gis_cfg.source_hsp_labels, dict
-                                ) else None
-                                if src_hsp is None:
-                                    continue
-                                payload = build_source_payload_for_generic_matching(
-                                    table=table,
-                                    source_hsp_label=str(src_hsp),
-                                    detected_operations=symmetry_payload.get(
-                                        "detected_operations", [],
-                                    ),
-                                    valley_preserving_operation_ids=list(vp_ids),
-                                    tol=gis_cfg.operation_match_tol,
-                                )
-                                if payload["status"] == "ok":
-                                    src_chars_by_kp = src_chars.setdefault(kp_name, {})
-                                    src_chars_by_kp[v_name] = payload["source_irrep_characters"]
-                                    src_op_maps_by_kp = src_op_maps.setdefault(kp_name, {})
-                                    src_op_maps_by_kp[v_name] = payload["source_operation_map"]
-                                else:
-                                    generic_source_blocked_rows.append({
-                                        "kpoint": kp_name,
-                                        "valley": v_name,
-                                        "source_hsp_label": src_hsp,
-                                        "table_sg_number": table.number,
-                                        "table_name": table.name,
-                                        "table_spinor": table.spinor,
-                                        "valley_preserving_operation_ids": list(vp_ids),
-                                        "hsp_little_group_operation_ids": (
-                                            list(hsp_lg_ids)
-                                            if isinstance(hsp_lg_ids, list)
-                                            else list(vp_ids)
-                                        ),
-                                        "provenance": payload.get("provenance", {}),
-                                        "blocker_reasons": payload["blocker_reasons"],
-                                    })
-                if src_chars and src_op_maps:
-                    generic_source_payloads = {
-                        "source_irrep_characters": src_chars,
-                        "source_operation_maps": src_op_maps,
-                        "table_sg_number": gis_cfg.spacegroup_number,
-                        "table_spinor": gis_cfg.spinor,
-                    }
+        sg_number = gis_cfg.spacegroup_number
+        spinor_flag = gis_cfg.spinor
+        source_hsp_override = dict(gis_cfg.source_hsp_labels) if gis_cfg.source_hsp_labels else None
 
-        # Build valley irrep matching report with generic source payloads.
-        valley_irrep_matching = build_valley_irrep_matching_report(
-            irrep_workflow_decisions=irrep_workflow_decisions,
-            symmetry_adapted_valley_report=symmetry_adapted_valley_report,
-            source_irrep_characters_flattened=(
-                generic_source_payloads.get("source_irrep_characters", {})
-                if generic_source_payloads else None
-            ),
-            source_operation_maps=(
-                generic_source_payloads.get("source_operation_maps", {})
-                if generic_source_payloads else None
-            ),
-            source_payload_blocked_rows=generic_source_blocked_rows,
-        )
-    else:
-        # Legacy: no generic source payloads.
-        valley_irrep_matching = build_valley_irrep_matching_report(
-            irrep_workflow_decisions=irrep_workflow_decisions,
-            symmetry_adapted_valley_report=symmetry_adapted_valley_report,
-        )
+    if sg_number is None and isinstance(symmetry_adapted_valley_report, dict):
+        # Auto-derive from the first valley-preserving subspace.
+        by_kp = symmetry_adapted_valley_report.get("by_kpoint", {})
+        if isinstance(by_kp, dict):
+            for kp_data in by_kp.values():
+                if not isinstance(kp_data, dict):
+                    continue
+                for vs in kp_data.get("valley_preserving_subspaces", []) if isinstance(kp_data.get("valley_preserving_subspaces"), list) else []:
+                    if not isinstance(vs, dict):
+                        continue
+                    ssg = vs.get("subspace_space_group", {})
+                    if not isinstance(ssg, dict):
+                        continue
+                    num = ssg.get("candidate_space_group_number")
+                    if isinstance(num, int) and not isinstance(num, bool) and num > 0:
+                        sg_number = num
+                        break
+                if sg_number is not None:
+                    break
+
+    if spinor_flag is None:
+        spinor_flag = config.spinor.convention_verified
+
+    if sg_number is not None and spinor_flag is not None:
+        try:
+            table = load_standard_irrep_table(sg_number, spinor=spinor_flag)
+        except Exception as exc:
+            generic_source_blocked_rows.append({
+                "reason": f"load_standard_irrep_table failed for "
+                          f"sg={sg_number} spinor={spinor_flag}: {exc}",
+            })
+            table = None
+        if table is not None:
+            src_chars: dict[str, dict[str, dict[str, dict[int, complex]]]] = {}
+            src_op_maps: dict[str, dict[str, dict[int, int]]] = {}
+            kpoint_frac = symmetry_payload.get("kpoint_frac_by_name", {})
+            if isinstance(symmetry_adapted_valley_report, dict):
+                by_kp = symmetry_adapted_valley_report.get("by_kpoint", {})
+                if isinstance(by_kp, dict):
+                    for kp_name, kp_data in by_kp.items():
+                        vp_subspaces = kp_data.get(
+                            "valley_preserving_subspaces", [],
+                        ) if isinstance(kp_data, dict) else []
+                        # --- Auto-match HSP label via k_frac ---
+                        k_frac_raw = kpoint_frac.get(kp_name)
+                        auto_hsp = None
+                        if k_frac_raw is not None:
+                            try:
+                                auto_hsp = table.match_kpoint_label(
+                                    np.asarray(k_frac_raw, dtype=float),
+                                )
+                            except Exception:
+                                auto_hsp = None
+                        for vs in vp_subspaces if isinstance(vp_subspaces, list) else []:
+                            if not isinstance(vs, dict):
+                                continue
+                            orbit = vs.get("orbit", [])
+                            if not orbit:
+                                continue
+                            v_name = str(orbit[0])
+                            ssg = vs.get("subspace_space_group", {})
+                            full_vp_ids = ssg.get(
+                                "valley_preserving_operation_ids", [],
+                            ) if isinstance(ssg, dict) else []
+                            hsp_lg_ids = vs.get(
+                                "hsp_preserving_operation_ids", [],
+                            )
+                            if isinstance(hsp_lg_ids, list) and hsp_lg_ids:
+                                vp_ids = [op for op in full_vp_ids if op in hsp_lg_ids]
+                            else:
+                                vp_ids = list(full_vp_ids)
+                            if not vp_ids:
+                                continue
+                            # Source HSP label: override > auto > blocked.
+                            src_hsp = None
+                            if source_hsp_override is not None:
+                                src_hsp = source_hsp_override.get(kp_name, {}).get(v_name)
+                            if src_hsp is None:
+                                src_hsp = auto_hsp
+                            if src_hsp is None:
+                                generic_source_blocked_rows.append({
+                                    "kpoint": kp_name,
+                                    "valley": v_name,
+                                    "reason": (
+                                        "no_source_hsp_label: could not determine "
+                                        "Bilbao HSP label for this kpoint"
+                                    ),
+                                })
+                                continue
+                            payload = build_source_payload_for_generic_matching(
+                                table=table,
+                                source_hsp_label=str(src_hsp),
+                                detected_operations=symmetry_payload.get(
+                                    "detected_operations", [],
+                                ),
+                                valley_preserving_operation_ids=list(vp_ids),
+                                tol=float(config.generic_irrep_source.operation_match_tol
+                                         if config.generic_irrep_source.enabled else 5e-5),
+                            )
+                            if payload["status"] == "ok":
+                                src_chars.setdefault(kp_name, {})[v_name] = (
+                                    payload["source_irrep_characters"]
+                                )
+                                src_op_maps.setdefault(kp_name, {})[v_name] = (
+                                    payload["source_operation_map"]
+                                )
+                            else:
+                                generic_source_blocked_rows.append({
+                                    "kpoint": kp_name,
+                                    "valley": v_name,
+                                    "source_hsp_label": src_hsp,
+                                    "table_sg_number": table.number,
+                                    "table_name": table.name,
+                                    "table_spinor": table.spinor,
+                                    "valley_preserving_operation_ids": list(vp_ids),
+                                    "hsp_little_group_operation_ids": (
+                                        list(hsp_lg_ids)
+                                        if isinstance(hsp_lg_ids, list)
+                                        else list(vp_ids)
+                                    ),
+                                    "provenance": payload.get("provenance", {}),
+                                    "blocker_reasons": payload["blocker_reasons"],
+                                })
+            if src_chars and src_op_maps:
+                generic_source_payloads = {
+                    "source_irrep_characters": src_chars,
+                    "source_operation_maps": src_op_maps,
+                    "table_sg_number": sg_number,
+                    "table_spinor": spinor_flag,
+                }
+
+    valley_irrep_matching = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=irrep_workflow_decisions,
+        symmetry_adapted_valley_report=symmetry_adapted_valley_report,
+        source_irrep_characters_flattened=(
+            generic_source_payloads.get("source_irrep_characters", {})
+            if generic_source_payloads else None
+        ),
+        source_operation_maps=(
+            generic_source_payloads.get("source_operation_maps", {})
+            if generic_source_payloads else None
+        ),
+        source_payload_blocked_rows=generic_source_blocked_rows,
+    )
 
 
     ebr_input_candidates = build_ebr_input_candidates(

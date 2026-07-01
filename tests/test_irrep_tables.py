@@ -377,7 +377,9 @@ def test_adapter_payload_drives_generic_matching_report():
                 },
             },
         },
-        source_irrep_characters=payload["source_irrep_characters"],
+        source_irrep_characters_flattened={
+            "GammaM": {"K_valley": payload["source_irrep_characters"]},
+        },
         source_operation_maps={
             "GammaM": {"K_valley": payload["source_operation_map"]},
         },
