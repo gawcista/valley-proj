@@ -247,7 +247,6 @@ def test_generic_p4_table_authoritative_bundle_maps_and_rejects_mismatch():
                         "candidate_space_group_symbol": "P4",
                         "valley_preserving_operation_ids": [0, 4],
                     },
-                    "legacy_subspace_group_candidate": "C4_like",
                     "matched_irrep": "P4_spinor_phase_+1/4",
                     "irrep_multiplicity": 1,
                     "matching_strategy": "bilbao_restricted_character",
@@ -262,7 +261,6 @@ def test_generic_p4_table_authoritative_bundle_maps_and_rejects_mismatch():
                         "candidate_space_group_symbol": "P4",
                         "valley_preserving_operation_ids": [0, 4],
                     },
-                    "legacy_subspace_group_candidate": "C4_like",
                     "matched_irrep": "P4_spinor_phase_-1/4",
                     "irrep_multiplicity": 1,
                     "matching_strategy": "bilbao_restricted_character",
@@ -1075,7 +1073,7 @@ def test_p4_public_output_contract(tmp_path):
                 "valley_preserving_subspaces": [{
                     "reference_valley": "K_valley",
                     "orbit": ["K_valley"],
-                    "subspace_group": {"subspace_group_candidate": "C4_like"},
+                    "subspace_group": {"subspace_group_candidate": "P4"},
                     "subspace_space_group": {
                         "candidate_space_group_symbol": "P4",
                         "valley_preserving_operation_ids": [0, 1],

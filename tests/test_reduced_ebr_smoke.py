@@ -328,7 +328,7 @@ def test_provenance_survives_through_output_writer_to_export_bundle(tmp_path):
                     "matching_strategy": "bilbao_restricted_character",
                     "irrep_multiplicities": {"C3_spinor_phase_+1/2": 2},
                     "subspace_space_group": {
-                        "candidate_space_group_symbol": "C3_like",
+                        "candidate_space_group_symbol": "P3",
                         "valley_preserving_operation_ids": [0, 1],
                     },
                     "valley_preserving_operation_ids": [0, 1],
@@ -339,7 +339,7 @@ def test_provenance_survives_through_output_writer_to_export_bundle(tmp_path):
                     "matching_strategy": "bilbao_restricted_character",
                     "irrep_multiplicities": {"C3_spinor_phase_+1/2": 1},
                     "subspace_space_group": {
-                        "candidate_space_group_symbol": "C3_like",
+                        "candidate_space_group_symbol": "P3",
                         "valley_preserving_operation_ids": [0, 2],
                     },
                     "valley_preserving_operation_ids": [0, 2],
@@ -353,7 +353,7 @@ def test_provenance_survives_through_output_writer_to_export_bundle(tmp_path):
                     "matching_strategy": "bilbao_restricted_character",
                     "irrep_multiplicities": {"C3_spinor_phase_+1/6": 1},
                     "subspace_space_group": {
-                        "candidate_space_group_symbol": "C3_like",
+                        "candidate_space_group_symbol": "P3",
                         "valley_preserving_operation_ids": [0, 1],
                     },
                     "valley_preserving_operation_ids": [0, 1],

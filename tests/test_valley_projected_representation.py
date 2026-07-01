@@ -40,7 +40,6 @@ def test_representation_report_uses_subspace_space_group_as_primary():
                             },
                             "subspace_group": {
                                 "subspace_group_candidate": "P2",
-                                "legacy_subspace_group_candidate": "C2_like",
                             },
                         }
                     ],
@@ -350,7 +349,7 @@ def test_representation_records_p4_order4_group_agnostic():
                                 "status": "candidate",
                             },
                             "subspace_group": {
-                                "subspace_group_candidate": "C4_like",
+                                "subspace_group_candidate": "P4",
                             },
                         }
                     ],
