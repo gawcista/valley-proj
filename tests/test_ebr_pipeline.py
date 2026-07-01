@@ -34,19 +34,27 @@ def test_ebr_input_candidates_excludes_non_trusted():
             },
         },
     }
-    # Matching: K_valley matched, Kp_valley diagnostic_only.
+    # Matching: generic_matches_by_kpoint — K_valley matched, Kp_valley diagnostic_only.
     matching = {
-        "by_kpoint": {
+        "matching_mode": "generic",
+        "generic_matches_by_kpoint": {
             "GammaM": {
                 "K_valley": {
-                    "1": {"matching_status": "matched", "matched_irrep": "C3_spinor_phase_+1/2",
-                          "subspace_group_candidate": "P3", "operation_order": 3,
-                          "eigenphases": [0.5], "diagnostic_only": False},
+                    "matching_status": "matched",
+                    "matching_strategy": "bilbao_restricted_character",
+                    "irrep_multiplicities": {"C3_spinor_phase_+1/2": 1},
+                    "subspace_space_group": {"candidate_space_group_symbol": "P3"},
+                    "valley_preserving_operation_ids": [0, 1],
+                    "hsp_little_group_operation_ids": [0, 1],
                 },
                 "Kp_valley": {
-                    "1": {"matching_status": "matched", "matched_irrep": "C3_spinor_phase_-1/2",
-                          "subspace_group_candidate": "P3", "operation_order": 3,
-                          "eigenphases": [-0.5], "diagnostic_only": True},
+                    "matching_status": "diagnostic",
+                    "matching_strategy": "bilbao_restricted_character",
+                    "irrep_multiplicities": {"C3_spinor_phase_-1/2": 1},
+                    "subspace_space_group": {"candidate_space_group_symbol": "P3"},
+                    "valley_preserving_operation_ids": [0, 1],
+                    "hsp_little_group_operation_ids": [0, 1],
+                    "diagnostic_only": True,
                 },
             },
         },
@@ -520,7 +528,7 @@ def test_non_trusted_rows_excluded_from_irrep_records():
     from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
     from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
 
-    # Mix of trusted and diagnostic_only rows
+    # Mix of trusted and diagnostic_only rows via generic_matches_by_kpoint.
     workflow = {
         "by_kpoint": {
             "GammaM": {
@@ -529,22 +537,27 @@ def test_non_trusted_rows_excluded_from_irrep_records():
         },
     }
     matching = {
-        "by_kpoint": {
+        "matching_mode": "generic",
+        "generic_matches_by_kpoint": {
             "GammaM": {
                 "K_valley": {
-                    "1": {"matching_status": "matched", "matched_irrep": "C3_spinor_phase_+1/2",
-                          "subspace_group_candidate": "P3", "operation_order": 3,
-                          "eigenphases": [0.5], "diagnostic_only": False},
-                    "2": {"matching_status": "matched", "matched_irrep": "C3_spinor_phase_+1/2",
-                          "subspace_group_candidate": "P3", "operation_order": 3,
-                          "eigenphases": [-0.5], "diagnostic_only": True},
+                    "matching_status": "matched",
+                    "matching_strategy": "bilbao_restricted_character",
+                    "irrep_multiplicities": {"C3_spinor_phase_+1/2": 1},
+                    "subspace_space_group": {
+                        "candidate_space_group_symbol": "P3",
+                        "valley_preserving_operation_ids": [0, 1],
+                    },
+                    "valley_preserving_operation_ids": [0, 1],
+                    "hsp_little_group_operation_ids": [0, 1],
+                    "source_operation_map": {0: 1, 1: 2},
                 },
             },
         },
     }
     candidates_report = build_ebr_input_candidates(
         irrep_workflow_decisions=workflow, valley_irrep_matching=matching)
-    # Only 1 trusted candidate (op=1), op=2 is diagnostic_only -> blocked.
+    # 1 trusted candidate.
     assert candidates_report["candidate_count"] == 1
 
     instances_report = build_ebr_problem_instances(ebr_input_candidates=candidates_report)
@@ -553,7 +566,7 @@ def test_non_trusted_rows_excluded_from_irrep_records():
     gamma_recs = records.get("GammaM", [])
     # Only the trusted record appears.
     assert len(gamma_recs) == 1
-    assert gamma_recs[0]["operation_id"] == "1"
+    assert gamma_recs[0]["matched_irrep"] == "C3_spinor_phase_+1/2"
 
 
 def test_reduced_ebr_mapping_ignores_irrep_records():

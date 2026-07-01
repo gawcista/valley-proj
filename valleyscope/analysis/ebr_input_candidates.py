@@ -1,8 +1,13 @@
-"""EBR-input candidate collector from trusted valley irrep matching results.
+"""EBR-input candidate collector from generic Bilbao restricted-character
+valley irrep matching results.
 
-Aggregates only trusted, matched valley-preserving irreps into a compact
-machine-readable EBR input candidate schema.  Does NOT implement reduced
-EBR decomposition, compatibility relations, or new character tables.
+Aggregates only trusted, matched valley-preserving irreps from the
+generic ``generic_matches_by_kpoint`` path into a compact machine-readable
+EBR input candidate schema.  Legacy phase-table matching is removed;
+generic restricted-character matching is the sole authoritative source.
+
+Does NOT implement reduced EBR decomposition, compatibility relations,
+or new character tables.
 """
 
 from __future__ import annotations
@@ -18,7 +23,7 @@ def build_ebr_input_candidates(
 ) -> dict[str, object]:
     """Collect trusted matched irreps as EBR input candidates.
 
-    Only rows satisfying ALL of:
+    Only rows from ``generic_matches_by_kpoint`` satisfying ALL of:
       - workflow decision readiness == "trusted"
       - workflow path not "blocked"
       - matching_status == "matched"
@@ -26,6 +31,9 @@ def build_ebr_input_candidates(
 
     are included as candidates.  Everything else is collected as
     blocked/not_ready with explicit reasons.
+
+    Legacy phase-table by_kpoint matches are no longer processed;
+    generic_matches_by_kpoint is the sole authoritative source.
     """
     candidates: list[dict[str, object]] = []
     blocked: list[dict[str, object]] = []
@@ -34,11 +42,7 @@ def build_ebr_input_candidates(
         return _empty_report("missing input reports")
 
     decisions_by_kp = irrep_workflow_decisions.get("by_kpoint", {})
-    matching_by_kp = valley_irrep_matching.get("by_kpoint", {})
     generic_by_kp = valley_irrep_matching.get("generic_matches_by_kpoint", {})
-
-    # Collect character data for candidates
-    char_data = _collect_character_lookup(symmetry_adapted_valley_report)
 
     # --- Generic restricted-character matches ---
     if isinstance(generic_by_kp, dict):
@@ -121,20 +125,6 @@ def build_ebr_input_candidates(
                     reason="; ".join(reasons) if reasons else "generic match blocked",
                 ))
 
-    # Legacy phase-table matching: only active in true legacy mode.
-    # In generic mode, legacy by_kpoint rows are never promoted to EBR
-    # candidates; generic_matches_by_kpoint is the sole authoritative source.
-    matching_mode = str(valley_irrep_matching.get("matching_mode", "not_evaluated"))
-
-    if matching_mode != "generic":
-        _collect_legacy_candidates(
-            decisions_by_kp=decisions_by_kp,
-            matching_by_kp=matching_by_kp,
-            char_data=char_data,
-            candidates=candidates,
-            blocked=blocked,
-        )
-
     by_kpoint: dict[str, dict[str, list[dict[str, object]]]] = {}
     for c in candidates:
         by_kpoint.setdefault(str(c["kpoint"]), {}).setdefault(str(c["valley"]), []).append(c)
@@ -161,141 +151,6 @@ def build_ebr_input_candidates(
 # ---------------------------------------------------------------------------
 # Internal
 # ---------------------------------------------------------------------------
-
-def _collect_legacy_candidates(
-    *,
-    decisions_by_kp: dict[str, object],
-    matching_by_kp: dict[str, object],
-    char_data: dict[tuple[str, str, object], dict[str, object]],
-    candidates: list[dict[str, object]],
-    blocked: list[dict[str, object]],
-) -> None:
-    """Collect EBR candidates from legacy by_kpoint phase-table matches.
-
-    Only invoked in legacy mode (matching_mode != "generic").  In generic
-    mode, generic_matches_by_kpoint is the sole authoritative source.
-    """
-    for kp_name in sorted(set(decisions_by_kp) | set(matching_by_kp)):
-        kp_decisions = decisions_by_kp.get(kp_name, {})
-        kp_matches = matching_by_kp.get(kp_name, {})
-
-        for v_name in sorted(set(kp_decisions) | set(kp_matches)):
-            decision = kp_decisions.get(v_name)
-            matches = kp_matches.get(v_name, {})
-
-            if not isinstance(decision, dict):
-                blocked.append(_blocked_row(
-                    kpoint=kp_name, valley=v_name,
-                    reason="no workflow decision",
-                ))
-                continue
-
-            readiness = str(decision.get("readiness_level", ""))
-            path = str(decision.get("workflow_path", ""))
-
-            if not isinstance(matches, dict) or not matches:
-                blocked.append(_blocked_row(
-                    kpoint=kp_name, valley=v_name,
-                    readiness=readiness, path=path,
-                    reason="no irrep matching results",
-                ))
-                continue
-
-            for op_id, match in matches.items():
-                if not isinstance(match, dict):
-                    continue
-                match_status = str(match.get("matching_status", ""))
-                matched_irrep = match.get("matched_irrep")
-                diagnostic_only = bool(match.get("diagnostic_only", False))
-
-                # Candidate gate
-                if (
-                    readiness == "trusted"
-                    and path != "blocked"
-                    and match_status == "matched"
-                    and not diagnostic_only
-                    and matched_irrep is not None
-                ):
-                    sg_candidate = match.get("subspace_group_candidate")
-                    eigenphases = match.get("eigenphases", [])
-                    char = char_data.get((kp_name, v_name, _coerce_id(op_id)))
-                    candidates.append({
-                        "kpoint": kp_name,
-                        "valley": v_name,
-                        "workflow_path": path,
-                        "readiness_level": readiness,
-                        "subspace_group_candidate": sg_candidate,
-                        "operation_id": op_id,
-                        "operation_order": match.get("operation_order"),
-                        "matched_irrep": matched_irrep,
-                        "character": char,
-                        "eigenphases": eigenphases,
-                        "source": f"valley_irrep_matching/{kp_name}/{v_name}",
-                        "ready_for_ebr_input": True,
-                    })
-                    continue
-
-                # Not a candidate — explain why
-                reasons: list[str] = []
-                if readiness != "trusted":
-                    reasons.append(f"readiness={readiness}")
-                if path == "blocked":
-                    reasons.append("path=blocked")
-                if match_status != "matched":
-                    reasons.append(f"matching_status={match_status}")
-                if diagnostic_only:
-                    reasons.append("diagnostic_only=true")
-                if matched_irrep is None:
-                    reasons.append("no matched_irrep")
-
-                blocked.append(_blocked_row(
-                    kpoint=kp_name, valley=v_name,
-                    op_id=op_id,
-                    readiness=readiness, path=path,
-                    matching_status=match_status,
-                    reason="; ".join(reasons),
-                ))
-
-
-def _collect_character_lookup(
-    report: dict[str, object] | None,
-) -> dict[tuple[str, str, object], dict[str, object]]:
-    """Extract per-(kpoint, valley, op) character data from SA report."""
-    result: dict[tuple[str, str, object], dict[str, object]] = {}
-    if report is None:
-        return result
-    for kp_name, kp_data in report.get("by_kpoint", {}).items():
-        if not isinstance(kp_data, dict):
-            continue
-        for subspace in kp_data.get("valley_preserving_subspaces", []):
-            if not isinstance(subspace, dict):
-                continue
-            orbit = subspace.get("orbit", [])
-            if not orbit:
-                continue
-            v = str(orbit[0])
-            cd = subspace.get("valley_preserving_character_diagnostics", {})
-            if not isinstance(cd, dict):
-                continue
-            for _, items in cd.get("per_valley", {}).items():
-                if not isinstance(items, list):
-                    continue
-                for item in items:
-                    if not isinstance(item, dict):
-                        continue
-                    op_id = item.get("operation_id")
-                    char = item.get("character")
-                    if op_id is not None and char is not None:
-                        result[(kp_name, v, _coerce_id(op_id))] = char
-    return result
-
-
-def _coerce_id(op_id: object) -> object:
-    try:
-        return int(str(op_id))
-    except (TypeError, ValueError):
-        return op_id
-
 
 def _validated_multiplicities(
     mults: object,

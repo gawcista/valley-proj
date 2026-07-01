@@ -7,7 +7,8 @@ from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
 # Helpers
 # -----------------------------------------------------------------------
 
-def _make_tmo_te2_like_inputs():
+def _make_generic_inputs():
+    """Shared generic-matching inputs: trusted K_valley @ GammaM."""
     decisions = {
         "by_kpoint": {
             "GammaM": {
@@ -19,40 +20,26 @@ def _make_tmo_te2_like_inputs():
         },
     }
     matching = {
-        "by_kpoint": {
+        "matching_mode": "generic",
+        "generic_matches_by_kpoint": {
             "GammaM": {
                 "K_valley": {
-                    "1": {
-                        "matching_status": "matched",
-                        "matched_irrep": "C3_spinor_phase_+1/2",
-                        "operation_order": 3,
-                        "subspace_group_candidate": "P3",
-                        "eigenphases": [0.5],
-                        "readiness_level": "trusted",
-                        "workflow_path": "direct_qcut",
+                    "matching_status": "matched",
+                    "matching_strategy": "bilbao_restricted_character",
+                    "irrep_multiplicities": {"C3_spinor_phase_+1/2": 1},
+                    "subspace_space_group": {
+                        "candidate_space_group_symbol": "P3",
+                        "valley_preserving_operation_ids": [0, 1],
+                        "status": "candidate",
                     },
+                    "valley_preserving_operation_ids": [0, 1],
+                    "hsp_little_group_operation_ids": [0, 1],
+                    "source_operation_map": {0: 1, 1: 2},
                 },
             },
         },
     }
-    sa = {
-        "by_kpoint": {
-            "GammaM": {
-                "valley_preserving_subspaces": [{
-                    "orbit": ["K_valley"],
-                    "valley_preserving_character_diagnostics": {
-                        "per_valley": {
-                            "K_valley": [{
-                                "operation_id": 1,
-                                "character": {"real": -1.0, "imag": 0.0},
-                            }],
-                        },
-                    },
-                }],
-            },
-        },
-    }
-    return decisions, matching, sa
+    return decisions, matching
 
 
 # -----------------------------------------------------------------------
@@ -60,11 +47,10 @@ def _make_tmo_te2_like_inputs():
 # -----------------------------------------------------------------------
 
 def test_trusted_matched_becomes_candidate():
-    decisions, matching, sa = _make_tmo_te2_like_inputs()
+    decisions, matching = _make_generic_inputs()
     r = build_ebr_input_candidates(
         irrep_workflow_decisions=decisions,
         valley_irrep_matching=matching,
-        symmetry_adapted_valley_report=sa,
     )
     assert r["status"] == "has_candidates"
     assert r["candidate_count"] == 1
@@ -72,7 +58,7 @@ def test_trusted_matched_becomes_candidate():
     c = r["candidates"][0]
     assert c["ready_for_ebr_input"] is True
     assert c["matched_irrep"] == "C3_spinor_phase_+1/2"
-    assert c["character"] == {"real": -1.0, "imag": 0.0}
+    assert c["matching_strategy"] == "bilbao_restricted_character"
 
 
 # -----------------------------------------------------------------------
@@ -91,16 +77,20 @@ def test_usable_with_caution_does_not_become_candidate():
         },
     }
     matching = {
-        "by_kpoint": {
+        "matching_mode": "generic",
+        "generic_matches_by_kpoint": {
             "MM": {
                 "M3_valley": {
-                    "5": {
-                        "matching_status": "diagnostic_only",
-                        "matched_irrep": None,
-                        "operation_order": 2,
-                        "subspace_group_candidate": "P2",
-                        "eigenphases": [-0.25, 0.25],
+                    "matching_status": "diagnostic",
+                    "matching_strategy": "bilbao_restricted_character",
+                    "irrep_multiplicities": {},
+                    "subspace_space_group": {
+                        "candidate_space_group_symbol": "P2",
+                        "valley_preserving_operation_ids": [0, 5],
                     },
+                    "valley_preserving_operation_ids": [0, 5],
+                    "hsp_little_group_operation_ids": [0, 5],
+                    "diagnostic_only": False,
                 },
             },
         },
@@ -113,7 +103,6 @@ def test_usable_with_caution_does_not_become_candidate():
     assert r["blocked_count"] == 1
     b = r["blocked"][0]
     assert "readiness=usable_with_caution" in b["reason"]
-    assert "matching_status=diagnostic_only" in b["reason"]
 
 
 # -----------------------------------------------------------------------
@@ -132,16 +121,19 @@ def test_failed_ambiguous_not_candidate():
         },
     }
     matching = {
-        "by_kpoint": {
+        "matching_mode": "generic",
+        "generic_matches_by_kpoint": {
             "MM": {
                 "M3_valley": {
-                    "5": {
-                        "matching_status": "failed_ambiguous",
-                        "matched_irrep": None,
-                        "operation_order": 2,
-                        "subspace_group_candidate": "P2",
-                        "eigenphases": [-0.25, 0.25],
+                    "matching_status": "failed_ambiguous",
+                    "matching_strategy": "bilbao_restricted_character",
+                    "irrep_multiplicities": {},
+                    "subspace_space_group": {
+                        "candidate_space_group_symbol": "P2",
+                        "valley_preserving_operation_ids": [0, 5],
                     },
+                    "valley_preserving_operation_ids": [0, 5],
+                    "hsp_little_group_operation_ids": [0, 5],
                 },
             },
         },
@@ -167,15 +159,20 @@ def test_diagnostic_only_flag_blocks_even_if_status_is_matched():
         },
     }
     matching = {
-        "by_kpoint": {
+        "matching_mode": "generic",
+        "generic_matches_by_kpoint": {
             "GammaM": {
                 "K_valley": {
-                    "1": {
-                        "matching_status": "matched",
-                        "diagnostic_only": True,
-                        "matched_irrep": "C3_spinor_phase_+1/2",
-                        "operation_order": 3,
+                    "matching_status": "matched",
+                    "matching_strategy": "bilbao_restricted_character",
+                    "irrep_multiplicities": {"C3_spinor_phase_+1/2": 1},
+                    "subspace_space_group": {
+                        "candidate_space_group_symbol": "P3",
+                        "valley_preserving_operation_ids": [0, 1],
                     },
+                    "valley_preserving_operation_ids": [0, 1],
+                    "hsp_little_group_operation_ids": [0, 1],
+                    "diagnostic_only": True,
                 },
             },
         },
@@ -205,13 +202,16 @@ def test_blocked_readiness_not_candidate():
         },
     }
     matching = {
-        "by_kpoint": {
+        "matching_mode": "generic",
+        "generic_matches_by_kpoint": {
             "MM": {
                 "K_valley": {
-                    "1": {
-                        "matching_status": "blocked",
-                        "matched_irrep": None,
-                    },
+                    "matching_status": "blocked",
+                    "matching_strategy": "bilbao_restricted_character",
+                    "irrep_multiplicities": {},
+                    "subspace_space_group": {},
+                    "valley_preserving_operation_ids": [],
+                    "hsp_little_group_operation_ids": [],
                 },
             },
         },
@@ -229,6 +229,7 @@ def test_blocked_readiness_not_candidate():
 # -----------------------------------------------------------------------
 
 def test_no_matching_results_blocked():
+    """Empty generic_matches_by_kpoint produces no candidates and no blocked rows."""
     decisions = {
         "by_kpoint": {
             "KM": {
@@ -239,13 +240,17 @@ def test_no_matching_results_blocked():
             },
         },
     }
-    matching = {"by_kpoint": {}}
+    matching = {
+        "matching_mode": "generic",
+        "generic_matches_by_kpoint": {},
+    }
     r = build_ebr_input_candidates(
         irrep_workflow_decisions=decisions,
         valley_irrep_matching=matching,
     )
     assert r["candidate_count"] == 0
-    assert "no irrep matching results" in r["blocked"][0]["reason"]
+    assert r["blocked_count"] == 0
+    assert r["status"] == "no_candidates"
 
 
 # -----------------------------------------------------------------------
@@ -253,11 +258,10 @@ def test_no_matching_results_blocked():
 # -----------------------------------------------------------------------
 
 def test_json_serializable():
-    decisions, matching, sa = _make_tmo_te2_like_inputs()
+    decisions, matching = _make_generic_inputs()
     r = build_ebr_input_candidates(
         irrep_workflow_decisions=decisions,
         valley_irrep_matching=matching,
-        symmetry_adapted_valley_report=sa,
     )
     encoded = json.dumps(r)
     assert len(encoded) > 0
@@ -269,11 +273,10 @@ def test_json_serializable():
 # -----------------------------------------------------------------------
 
 def test_schema_fields_present():
-    decisions, matching, sa = _make_tmo_te2_like_inputs()
+    decisions, matching = _make_generic_inputs()
     r = build_ebr_input_candidates(
         irrep_workflow_decisions=decisions,
         valley_irrep_matching=matching,
-        symmetry_adapted_valley_report=sa,
     )
     keys = {"status", "candidate_count", "blocked_count",
             "reduced_ebr_decomposition_status", "by_kpoint",
@@ -283,11 +286,10 @@ def test_schema_fields_present():
 
 
 def test_no_forbidden_terms():
-    decisions, matching, sa = _make_tmo_te2_like_inputs()
+    decisions, matching = _make_generic_inputs()
     r = build_ebr_input_candidates(
         irrep_workflow_decisions=decisions,
         valley_irrep_matching=matching,
-        symmetry_adapted_valley_report=sa,
     )
     encoded = json.dumps(r)
     for forbidden in ["covariance", "equivariance", "stabilizer",
@@ -315,21 +317,30 @@ def test_mixed_readiness():
         },
     }
     matching = {
-        "by_kpoint": {
+        "matching_mode": "generic",
+        "generic_matches_by_kpoint": {
             "GammaM": {
                 "K_valley": {
-                    "1": {
-                        "matching_status": "matched",
-                        "matched_irrep": "C3_spinor_phase_+1/2",
-                        "operation_order": 3,
+                    "matching_status": "matched",
+                    "matching_strategy": "bilbao_restricted_character",
+                    "irrep_multiplicities": {"C3_spinor_phase_+1/2": 1},
+                    "subspace_space_group": {
+                        "candidate_space_group_symbol": "P3",
+                        "valley_preserving_operation_ids": [0, 1],
                     },
+                    "valley_preserving_operation_ids": [0, 1],
+                    "hsp_little_group_operation_ids": [0, 1],
                 },
                 "Kp_valley": {
-                    "1": {
-                        "matching_status": "diagnostic_only",
-                        "matched_irrep": None,
-                        "operation_order": 3,
+                    "matching_status": "diagnostic",
+                    "matching_strategy": "bilbao_restricted_character",
+                    "irrep_multiplicities": {},
+                    "subspace_space_group": {
+                        "candidate_space_group_symbol": "P3",
+                        "valley_preserving_operation_ids": [0, 1],
                     },
+                    "valley_preserving_operation_ids": [0, 1],
+                    "hsp_little_group_operation_ids": [0, 1],
                 },
             },
         },
@@ -368,7 +379,7 @@ def test_generic_matches_produce_ebr_candidates():
         },
     }
     matching = {
-        "by_kpoint": {},
+        "matching_mode": "generic",
         "generic_matches_by_kpoint": {
             "GammaM": {
                 "K_valley": {

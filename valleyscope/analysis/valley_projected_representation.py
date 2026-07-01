@@ -222,12 +222,8 @@ def _build_representation_records(
         groups.setdefault(key, []).append(row)
 
     # Collect irrep matching data.
-    matching_by_kp: dict[str, Any] = {}
     generic_by_kp: dict[str, Any] = {}
     if isinstance(valley_irrep_matching, dict):
-        by_kp = valley_irrep_matching.get("by_kpoint")
-        if isinstance(by_kp, dict):
-            matching_by_kp = by_kp
         gen_by_kp = valley_irrep_matching.get("generic_matches_by_kpoint")
         if isinstance(gen_by_kp, dict):
             generic_by_kp = gen_by_kp
@@ -310,13 +306,7 @@ def _build_representation_records(
             operations.append(op_entry)
 
         # Irrep matching data for this (kpoint, valley).
-        # In generic mode, only the generic restricted-character path is
-        # authoritative; legacy phase-table matches are never attached.
-        matching_mode = (
-            str(valley_irrep_matching.get("matching_mode", "not_evaluated"))
-            if isinstance(valley_irrep_matching, dict)
-            else "not_evaluated"
-        )
+        # Only the generic restricted-character path is authoritative.
         irrep_matching: dict[str, Any] | None = None
         gm = generic_by_kp.get(kpoint, {}).get(valley)
         if isinstance(gm, dict):
@@ -326,34 +316,6 @@ def _build_representation_records(
                 "irrep_multiplicities": gm.get("irrep_multiplicities"),
                 "source_operation_map": gm.get("source_operation_map"),
             }
-        elif matching_mode != "generic":
-            lm = matching_by_kp.get(kpoint, {}).get(valley)
-            if isinstance(lm, dict):
-                statuses = {
-                    str(op_result.get("matching_status"))
-                    for op_result in lm.values()
-                    if isinstance(op_result, dict)
-                }
-                irrep_matching = {
-                    "matching_status": (
-                        "matched"
-                        if statuses == {"matched"}
-                        else "incomplete"
-                        if "matched" in statuses
-                        else "not_matched"
-                    ),
-                    "matching_strategy": (
-                        next(
-                            (
-                                str(op_result.get("matching_strategy", ""))
-                                for op_result in lm.values()
-                                if isinstance(op_result, dict)
-                                and op_result.get("matching_strategy")
-                            ),
-                            None,
-                        )
-                    ),
-                }
 
         record: dict[str, Any] = {
             "kpoint": kpoint,

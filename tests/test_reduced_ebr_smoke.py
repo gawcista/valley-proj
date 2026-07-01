@@ -307,7 +307,7 @@ def test_provenance_survives_through_output_writer_to_export_bundle(tmp_path):
     from valleyscope.reports.analysis_outputs import write_analysis_outputs
     from valleyscope.io.config import load_config
 
-    # Trusted irrep matching with character data.
+    # Trusted irrep matching with generic_matches_by_kpoint.
     workflow = {
         "by_kpoint": {
             "GammaM": {
@@ -318,55 +318,47 @@ def test_provenance_survives_through_output_writer_to_export_bundle(tmp_path):
             },
         },
     }
+    # GammaM: 2 candidates (one diagnostic_only), KM: 1 candidate.
     matching = {
-        "by_kpoint": {
+        "matching_mode": "generic",
+        "generic_matches_by_kpoint": {
             "GammaM": {
                 "K_valley": {
-                    "1": {"matching_status": "matched", "matched_irrep": "C3_spinor_phase_+1/2",
-                          "subspace_group_candidate": "C3_like", "operation_order": 3,
-                          "eigenphases": [0.5], "diagnostic_only": False},
-                    "2": {"matching_status": "matched", "matched_irrep": "C3_spinor_phase_+1/2",
-                          "subspace_group_candidate": "C3_like", "operation_order": 3,
-                          "eigenphases": [-0.5], "diagnostic_only": True},
+                    "matching_status": "matched",
+                    "matching_strategy": "bilbao_restricted_character",
+                    "irrep_multiplicities": {"C3_spinor_phase_+1/2": 2},
+                    "subspace_space_group": {
+                        "candidate_space_group_symbol": "C3_like",
+                        "valley_preserving_operation_ids": [0, 1],
+                    },
+                    "valley_preserving_operation_ids": [0, 1],
+                    "hsp_little_group_operation_ids": [0, 1],
+                },
+                "K_valley_diag": {
+                    "matching_status": "matched",
+                    "matching_strategy": "bilbao_restricted_character",
+                    "irrep_multiplicities": {"C3_spinor_phase_+1/2": 1},
+                    "subspace_space_group": {
+                        "candidate_space_group_symbol": "C3_like",
+                        "valley_preserving_operation_ids": [0, 2],
+                    },
+                    "valley_preserving_operation_ids": [0, 2],
+                    "hsp_little_group_operation_ids": [0, 2],
+                    "diagnostic_only": True,
                 },
             },
             "KM": {
                 "K_valley": {
-                    "1": {"matching_status": "matched", "matched_irrep": "C3_spinor_phase_+1/6",
-                          "subspace_group_candidate": "C3_like", "operation_order": 3,
-                          "eigenphases": [0.166667], "diagnostic_only": False},
+                    "matching_status": "matched",
+                    "matching_strategy": "bilbao_restricted_character",
+                    "irrep_multiplicities": {"C3_spinor_phase_+1/6": 1},
+                    "subspace_space_group": {
+                        "candidate_space_group_symbol": "C3_like",
+                        "valley_preserving_operation_ids": [0, 1],
+                    },
+                    "valley_preserving_operation_ids": [0, 1],
+                    "hsp_little_group_operation_ids": [0, 1],
                 },
-            },
-        },
-    }
-    # Character lookup via symmetry-adapted report.
-    sa_report = {
-        "by_kpoint": {
-            "GammaM": {
-                "valley_preserving_subspaces": [{
-                    "orbit": ["K_valley"],
-                    "valley_preserving_character_diagnostics": {
-                        "per_valley": {
-                            "K_valley": [{
-                                "operation_id": 1,
-                                "character": {"real": -1.0, "imag": 0.0},
-                            }],
-                        },
-                    },
-                }],
-            },
-            "KM": {
-                "valley_preserving_subspaces": [{
-                    "orbit": ["K_valley"],
-                    "valley_preserving_character_diagnostics": {
-                        "per_valley": {
-                            "K_valley": [{
-                                "operation_id": 1,
-                                "character": {"real": 0.5, "imag": 0.866025},
-                            }],
-                        },
-                    },
-                }],
             },
         },
     }
@@ -374,8 +366,9 @@ def test_provenance_survives_through_output_writer_to_export_bundle(tmp_path):
     candidates = build_ebr_input_candidates(
         irrep_workflow_decisions=workflow,
         valley_irrep_matching=matching,
-        symmetry_adapted_valley_report=sa_report,
     )
+    # GammaM/K_valley (1 irrep, mult=2) + KM/K_valley (1 irrep) = 2 candidates.
+    # GammaM/K_valley_diag (diagnostic_only) → blocked.
     assert candidates["candidate_count"] == 2
     assert candidates["blocked_count"] == 1
 
@@ -422,26 +415,27 @@ def test_provenance_survives_through_output_writer_to_export_bundle(tmp_path):
 
     gamma_rec = records["GammaM"][0]
     assert gamma_rec["valley"] == "K_valley"
-    assert gamma_rec["operation_id"] == "1"
-    assert gamma_rec["operation_order"] == 3
     assert gamma_rec["matched_irrep"] == "C3_spinor_phase_+1/2"
-    assert gamma_rec["eigenphases"] == [0.5]
     assert gamma_rec["workflow_path"] == "direct_qcut"
     assert gamma_rec["readiness_level"] == "trusted"
     assert "valley_irrep_matching" in gamma_rec["source"]
-    # Character preserved from SA report.
-    assert gamma_rec["character"] is not None
-    assert gamma_rec["character"]["real"] == -1.0
-    assert all(rec["operation_id"] != "2" for recs in records.values() for rec in recs)
+    # Generic path: matching_strategy is bilbao_restricted_character.
+    assert gamma_rec.get("matching_strategy") == "bilbao_restricted_character"
+    assert gamma_rec.get("subspace_space_group") is not None
+    # No legacy operation_id from diagnostic_only row.
+    assert all(
+        rec.get("operation_id") != "2" for recs in records.values() for rec in recs
+    )
 
     km_rec = records["KM"][0]
-    assert km_rec["operation_id"] == "1"
     assert km_rec["matched_irrep"] == "C3_spinor_phase_+1/6"
-    assert km_rec["character"] is not None
+    assert km_rec.get("matching_strategy") == "bilbao_restricted_character"
 
     # irreps_by_kpoint still present for reduced EBR matching.
     assert "irreps_by_kpoint" in bundle
-    assert bundle["irreps_by_kpoint"]["GammaM"] == ["C3_spinor_phase_+1/2"]
+    assert bundle["irreps_by_kpoint"]["GammaM"] == [
+        "C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"
+    ]
 
     # Summary embeds the export bundle with provenance.
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))

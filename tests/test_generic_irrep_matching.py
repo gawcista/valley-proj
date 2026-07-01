@@ -821,8 +821,12 @@ def test_ebr_candidates_generic_mode_no_legacy_promotion():
     assert r["status"] == "no_candidates"
 
 
-def test_ebr_candidates_legacy_mode_promotes():
-    """In legacy mode, legacy by_kpoint matches DO become candidates."""
+def test_ebr_candidates_legacy_mode_no_longer_promotes():
+    """Legacy by_kpoint matches are no longer promoted to EBR candidates.
+
+    The legacy phase-table matching path has been removed;
+    only generic_matches_by_kpoint is authoritative.
+    """
     from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
 
     decisions = {
@@ -856,8 +860,9 @@ def test_ebr_candidates_legacy_mode_promotes():
         irrep_workflow_decisions=decisions,
         valley_irrep_matching=matching,
     )
-    assert r["candidate_count"] == 1
-    assert r["candidates"][0]["matched_irrep"] == "C3_spinor_phase_+1/2"
+    # Legacy path removed — by_kpoint data is ignored.
+    assert r["candidate_count"] == 0
+    assert r["status"] == "no_candidates"
 
 
 def test_representation_record_no_legacy_fallback_in_generic_mode():
