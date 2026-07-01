@@ -154,7 +154,12 @@ def build_reduced_ebr_mapping(
             **_status("missing_table", "no reduced EBR table provided"),
             "solutions": [],
             "excluded_bundles": [
-                {"bundle_id": b.get("bundle_id", "?"), "reason": "missing_table"}
+                {
+                    "bundle_id": b.get("bundle_id", "?"),
+                    "subspace_group_candidate": b.get("subspace_group_candidate", ""),
+                    "subspace_space_group": b.get("subspace_space_group", {}),
+                    "reason": "missing_table",
+                }
                 for b in bundles if isinstance(b, dict)
             ],
             "table_status": "not_provided",
@@ -175,6 +180,8 @@ def build_reduced_ebr_mapping(
         if not bundle.get("ready_for_external_solver"):
             excluded.append({
                 "bundle_id": bundle.get("bundle_id", "?"),
+                "subspace_group_candidate": bundle.get("subspace_group_candidate", ""),
+                "subspace_space_group": bundle.get("subspace_space_group", {}),
                 "reason": "not ready for external solver",
             })
             continue
@@ -183,6 +190,8 @@ def build_reduced_ebr_mapping(
         if bundle_group != table_group:
             excluded.append({
                 "bundle_id": bundle.get("bundle_id", "?"),
+                "subspace_group_candidate": bundle_group,
+                "subspace_space_group": bundle.get("subspace_space_group", {}),
                 "reason": (
                     f"table group {table_group} != "
                     f"bundle group {bundle_group}"
@@ -209,6 +218,8 @@ def build_reduced_ebr_mapping(
         else:
             excluded.append({
                 "bundle_id": bundle.get("bundle_id", "?"),
+                "subspace_group_candidate": bundle.get("subspace_group_candidate", ""),
+                "subspace_space_group": bundle.get("subspace_space_group", {}),
                 "reason": (
                     "malformed expected_hsps: expected a unique list of "
                     "non-empty HSP labels"
@@ -219,6 +230,8 @@ def build_reduced_ebr_mapping(
         if bundle_expected_set != table_expected:
             excluded.append({
                 "bundle_id": bundle.get("bundle_id", "?"),
+                "subspace_group_candidate": bundle.get("subspace_group_candidate", ""),
+                "subspace_space_group": bundle.get("subspace_space_group", {}),
                 "reason": (
                     f"expected_hsps mismatch: "
                     f"table has {sorted(table_expected)}, "
@@ -230,6 +243,8 @@ def build_reduced_ebr_mapping(
         if actual_hsps != table_expected:
             excluded.append({
                 "bundle_id": bundle.get("bundle_id", "?"),
+                "subspace_group_candidate": bundle.get("subspace_group_candidate", ""),
+                "subspace_space_group": bundle.get("subspace_space_group", {}),
                 "reason": (
                     f"irrep HSP basis mismatch: "
                     f"table expects {sorted(table_expected)}, "
@@ -241,6 +256,8 @@ def build_reduced_ebr_mapping(
         if irrep_counts is None:
             excluded.append({
                 "bundle_id": bundle.get("bundle_id", "?"),
+                "subspace_group_candidate": bundle.get("subspace_group_candidate", ""),
+                "subspace_space_group": bundle.get("subspace_space_group", {}),
                 "reason": "could not resolve irrep keys to table irreps",
             })
             continue
@@ -256,6 +273,7 @@ def build_reduced_ebr_mapping(
             "bundle_id": bundle.get("bundle_id", ""),
             "valley": bundle.get("valley", ""),
             "subspace_group_candidate": bundle_group,
+            "subspace_space_group": bundle.get("subspace_space_group", {}),
             "irrep_vector": irrep_counts,
             **result,
         })

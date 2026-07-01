@@ -37,6 +37,7 @@ def build_reduced_table_from_irreptables(
     subspace_group_candidate: str,
     source_loader: Callable[[int | str, bool], Mapping[str, object]] | None = None,
     provenance: Mapping[str, object] | None = None,
+    subspace_space_group: Mapping[str, object] | None = None,
     sg_number: int | str | None = None,
     spinor: bool | None = None,
     provenance_extra: Mapping[str, object] | None = None,
@@ -92,6 +93,7 @@ def build_reduced_table_from_irreptables(
         allowed_irrep_keys=allowed_irrep_keys,
         subspace_group_candidate=subspace_group_candidate,
         provenance=source_provenance,
+        subspace_space_group=subspace_space_group,
     )
 
 
@@ -284,6 +286,7 @@ def _build_common(
     provenance = _optional_mapping(spec, "provenance")
     expected_hsps = _required_string_sequence(spec, "expected_hsps")
     allowed_irrep_keys = _required_string_sequence(spec, "allowed_irrep_keys")
+    subspace_space_group_raw = spec.get("subspace_space_group")
 
     table = build_reduced_table_from_irreptables(
         space_group_number=space_group_number,
@@ -298,6 +301,11 @@ def _build_common(
         allowed_irrep_keys=allowed_irrep_keys,
         subspace_group_candidate=subspace_group_candidate,
         provenance=provenance,
+        subspace_space_group=(
+            dict(subspace_space_group_raw)
+            if isinstance(subspace_space_group_raw, Mapping)
+            else None
+        ),
     )
     _validate_reduced_table_dict(table)
     return table

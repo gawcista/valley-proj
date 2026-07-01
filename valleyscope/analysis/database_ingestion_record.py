@@ -137,6 +137,7 @@ def build_database_ingestion_record(
                     "bundle_id": s.get("bundle_id", "?"),
                     "valley": s.get("valley", "?"),
                     "subspace_group_candidate": s.get("subspace_group_candidate", "?"),
+                    "subspace_space_group": s.get("subspace_space_group", {}),
                     "status": s.get("status", "?"),
                     "classification": s.get("classification", "?"),
                     "integer_span_status": s.get("integer_span_status", "?"),

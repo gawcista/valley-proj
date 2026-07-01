@@ -39,6 +39,7 @@ def build_reduced_table_from_runtime_source(
     allowed_irrep_keys: Sequence[str],
     subspace_group_candidate: str,
     provenance: Mapping[str, Any] | None = None,
+    subspace_space_group: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a ValleyScope reduced external table from a runtime source payload.
 
@@ -56,10 +57,16 @@ def build_reduced_table_from_runtime_source(
         whose ``valleyscope_irrep_key`` is in this set are included.
     subspace_group_candidate : str
         The physical valley-projected subspace-space-group symbol
-        (e.g. ``"P3"``, ``"P4"``, ``"P2"``) for the reduced table.
+        (e.g. ``"P3"``, ``"P4"``, ``"P2"``) — required scalar key for the
+        reduced external-table interface.
     provenance : Mapping or None
         Optional provenance dict (package name, version, detected space group,
         etc.) attached to the output.
+    subspace_space_group : Mapping or None
+        Optional structured subgroup provenance (e.g. with
+        ``candidate_space_group_symbol``, ``valley_preserving_operation_ids``).
+        When provided, it is stored alongside the scalar key so downstream
+        reduced-EBR consumers can access the canonical physical object.
 
     Returns
     -------
@@ -221,6 +228,8 @@ def build_reduced_table_from_runtime_source(
         "irreps": reduced_irreps,
         "ebrs": reduced_ebrs,
     }
+    if subspace_space_group is not None and isinstance(subspace_space_group, Mapping):
+        result["subspace_space_group"] = dict(subspace_space_group)
     result["provenance"] = _build_provenance(
         source_payload=source_payload,
         explicit_provenance=provenance,
