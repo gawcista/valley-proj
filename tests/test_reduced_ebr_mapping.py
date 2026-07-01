@@ -36,6 +36,7 @@ def _bundle():
             "bundle_id": "bundle_ebr_instance_001",
             "valley": "K_valley",
             "subspace_group_candidate": "P3",
+            "subspace_space_group": {"candidate_space_group_symbol": "P3"},
             "ready_for_external_solver": True,
             "irreps_by_kpoint": {
                 "GammaM": ["C3_spinor_phase_+1/2"],
@@ -100,6 +101,7 @@ def test_exact_solution_found():
         "bundles": [{
             "bundle_id": "b_001", "valley": "K",
             "subspace_group_candidate": "P3",
+            "subspace_space_group": {"candidate_space_group_symbol": "P3"},
             "ready_for_external_solver": True,
             "irreps_by_kpoint": bundle_vec,
         }],
@@ -108,6 +110,7 @@ def test_exact_solution_found():
     assert r["status"] == "solved_exact"
     s = r["solutions"][0]
     assert s["status"] == "solved_exact"
+    assert s["subspace_space_group"] == {"candidate_space_group_symbol": "P3"}
     labels = {e["label"] for e in s["ebr_decomposition"]}
     assert labels == {"EBR_A", "EBR_B"}
 
@@ -157,6 +160,7 @@ def test_group_mismatch_excluded():
         "bundles": [{
             "bundle_id": "b_001", "valley": "M1",
             "subspace_group_candidate": "P2",
+            "subspace_space_group": {"candidate_space_group_symbol": "P2"},
             "ready_for_external_solver": True,
             "irreps_by_kpoint": {"GammaM": ["C2_spinor_phase_+1/4"]},
         }],
@@ -164,6 +168,8 @@ def test_group_mismatch_excluded():
     r = build_reduced_ebr_mapping(ebr_export_bundle=b, table=_SAMPLE_TABLE)
     ex = r["excluded_bundles"]
     assert len(ex) == 1
+    assert ex[0]["subspace_group_candidate"] == "P2"
+    assert ex[0]["subspace_space_group"] == {"candidate_space_group_symbol": "P2"}
     assert "table group" in ex[0]["reason"]
 
 # -----------------------------------------------------------------------
@@ -197,6 +203,7 @@ def test_not_ready_excluded():
         "bundles": [{
             "bundle_id": "b_001", "valley": "K",
             "subspace_group_candidate": "P3",
+            "subspace_space_group": {"candidate_space_group_symbol": "P3"},
             "ready_for_external_solver": False,
             "irreps_by_kpoint": {},
         }],
@@ -204,6 +211,8 @@ def test_not_ready_excluded():
     r = build_reduced_ebr_mapping(ebr_export_bundle=b, table=_SAMPLE_TABLE)
     ex = r["excluded_bundles"]
     assert len(ex) == 1
+    assert ex[0]["subspace_group_candidate"] == "P3"
+    assert ex[0]["subspace_space_group"] == {"candidate_space_group_symbol": "P3"}
     assert "not ready" in ex[0]["reason"]
 
 def test_unknown_irrep_label_is_not_matched_by_hsp_only():

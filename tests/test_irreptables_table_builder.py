@@ -108,6 +108,19 @@ def test_builder_fake_loader_produces_loadable_reduced_table(tmp_path):
     assert loaded["irreps"] == _ALLOWED_KEYS
 
 
+def test_builder_preserves_optional_subspace_space_group():
+    table, _calls = _build_with_fake_loader(
+        subspace_space_group={
+            "candidate_space_group_symbol": "P3",
+            "valley_preserving_operation_ids": [0, 1, 2],
+        },
+    )
+    assert table["subspace_space_group"] == {
+        "candidate_space_group_symbol": "P3",
+        "valley_preserving_operation_ids": [0, 1, 2],
+    }
+
+
 def test_builder_provenance_marks_public_source_and_reduction_contract():
     table, _calls = _build_with_fake_loader(
         provenance={"review_status": "fixture-only"},
@@ -179,7 +192,17 @@ def test_default_loader_missing_import_reports_clear_runtimeerror(monkeypatch):
 def test_spec_file_helper_uses_canonical_spec_with_fake_loader(tmp_path):
     calls = []
     spec_path = tmp_path / "mapping_spec.json"
-    spec_path.write_text(json.dumps(_canonical_spec()), encoding="utf-8")
+    spec_path.write_text(
+        json.dumps(
+            _canonical_spec(
+                subspace_space_group={
+                    "candidate_space_group_symbol": "P3",
+                    "valley_preserving_operation_ids": [0, 1, 2],
+                }
+            )
+        ),
+        encoding="utf-8",
+    )
 
     table = build_reduced_table_from_spec_file(
         spec_path,
@@ -188,6 +211,10 @@ def test_spec_file_helper_uses_canonical_spec_with_fake_loader(tmp_path):
 
     assert calls == [(150, True)]
     assert table["irreps"] == _ALLOWED_KEYS
+    assert table["subspace_space_group"] == {
+        "candidate_space_group_symbol": "P3",
+        "valley_preserving_operation_ids": [0, 1, 2],
+    }
     assert table["provenance"]["data_source"] == "irreptables"
     assert table["provenance"]["review_status"] == "fixture-only"
     out_path = tmp_path / "table.json"

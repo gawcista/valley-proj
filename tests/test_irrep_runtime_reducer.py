@@ -73,6 +73,23 @@ def test_happy_path_output_passes_load_reduced_ebr_table(tmp_path):
     assert loaded["irreps"] == _KEYS
 
 
+def test_optional_subspace_space_group_is_preserved():
+    result = build_reduced_table_from_runtime_source(
+        source_payload=_source_payload(),
+        expected_hsps=_HSP,
+        allowed_irrep_keys=_KEYS,
+        subspace_group_candidate="P3",
+        subspace_space_group={
+            "candidate_space_group_symbol": "P3",
+            "valley_preserving_operation_ids": [0, 1, 2],
+        },
+    )
+    assert result["subspace_space_group"] == {
+        "candidate_space_group_symbol": "P3",
+        "valley_preserving_operation_ids": [0, 1, 2],
+    }
+
+
 # -----------------------------------------------------------------------
 # 2. Missing/empty basis
 # -----------------------------------------------------------------------

@@ -93,7 +93,10 @@ def test_ingestion_record_with_reduced_ebr_mapping():
         "status": "solved_exact",
         "table_status": "loaded",
         "solutions": [
-            {"classification": "atomic-compatible-candidate"},
+            {
+                "classification": "atomic-compatible-candidate",
+                "subspace_space_group": {"candidate_space_group_symbol": "P3"},
+            },
             {"classification": "atomic-compatible-candidate"},
             {"classification": "fragile-topology-candidate"},
         ],
@@ -239,6 +242,7 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
                 "bundle_id": "b_001", "source_instance_id": "ebr_001",
                 "valley": "K_valley",
                 "subspace_group_candidate": "P3",
+                "subspace_space_group": {"candidate_space_group_symbol": "P3"},
                 "ready_for_external_solver": True,
                 "irrep_records_by_kpoint": c3_records,
             },
@@ -246,6 +250,7 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
                 "bundle_id": "b_002", "source_instance_id": "ebr_002",
                 "valley": "Kp_valley",
                 "subspace_group_candidate": "P3",
+                "subspace_space_group": {"candidate_space_group_symbol": "P3"},
                 "ready_for_external_solver": True,
                 "irrep_records_by_kpoint": c3p_records,
             },
@@ -258,6 +263,7 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
             {
                 "bundle_id": "b_001", "valley": "K_valley",
                 "subspace_group_candidate": "P3",
+                "subspace_space_group": {"candidate_space_group_symbol": "P3"},
                 "status": "solved_exact",
                 "classification": "atomic-compatible-candidate",
                 "integer_span_status": "in_integer_span",
@@ -268,6 +274,7 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
             {
                 "bundle_id": "b_002", "valley": "Kp_valley",
                 "subspace_group_candidate": "P3",
+                "subspace_space_group": {"candidate_space_group_symbol": "P3"},
                 "status": "solved_exact",
                 "classification": "atomic-compatible-candidate",
                 "integer_span_status": "in_integer_span",
@@ -316,6 +323,9 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
         assert r["integer_span_status"] == "in_integer_span"
         assert r["nonnegative_solution_status"] == "solved_exact"
         assert r["irrep_vector"] == [0, 2, 0, 1, 0, 1]
+        assert r["subspace_space_group"] == {
+            "candidate_space_group_symbol": "P3"
+        }
         assert len(r["ebr_decomposition"]) == 1
         assert r["ebr_decomposition"][0]["coefficient"] == 1
 
