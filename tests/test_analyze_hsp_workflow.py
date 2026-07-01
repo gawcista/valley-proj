@@ -1134,6 +1134,307 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     assert "expected_hsps" in bad_mapping["excluded_bundles"][0]["reason"]
 
 
+def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
+    """Real runtime spec builder path produces same outputs as table_file.
+
+    Only ``_load_ebr_data_from_irreptables`` is monkeypatched — the
+    actual ``build_reduced_table_from_spec_file`` runs for real through
+    the spec → source payload → reduce → validate pipeline.
+    """
+    from valleyscope.analysis.database_ingestion_record import (
+        load_database_ingestion_record_from_directory,
+    )
+    import valleyscope.workflows.analyze_hsp as workflow_mod
+    import valleyscope.analysis.irreptables_runtime_table_builder as builder_mod
+
+    # --- HDF5 fixture (same P4 toy as the table_file E2E test) ---
+    h5_path = tmp_path / "wf.h5"
+    structure = tmp_path / "CONTCAR"
+    write_square_poscar(structure)
+    with h5py.File(h5_path, "w") as h5:
+        meta = h5.create_group("metadata")
+        lattice = meta.create_group("lattice")
+        lattice["direct_cart"] = np.eye(3)
+        lattice["reciprocal_cart"] = np.eye(3)
+        meta["spinor"] = False; meta["source"] = "toy"
+        meta["vasp_band_index_base"] = 1
+        kp = h5.create_group("kpoints").create_group("0")
+        kp["name"] = "GammaM"; kp["frac"] = np.zeros(3); kp["cart"] = np.zeros(3)
+        kp["g_vectors_frac"] = np.array([[1, 0, 0], [-1, 0, 0]])
+        kp["g_vectors_cart"] = np.array([[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]])
+        kp["coefficients"] = np.array([[[1.0, 0.0]], [[0.0, 1.0]]], dtype=np.complex128)
+        kp["energies_eV"] = np.array([0.1, 0.1001])
+        kp["band_indices_vasp"] = np.array([101, 102])
+
+    symmetry_adapted_report = {
+        "by_kpoint": {
+            "GammaM": {
+                "valley_preserving_subspaces": [{
+                    "reference_valley": "K_valley",
+                    "orbit": ["K_valley"],
+                    "hsp_preserving_operation_ids": [0, 4],
+                    "subspace_space_group": {
+                        "valley_preserving_operation_ids": [0, 4],
+                        "candidate_space_group_symbol": "P4",
+                    },
+                    "subspace_group": {
+                        "subspace_group_candidate": "P4",
+                        "operation_orders": {"0": 1, "4": 2},
+                    },
+                    "valley_preserving_character_diagnostics": {
+                        "per_valley": {
+                            "K_valley": [
+                                {"operation_id": 0, "eigenphases": [0.0, 0.0]},
+                                {"operation_id": 4, "eigenphases": [0.0, 0.5]},
+                            ],
+                        },
+                    },
+                }],
+            },
+        },
+    }
+    workflow_decisions = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "readiness_level": "trusted",
+                    "workflow_path": "direct_qcut",
+                },
+            },
+        },
+    }
+    source_chars = {
+        "A": {1: 1 + 0j, 2: 1 + 0j},
+        "B": {1: 1 + 0j, 2: -1 + 0j},
+    }
+
+    # --- Table content (same for both paths) ---
+    matching_table = {
+        "schema_version": "1.0.0",
+        "subspace_group_candidate": "P4",
+        "expected_hsps": ["GammaM"],
+        "irreps": ["GammaM:A", "GammaM:B"],
+        "ebrs": [
+            {"label": "EBR_A", "vector": [1, 0]},
+            {"label": "EBR_B", "vector": [0, 1]},
+        ],
+    }
+    table_path = tmp_path / "reduced_ebr_table.json"
+    table_path.write_text(json.dumps(matching_table), encoding="utf-8")
+
+    # --- Spec file that would produce the same table via runtime builder ---
+    # Toy EBR data that reduces to the matching_table above.
+    toy_ebr_data = {
+        "basis": {
+            "irrep_labels": ["A@GM"],
+            "degeneracies": [1],
+        },
+        "ebrs": [
+            {"ebr_name": "EBR_A", "wyckoff_position": "1a", "vector": [1]},
+            {"ebr_name": "EBR_B", "wyckoff_position": "1b", "vector": [1]},
+        ],
+    }
+    spec = {
+        "schema_version": "1.0.0",
+        "data_source": "irreptables",
+        "space_group_number": 75,
+        "spinful": False,
+        "source_hsp_by_irrep": {"A@GM": "GammaM"},
+        "valleyscope_key_by_source_irrep": {"A@GM": "GammaM:A"},
+        "expected_hsps": ["GammaM"],
+        "allowed_irrep_keys": ["GammaM:A", "GammaM:B"],
+        "subspace_group_candidate": "P4",
+    }
+    spec_path = tmp_path / "p4_spec.json"
+    spec_path.write_text(json.dumps(spec), encoding="utf-8")
+
+    # Monkeypatch only the low-level data loader so the runtime builder
+    # exercises the real spec→payload→reduce→validate pipeline.
+    monkeypatch.setattr(
+        builder_mod,
+        "_load_ebr_data_from_irreptables",
+        lambda sg, spinful: toy_ebr_data,
+    )
+    # ... but the spec requires both irrep keys to be covered.  Our toy
+    # data only has one source label.  Add a second source label that
+    # maps to the same key via a different HSP, or make the table
+    # match.  For simplicity, change the spec to match the toy data.
+    # Actually, the runtime reducer validates that allowed_irrep_keys
+    # each have at least one basis entry.  Let me use a proper spec:
+    spec2 = {
+        "schema_version": "1.0.0",
+        "data_source": "irreptables",
+        "space_group_number": 75,
+        "spinful": False,
+        "source_hsp_by_irrep": {"A@GM": "GammaM", "B@GM": "GammaM"},
+        "valleyscope_key_by_source_irrep": {
+            "A@GM": "GammaM:A",
+            "B@GM": "GammaM:B",
+        },
+        "expected_hsps": ["GammaM"],
+        "allowed_irrep_keys": ["GammaM:A", "GammaM:B"],
+        "subspace_group_candidate": "P4",
+    }
+    spec_path.write_text(json.dumps(spec2), encoding="utf-8")
+    toy_ebr_data2 = {
+        "basis": {
+            "irrep_labels": ["A@GM", "B@GM"],
+            "degeneracies": [1, 1],
+        },
+        "ebrs": [
+            {"ebr_name": "EBR_A", "wyckoff_position": "1a", "vector": [1, 0]},
+            {"ebr_name": "EBR_B", "wyckoff_position": "1b", "vector": [0, 1]},
+        ],
+    }
+    monkeypatch.setattr(
+        builder_mod,
+        "_load_ebr_data_from_irreptables",
+        lambda sg, spinful: toy_ebr_data2,
+    )
+
+    # Common monkeypatches (same as table_file E2E test).
+    monkeypatch.setattr(
+        workflow_mod, "_build_symmetry_adapted_valley_report",
+        lambda **_: symmetry_adapted_report,
+    )
+    monkeypatch.setattr(
+        workflow_mod, "_build_hsp_star_derived_character_layer",
+        lambda **_: (None, None),
+    )
+    monkeypatch.setattr(
+        workflow_mod, "build_irrep_workflow_decisions",
+        lambda **_: workflow_decisions,
+    )
+    monkeypatch.setattr(
+        workflow_mod, "load_standard_irrep_table",
+        lambda spacegroup_number, *, spinor: object(),
+    )
+    monkeypatch.setattr(
+        workflow_mod, "build_source_payload_for_generic_matching",
+        lambda **_: {
+            "status": "ok",
+            "source_irrep_characters": source_chars,
+            "source_operation_map": {0: 1, 4: 2},
+        },
+    )
+
+    # --- table_file run ---
+    out_table = tmp_path / "out_table"
+    cfg_table = tmp_path / "cfg_table.yaml"
+    cfg_table.write_text(yaml.safe_dump({
+        "input": {"wavefunction_h5": str(h5_path)},
+        "analysis": {
+            "kpoints": ["GammaM"], "iband": [101, 102],
+            "degeneracy_tol_meV": 1.0,
+            "generic_irrep_source": {
+                "enabled": True, "spacegroup_number": 143,
+                "spinor": False,
+                "source_hsp_labels": {"GammaM": {"K_valley": "GM"}},
+            },
+            "reduced_ebr": {"enabled": True, "table_file": str(table_path)},
+        },
+        "monolayer_lattices": {"default": {"reciprocal_cart": np.eye(3).tolist()}},
+        "valley_centers": {"coordinate_mode": "cart", "centers": [
+            {"name": "K", "cart": [1.0, 0.0, 0.0]},
+            {"name": "Kp", "cart": [-1.0, 0.0, 0.0]},
+        ]},
+        "valley_subspaces": [
+            {"name": "K_valley", "centers": ["K"]},
+            {"name": "Kp_valley", "centers": ["Kp"]},
+        ],
+        "projection": {"qcut_mode": "absolute", "qcut_Ainv": 0.25,
+                       "overlap_policy": "warn_exclude"},
+        "symmetry": {
+            "operations": {"mode": "auto", "structure_file": str(structure),
+                           "backend": "spglib"},
+            "tolerance": {"symprec": 1.0e-5, "angle_tolerance": -1.0},
+            "filters": {"rotation_order": 2},
+        },
+        "output": {"directory": str(out_table), "profile": "standard"},
+    }), encoding="utf-8")
+
+    outputs_table = analyze_hsp(cfg_table)
+    summary_table = json.loads(
+        outputs_table["valley_summary_json"].read_text(encoding="utf-8"))
+    mapping_table = summary_table["valley_reduced_ebr_mapping"]
+
+    # --- spec_file run (real runtime builder) ---
+    out_spec = tmp_path / "out_spec"
+    cfg_spec = tmp_path / "cfg_spec.yaml"
+    cfg_spec.write_text(yaml.safe_dump({
+        "input": {"wavefunction_h5": str(h5_path)},
+        "analysis": {
+            "kpoints": ["GammaM"], "iband": [101, 102],
+            "degeneracy_tol_meV": 1.0,
+            "generic_irrep_source": {
+                "enabled": True, "spacegroup_number": 143,
+                "spinor": False,
+                "source_hsp_labels": {"GammaM": {"K_valley": "GM"}},
+            },
+            "reduced_ebr": {"enabled": True, "spec_file": str(spec_path)},
+        },
+        "monolayer_lattices": {"default": {"reciprocal_cart": np.eye(3).tolist()}},
+        "valley_centers": {"coordinate_mode": "cart", "centers": [
+            {"name": "K", "cart": [1.0, 0.0, 0.0]},
+            {"name": "Kp", "cart": [-1.0, 0.0, 0.0]},
+        ]},
+        "valley_subspaces": [
+            {"name": "K_valley", "centers": ["K"]},
+            {"name": "Kp_valley", "centers": ["Kp"]},
+        ],
+        "projection": {"qcut_mode": "absolute", "qcut_Ainv": 0.25,
+                       "overlap_policy": "warn_exclude"},
+        "symmetry": {
+            "operations": {"mode": "auto", "structure_file": str(structure),
+                           "backend": "spglib"},
+            "tolerance": {"symprec": 1.0e-5, "angle_tolerance": -1.0},
+            "filters": {"rotation_order": 2},
+        },
+        "output": {"directory": str(out_spec), "profile": "standard"},
+    }), encoding="utf-8")
+
+    outputs_spec = analyze_hsp(cfg_spec)
+    summary_spec = json.loads(
+        outputs_spec["valley_summary_json"].read_text(encoding="utf-8"))
+    mapping_spec = summary_spec["valley_reduced_ebr_mapping"]
+
+    # --- Equivalence assertions ---
+    assert mapping_table["mapping_status"] == "solved_exact"
+    assert mapping_spec["mapping_status"] == mapping_table["mapping_status"]
+    assert mapping_spec["solutions"] == mapping_table["solutions"]
+    assert mapping_spec["excluded_bundles"] == mapping_table["excluded_bundles"]
+
+    # reduced_ebr_input differs — this is the only intentional difference.
+    assert mapping_table["reduced_ebr_input"]["source"] == "table_file"
+    assert mapping_spec["reduced_ebr_input"]["source"] == "spec_file"
+    assert mapping_spec["reduced_ebr_input"]["spec_file_stem"] == "p4_spec"
+    assert mapping_spec["reduced_ebr_input"]["subspace_group_candidate"] == "P4"
+    assert mapping_spec["reduced_ebr_input"]["data_source"] == "irreptables"
+
+    # Strip reduced_ebr_input and prove everything else is identical.
+    mapping_table_stripped = dict(mapping_table)
+    mapping_spec_stripped = dict(mapping_spec)
+    del mapping_table_stripped["reduced_ebr_input"]
+    del mapping_spec_stripped["reduced_ebr_input"]
+    assert mapping_spec_stripped == mapping_table_stripped
+
+    # Ingestion records also equivalent modulo reduced_ebr_input.
+    rec_table = load_database_ingestion_record_from_directory(str(out_table))
+    rec_spec = load_database_ingestion_record_from_directory(str(out_spec))
+    assert rec_table["record_status"] == rec_spec["record_status"] == "has_ready_ebr_bundles"
+    assert rec_table["reduced_ebr_classification_counts"] == \
+        rec_spec["reduced_ebr_classification_counts"]
+    assert rec_table["reduced_ebr_input"]["source"] == "table_file"
+    assert rec_spec["reduced_ebr_input"]["source"] == "spec_file"
+
+    # Summary embeddings are identical modulo reduced_ebr_input.
+    summary_emb_table = dict(summary_table["valley_reduced_ebr_mapping"])
+    summary_emb_spec = dict(summary_spec["valley_reduced_ebr_mapping"])
+    del summary_emb_table["reduced_ebr_input"]
+    del summary_emb_spec["reduced_ebr_input"]
+    assert summary_emb_spec == summary_emb_table
+
+
 def test_unmock_generic_source_adapter_positive_full_pipeline():
     """Unmock: real load_standard_irrep_table + build_source_payload
     feed through matcher -> EBR -> reduced mapping -> database ingestion."""

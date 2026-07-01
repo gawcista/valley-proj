@@ -131,6 +131,7 @@ def build_reduced_ebr_mapping(
     ebr_export_bundle: dict | None,
     table: dict | None = None,
     max_coefficient: int = 6,
+    reduced_ebr_input: dict | None = None,
 ) -> dict:
     """Exact reduced EBR decomposition of export bundle irrep vectors.
 
@@ -139,19 +140,23 @@ def build_reduced_ebr_mapping(
     ebr_export_bundle : output of build_ebr_export_bundle
     table : validated reduced EBR table dict (from load_reduced_ebr_table)
     max_coefficient : int, max coefficient per EBR in brute-force search
+    reduced_ebr_input : optional compact non-path provenance documenting
+        which reduced-EBR input source was used (table_file or spec_file).
     """
     max_coefficient = int(max_coefficient)
     if max_coefficient < 0:
         raise ValueError("max_coefficient must be nonnegative")
 
     if ebr_export_bundle is None:
-        return _status("not_evaluated", "no export bundle available")
+        return _status("not_evaluated", "no export bundle available",
+                       reduced_ebr_input=reduced_ebr_input)
 
     bundles = ebr_export_bundle.get("bundles", [])
 
     if table is None:
-        return {
-            **_status("missing_table", "no reduced EBR table provided"),
+        result: dict = {
+            **_status("missing_table", "no reduced EBR table provided",
+                      reduced_ebr_input=reduced_ebr_input),
             "solutions": [],
             "excluded_bundles": [
                 {
@@ -164,6 +169,7 @@ def build_reduced_ebr_mapping(
             ],
             "table_status": "not_provided",
         }
+        return result
 
     table_group = str(table.get("subspace_group_candidate", ""))
     table_irreps = table["irreps"]
@@ -280,7 +286,8 @@ def build_reduced_ebr_mapping(
 
     if not solutions:
         return {
-            **_status("not_evaluated", "no bundles to decompose"),
+            **_status("not_evaluated", "no bundles to decompose",
+                      reduced_ebr_input=reduced_ebr_input),
             "solutions": [],
             "excluded_bundles": excluded,
             "table_status": "loaded" if table else "not_provided",
@@ -288,7 +295,7 @@ def build_reduced_ebr_mapping(
 
     all_solved = all(s.get("status") == "solved_exact" for s in solutions)
     mapping_status = "solved_exact" if all_solved else "no_exact_solution"
-    return {
+    result = {
         "status": mapping_status,
         "mapping_status": mapping_status,
         "reduced_ebr_decomposition_status": mapping_status,
@@ -304,6 +311,9 @@ def build_reduced_ebr_mapping(
             "reduced EBR table was provided."
         ),
     }
+    if reduced_ebr_input is not None:
+        result["reduced_ebr_input"] = dict(reduced_ebr_input)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -370,8 +380,9 @@ def _resolve_table_irrep_index(
     return None
 
 
-def _status(status: str, reason: str) -> dict:
-    return {
+def _status(status: str, reason: str,
+            reduced_ebr_input: dict | None = None) -> dict:
+    result: dict = {
         "status": status,
         "mapping_status": status,
         "reduced_ebr_decomposition_status": status,
@@ -381,3 +392,6 @@ def _status(status: str, reason: str) -> dict:
         "solver": _SOLVER_NAME,
         "interpretation": reason,
     }
+    if reduced_ebr_input is not None:
+        result["reduced_ebr_input"] = dict(reduced_ebr_input)
+    return result

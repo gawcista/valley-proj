@@ -114,6 +114,9 @@ def build_database_ingestion_record(
     if valley_reduced_ebr_mapping is not None:
         record["reduced_ebr_mapping_status"] = valley_reduced_ebr_mapping.get("status", "?")
         record["reduced_ebr_table_status"] = valley_reduced_ebr_mapping.get("table_status", "?")
+        reduced_ebr_input = valley_reduced_ebr_mapping.get("reduced_ebr_input")
+        if isinstance(reduced_ebr_input, dict):
+            record["reduced_ebr_input"] = dict(reduced_ebr_input)
         solutions = valley_reduced_ebr_mapping.get("solutions", [])
         if isinstance(solutions, list):
             atomic = sum(1 for s in solutions if isinstance(s, dict)

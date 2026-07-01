@@ -128,6 +128,7 @@ class RotationConfig:
 class ReducedEbrConfig:
     enabled: bool = False
     table_file: Path | None = None
+    spec_file: Path | None = None
     max_coefficient: int = 6
 
 
@@ -574,15 +575,25 @@ def _parse_reduced_ebr_config(base: Path, raw: dict[str, Any]) -> ReducedEbrConf
     if max_coefficient < 0:
         raise ValueError("analysis.reduced_ebr.max_coefficient must be nonnegative")
     table_file_raw = raw.get("table_file")
+    spec_file_raw = raw.get("spec_file")
     if raw.get("table_name") is not None:
         raise ValueError(
             "analysis.reduced_ebr.table_name was removed. "
             "Use analysis.reduced_ebr.table_file for external tables, "
-            "or the irreptables runtime reducer for Bilbao-derived reduced tables."
+            "or analysis.reduced_ebr.spec_file for irreptables runtime "
+            "reduced tables."
+        )
+    if table_file_raw is not None and spec_file_raw is not None:
+        raise ValueError(
+            "analysis.reduced_ebr.table_file and analysis.reduced_ebr.spec_file "
+            "are mutually exclusive.  Both are first-class equivalent reduced-EBR "
+            "inputs.  table_file loads a prebuilt table; spec_file builds one "
+            "at runtime from an irreptables mapping spec."
         )
     return ReducedEbrConfig(
         enabled=bool(raw.get("enabled", False)),
         table_file=resolve_config_path(base, table_file_raw),
+        spec_file=resolve_config_path(base, spec_file_raw),
         max_coefficient=max_coefficient,
     )
 

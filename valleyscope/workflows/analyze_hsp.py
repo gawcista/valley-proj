@@ -592,14 +592,32 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     )
     if config.reduced_ebr.enabled:
         table = None
+        reduced_ebr_input: dict[str, object] = {"source": "not_provided"}
         if config.reduced_ebr.table_file:
             table = load_reduced_ebr_table(config.reduced_ebr.table_file)
-        # Production reduced EBR uses the irreptable-based runtime reducer.
-        # Static package-data reviewed tables are removed.
+            reduced_ebr_input = {
+                "source": "table_file",
+                "table_file_stem": config.reduced_ebr.table_file.stem,
+            }
+        elif config.reduced_ebr.spec_file:
+            from valleyscope.analysis.irreptables_runtime_table_builder import (
+                build_reduced_table_from_spec_file,
+            )
+            table = build_reduced_table_from_spec_file(
+                str(config.reduced_ebr.spec_file),
+            )
+            provenance = table.get("provenance", {}) if isinstance(table.get("provenance"), dict) else {}
+            reduced_ebr_input = {
+                "source": "spec_file",
+                "spec_file_stem": config.reduced_ebr.spec_file.stem,
+                "subspace_group_candidate": table.get("subspace_group_candidate", ""),
+                "data_source": provenance.get("data_source", ""),
+            }
         reduced_ebr_mapping = build_reduced_ebr_mapping(
             ebr_export_bundle=ebr_export_bundle,
             table=table,
             max_coefficient=config.reduced_ebr.max_coefficient,
+            reduced_ebr_input=reduced_ebr_input,
         )
 
 
