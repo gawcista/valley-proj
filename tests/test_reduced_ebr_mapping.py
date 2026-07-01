@@ -1334,6 +1334,224 @@ def test_config_rejects_table_name_regardless_of_table_file(tmp_path):
 
 # table_name path removed; test deleted
 
+# -----------------------------------------------------------------------
+# Reduced-EBR input equivalence and provenance
+# -----------------------------------------------------------------------
+
+def test_config_rejects_table_file_and_spec_file_together(tmp_path):
+    """table_file and spec_file are mutually exclusive."""
+    config_path = tmp_path / "cfg.yaml"
+    config_path.write_text(yaml.safe_dump({
+        "input": {"wavefunction_h5": "wave.h5"},
+        "analysis": {
+            "kpoints": ["GammaM"], "iband": [1],
+            "reduced_ebr": {
+                "enabled": True,
+                "table_file": "t.json",
+                "spec_file": "spec.json",
+            },
+        },
+        "monolayer_lattices": {"default": {"reciprocal_cart": np.eye(3).tolist()}},
+        "valley_centers": {"coordinate_mode": "cart", "centers": [{"name": "K", "cart": [0, 0, 0]}]},
+        "valley_subspaces": [{"name": "K_valley", "centers": ["K"]}],
+        "output": {"directory": "out"},
+    }), encoding="utf-8")
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        load_config(config_path)
+
+
+def test_config_accepts_spec_file(tmp_path):
+    """spec_file is resolved relative to config base."""
+    (tmp_path / "specs").mkdir()
+    config_path = tmp_path / "cfg.yaml"
+    config_path.write_text(yaml.safe_dump({
+        "input": {"wavefunction_h5": "wave.h5"},
+        "analysis": {
+            "kpoints": ["GammaM"], "iband": [1],
+            "reduced_ebr": {
+                "enabled": True,
+                "spec_file": "specs/p3_spec.json",
+            },
+        },
+        "monolayer_lattices": {"default": {"reciprocal_cart": np.eye(3).tolist()}},
+        "valley_centers": {"coordinate_mode": "cart", "centers": [{"name": "K", "cart": [0, 0, 0]}]},
+        "valley_subspaces": [{"name": "K_valley", "centers": ["K"]}],
+        "output": {"directory": "out"},
+    }), encoding="utf-8")
+    cfg = load_config(config_path)
+    assert cfg.reduced_ebr.spec_file == (tmp_path / "specs" / "p3_spec.json")
+    assert cfg.reduced_ebr.table_file is None
+
+
+def test_config_reduced_ebr_default_off(tmp_path):
+    """spec_file without enabled=True stays default-off."""
+    config_path = tmp_path / "cfg.yaml"
+    config_path.write_text(yaml.safe_dump({
+        "input": {"wavefunction_h5": "wave.h5"},
+        "analysis": {
+            "kpoints": ["GammaM"], "iband": [1],
+            "reduced_ebr": {"spec_file": "spec.json"},
+        },
+        "monolayer_lattices": {"default": {"reciprocal_cart": np.eye(3).tolist()}},
+        "valley_centers": {"coordinate_mode": "cart", "centers": [{"name": "K", "cart": [0, 0, 0]}]},
+        "valley_subspaces": [{"name": "K_valley", "centers": ["K"]}],
+        "output": {"directory": "out"},
+    }), encoding="utf-8")
+    cfg = load_config(config_path)
+    assert cfg.reduced_ebr.enabled is False
+
+
+def test_table_file_and_spec_file_equivalent_outputs():
+    """Same table data via table_file produces identical solutions as spec_file."""
+    from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
+
+    bundle_vec = {
+        "GammaM": ["C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"],
+        "KM": ["C3_spinor_phase_+1/6", "C3_spinor_phase_-1/6"],
+    }
+    bundle = {
+        "bundles": [{
+            "bundle_id": "b_001", "valley": "K",
+            "subspace_group_candidate": "P3",
+            "subspace_space_group": {"candidate_space_group_symbol": "P3"},
+            "ready_for_external_solver": True,
+            "irreps_by_kpoint": bundle_vec,
+        }],
+    }
+    table = dict(_SAMPLE_TABLE)
+
+    result_table = build_reduced_ebr_mapping(
+        ebr_export_bundle=bundle,
+        table=table,
+        reduced_ebr_input={"source": "table_file", "table_file_stem": "p3_table"},
+    )
+    assert result_table["status"] == "solved_exact"
+
+    result_spec = build_reduced_ebr_mapping(
+        ebr_export_bundle=bundle,
+        table=table,
+        reduced_ebr_input={
+            "source": "spec_file",
+            "spec_file_stem": "p3_spec",
+            "subspace_group_candidate": "P3",
+            "data_source": "irreptables",
+        },
+    )
+    assert result_spec["status"] == "solved_exact"
+    assert result_table["solutions"] == result_spec["solutions"]
+    assert result_table["mapping_status"] == result_spec["mapping_status"]
+
+
+def test_reduced_ebr_input_provenance_in_output():
+    """reduced_ebr_input provenance appears in mapping output."""
+    bundle_vec = {
+        "GammaM": ["C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"],
+        "KM": ["C3_spinor_phase_+1/6", "C3_spinor_phase_-1/6"],
+    }
+    bundle = {
+        "bundles": [{
+            "bundle_id": "b_001", "valley": "K",
+            "subspace_group_candidate": "P3",
+            "subspace_space_group": {"candidate_space_group_symbol": "P3"},
+            "ready_for_external_solver": True,
+            "irreps_by_kpoint": bundle_vec,
+        }],
+    }
+    result = build_reduced_ebr_mapping(
+        ebr_export_bundle=bundle,
+        table=dict(_SAMPLE_TABLE),
+        reduced_ebr_input={"source": "table_file", "table_file_stem": "p3_table"},
+    )
+    assert result["reduced_ebr_input"] == {
+        "source": "table_file",
+        "table_file_stem": "p3_table",
+    }
+
+
+def test_reduced_ebr_input_preserved_in_missing_table_status():
+    """reduced_ebr_input is preserved even when table is missing."""
+    result = build_reduced_ebr_mapping(
+        ebr_export_bundle=_bundle(),
+        table=None,
+        reduced_ebr_input={"source": "spec_file", "spec_file_stem": "bad_spec"},
+    )
+    assert result["status"] == "missing_table"
+    assert result["reduced_ebr_input"]["source"] == "spec_file"
+
+
+def test_reduced_ebr_input_provenance_in_ingestion_record():
+    """Database ingestion record preserves reduced_ebr_input."""
+    from valleyscope.analysis.database_ingestion_record import (
+        build_database_ingestion_record,
+    )
+
+    bundle_vec = {
+        "GammaM": ["C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"],
+        "KM": ["C3_spinor_phase_+1/6", "C3_spinor_phase_-1/6"],
+    }
+    bundle = {
+        "bundles": [{
+            "bundle_id": "b_001", "valley": "K",
+            "subspace_group_candidate": "P3",
+            "subspace_space_group": {"candidate_space_group_symbol": "P3"},
+            "ready_for_external_solver": True,
+            "irreps_by_kpoint": bundle_vec,
+        }],
+    }
+    mapping = build_reduced_ebr_mapping(
+        ebr_export_bundle=bundle,
+        table=dict(_SAMPLE_TABLE),
+        reduced_ebr_input={"source": "table_file", "table_file_stem": "p3_table"},
+    )
+    summary = {
+        "target_kpoints": ["GammaM", "KM"],
+        "iband": [1, 2],
+        "input": {},
+    }
+    record = build_database_ingestion_record(
+        valley_summary=summary,
+        valley_ebr_export_bundle=bundle,
+        valley_reduced_ebr_mapping=mapping,
+    )
+    assert record["reduced_ebr_input"] == {
+        "source": "table_file",
+        "table_file_stem": "p3_table",
+    }
+
+
+def test_reduced_ebr_input_not_present_when_not_provided():
+    """When reduced_ebr_input is None, it does not appear in output."""
+    bundle_vec = {
+        "GammaM": ["C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"],
+        "KM": ["C3_spinor_phase_+1/6", "C3_spinor_phase_-1/6"],
+    }
+    bundle = {
+        "bundles": [{
+            "bundle_id": "b_001", "valley": "K",
+            "subspace_group_candidate": "P3",
+            "subspace_space_group": {"candidate_space_group_symbol": "P3"},
+            "ready_for_external_solver": True,
+            "irreps_by_kpoint": bundle_vec,
+        }],
+    }
+    result = build_reduced_ebr_mapping(
+        ebr_export_bundle=bundle,
+        table=dict(_SAMPLE_TABLE),
+    )
+    assert "reduced_ebr_input" not in result
+
+
+def test_reduced_ebr_input_not_provided_marker():
+    """Explicit not_provided provenance is preserved in missing-table output."""
+    result = build_reduced_ebr_mapping(
+        ebr_export_bundle=_bundle(),
+        table=None,
+        reduced_ebr_input={"source": "not_provided"},
+    )
+    assert result["status"] == "missing_table"
+    assert result["table_status"] == "not_provided"
+    assert result["reduced_ebr_input"] == {"source": "not_provided"}
+
 def test_adapter_load_raw_returns_irreptables_shape():
     """Adapter load_raw_ebr_data returns raw irreptables dict shape."""
     from valleyscope.irreps.ebr_data_adapter import load_raw_ebr_data

@@ -1222,46 +1222,9 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
     table_path = tmp_path / "reduced_ebr_table.json"
     table_path.write_text(json.dumps(matching_table), encoding="utf-8")
 
-    # --- Spec file that would produce the same table via runtime builder ---
-    # Toy EBR data that reduces to the matching_table above.
-    toy_ebr_data = {
-        "basis": {
-            "irrep_labels": ["A@GM"],
-            "degeneracies": [1],
-        },
-        "ebrs": [
-            {"ebr_name": "EBR_A", "wyckoff_position": "1a", "vector": [1]},
-            {"ebr_name": "EBR_B", "wyckoff_position": "1b", "vector": [1]},
-        ],
-    }
-    spec = {
-        "schema_version": "1.0.0",
-        "data_source": "irreptables",
-        "space_group_number": 75,
-        "spinful": False,
-        "source_hsp_by_irrep": {"A@GM": "GammaM"},
-        "valleyscope_key_by_source_irrep": {"A@GM": "GammaM:A"},
-        "expected_hsps": ["GammaM"],
-        "allowed_irrep_keys": ["GammaM:A", "GammaM:B"],
-        "subspace_group_candidate": "P4",
-    }
+    # --- Spec file that produces the same table via the real runtime builder ---
     spec_path = tmp_path / "p4_spec.json"
-    spec_path.write_text(json.dumps(spec), encoding="utf-8")
-
-    # Monkeypatch only the low-level data loader so the runtime builder
-    # exercises the real spec→payload→reduce→validate pipeline.
-    monkeypatch.setattr(
-        builder_mod,
-        "_load_ebr_data_from_irreptables",
-        lambda sg, spinful: toy_ebr_data,
-    )
-    # ... but the spec requires both irrep keys to be covered.  Our toy
-    # data only has one source label.  Add a second source label that
-    # maps to the same key via a different HSP, or make the table
-    # match.  For simplicity, change the spec to match the toy data.
-    # Actually, the runtime reducer validates that allowed_irrep_keys
-    # each have at least one basis entry.  Let me use a proper spec:
-    spec2 = {
+    spec = {
         "schema_version": "1.0.0",
         "data_source": "irreptables",
         "space_group_number": 75,
@@ -1275,8 +1238,8 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
         "allowed_irrep_keys": ["GammaM:A", "GammaM:B"],
         "subspace_group_candidate": "P4",
     }
-    spec_path.write_text(json.dumps(spec2), encoding="utf-8")
-    toy_ebr_data2 = {
+    spec_path.write_text(json.dumps(spec), encoding="utf-8")
+    toy_ebr_data = {
         "basis": {
             "irrep_labels": ["A@GM", "B@GM"],
             "degeneracies": [1, 1],
@@ -1286,10 +1249,12 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
             {"ebr_name": "EBR_B", "wyckoff_position": "1b", "vector": [0, 1]},
         ],
     }
+    # Monkeypatch only the low-level data loader so the runtime builder
+    # still executes the real spec -> payload -> reduce -> validate path.
     monkeypatch.setattr(
         builder_mod,
         "_load_ebr_data_from_irreptables",
-        lambda sg, spinful: toy_ebr_data2,
+        lambda sg, spinful: toy_ebr_data,
     )
 
     # Common monkeypatches (same as table_file E2E test).

@@ -1302,7 +1302,8 @@ def test_schema_doc_covers_public_outputs_and_reduced_ebr_statuses():
     # Reduced-EBR public field names must appear.
     for field in [
         "mapping_status", "reduced_ebr_decomposition_status",
-        "table_status", "not_applicable", "not_provided", "loaded",
+        "table_status", "reduced_ebr_input",
+        "not_applicable", "not_provided", "loaded",
     ]:
         assert field in schema_text, (
             f"docs/schema.md must document reduced-EBR field '{field}'"

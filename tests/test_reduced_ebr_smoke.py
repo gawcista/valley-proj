@@ -70,6 +70,30 @@ def test_reduced_ebr_disabled_does_not_write_mapping(tmp_path):
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     assert "valley_reduced_ebr_mapping" not in summary
 
+
+def test_reduced_ebr_enabled_without_input_marks_not_provided(tmp_path):
+    """E2E: enabled reduced EBR without table/spec reports not_provided input."""
+    h5_path = tmp_path / "wf.h5"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    config_path = tmp_path / "cfg.yaml"
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["analysis"]["reduced_ebr"] = {"enabled": True}
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    outputs = analyze_hsp(config_path)
+
+    mapping = json.loads(
+        outputs["valley_reduced_ebr_mapping_json"].read_text(encoding="utf-8")
+    )
+    assert mapping["status"] == "missing_table"
+    assert mapping["table_status"] == "not_provided"
+    assert mapping["reduced_ebr_input"] == {"source": "not_provided"}
+
+    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    assert summary["valley_reduced_ebr_mapping"] == mapping
+
 def test_summary_text_surfaces_atomic_fragile_stable_classification():
     """E2E: summary text surfaces atomic, fragile, stable classifications."""
     from valleyscope.reports.summary_report import build_summary_payload, render_summary_text
