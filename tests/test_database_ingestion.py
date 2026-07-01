@@ -444,6 +444,7 @@ def test_ingestion_record_includes_excluded_ebr_records():
             {
                 "source_instance_id": "ebr_001", "valley": "M3_valley",
                 "subspace_group_candidate": "P2",
+                "subspace_space_group": {"candidate_space_group_symbol": "P2"},
                 "status": "blocked",
                 "ready_for_ebr_decomposition": False,
                 "exclusion_reasons": [
@@ -462,6 +463,9 @@ def test_ingestion_record_includes_excluded_ebr_records():
     assert len(exclude) == 1
     assert exclude[0]["source_instance_id"] == "ebr_001"
     assert exclude[0]["valley"] == "M3_valley"
+    assert exclude[0]["subspace_space_group"] == {
+        "candidate_space_group_symbol": "P2"
+    }
     assert exclude[0]["exclusion_reasons"] == [
         "spinor_convention_unverified", "low_seed_projector_symmetry",
     ]

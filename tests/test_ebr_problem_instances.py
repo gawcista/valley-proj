@@ -72,6 +72,7 @@ def test_candidates_group_into_instances():
     assert r["instance_count"] == 1
     inst = r["instances"][0]
     assert inst["subspace_group_candidate"] == "P3"
+    assert inst["subspace_space_group"]["candidate_space_group_symbol"] == "P3"
     assert inst["valley"] == "K_valley"
     assert inst["status"] == "complete"
     assert inst["ready_for_ebr_decomposition"] is True

@@ -9,6 +9,10 @@ _COMPLETE_INSTANCES = {
             "instance_id": "ebr_instance_001",
             "valley": "K_valley",
             "subspace_group_candidate": "P3",
+            "subspace_space_group": {
+                "candidate_space_group_symbol": "P3",
+                "valley_preserving_operation_ids": [0, 1],
+            },
             "workflow_path": "direct_qcut",
             "readiness_level": "trusted",
             "status": "complete",
@@ -35,6 +39,7 @@ def test_complete_instances_exported():
     b = r["bundles"][0]
     assert b["ready_for_external_solver"] is True
     assert b["subspace_group_candidate"] == "P3"
+    assert b["subspace_space_group"]["candidate_space_group_symbol"] == "P3"
     assert b["missing_optional_hsps"] == ["MM"]
 
 
@@ -48,6 +53,7 @@ def test_partial_instance_excluded():
             "instance_id": "ebr_instance_001",
             "valley": "K_valley",
             "subspace_group_candidate": "P3",
+            "subspace_space_group": {"candidate_space_group_symbol": "P3"},
             "status": "partial",
             "ready_for_ebr_decomposition": False,
             "blocked_by": ["missing required HSPs: ['KM']"],
@@ -56,6 +62,7 @@ def test_partial_instance_excluded():
     assert r["bundle_count"] == 0
     assert r["excluded_count"] == 1
     e = r["excluded_instances"][0]
+    assert e["subspace_space_group"]["candidate_space_group_symbol"] == "P3"
     assert any("status=partial" in r for r in e["exclusion_reasons"])
 
 
@@ -65,6 +72,7 @@ def test_no_policy_excluded():
             "instance_id": "ebr_instance_001",
             "valley": "M1_valley",
             "subspace_group_candidate": "P2",
+            "subspace_space_group": {"candidate_space_group_symbol": "P2"},
             "status": "no_policy",
             "ready_for_ebr_decomposition": False,
             "blocked_by": ["no expected-HSP policy for C2_like"],
@@ -72,6 +80,12 @@ def test_no_policy_excluded():
     })
     assert r["bundle_count"] == 0
     assert r["excluded_count"] == 1
+    assert (
+        r["excluded_instances"][0]["subspace_space_group"][
+            "candidate_space_group_symbol"
+        ]
+        == "P2"
+    )
 
 
 # -----------------------------------------------------------------------
@@ -102,6 +116,7 @@ def test_mixed_partial_export():
                 "instance_id": "ebr_instance_001",
                 "valley": "K_valley",
                 "subspace_group_candidate": "P3",
+                "subspace_space_group": {"candidate_space_group_symbol": "P3"},
                 "workflow_path": "direct_qcut",
                 "readiness_level": "trusted",
                 "status": "complete",
@@ -116,6 +131,7 @@ def test_mixed_partial_export():
                 "instance_id": "ebr_instance_002",
                 "valley": "M1_valley",
                 "subspace_group_candidate": "P2",
+                "subspace_space_group": {"candidate_space_group_symbol": "P2"},
                 "status": "no_policy",
                 "ready_for_ebr_decomposition": False,
                 "blocked_by": ["no expected-HSP policy for C2_like"],
@@ -133,6 +149,7 @@ def test_complete_but_not_trusted_is_excluded():
             "instance_id": "ebr_instance_001",
             "valley": "K_valley",
             "subspace_group_candidate": "P3",
+            "subspace_space_group": {"candidate_space_group_symbol": "P3"},
             "workflow_path": "symmetry_adapted",
             "readiness_level": "usable_with_caution",
             "status": "complete",
@@ -180,6 +197,7 @@ def test_schema_fields():
               "irreps_by_kpoint", "operations_by_kpoint",
               "ready_for_external_solver"]:
         assert k in b, f"missing: {k}"
+    assert "subspace_space_group" in b
 
 
 def test_no_forbidden_terms():
