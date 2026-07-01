@@ -240,6 +240,11 @@ def _extract_irrep_records(
         for rec in records:
             if not isinstance(rec, dict):
                 continue
+            # Canonical subgroup identity: subspace_space_group is the
+            # primary physical object preserved from per-record provenance
+            # (see generic-field preservation loop below); flat
+            # subgroup_candidate is the derived scalar key for compact
+            # indexing.
             entry: dict[str, Any] = {
                 "kpoint": kpoint,
                 "valley": rec.get("valley", ""),
@@ -280,6 +285,7 @@ def _compact_excluded_records(
             "source_instance_id": exc.get("source_instance_id", "?"),
             "valley": exc.get("valley", "?"),
             "subspace_group_candidate": exc.get("subspace_group_candidate", "?"),
+            "subspace_space_group": exc.get("subspace_space_group", {}),
             "status": exc.get("status", "?"),
             "ready_for_ebr_decomposition": exc.get("ready_for_ebr_decomposition", False),
             "exclusion_reasons": exc.get("exclusion_reasons", []),

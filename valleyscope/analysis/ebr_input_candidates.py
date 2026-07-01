@@ -61,6 +61,9 @@ def build_ebr_input_candidates(
                 op_map = gm.get("source_operation_map", {})
                 vp_ids = gm.get("valley_preserving_operation_ids", [])
                 positive_mults, invalid_mults = _validated_multiplicities(mults)
+                # Canonical subgroup identity: subspace_space_group is the
+                # primary physical object.  The flat derived scalar key is
+                # kept for compact exports and external-table interfaces.
                 subspace_space_group = (
                     dict(gm.get("subspace_space_group", {}))
                     if isinstance(gm.get("subspace_space_group", {}), dict)

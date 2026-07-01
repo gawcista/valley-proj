@@ -1782,7 +1782,7 @@ def _render_ebr_problem_instances(
             rows.append([
                 inst.get("instance_id", ""),
                 inst.get("valley", ""),
-                inst.get("subspace_group_candidate", ""),
+                _canonical_sg_display(inst),
                 inst.get("status", ""),
                 str(inst.get("ready_for_ebr_decomposition", "")),
                 _short_list(inst.get("blocked_by", [])),
@@ -1820,7 +1820,7 @@ def _render_ebr_export_bundle(
             rows.append([
                 b.get("bundle_id", ""),
                 b.get("valley", ""),
-                b.get("subspace_group_candidate", ""),
+                _canonical_sg_display(b),
                 b.get("workflow_path", ""),
                 _short_list(b.get("expected_hsps", [])),
                 _short_list(b.get("optional_hsps", [])),
@@ -1841,7 +1841,7 @@ def _render_ebr_export_bundle(
         for e in excluded:
             lines.append(
                 f"  {e.get('source_instance_id','')} "
-                f"{e.get('valley','')}/{e.get('subspace_group_candidate','')}: "
+                f"{e.get('valley','')}/{_canonical_sg_display(e)}: "
                 f"{'; '.join(e.get('exclusion_reasons', []))[:120]}"
             )
     lines.append("")
@@ -1957,6 +1957,21 @@ OUTPUT_FILE_LABELS: dict[str, str] = {
 
 def _output_file_label(name: str) -> str:
     return OUTPUT_FILE_LABELS.get(name, name.replace("_", " ").title())
+
+
+def _canonical_sg_display(record: dict[str, Any]) -> str:
+    """Return the canonical subgroup symbol for display.
+
+    Prefers ``subspace_space_group.candidate_space_group_symbol`` (the
+    primary physical identifier); falls back to the flat derived
+    ``subspace_group_candidate`` scalar key.
+    """
+    ssg = record.get("subspace_space_group", {})
+    if isinstance(ssg, dict):
+        symbol = ssg.get("candidate_space_group_symbol")
+        if symbol and isinstance(symbol, str):
+            return str(symbol)
+    return str(record.get("subspace_group_candidate", ""))
 
 
 def _compact_projector_symmetry(report: dict[str, Any]) -> dict[str, Any]:

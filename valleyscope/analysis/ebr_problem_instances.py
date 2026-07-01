@@ -60,6 +60,21 @@ def build_ebr_problem_instances(
         instance_counter += 1
         instance_id = f"ebr_instance_{instance_counter:03d}"
 
+        # --- Canonical subgroup identity ---
+        # subspace_space_group is the primary physical object; flat
+        # subspace_group_candidate is the derived scalar key for compact
+        # exports, external-table matching, and database indexing.
+        first_candidate_ssg = _first_subspace_space_group(cands)
+        subspace_space_group: dict[str, object] = (
+            dict(first_candidate_ssg) if isinstance(first_candidate_ssg, dict) else {}
+        )
+        # Derive flat key from canonical source when available; fall back to
+        # subgroup_candidate for backward-compatible ingestion.
+        canonical_sg = (
+            subspace_space_group.get("candidate_space_group_symbol")
+            or sg
+        )
+
         irreps_by_kpoint: dict[str, list[str]] = {}
         operations_by_kpoint: dict[str, list[object]] = {}
         irrep_records_by_kpoint: dict[str, list[dict[str, object]]] = {}
@@ -111,7 +126,8 @@ def build_ebr_problem_instances(
         instances.append({
             "instance_id": instance_id,
             "valley": valley,
-            "subspace_group_candidate": sg,
+            "subspace_group_candidate": canonical_sg,
+            "subspace_space_group": subspace_space_group,
             "workflow_path": workflow_path,
             "readiness_level": readiness_level,
             "irreps_by_kpoint": {k: v for k, v in sorted(irreps_by_kpoint.items())},
@@ -152,6 +168,17 @@ def build_ebr_problem_instances(
 # ---------------------------------------------------------------------------
 # Internal
 # ---------------------------------------------------------------------------
+
+def _first_subspace_space_group(
+    cands: list[dict[str, object]],
+) -> dict[str, object]:
+    """Return the canonical subspace_space_group from the first candidate."""
+    for c in cands:
+        ssg = c.get("subspace_space_group")
+        if isinstance(ssg, dict) and ssg:
+            return ssg
+    return {}
+
 
 def _sort_key(op_id: object) -> tuple[int, object]:
     try:
