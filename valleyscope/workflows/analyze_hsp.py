@@ -140,6 +140,54 @@ def _target_band_positions(available_bands: np.ndarray, target_bands: list[int])
     return positions
 
 
+def _generic_irrep_override_blocker(
+    *,
+    computed_sg: int | None,
+    wavefunction_spinor: bool,
+    override_sg: int,
+    override_spinor: bool | None,
+) -> str | None:
+    if computed_sg is not None and override_sg != computed_sg:
+        return (
+            f"generic_irrep_source override sg={override_sg} disagrees with "
+            f"computed subgroup sg={computed_sg}"
+        )
+    if (
+        override_spinor is not None
+        and bool(override_spinor) != wavefunction_spinor
+    ):
+        return (
+            f"generic_irrep_source override spinor={bool(override_spinor)} "
+            f"disagrees with wavefunction spinor={wavefunction_spinor}"
+        )
+    return None
+
+
+def _resolve_generic_irrep_hsp_label(
+    *,
+    table,
+    k_frac: np.ndarray | None,
+    override_label: str | None,
+) -> tuple[str | None, str | None]:
+    coordinate_label = (
+        table.match_kpoint_label(np.asarray(k_frac, dtype=float))
+        if k_frac is not None
+        else None
+    )
+    if override_label is not None and override_label != coordinate_label:
+        return None, (
+            f"generic_irrep_source HSP override {override_label!r} disagrees "
+            f"with coordinate-matched HSP {coordinate_label!r}"
+        )
+    label = override_label or coordinate_label
+    if label is None:
+        return None, (
+            "no_source_hsp_label: could not determine Bilbao HSP label "
+            "for this kpoint"
+        )
+    return label, None
+
+
 def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     config = load_config(config_path)
     wavefunctions = read_wavefunction_h5(config.input.wavefunction_h5)
@@ -517,23 +565,20 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                         computed_sg = int(num)
 
                 if override_sg is not None:
-                    sg_number = override_sg
-                    spinor_flag = (
-                        bool(override_spinor) if override_spinor is not None
-                        else spinor_wf
+                    override_blocker = _generic_irrep_override_blocker(
+                        computed_sg=computed_sg,
+                        wavefunction_spinor=spinor_wf,
+                        override_sg=override_sg,
+                        override_spinor=override_spinor,
                     )
-                    if computed_sg is not None and override_sg != computed_sg:
-                        # Override disagrees with computed subgroup:
-                        # proceed for diagnostics but produce only blocked rows.
+                    if override_blocker is not None:
                         generic_source_blocked_rows.append({
                             "kpoint": kp_name, "valley": v_name,
-                            "reason": (
-                                f"generic_irrep_source override sg={override_sg} "
-                                f"disagrees with computed subgroup sg={computed_sg}; "
-                                f"diagnostic-only"
-                            ),
+                            "reason": f"{override_blocker}; diagnostic-only",
                         })
                         continue
+                    sg_number = override_sg
+                    spinor_flag = spinor_wf
                 elif computed_sg is not None:
                     sg_number = computed_sg
                     spinor_flag = spinor_wf
@@ -557,20 +602,23 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
 
                 # --- Standard-setting HSP correspondence (conservative) ---
                 k_frac_raw = kpoint_frac.get(kp_name)
-                src_hsp: str | None = None
-                if override_hsp is not None:
-                    src_hsp = override_hsp.get(kp_name, {}).get(v_name)
-                if src_hsp is None and k_frac_raw is not None:
-                    src_hsp = table.match_kpoint_label(
-                        np.asarray(k_frac_raw, dtype=float),
-                    )
-                if src_hsp is None:
+                override_label = (
+                    override_hsp.get(kp_name, {}).get(v_name)
+                    if override_hsp is not None
+                    else None
+                )
+                src_hsp, hsp_blocker = _resolve_generic_irrep_hsp_label(
+                    table=table,
+                    k_frac=(
+                        np.asarray(k_frac_raw, dtype=float)
+                        if k_frac_raw is not None else None
+                    ),
+                    override_label=override_label,
+                )
+                if hsp_blocker is not None:
                     generic_source_blocked_rows.append({
                         "kpoint": kp_name, "valley": v_name,
-                        "reason": (
-                            "no_source_hsp_label: could not determine "
-                            "Bilbao HSP label for this kpoint"
-                        ),
+                        "reason": hsp_blocker,
                     })
                     continue
 

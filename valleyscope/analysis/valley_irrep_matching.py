@@ -104,16 +104,15 @@ def build_valley_irrep_matching_report(
     ) -> dict[str, object]:
         """Return the canonical subspace_space_group for a (kpoint, valley).
 
-        Prefers the resolved identity from per_valley_standard_matches;
-        falls back to the SA-report value.
+        Merge the resolved identity from per_valley_standard_matches over the
+        SA-report operation inventory so valley-changing provenance is kept.
         """
+        merged = dict(sa_ssg) if isinstance(sa_ssg, Mapping) else {}
         if isinstance(resolved_subspace_groups, Mapping):
             r = resolved_subspace_groups.get(kp_name, {}).get(v_name)
             if isinstance(r, Mapping) and r:
-                return dict(r)
-        if isinstance(sa_ssg, Mapping):
-            return dict(sa_ssg)
-        return {}
+                merged.update(r)
+        return merged
 
     generic_matches: dict[str, dict[str, dict[str, object]]] = {}
 
@@ -170,13 +169,26 @@ def build_valley_irrep_matching_report(
                 if hsp_lg_fl:
                     vp_ids_fl = [op for op in vp_ids_fl if op in hsp_lg_fl]
                 # --- Identity-only G_k^(a) detection ---
-                if vp_ids_fl == [0]:
+                identity_ids = [
+                    op_id
+                    for op_id in vp_ids_fl
+                    if isinstance(op_map, Mapping) and op_map.get(op_id) == 1
+                ]
+                if len(vp_ids_fl) == 1 and identity_ids == vp_ids_fl:
+                    identity_character = computed_fl.get(identity_ids[0])
+                    local_dimension = (
+                        int(round(identity_character.real))
+                        if identity_character is not None
+                        and abs(identity_character.imag) <= 1e-6
+                        and identity_character.real > 0
+                        else None
+                    )
                     generic_matches.setdefault(kp_name, {})[v_name] = {
                         "matching_status": "identity_only_not_irrep_distinguishing",
                         "matching_strategy": "bilbao_restricted_character",
                         "irrep_multiplicities": {},
-                        "source_operation_map": {},
-                        "valley_preserving_operation_ids": [0],
+                        "source_operation_map": dict(op_map),
+                        "valley_preserving_operation_ids": list(vp_ids_fl),
                         "hsp_little_group_operation_ids": (
                             hsp_ids_fl if hsp_ids_fl else [0]
                         ),
@@ -195,9 +207,7 @@ def build_valley_irrep_matching_report(
                             dict(ssg_fl) if isinstance(ssg_fl, Mapping)
                             else {}
                         ),
-                        "local_representation_dimension": (
-                            len(computed_fl) if computed_fl else 1
-                        ),
+                        "local_representation_dimension": local_dimension,
                     }
                     continue
                 if not vp_ids_fl or not computed_fl or not isinstance(op_map, Mapping) or not op_map:

@@ -66,6 +66,24 @@ def build_valley_projected_representation_report(
                     if isinstance(wf_info, dict):
                         wf_lookup[(kp_name, v_name)] = wf_info
 
+    # Canonical matched subgroup identity overrides an unresolved
+    # symmetry-adapted placeholder while preserving its operation inventory.
+    matching_ssg_lookup: dict[tuple[str, str], dict[str, Any]] = {}
+    if isinstance(valley_irrep_matching, dict):
+        generic_by_kp = valley_irrep_matching.get(
+            "generic_matches_by_kpoint", {}
+        )
+        if isinstance(generic_by_kp, dict):
+            for kp_name, valleys in generic_by_kp.items():
+                if not isinstance(valleys, dict):
+                    continue
+                for valley_name, match in valleys.items():
+                    if not isinstance(match, dict):
+                        continue
+                    ssg = match.get("subspace_space_group")
+                    if isinstance(ssg, dict):
+                        matching_ssg_lookup[(kp_name, valley_name)] = ssg
+
     # Process eigenvalue rows.
     if symmetry_eigenvalue_rows is not None:
         for row in symmetry_eigenvalue_rows:
@@ -82,6 +100,11 @@ def build_valley_projected_representation_report(
             )
             if not isinstance(subspace_space_group_data, dict):
                 subspace_space_group_data = {}
+            else:
+                subspace_space_group_data = dict(subspace_space_group_data)
+            matched_ssg = matching_ssg_lookup.get((kp, valley))
+            if matched_ssg:
+                subspace_space_group_data.update(matched_ssg)
             subspace_group_data = subspace_data.get("subspace_group", {})
             if not isinstance(subspace_group_data, dict):
                 subspace_group_data = {}

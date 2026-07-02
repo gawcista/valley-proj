@@ -75,8 +75,15 @@ def build_ebr_input_candidates(
                 )
                 # Defensive gate: unresolved/null subgroup identity cannot
                 # become a physical EBR candidate.
+                sg_number = subspace_space_group.get(
+                    "candidate_space_group_number"
+                )
                 sg_resolved = (
-                    isinstance(subspace_group_candidate, str)
+                    subspace_space_group.get("status") == "resolved"
+                    and isinstance(sg_number, int)
+                    and not isinstance(sg_number, bool)
+                    and sg_number > 0
+                    and isinstance(subspace_group_candidate, str)
                     and bool(subspace_group_candidate)
                     and subspace_group_candidate != "None"
                 )

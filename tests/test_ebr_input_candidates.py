@@ -28,9 +28,10 @@ def _make_generic_inputs():
                     "matching_strategy": "bilbao_restricted_character",
                     "irrep_multiplicities": {"C3_spinor_phase_+1/2": 1},
                     "subspace_space_group": {
+                        "status": "resolved",
+                        "candidate_space_group_number": 143,
                         "candidate_space_group_symbol": "P3",
                         "valley_preserving_operation_ids": [0, 1],
-                        "status": "candidate",
                     },
                     "valley_preserving_operation_ids": [0, 1],
                     "hsp_little_group_operation_ids": [0, 1],
@@ -40,6 +41,26 @@ def _make_generic_inputs():
         },
     }
     return decisions, matching
+
+
+def test_unresolved_subspace_group_with_symbol_is_not_candidate():
+    decisions, matching = _make_generic_inputs()
+    row = matching["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
+    row["subspace_space_group"] = {
+        "status": "unresolved",
+        "candidate_space_group_number": None,
+        "candidate_space_group_symbol": "P3",
+        "valley_preserving_operation_ids": [0, 1],
+    }
+
+    report = build_ebr_input_candidates(
+        irrep_workflow_decisions=decisions,
+        valley_irrep_matching=matching,
+    )
+
+    assert report["candidate_count"] == 0
+    assert report["blocked_count"] == 1
+    assert "subspace_group_candidate_unresolved" in report["blocked"][0]["reason"]
 
 
 # -----------------------------------------------------------------------
@@ -167,6 +188,8 @@ def test_diagnostic_only_flag_blocks_even_if_status_is_matched():
                     "matching_strategy": "bilbao_restricted_character",
                     "irrep_multiplicities": {"C3_spinor_phase_+1/2": 1},
                     "subspace_space_group": {
+                        "status": "resolved",
+                        "candidate_space_group_number": 143,
                         "candidate_space_group_symbol": "P3",
                         "valley_preserving_operation_ids": [0, 1],
                     },
@@ -325,6 +348,8 @@ def test_mixed_readiness():
                     "matching_strategy": "bilbao_restricted_character",
                     "irrep_multiplicities": {"C3_spinor_phase_+1/2": 1},
                     "subspace_space_group": {
+                        "status": "resolved",
+                        "candidate_space_group_number": 143,
                         "candidate_space_group_symbol": "P3",
                         "valley_preserving_operation_ids": [0, 1],
                     },
@@ -336,6 +361,8 @@ def test_mixed_readiness():
                     "matching_strategy": "bilbao_restricted_character",
                     "irrep_multiplicities": {},
                     "subspace_space_group": {
+                        "status": "resolved",
+                        "candidate_space_group_number": 143,
                         "candidate_space_group_symbol": "P3",
                         "valley_preserving_operation_ids": [0, 1],
                     },
@@ -388,9 +415,10 @@ def test_generic_matches_produce_ebr_candidates():
                     "irrep_multiplicities": {"-GM5": 1, "-GM6_a": 2},
                     "subspace_group_candidate": "P3",
                     "subspace_space_group": {
+                        "status": "resolved",
+                        "candidate_space_group_number": 143,
                         "candidate_space_group_symbol": "P3",
                         "valley_preserving_operation_ids": [0, 4],
-                        "status": "candidate",
                     },
                     "source_operation_map": {0: 1, 4: 2},
                     "valley_preserving_operation_ids": [0, 4],

@@ -3,6 +3,61 @@ from valleyscope.analysis.valley_projected_representation import (
 )
 
 
+def test_resolved_matching_group_overlays_unresolved_subspace_report():
+    report = build_valley_projected_representation_report(
+        kpoint_names=["GammaM"],
+        valley_names=["K_valley"],
+        symmetry_eigenvalue_rows=[{
+            "kpoint": "GammaM",
+            "target_valley": "K_valley",
+            "operation_id": 1,
+            "order": 3,
+            "diagnostic_only": False,
+            "topology_input_ready": True,
+            "rotation_ready": True,
+        }],
+        symmetry_adapted_valley_report={"by_kpoint": {"GammaM": {
+            "valley_preserving_subspaces": [{
+                "orbit": ["K_valley"],
+                "hsp_preserving_operation_ids": [0, 1, 2],
+                "subspace_space_group": {
+                    "status": "unresolved",
+                    "candidate_space_group_symbol": None,
+                    "valley_preserving_operation_ids": [0, 1, 2],
+                    "valley_changing_operation_ids": [3, 4, 5],
+                },
+            }],
+        }}},
+        irrep_workflow_decisions={"by_kpoint": {"GammaM": {
+            "K_valley": {
+                "readiness_level": "trusted",
+                "workflow_path": "direct_qcut",
+            },
+        }}},
+        valley_irrep_matching={"generic_matches_by_kpoint": {"GammaM": {
+            "K_valley": {
+                "matching_status": "matched",
+                "matching_strategy": "bilbao_restricted_character",
+                "irrep_multiplicities": {"-GM4": 1},
+                "subspace_space_group": {
+                    "status": "resolved",
+                    "candidate_space_group_number": 143,
+                    "candidate_space_group_symbol": "P3",
+                    "valley_preserving_operation_ids": [0, 1, 2],
+                },
+            },
+        }}},
+    )
+
+    row = report["rows"][0]
+    assert row["subspace_space_group"]["candidate_space_group_symbol"] == "P3"
+    assert row["subspace_space_group"]["candidate_space_group_number"] == 143
+    assert row["valley_changing_operation_ids"] == [3, 4, 5]
+    assert report["representation_records"][0]["subspace_space_group"][
+        "candidate_space_group_symbol"
+    ] == "P3"
+
+
 def test_representation_report_uses_subspace_space_group_as_primary():
     report = build_valley_projected_representation_report(
         kpoint_names=["GammaM"],

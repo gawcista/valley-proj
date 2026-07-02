@@ -43,7 +43,11 @@ def test_ebr_input_candidates_excludes_non_trusted():
                     "matching_status": "matched",
                     "matching_strategy": "bilbao_restricted_character",
                     "irrep_multiplicities": {"C3_spinor_phase_+1/2": 1},
-                    "subspace_space_group": {"candidate_space_group_symbol": "P3"},
+                    "subspace_space_group": {
+                        "status": "resolved",
+                        "candidate_space_group_number": 143,
+                        "candidate_space_group_symbol": "P3",
+                    },
                     "valley_preserving_operation_ids": [0, 1],
                     "hsp_little_group_operation_ids": [0, 1],
                 },
@@ -51,7 +55,11 @@ def test_ebr_input_candidates_excludes_non_trusted():
                     "matching_status": "diagnostic",
                     "matching_strategy": "bilbao_restricted_character",
                     "irrep_multiplicities": {"C3_spinor_phase_-1/2": 1},
-                    "subspace_space_group": {"candidate_space_group_symbol": "P3"},
+                    "subspace_space_group": {
+                        "status": "resolved",
+                        "candidate_space_group_number": 143,
+                        "candidate_space_group_symbol": "P3",
+                    },
                     "valley_preserving_operation_ids": [0, 1],
                     "hsp_little_group_operation_ids": [0, 1],
                     "diagnostic_only": True,
@@ -244,6 +252,8 @@ def test_generic_p4_table_authoritative_bundle_maps_and_rejects_mismatch():
                     "workflow_path": "direct_qcut",
                     "readiness_level": "trusted",
                     "subspace_space_group": {
+                        "status": "resolved",
+                        "candidate_space_group_number": 75,
                         "candidate_space_group_symbol": "P4",
                         "valley_preserving_operation_ids": [0, 4],
                     },
@@ -258,6 +268,8 @@ def test_generic_p4_table_authoritative_bundle_maps_and_rejects_mismatch():
                     "workflow_path": "direct_qcut",
                     "readiness_level": "trusted",
                     "subspace_space_group": {
+                        "status": "resolved",
+                        "candidate_space_group_number": 75,
                         "candidate_space_group_symbol": "P4",
                         "valley_preserving_operation_ids": [0, 4],
                     },
@@ -543,6 +555,8 @@ def test_non_trusted_rows_excluded_from_irrep_records():
                     "matching_strategy": "bilbao_restricted_character",
                     "irrep_multiplicities": {"C3_spinor_phase_+1/2": 1},
                     "subspace_space_group": {
+                        "status": "resolved",
+                        "candidate_space_group_number": 143,
                         "candidate_space_group_symbol": "P3",
                         "valley_preserving_operation_ids": [0, 1],
                     },
@@ -638,6 +652,8 @@ def test_generic_irrep_full_pipeline_smoke():
                     "orbit": ["K_valley"],
                     "subspace_group": {"subspace_group_candidate": "P4"},
                     "subspace_space_group": {
+                        "status": "resolved",
+                        "candidate_space_group_number": 75,
                         "candidate_space_group_symbol": "P4",
                         "valley_preserving_operation_ids": [0, 4],
                     },
@@ -764,6 +780,8 @@ def test_generic_ebr_builder_e2e_p4_group_agnostic(tmp_path):
                     "orbit": ["K_valley"],
                     "subspace_group": {"subspace_group_candidate": "P4"},
                     "subspace_space_group": {
+                        "status": "resolved",
+                        "candidate_space_group_number": 75,
                         "candidate_space_group_symbol": "P4",
                         "valley_preserving_operation_ids": [0, 1],
                     },
@@ -923,6 +941,8 @@ def test_irreptables_loader_e2e_p4_group_agnostic(tmp_path):
                     "orbit": ["K_valley"],
                     "subspace_group": {"subspace_group_candidate": "P4"},
                     "subspace_space_group": {
+                        "status": "resolved",
+                        "candidate_space_group_number": 75,
                         "candidate_space_group_symbol": "P4",
                         "valley_preserving_operation_ids": [0, 1],
                     },
@@ -1075,6 +1095,8 @@ def test_p4_public_output_contract(tmp_path):
                     "orbit": ["K_valley"],
                     "subspace_group": {"subspace_group_candidate": "P4"},
                     "subspace_space_group": {
+                        "status": "resolved",
+                        "candidate_space_group_number": 75,
                         "candidate_space_group_symbol": "P4",
                         "valley_preserving_operation_ids": [0, 1],
                     },
@@ -1224,6 +1246,8 @@ def test_standard_outputs_no_cn_like_guardrail(tmp_path):
                         "legacy_subspace_group_candidate": "C4_like",
                     },
                     "subspace_space_group": {
+                        "status": "resolved",
+                        "candidate_space_group_number": 75,
                         "candidate_space_group_symbol": "P4",
                         "valley_preserving_operation_ids": [0, 1],
                     },

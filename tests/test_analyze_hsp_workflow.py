@@ -1024,7 +1024,11 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     monkeypatch.setattr(
         workflow_mod,
         "load_standard_irrep_table",
-        lambda spacegroup_number, *, spinor: object(),
+        lambda spacegroup_number, *, spinor: type(
+            "ToyTable",
+            (),
+            {"match_kpoint_label": lambda self, k_frac: "GM"},
+        )(),
     )
     monkeypatch.setattr(
         workflow_mod,
@@ -1297,6 +1301,11 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
             "valley_preservation_check": {"status": "not_run"},
         },
     )
+    monkeypatch.setattr(
+        workflow_mod,
+        "build_valley_preserving_subgroup_report",
+        lambda **_: None,
+    )
 
     # Common monkeypatches (same as table_file E2E test).
     monkeypatch.setattr(
@@ -1313,7 +1322,11 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         workflow_mod, "load_standard_irrep_table",
-        lambda spacegroup_number, *, spinor: object(),
+        lambda spacegroup_number, *, spinor: type(
+            "ToyTable",
+            (),
+            {"match_kpoint_label": lambda self, k_frac: "GM"},
+        )(),
     )
     monkeypatch.setattr(
         workflow_mod, "build_source_payload_for_generic_matching",
@@ -1333,7 +1346,7 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
             "kpoints": ["GammaM"], "iband": [101, 102],
             "degeneracy_tol_meV": 1.0,
             "generic_irrep_source": {
-                "enabled": True, "spacegroup_number": 143,
+                "enabled": True, "spacegroup_number": 75,
                 "spinor": False,
                 "source_hsp_labels": {"GammaM": {"K_valley": "GM"}},
             },
@@ -1373,7 +1386,7 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
             "kpoints": ["GammaM"], "iband": [101, 102],
             "degeneracy_tol_meV": 1.0,
             "generic_irrep_source": {
-                "enabled": True, "spacegroup_number": 143,
+                "enabled": True, "spacegroup_number": 75,
                 "spinor": False,
                 "source_hsp_labels": {"GammaM": {"K_valley": "GM"}},
             },
@@ -1630,7 +1643,10 @@ def test_identity_only_gka_no_false_label():
     sa_report = {"by_kpoint": {"MM": {"valley_preserving_subspaces": [{
         "orbit": ["K_valley"],
         "hsp_preserving_operation_ids": [0],
-        "subspace_space_group": {"valley_preserving_operation_ids": [0, 5]},
+        "subspace_space_group": {
+            "valley_preserving_operation_ids": [0, 5],
+            "valley_changing_operation_ids": [5],
+        },
         "valley_preserving_character_diagnostics": {
             "per_valley": {"K_valley": [
                 {"operation_id": 0, "eigenphases": [0.0, 0.0]},
@@ -1643,6 +1659,12 @@ def test_identity_only_gka_no_false_label():
         symmetry_adapted_valley_report=sa_report,
         source_irrep_characters_flattened={"MM": {"K_valley": source_chars}},
         source_operation_maps={"MM": {"K_valley": {0: 1}}},
+        resolved_subspace_groups={"MM": {"K_valley": {
+            "status": "resolved",
+            "candidate_space_group_number": 143,
+            "candidate_space_group_symbol": "P3",
+            "valley_preserving_operation_ids": [0, 5],
+        }}},
     )
     gm = report.get("generic_matches_by_kpoint", {}).get("MM", {}).get("K_valley", {})
     # Identity-only: valid local representation.
@@ -1652,6 +1674,8 @@ def test_identity_only_gka_no_false_label():
     assert gm.get("matching_status") == "identity_only_not_irrep_distinguishing"
     assert gm.get("diagnostic_only") is True
     assert "identity_only_Gka" in str(gm.get("reason", ""))
+    assert gm.get("local_representation_dimension") == 2
+    assert gm["subspace_space_group"]["valley_changing_operation_ids"] == [5]
 
 
 def test_spinor_table_matches_wavefunction_not_convention():
@@ -1699,6 +1723,44 @@ def test_override_agreement_enforced():
     )
     gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
     assert gm["matching_strategy"] == "bilbao_restricted_character"
+
+
+def test_generic_irrep_override_rejects_spinor_mismatch():
+    from valleyscope.workflows.analyze_hsp import (
+        _generic_irrep_override_blocker,
+    )
+
+    blocker = _generic_irrep_override_blocker(
+        computed_sg=143,
+        wavefunction_spinor=True,
+        override_sg=143,
+        override_spinor=False,
+    )
+
+    assert blocker == (
+        "generic_irrep_source override spinor=False disagrees with "
+        "wavefunction spinor=True"
+    )
+
+
+def test_generic_irrep_override_hsp_requires_coordinate_agreement():
+    from valleyscope.irreps.tables import load_standard_irrep_table
+    from valleyscope.workflows.analyze_hsp import (
+        _resolve_generic_irrep_hsp_label,
+    )
+
+    table = load_standard_irrep_table(143, spinor=True)
+    label, blocker = _resolve_generic_irrep_hsp_label(
+        table=table,
+        k_frac=np.zeros(3),
+        override_label="K",
+    )
+
+    assert label is None
+    assert blocker == (
+        "generic_irrep_source HSP override 'K' disagrees with "
+        "coordinate-matched HSP 'GM'"
+    )
 
 
 def test_no_independent_second_matcher():
@@ -1854,6 +1916,12 @@ def test_unmock_generic_source_adapter_positive_full_pipeline():
             "GammaM": {"K_valley": payload["source_irrep_characters"]},
         },
         source_operation_maps=op_maps,
+        resolved_subspace_groups={"GammaM": {"K_valley": {
+            "status": "resolved",
+            "candidate_space_group_number": 143,
+            "candidate_space_group_symbol": "P3",
+            "valley_preserving_operation_ids": [1, 2, 3],
+        }}},
     )
     gm = matching["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
     assert gm["matching_status"] == "matched"
