@@ -803,46 +803,6 @@ def _collect_valley_characters(
     }
 
 
-def _collect_computed_characters(
-    *,
-    symmetry_rows: list[dict[str, Any]],
-    kpoint: str,
-    operation_to_table: dict[Any, int],
-) -> dict[str, Any]:
-    """Legacy: collect characters without valley filtering (backward compat)."""
-    computed_characters: dict[int, complex] = {}
-    ready_row_counts: dict[int, int] = {}
-    rows_by_table_operation: dict[int, list[dict[str, Any]]] = {}
-
-    for row in symmetry_rows:
-        if str(row.get("kpoint", "")) != kpoint:
-            continue
-        if not bool(row.get("little_group_passed", False)):
-            continue
-        if not bool(row.get("valley_preserving", False)):
-            continue
-        operation_id = row.get("operation_id")
-        if operation_id not in operation_to_table:
-            continue
-        table_index = operation_to_table[operation_id]
-        rows_by_table_operation.setdefault(table_index, []).append(row)
-
-    for table_index, rows in rows_by_table_operation.items():
-        if not rows or not all(bool(row.get("topology_input_ready", False)) for row in rows):
-            continue
-        ready_row_counts[table_index] = len(rows)
-        character = next(
-            (row.get("character_valley", "") for row in rows if row.get("character_valley", "")),
-            "",
-        )
-        if character:
-            computed_characters[table_index] = _parse_complex_character(character)
-    return {
-        "computed_characters": computed_characters,
-        "ready_row_counts": ready_row_counts,
-    }
-
-
 def _collect_state_diagonal_characters(
     *,
     representation_payload: dict[str, Any] | None,

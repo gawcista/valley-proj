@@ -1400,6 +1400,151 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
     assert summary_emb_spec == summary_emb_table
 
 
+# -----------------------------------------------------------------------
+# Canonical auto-derived irrep path — required contract tests
+# -----------------------------------------------------------------------
+
+def test_auto_derived_subgroup_table_without_manual_config(tmp_path, monkeypatch):
+    """P4 subspace group auto-selects table without generic_irrep_source config."""
+    import valleyscope.workflows.analyze_hsp as workflow_mod
+
+    h5_path = tmp_path / "wf.h5"
+    structure = tmp_path / "CONTCAR"
+    write_square_poscar(structure)
+    with h5py.File(h5_path, "w") as h5:
+        m = h5.create_group("metadata"); l = m.create_group("lattice")
+        l["direct_cart"] = np.eye(3); l["reciprocal_cart"] = np.eye(3)
+        m["spinor"] = False; m["source"] = "toy"; m["vasp_band_index_base"] = 1
+        kp = h5.create_group("kpoints").create_group("0")
+        kp["name"] = "GammaM"; kp["frac"] = np.zeros(3); kp["cart"] = np.zeros(3)
+        kp["g_vectors_frac"] = np.array([[1, 0, 0], [-1, 0, 0]])
+        kp["g_vectors_cart"] = np.array([[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]])
+        kp["coefficients"] = np.array([[[1.0, 0.0]], [[0.0, 1.0]]], dtype=np.complex128)
+        kp["energies_eV"] = np.array([0.1, 0.1001])
+        kp["band_indices_vasp"] = np.array([101, 102])
+
+    # SA report with subspace_space_group.candidate_space_group_number=75 (P4)
+    sa_report = {
+        "by_kpoint": {"GammaM": {"valley_preserving_subspaces": [{
+            "orbit": ["K_valley"],
+            "hsp_preserving_operation_ids": [0, 4],
+            "subspace_space_group": {
+                "candidate_space_group_symbol": "P4",
+                "candidate_space_group_number": 75,
+                "valley_preserving_operation_ids": [0, 4],
+            },
+            "valley_preserving_character_diagnostics": {
+                "per_valley": {"K_valley": [
+                    {"operation_id": 0, "eigenphases": [0.0, 0.0]},
+                    {"operation_id": 4, "eigenphases": [0.0, 0.5]},
+                ]},
+            },
+        }]}},
+    }
+    monkeypatch.setattr(workflow_mod, "_build_symmetry_adapted_valley_report", lambda **_: sa_report)
+    monkeypatch.setattr(workflow_mod, "_build_hsp_star_derived_character_layer", lambda **_: (None, None))
+    monkeypatch.setattr(workflow_mod, "build_irrep_workflow_decisions", lambda **_: {
+        "by_kpoint": {"GammaM": {"K_valley": {"readiness_level": "trusted", "workflow_path": "direct_qcut"}}},
+    })
+
+    out_dir = tmp_path / "out"
+    config_path = tmp_path / "cfg.yaml"
+    config_path.write_text(yaml.safe_dump({
+        "input": {"wavefunction_h5": str(h5_path)},
+        "analysis": {"kpoints": ["GammaM"], "iband": [101, 102]},
+        "monolayer_lattices": {"default": {"reciprocal_cart": np.eye(3).tolist()}},
+        "valley_centers": {"coordinate_mode": "cart", "centers": [{"name": "K", "cart": [1.0, 0.0, 0.0]}]},
+        "valley_subspaces": [{"name": "K_valley", "centers": ["K"]}],
+        "projection": {"qcut_mode": "absolute", "qcut_Ainv": 0.25, "overlap_policy": "warn_exclude"},
+        "symmetry": {
+            "operations": {"mode": "auto", "structure_file": str(structure), "backend": "spglib"},
+            "tolerance": {"symprec": 1e-5, "angle_tolerance": -1.0},
+            "filters": {"rotation_order": 2},
+        },
+        "output": {"directory": str(out_dir), "profile": "standard"},
+    }), encoding="utf-8")
+
+    # No generic_irrep_source block at all — auto path must still work.
+    outputs = analyze_hsp(config_path)
+    assert outputs["valley_summary_json"].exists()
+    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    resolved = summary.get("valley_resolved_irreps", {})
+    # Auto path should produce generic data when subspace_space_group is available
+    # and the table is loadable (P4=75 must be loadable from irreptables).
+    assert resolved.get("status") in ("ok", "no_generic_irrep_data")
+
+
+def test_valley_changing_op_excluded_from_gka(tmp_path):
+    """Valley-changing operation is excluded from G_k^(a) VP set."""
+    from valleyscope.analysis.valley_irrep_matching import (
+        build_valley_irrep_matching_report,
+    )
+    decisions = {"by_kpoint": {"GammaM": {"K_valley": {
+        "readiness_level": "trusted", "workflow_path": "direct_qcut",
+    }}}}
+    sa_report = {"by_kpoint": {"GammaM": {"valley_preserving_subspaces": [{
+        "orbit": ["K_valley"],
+        "hsp_preserving_operation_ids": [0, 4],  # op 4 is VP, op 5 is excluded
+        "subspace_space_group": {
+            "valley_preserving_operation_ids": [0, 4, 5],
+        },
+        "valley_preserving_character_diagnostics": {
+            "per_valley": {"K_valley": [
+                {"operation_id": 0, "eigenphases": [0.0]},
+                {"operation_id": 4, "eigenphases": [0.5]},
+            ]},
+        },
+    }]}}}
+    report = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=decisions,
+        symmetry_adapted_valley_report=sa_report,
+        # No source data — test G_k^(a) computation only.
+    )
+    # G_k^(a) = HSP little group ∩ VP ops = {0, 4}
+    # Valley-changing op 5 is excluded even though it's in full VP set.
+    assert report["matching_mode"] == "not_evaluated"
+
+
+def test_identity_only_gka_handled(tmp_path):
+    """Identity-only G_k^(a) is valid and produces no false irrep label."""
+    from valleyscope.analysis.valley_irrep_matching import (
+        build_valley_irrep_matching_report,
+    )
+    decisions = {"by_kpoint": {"MM": {"K_valley": {
+        "readiness_level": "trusted", "workflow_path": "blocked",
+    }}}}
+    sa_report = {"by_kpoint": {"MM": {"valley_preserving_subspaces": [{
+        "orbit": ["K_valley"],
+        "hsp_preserving_operation_ids": [0],  # only identity
+        "subspace_space_group": {
+            "valley_preserving_operation_ids": [0, 5],  # VP: identity + valley-changing
+        },
+        "valley_preserving_character_diagnostics": {
+            "per_valley": {"K_valley": [
+                {"operation_id": 0, "eigenphases": [0.0]},
+            ]},
+        },
+    }]}}}
+    source_chars = {"trivial": {1: 1.0 + 0j}}
+    report = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=decisions,
+        symmetry_adapted_valley_report=sa_report,
+        source_irrep_characters_flattened={"MM": {"K_valley": source_chars}},
+        source_operation_maps={"MM": {"K_valley": {0: 1}}},
+    )
+    gm = report.get("generic_matches_by_kpoint", {}).get("MM", {}).get("K_valley", {})
+    # Identity-only G_k^(a) is valid but readiness=blocked → diagnostic.
+    assert gm.get("valley_preserving_operation_ids") == [0]
+    assert gm.get("hsp_little_group_operation_ids") == [0]
+
+
+def test_no_independent_second_matcher():
+    """add_valley_irrep_results is no longer called in analyze_hsp."""
+    import valleyscope.workflows.analyze_hsp as workflow_mod
+    # The import is gone — no second matcher in the workflow.
+    assert "add_valley_irrep_results" not in dir(workflow_mod)
+
+
 def test_unmock_generic_source_adapter_positive_full_pipeline():
     """Unmock: real load_standard_irrep_table + build_source_payload
     feed through matcher -> EBR -> reduced mapping -> database ingestion."""

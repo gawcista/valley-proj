@@ -67,7 +67,6 @@ from valleyscope.analysis.symmetry_eigenvalue_diagnostic import (
     symmetry_eigenvalue_diagnostics_for_kpoint,
 )
 from valleyscope.analysis.valley_little_group import (
-    add_valley_irrep_results,
     build_valley_preserving_subgroup_report,
     update_valley_preserving_operation_inventory,
 )
@@ -426,12 +425,12 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             symmetry_payload=symmetry_payload,
             target_kpoints=config.analysis.kpoints,
         )
-        add_valley_irrep_results(
-            symmetry_payload=symmetry_payload,
-            symmetry_rows=symmetry_rows,
-            representation_payload=symmetry_representation_payload,
-            tolerance=config.rotation.irrep_weight_tol,
-        )
+        # Legacy per-valley irrep table matching and character
+        # decomposition (add_valley_irrep_results) is superseded by
+        # the canonical generic restricted-character matcher.  The
+        # subgroup_report still carries the operation-level table
+        # matching from _build_per_valley_irrep_table_matching for
+        # summary-text diagnostic display.
 
     sector_names = list(projectors_by_kpoint[next(iter(projectors_by_kpoint))].sector_masks)
     symmetry_eigenvalue_summary = _build_symmetry_eigenvalue_summary(symmetry_payload, symmetry_rows)
