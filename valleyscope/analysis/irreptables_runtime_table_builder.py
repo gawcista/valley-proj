@@ -371,3 +371,222 @@ def _package_version(package_name: str) -> str | None:
         return importlib.metadata.version(package_name)
     except importlib.metadata.PackageNotFoundError:
         return None
+
+
+# ---------------------------------------------------------------------------
+# Auto-canonical EBR table builder
+# ---------------------------------------------------------------------------
+
+def build_auto_canonical_reduced_ebr_table(
+    *,
+    subspace_sg_number: int,
+    spinor: bool,
+    bundle_irreps_by_kpoint: Mapping[str, Sequence[str]],
+    expected_hsps: Sequence[str],
+    subspace_group_candidate: str,
+    subspace_space_group: Mapping[str, object] | None = None,
+    source_loader: Callable[[int | str, bool], Mapping[str, object]] | None = None,
+) -> dict[str, Any]:
+    """Build a reduced EBR table automatically from canonical irrep data.
+
+    Derives the source-label → ValleyScope-key mapping directly from
+    canonical irreptables irrep labels without a user-supplied spec file
+    or hand-written table.  Both the canonical irrep labels and the
+    irreptables EBR basis labels come from the same irreptables source,
+    so the mapping is identity: ``-GM4`` → ``GammaM:-GM4``.
+
+    Parameters
+    ----------
+    subspace_sg_number : int
+        Valley-projected subspace space-group number (e.g. 143 for P3).
+    spinor : bool
+        Whether to load spinful (double-group) EBR data.
+    bundle_irreps_by_kpoint : Mapping[str, Sequence[str]]
+        Canonical irrep labels grouped by ValleyScope HSP, as carried by
+        the EBR export bundle (``irreps_by_kpoint`` field).
+    expected_hsps : Sequence[str]
+        Sampled ValleyScope HSP labels to include in the reduced basis.
+    subspace_group_candidate : str
+        Subspace-group symbol for the reduced table key (e.g. ``"P3"``).
+    subspace_space_group : Mapping or None
+        Optional structured subspace-space-group provenance.
+    source_loader : Callable or None
+        Injectable loader for irreptables EBR data (test seam).
+
+    Returns
+    -------
+    dict
+        A validated reduced EBR table dict compatible with
+        ``load_reduced_ebr_table`` and ``build_reduced_ebr_mapping``.
+
+    Raises
+    ------
+    ValueError
+        If canonical labels cannot be resolved to irreptables kpoints,
+        expected_hsps is empty, or the reduced table is empty.
+    RuntimeError
+        If irreptables EBR data cannot be loaded.
+    """
+    from valleyscope.irreps.tables import load_standard_irrep_table
+
+    if not expected_hsps:
+        raise ValueError("expected_hsps must be non-empty")
+
+    # --- 1. Load irreptables irrep table to build label → Bilbao kpoint ---
+    irrep_table = load_standard_irrep_table(subspace_sg_number, spinor=spinor)
+    label_to_bilbao_kp: dict[str, str] = {}
+    bilbao_kp_set: set[str] = set()
+    for irrep in irrep_table.irreps:
+        label_to_bilbao_kp[irrep.label] = irrep.kpoint_label
+        bilbao_kp_set.add(irrep.kpoint_label)
+
+    # --- 2. Build Bilbao kpoint → ValleyScope HSP from canonical data ---
+    bilbao_to_valleyscope: dict[str, str] = {}
+    for vs_hsp, labels in bundle_irreps_by_kpoint.items():
+        if not isinstance(labels, Sequence) or isinstance(labels, (str, bytes)):
+            continue
+        for label in labels:
+            bilbao_kp = label_to_bilbao_kp.get(str(label))
+            if bilbao_kp:
+                if (
+                    bilbao_kp in bilbao_to_valleyscope
+                    and bilbao_to_valleyscope[bilbao_kp] != vs_hsp
+                ):
+                    raise ValueError(
+                        f"conflicting HSP mapping for Bilbao kpoint "
+                        f"{bilbao_kp!r}: {bilbao_to_valleyscope[bilbao_kp]!r} "
+                        f"vs {vs_hsp!r}"
+                    )
+                bilbao_to_valleyscope[bilbao_kp] = vs_hsp
+
+    if not bilbao_to_valleyscope:
+        raise ValueError(
+            "could not derive Bilbao→ValleyScope HSP mapping from "
+            "canonical irrep labels"
+        )
+
+    # --- 3. Load irreptables EBR data (once, cached for downstream) ---
+    loader = source_loader or _load_ebr_data_from_irreptables
+    try:
+        ebr_data = loader(subspace_sg_number, spinor)
+    except Exception as exc:
+        if isinstance(exc, RuntimeError):
+            raise
+        raise RuntimeError(
+            "failed to load irreptables EBR data for "
+            f"space_group_number={subspace_sg_number!r}, "
+            f"spinful={spinor}: {type(exc).__name__}: {exc}"
+        ) from exc
+
+    ebr_basis_labels = _extract_ebr_basis_labels(ebr_data)
+
+    # Wrap loader so downstream build_reduced_table_from_irreptables
+    # reuses the already-loaded data.
+    def _cached_loader(_sg: int | str, _spin: bool) -> Mapping[str, object]:
+        return ebr_data
+
+    # --- 4a. Auto-derive source_hsp_by_irrep ---
+    source_hsp_by_irrep: dict[str, str] = {}
+    for label in ebr_basis_labels:
+        bilbao_kp = label_to_bilbao_kp.get(label)
+        if bilbao_kp and bilbao_kp in bilbao_to_valleyscope:
+            source_hsp_by_irrep[label] = bilbao_to_valleyscope[bilbao_kp]
+        else:
+            # Label from an unsampled kpoint: map to the Bilbao label as
+            # a placeholder HSP; the reducer will filter it out because
+            # it won't be in expected_hsps.
+            source_hsp_by_irrep[label] = bilbao_kp if bilbao_kp else f"_{label}"
+
+    # --- 4b. Auto-derive valleyscope_irrep_multiplicity_by_source_irrep ---
+    # Each irreptables source label at a sampled HSP maps 1:1 to
+    # {ValleyScope HSP}:{label} with multiplicity 1.  Labels at unsampled
+    # HSPs are omitted; the normalizer skips them when their HSP is not
+    # in expected_hsps.
+    hsps_set = set(expected_hsps)
+    valleyscope_irrep_multiplicity_by_source_irrep: dict[str, dict[str, int]] = {}
+    for label in ebr_basis_labels:
+        bilbao_kp = label_to_bilbao_kp.get(label)
+        vs_hsp = bilbao_to_valleyscope.get(bilbao_kp) if bilbao_kp else None
+        if vs_hsp and vs_hsp in hsps_set:
+            valleyscope_irrep_multiplicity_by_source_irrep[label] = {
+                f"{vs_hsp}:{label}": 1
+            }
+        # Labels at unsampled HSPs are intentionally omitted from
+        # mult_map.  The normalizer's _basis_from_multiplicities skips
+        # labels not in mult_map when expected_hsp_set is set and the
+        # label's HSP is not in it.
+
+    # --- 4c. Build allowed_irrep_keys: all irrep keys at sampled HSPs ---
+    allowed_irrep_keys: list[str] = []
+    for label in ebr_basis_labels:
+        vs_hsp = source_hsp_by_irrep.get(label, "")
+        if vs_hsp in hsps_set:
+            key = f"{vs_hsp}:{label}"
+            if key not in allowed_irrep_keys:
+                allowed_irrep_keys.append(key)
+
+    if not allowed_irrep_keys:
+        raise ValueError(
+            "no irreptables EBR basis labels map to expected_hsps "
+            f"{sorted(hsps_set)}"
+        )
+
+    # --- 5. Build provenance ---
+    provenance: dict[str, object] = {
+        "data_source": "irreptables",
+        "package": "irreptables",
+        "package_version": _package_version("irreptables"),
+        "space_group_number": subspace_sg_number,
+        "spinful": spinor,
+        "expected_hsps": list(expected_hsps),
+        "subspace_group_candidate": subspace_group_candidate,
+        "valleyscope_reduction": "sampled_hsp_valley_preserving",
+        "auto_canonical": True,
+        "bilbao_to_valleyscope_hsp": dict(bilbao_to_valleyscope),
+    }
+
+    # --- 6. Build reduced table ---
+    table = build_reduced_table_from_irreptables(
+        space_group_number=subspace_sg_number,
+        spinful=spinor,
+        source_loader=_cached_loader,
+        source_hsp_by_irrep=source_hsp_by_irrep,
+        valleyscope_irrep_multiplicity_by_source_irrep=(
+            valleyscope_irrep_multiplicity_by_source_irrep
+        ),
+        expected_hsps=expected_hsps,
+        allowed_irrep_keys=allowed_irrep_keys,
+        subspace_group_candidate=subspace_group_candidate,
+        provenance=provenance,
+        subspace_space_group=(
+            dict(subspace_space_group)
+            if isinstance(subspace_space_group, Mapping) else None
+        ),
+    )
+
+    _validate_reduced_table_dict(table)
+    return table
+
+
+def _extract_ebr_basis_labels(ebr_data: Mapping[str, object]) -> list[str]:
+    """Extract basis irrep labels from irreptables EBR data dict."""
+    if not isinstance(ebr_data, Mapping):
+        raise ValueError("ebr_data must be a mapping")
+    basis = ebr_data.get("basis")
+    if not isinstance(basis, Mapping):
+        raise ValueError("ebr_data['basis'] must be a mapping")
+    labels_raw = basis.get("irrep_labels")
+    if not isinstance(labels_raw, Sequence) or isinstance(labels_raw, (str, bytes)):
+        raise ValueError("basis.irrep_labels must be a non-empty list")
+    labels: list[str] = []
+    seen: set[str] = set()
+    for i, label in enumerate(labels_raw):
+        if not isinstance(label, str) or not label:
+            raise ValueError(f"basis.irrep_labels[{i}] must be a non-empty string")
+        if label in seen:
+            raise ValueError(f"duplicate source irrep label {label!r}")
+        seen.add(label)
+        labels.append(label)
+    if not labels:
+        raise ValueError("basis.irrep_labels must be a non-empty list")
+    return labels

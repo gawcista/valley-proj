@@ -100,7 +100,8 @@ _IRREP_KEY_RE = (
     r"\A"                         # start
     r"[A-Za-z][A-Za-z0-9_]*"      # kpoint label
     r":"                          # separator
-    r"[A-Za-z][A-Za-z0-9_+/\-]*"  # irrep label
+    r"[A-Za-z0-9_+/\-]"           # irrep label first char (may be - for spinor)
+    r"[A-Za-z0-9_+/\-]*"          # irrep label rest
     r"(?::op\d+)?"                # optional operation suffix
     r"\Z"                         # end
 )

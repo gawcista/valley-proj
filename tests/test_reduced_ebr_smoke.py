@@ -72,7 +72,8 @@ def test_reduced_ebr_disabled_does_not_write_mapping(tmp_path):
 
 
 def test_reduced_ebr_enabled_without_input_marks_not_provided(tmp_path):
-    """E2E: enabled reduced EBR without table/spec reports not_provided input."""
+    """E2E: enabled reduced EBR without table/spec attempts auto-canonical,
+    falls back to missing_table when no ready bundles exist."""
     h5_path = tmp_path / "wf.h5"
     out_dir = tmp_path / "out"
     write_fixture(h5_path)
@@ -89,7 +90,10 @@ def test_reduced_ebr_enabled_without_input_marks_not_provided(tmp_path):
     )
     assert mapping["status"] == "missing_table"
     assert mapping["table_status"] == "not_provided"
-    assert mapping["reduced_ebr_input"] == {"source": "not_provided"}
+    # Auto-canonical is attempted; falls back gracefully when no bundles.
+    assert mapping["reduced_ebr_input"]["source"] in (
+        "auto_canonical_blocked", "not_provided",
+    )
 
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     assert summary["valley_reduced_ebr_mapping"] == mapping

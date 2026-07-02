@@ -761,6 +761,13 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 "subspace_group_candidate": table.get("subspace_group_candidate", ""),
                 "data_source": provenance.get("data_source", ""),
             }
+        else:
+            # --- Auto-canonical path: derive reduced EBR table from
+            # canonical irrep data without user-supplied mapping ---
+            table, reduced_ebr_input = _resolve_auto_canonical_ebr_table(
+                ebr_export_bundle=ebr_export_bundle,
+                spinor_wf=spinor_wf,
+            )
         reduced_ebr_mapping = build_reduced_ebr_mapping(
             ebr_export_bundle=ebr_export_bundle,
             table=table,
@@ -2448,3 +2455,117 @@ def _warn_fixed_center_distance(
                     "This is a k/center mismatch, not necessarily non-parent-valley. "
                     "Consider k_resolved_parent_valley projector_mode."
                 )
+
+
+# ---------------------------------------------------------------------------
+# Auto-canonical reduced EBR table resolution
+# ---------------------------------------------------------------------------
+
+def _resolve_auto_canonical_ebr_table(
+    *,
+    ebr_export_bundle: dict[str, object] | None,
+    spinor_wf: bool,
+) -> tuple[dict[str, object] | None, dict[str, object]]:
+    """Attempt automatic canonical reduced EBR table construction.
+
+    Derives the reduced EBR table from the canonical irrep labels in the
+    export bundle without a user-supplied table file or spec file.
+
+    Returns (table, reduced_ebr_input).  On failure, table is None and
+    reduced_ebr_input carries the reason.
+    """
+    if ebr_export_bundle is None:
+        return None, {
+            "source": "auto_canonical_blocked",
+            "reason": "no export bundle available",
+        }
+
+    bundles = ebr_export_bundle.get("bundles", [])
+    if not isinstance(bundles, list) or not bundles:
+        return None, {
+            "source": "auto_canonical_blocked",
+            "reason": "no ready bundles in export",
+        }
+
+    # Collect subspace groups from ready bundles.
+    sg_bundles: dict[int, dict[str, object]] = {}
+    for b in bundles:
+        if not isinstance(b, dict):
+            continue
+        if not b.get("ready_for_external_solver"):
+            continue
+        ssg = b.get("subspace_space_group", {})
+        if not isinstance(ssg, dict):
+            continue
+        sg_num = ssg.get("candidate_space_group_number")
+        if not isinstance(sg_num, int) or isinstance(sg_num, bool) or sg_num <= 0:
+            continue
+        sg_num = int(sg_num)
+        if sg_num not in sg_bundles:
+            sg_bundles[sg_num] = b
+
+    if not sg_bundles:
+        return None, {
+            "source": "auto_canonical_blocked",
+            "reason": "no bundle with resolved subspace space group number",
+        }
+
+    # Use the first resolved subspace group as canonical table source.
+    # Additional subspace groups would need separate tables.
+    sg_num, first_bundle = next(iter(sg_bundles.items()))
+    irreps_by_kp = first_bundle.get("irreps_by_kpoint", {})
+    if not isinstance(irreps_by_kp, dict) or not irreps_by_kp:
+        return None, {
+            "source": "auto_canonical_blocked",
+            "reason": "bundle has no irreps_by_kpoint",
+        }
+
+    expected_hsps = first_bundle.get("expected_hsps", [])
+    if not isinstance(expected_hsps, list) or not expected_hsps:
+        return None, {
+            "source": "auto_canonical_blocked",
+            "reason": "bundle has no expected_hsps",
+        }
+
+    sg_candidate = str(first_bundle.get("subspace_group_candidate", ""))
+    ssg = first_bundle.get("subspace_space_group", {})
+
+    from valleyscope.analysis.irreptables_runtime_table_builder import (
+        build_auto_canonical_reduced_ebr_table,
+    )
+
+    try:
+        table = build_auto_canonical_reduced_ebr_table(
+            subspace_sg_number=sg_num,
+            spinor=spinor_wf,
+            bundle_irreps_by_kpoint=irreps_by_kp,
+            expected_hsps=expected_hsps,
+            subspace_group_candidate=sg_candidate,
+            subspace_space_group=ssg if isinstance(ssg, dict) else None,
+        )
+    except Exception as exc:
+        return None, {
+            "source": "auto_canonical_failed",
+            "reason": f"{type(exc).__name__}: {exc}",
+            "subspace_sg_number": sg_num,
+            "spinor": spinor_wf,
+        }
+
+    provenance = table.get("provenance", {}) if isinstance(table.get("provenance"), dict) else {}
+    reduced_ebr_input: dict[str, object] = {
+        "source": "auto_canonical",
+        "subspace_group_candidate": table.get("subspace_group_candidate", ""),
+        "data_source": provenance.get("data_source", ""),
+        "auto_canonical": True,
+        "space_group_number": provenance.get("space_group_number", sg_num),
+        "spinful": provenance.get("spinful", spinor_wf),
+    }
+
+    if len(sg_bundles) > 1:
+        reduced_ebr_input["note"] = (
+            f"auto table built for SG {sg_num}; "
+            f"bundles with other subspace groups ({sorted(sg_bundles)}) "
+            f"will be excluded"
+        )
+
+    return table, reduced_ebr_input
