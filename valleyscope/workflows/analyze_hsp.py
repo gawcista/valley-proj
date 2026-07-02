@@ -451,155 +451,174 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             valley_names=valley_names,
             spinor_convention_verified=config.spinor.convention_verified,
         )
-    # --- Generic irrep matching preflight ---
-    # Auto-derives the source irrep table from the computed
-    # subspace_space_group when available.  The explicit
-    # generic_irrep_source config block remains as an optional override
-    # for debug / non-standard HSP mappings.
+    # --- Canonical per-valley irrep matching preflight ---
+    # Builds one source-payload context per (kpoint, valley) from the
+    # computed per-valley standard subgroup identity.  The explicit
+    # generic_irrep_source config block is an optional override; when
+    # present it must agree with the computed subgroup or the result is
+    # diagnostic-only with explicit provenance.
     generic_source_payloads: dict[str, Any] | None = None
     generic_source_blocked_rows: list[dict[str, Any]] = []
 
-    # --- Resolve subspace-space-group identity ---
-    sg_number: int | None = None
-    spinor_flag: bool | None = None
-    source_hsp_override: dict[str, dict[str, str]] | None = None
+    # --- Canonical subgroup identity from per-valley standard matches ---
+    subgroup_report = symmetry_payload.get(
+        "valley_preserving_subgroup_report", {},
+    ) if isinstance(symmetry_payload, dict) else {}
+    per_valley_matches = subgroup_report.get(
+        "per_valley_standard_matches", {},
+    ) if isinstance(subgroup_report, dict) else {}
+    # Table spinfulness follows the wavefunction, not convention_verified.
+    # convention_verified is a readiness gate, not a table selection criterion.
+    spinor_wf = bool(symmetry_payload.get("spinor_wavefunction", False))
+    kpoint_frac = symmetry_payload.get("kpoint_frac_by_name", {})
 
+    # --- Explicit override validation ---
+    override_sg: int | None = None
+    override_spinor: bool | None = None
+    override_hsp: dict[str, dict[str, str]] | None = None
     if config.generic_irrep_source.enabled:
         gis_cfg = config.generic_irrep_source
-        sg_number = gis_cfg.spacegroup_number
-        spinor_flag = gis_cfg.spinor
-        source_hsp_override = dict(gis_cfg.source_hsp_labels) if gis_cfg.source_hsp_labels else None
+        override_sg = gis_cfg.spacegroup_number
+        override_spinor = gis_cfg.spinor
+        override_hsp = (
+            dict(gis_cfg.source_hsp_labels)
+            if gis_cfg.source_hsp_labels else None
+        )
 
-    if sg_number is None and isinstance(symmetry_adapted_valley_report, dict):
-        # Auto-derive from the first valley-preserving subspace.
-        by_kp = symmetry_adapted_valley_report.get("by_kpoint", {})
-        if isinstance(by_kp, dict):
-            for kp_data in by_kp.values():
-                if not isinstance(kp_data, dict):
+    src_chars: dict[str, dict[str, dict[str, dict[int, complex]]]] = {}
+    src_op_maps: dict[str, dict[str, dict[int, int]]] = {}
+    by_kp = symmetry_adapted_valley_report.get("by_kpoint", {}) if isinstance(symmetry_adapted_valley_report, dict) else {}
+
+    if isinstance(by_kp, dict):
+        for kp_name, kp_data in by_kp.items():
+            if not isinstance(kp_data, dict):
+                continue
+            vp_subspaces = kp_data.get("valley_preserving_subspaces", [])
+            if not isinstance(vp_subspaces, list):
+                continue
+            for vs in vp_subspaces:
+                if not isinstance(vs, dict):
                     continue
-                for vs in kp_data.get("valley_preserving_subspaces", []) if isinstance(kp_data.get("valley_preserving_subspaces"), list) else []:
-                    if not isinstance(vs, dict):
-                        continue
-                    ssg = vs.get("subspace_space_group", {})
-                    if not isinstance(ssg, dict):
-                        continue
-                    num = ssg.get("candidate_space_group_number")
-                    if isinstance(num, int) and not isinstance(num, bool) and num > 0:
-                        sg_number = num
-                        break
-                if sg_number is not None:
-                    break
+                orbit = vs.get("orbit", [])
+                if not orbit:
+                    continue
+                v_name = str(orbit[0])
 
-    if spinor_flag is None:
-        spinor_flag = config.spinor.convention_verified
+                # --- Per-valley canonical subgroup identity ---
+                sg_number: int
+                spinor_flag: bool
+                if override_sg is not None:
+                    # Explicit config: bypass per-valley lookup.
+                    sg_number = override_sg
+                    spinor_flag = (
+                        bool(override_spinor) if override_spinor is not None
+                        else spinor_wf
+                    )
+                else:
+                    # Auto-derived from computed per-valley subgroup.
+                    match_info = per_valley_matches.get(v_name, {})
+                    standard_match = match_info.get("standard_group_match")
+                    if not isinstance(standard_match, dict):
+                        generic_source_blocked_rows.append({
+                            "kpoint": kp_name, "valley": v_name,
+                            "reason": "no per-valley standard subgroup match",
+                        })
+                        continue
+                    canonical_sg = int(standard_match.get("number", 0))
+                    if canonical_sg <= 0:
+                        generic_source_blocked_rows.append({
+                            "kpoint": kp_name, "valley": v_name,
+                            "reason": "invalid per-valley standard subgroup number",
+                        })
+                        continue
+                    sg_number = canonical_sg
+                    spinor_flag = spinor_wf
 
-    if sg_number is not None and spinor_flag is not None:
-        try:
-            table = load_standard_irrep_table(sg_number, spinor=spinor_flag)
-        except Exception as exc:
-            generic_source_blocked_rows.append({
-                "reason": f"load_standard_irrep_table failed for "
-                          f"sg={sg_number} spinor={spinor_flag}: {exc}",
-            })
-            table = None
-        if table is not None:
-            src_chars: dict[str, dict[str, dict[str, dict[int, complex]]]] = {}
-            src_op_maps: dict[str, dict[str, dict[int, int]]] = {}
-            kpoint_frac = symmetry_payload.get("kpoint_frac_by_name", {})
-            if isinstance(symmetry_adapted_valley_report, dict):
-                by_kp = symmetry_adapted_valley_report.get("by_kpoint", {})
-                if isinstance(by_kp, dict):
-                    for kp_name, kp_data in by_kp.items():
-                        vp_subspaces = kp_data.get(
-                            "valley_preserving_subspaces", [],
-                        ) if isinstance(kp_data, dict) else []
-                        # --- Auto-match HSP label via k_frac ---
-                        k_frac_raw = kpoint_frac.get(kp_name)
-                        auto_hsp = None
-                        if k_frac_raw is not None:
-                            try:
-                                auto_hsp = table.match_kpoint_label(
-                                    np.asarray(k_frac_raw, dtype=float),
-                                )
-                            except Exception:
-                                auto_hsp = None
-                        for vs in vp_subspaces if isinstance(vp_subspaces, list) else []:
-                            if not isinstance(vs, dict):
-                                continue
-                            orbit = vs.get("orbit", [])
-                            if not orbit:
-                                continue
-                            v_name = str(orbit[0])
-                            ssg = vs.get("subspace_space_group", {})
-                            full_vp_ids = ssg.get(
-                                "valley_preserving_operation_ids", [],
-                            ) if isinstance(ssg, dict) else []
-                            hsp_lg_ids = vs.get(
-                                "hsp_preserving_operation_ids", [],
-                            )
-                            if isinstance(hsp_lg_ids, list) and hsp_lg_ids:
-                                vp_ids = [op for op in full_vp_ids if op in hsp_lg_ids]
-                            else:
-                                vp_ids = list(full_vp_ids)
-                            if not vp_ids:
-                                continue
-                            # Source HSP label: override > auto > blocked.
-                            src_hsp = None
-                            if source_hsp_override is not None:
-                                src_hsp = source_hsp_override.get(kp_name, {}).get(v_name)
-                            if src_hsp is None:
-                                src_hsp = auto_hsp
-                            if src_hsp is None:
-                                generic_source_blocked_rows.append({
-                                    "kpoint": kp_name,
-                                    "valley": v_name,
-                                    "reason": (
-                                        "no_source_hsp_label: could not determine "
-                                        "Bilbao HSP label for this kpoint"
-                                    ),
-                                })
-                                continue
-                            payload = build_source_payload_for_generic_matching(
-                                table=table,
-                                source_hsp_label=str(src_hsp),
-                                detected_operations=symmetry_payload.get(
-                                    "detected_operations", [],
-                                ),
-                                valley_preserving_operation_ids=list(vp_ids),
-                                tol=float(config.generic_irrep_source.operation_match_tol
-                                         if config.generic_irrep_source.enabled else 5e-5),
-                            )
-                            if payload["status"] == "ok":
-                                src_chars.setdefault(kp_name, {})[v_name] = (
-                                    payload["source_irrep_characters"]
-                                )
-                                src_op_maps.setdefault(kp_name, {})[v_name] = (
-                                    payload["source_operation_map"]
-                                )
-                            else:
-                                generic_source_blocked_rows.append({
-                                    "kpoint": kp_name,
-                                    "valley": v_name,
-                                    "source_hsp_label": src_hsp,
-                                    "table_sg_number": table.number,
-                                    "table_name": table.name,
-                                    "table_spinor": table.spinor,
-                                    "valley_preserving_operation_ids": list(vp_ids),
-                                    "hsp_little_group_operation_ids": (
-                                        list(hsp_lg_ids)
-                                        if isinstance(hsp_lg_ids, list)
-                                        else list(vp_ids)
-                                    ),
-                                    "provenance": payload.get("provenance", {}),
-                                    "blocker_reasons": payload["blocker_reasons"],
-                                })
-            if src_chars and src_op_maps:
-                generic_source_payloads = {
-                    "source_irrep_characters": src_chars,
-                    "source_operation_maps": src_op_maps,
-                    "table_sg_number": sg_number,
-                    "table_spinor": spinor_flag,
-                }
+                # --- Load source irrep table ---
+                try:
+                    table = load_standard_irrep_table(sg_number, spinor=spinor_flag)
+                except Exception as exc:
+                    generic_source_blocked_rows.append({
+                        "kpoint": kp_name, "valley": v_name,
+                        "reason": f"load_standard_irrep_table sg={sg_number} "
+                                  f"spinor={spinor_flag}: {exc}",
+                    })
+                    continue
+
+                # --- Standard-setting HSP correspondence (conservative) ---
+                k_frac_raw = kpoint_frac.get(kp_name)
+                src_hsp: str | None = None
+                if override_hsp is not None:
+                    src_hsp = override_hsp.get(kp_name, {}).get(v_name)
+                if src_hsp is None and k_frac_raw is not None:
+                    src_hsp = table.match_kpoint_label(
+                        np.asarray(k_frac_raw, dtype=float),
+                    )
+                if src_hsp is None:
+                    generic_source_blocked_rows.append({
+                        "kpoint": kp_name, "valley": v_name,
+                        "reason": (
+                            "no_source_hsp_label: could not determine "
+                            "Bilbao HSP label for this kpoint"
+                        ),
+                    })
+                    continue
+
+                # --- G_k^(a) operation IDs ---
+                ssg = vs.get("subspace_space_group", {})
+                full_vp_ids = ssg.get("valley_preserving_operation_ids", []) if isinstance(ssg, dict) else []
+                hsp_lg_ids = vs.get("hsp_preserving_operation_ids", [])
+                if isinstance(hsp_lg_ids, list) and hsp_lg_ids:
+                    vp_ids = [op for op in full_vp_ids if op in hsp_lg_ids]
+                else:
+                    vp_ids = list(full_vp_ids)
+                if not vp_ids:
+                    # Identity-only G_k^(a): valid local representation,
+                    # not a numerical failure.  No restricted-character
+                    # matching is attempted.
+                    continue
+
+                # --- Build source payload ---
+                tol = float(
+                    config.generic_irrep_source.operation_match_tol
+                    if config.generic_irrep_source.enabled else 5e-5
+                )
+                payload = build_source_payload_for_generic_matching(
+                    table=table,
+                    source_hsp_label=str(src_hsp),
+                    detected_operations=symmetry_payload.get("detected_operations", []),
+                    valley_preserving_operation_ids=list(vp_ids),
+                    tol=tol,
+                )
+                if payload["status"] == "ok":
+                    src_chars.setdefault(kp_name, {})[v_name] = (
+                        payload["source_irrep_characters"]
+                    )
+                    src_op_maps.setdefault(kp_name, {})[v_name] = (
+                        payload["source_operation_map"]
+                    )
+                else:
+                    generic_source_blocked_rows.append({
+                        "kpoint": kp_name,
+                        "valley": v_name,
+                        "source_hsp_label": src_hsp,
+                        "table_sg_number": table.number,
+                        "table_name": table.name,
+                        "table_spinor": table.spinor,
+                        "valley_preserving_operation_ids": list(vp_ids),
+                        "hsp_little_group_operation_ids": (
+                            list(hsp_lg_ids) if isinstance(hsp_lg_ids, list)
+                            else list(vp_ids)
+                        ),
+                        "provenance": payload.get("provenance", {}),
+                        "blocker_reasons": payload["blocker_reasons"],
+                    })
+
+    if src_chars and src_op_maps:
+        generic_source_payloads = {
+            "source_irrep_characters": src_chars,
+            "source_operation_maps": src_op_maps,
+        }
 
     valley_irrep_matching = build_valley_irrep_matching_report(
         irrep_workflow_decisions=irrep_workflow_decisions,
