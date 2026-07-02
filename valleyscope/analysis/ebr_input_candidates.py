@@ -73,10 +73,18 @@ def build_ebr_input_candidates(
                     subspace_space_group.get("candidate_space_group_symbol")
                     or gm.get("subspace_group_candidate")
                 )
+                # Defensive gate: unresolved/null subgroup identity cannot
+                # become a physical EBR candidate.
+                sg_resolved = (
+                    isinstance(subspace_group_candidate, str)
+                    and bool(subspace_group_candidate)
+                    and subspace_group_candidate != "None"
+                )
 
                 # Candidate gate
                 if (
-                    readiness == "trusted"
+                    sg_resolved
+                    and readiness == "trusted"
                     and path != "blocked"
                     and match_status == "matched"
                     and not diag
@@ -103,6 +111,8 @@ def build_ebr_input_candidates(
 
                 # Not a candidate — explain why.
                 reasons: list[str] = []
+                if not sg_resolved:
+                    reasons.append("subspace_group_candidate_unresolved")
                 if readiness != "trusted":
                     reasons.append(f"readiness={readiness}")
                 if path == "blocked":

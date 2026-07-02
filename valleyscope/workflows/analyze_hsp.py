@@ -507,32 +507,42 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 # --- Per-valley canonical subgroup identity ---
                 sg_number: int
                 spinor_flag: bool
+                # Always read the computed subgroup for agreement checking.
+                match_info = per_valley_matches.get(v_name, {})
+                standard_match = match_info.get("standard_group_match")
+                computed_sg: int | None = None
+                if isinstance(standard_match, dict):
+                    num = standard_match.get("number")
+                    if isinstance(num, int) and not isinstance(num, bool) and num > 0:
+                        computed_sg = int(num)
+
                 if override_sg is not None:
-                    # Explicit config: bypass per-valley lookup.
                     sg_number = override_sg
                     spinor_flag = (
                         bool(override_spinor) if override_spinor is not None
                         else spinor_wf
                     )
-                else:
-                    # Auto-derived from computed per-valley subgroup.
-                    match_info = per_valley_matches.get(v_name, {})
-                    standard_match = match_info.get("standard_group_match")
-                    if not isinstance(standard_match, dict):
+                    if computed_sg is not None and override_sg != computed_sg:
+                        # Override disagrees with computed subgroup:
+                        # proceed for diagnostics but produce only blocked rows.
                         generic_source_blocked_rows.append({
                             "kpoint": kp_name, "valley": v_name,
-                            "reason": "no per-valley standard subgroup match",
+                            "reason": (
+                                f"generic_irrep_source override sg={override_sg} "
+                                f"disagrees with computed subgroup sg={computed_sg}; "
+                                f"diagnostic-only"
+                            ),
                         })
                         continue
-                    canonical_sg = int(standard_match.get("number", 0))
-                    if canonical_sg <= 0:
-                        generic_source_blocked_rows.append({
-                            "kpoint": kp_name, "valley": v_name,
-                            "reason": "invalid per-valley standard subgroup number",
-                        })
-                        continue
-                    sg_number = canonical_sg
+                elif computed_sg is not None:
+                    sg_number = computed_sg
                     spinor_flag = spinor_wf
+                else:
+                    generic_source_blocked_rows.append({
+                        "kpoint": kp_name, "valley": v_name,
+                        "reason": "no per-valley standard subgroup match",
+                    })
+                    continue
 
                 # --- Load source irrep table ---
                 try:
@@ -614,6 +624,37 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                         "blocker_reasons": payload["blocker_reasons"],
                     })
 
+    # --- Build resolved canonical subgroup contexts ---
+    resolved_subspace_groups: dict[str, dict[str, dict[str, object]]] = {}
+    for v_name, match_info in per_valley_matches.items():
+        if not isinstance(match_info, dict):
+            continue
+        standard_match = match_info.get("standard_group_match")
+        if not isinstance(standard_match, dict):
+            continue
+        num = standard_match.get("number")
+        symbol = standard_match.get("international_short")
+        op_ids = standard_match.get("operation_ids", [])
+        if not (isinstance(num, int) and not isinstance(num, bool) and num > 0):
+            continue
+        resolved_ssg: dict[str, object] = {
+            "status": "resolved",
+            "candidate_space_group_number": int(num),
+            "candidate_space_group_symbol": (
+                str(symbol) if isinstance(symbol, str) and symbol else ""
+            ),
+            "valley_preserving_operation_ids": (
+                list(op_ids) if isinstance(op_ids, list) else []
+            ),
+            "source": (
+                "symmetry_analysis.valley_preserving_subgroup_report"
+                ".per_valley_standard_matches"
+            ),
+        }
+        # Resolved subgroup applies to all kpoints for this valley.
+        for kp_name in (by_kp if isinstance(by_kp, dict) else {}):
+            resolved_subspace_groups.setdefault(kp_name, {})[v_name] = resolved_ssg
+
     if src_chars and src_op_maps:
         generic_source_payloads = {
             "source_irrep_characters": src_chars,
@@ -632,6 +673,9 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             if generic_source_payloads else None
         ),
         source_payload_blocked_rows=generic_source_blocked_rows,
+        resolved_subspace_groups=(
+            resolved_subspace_groups if resolved_subspace_groups else None
+        ),
     )
 
 

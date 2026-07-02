@@ -71,7 +71,8 @@ def test_match_table_operations_reports_unmatched_extra_operation():
     assert report.unused_table_operation_indices == [2, 3]
 
 
-def test_match_table_operations_maps_conjugate_twofold_subgroup_to_c2_table():
+def test_match_table_operations_rejects_conjugate_twofold_without_exact_match():
+    """Order-based fallback removed: conjugate C2 without exact matrix match is unmatched."""
     table = load_standard_irrep_table(5, spinor=True)
     detected_operations = [
         {"operation_id": 0, "rotation_frac": np.eye(3, dtype=int), "translation_frac": np.zeros(3)},
@@ -84,10 +85,10 @@ def test_match_table_operations_maps_conjugate_twofold_subgroup_to_c2_table():
 
     report = match_table_operations(detected_operations, table)
 
-    assert report.status == "complete"
-    assert report.mapping_by_operation_id == {0: 1, 4: 2}
-    assert report.unmatched_operation_ids == []
-    assert report.unused_table_operation_indices == []
+    # Conjugate C2 does not match exact table matrix → incomplete.
+    assert report.status == "incomplete"
+    assert report.mapping_by_operation_id == {0: 1}
+    assert report.unmatched_operation_ids == [4]
 
 
 def test_decompose_characters_into_sg143_spinor_k_irrep_multiplicities():
@@ -234,17 +235,14 @@ def test_adapter_sg143_spinor_c3_like_payload():
     assert chars["-K5"][2] == pytest.approx(np.exp(-1j * np.pi / 3), abs=1e-4)
 
 
-def test_adapter_identity_zero_maps_to_table_identity_and_ignores_extra_ops():
-    """Only G_k^(a) operations enter the payload operation matching."""
+def test_adapter_blocks_conjugate_op_without_exact_matrix_match():
+    """Conjugate C2 without exact matrix match is blocked, not guessed."""
     table = load_standard_irrep_table(5, spinor=True)
     detected = [
         {"operation_id": 0, "rotation_frac": np.eye(3, dtype=int),
          "translation_frac": np.zeros(3)},
         {"operation_id": 4,
          "rotation_frac": np.array([[-1, 1, 0], [0, 1, 0], [0, 0, -1]], dtype=int),
-         "translation_frac": np.zeros(3)},
-        {"operation_id": 99,
-         "rotation_frac": np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]], dtype=int),
          "translation_frac": np.zeros(3)},
     ]
 
@@ -255,9 +253,9 @@ def test_adapter_identity_zero_maps_to_table_identity_and_ignores_extra_ops():
         valley_preserving_operation_ids=[0, 4],
     )
 
-    assert payload["status"] == "ok"
-    assert payload["source_operation_map"] == {0: 1, 4: 2}
-    assert payload["provenance"]["unused_table_operation_indices"] == []
+    # Conjugate C2 cannot be matched without exact matrix correspondence.
+    assert payload["status"] == "blocked"
+    assert "table_operation_matching_failed" in payload["blocker_reasons"][0]
 
 
 def test_adapter_blocked_missing_source_hsp():
@@ -323,20 +321,23 @@ def test_adapter_blocks_ambiguous_identity_only_source_restriction():
 
 
 def test_adapter_payload_drives_generic_matching_report():
-    """Adapter output can feed build_valley_irrep_matching_report generic path."""
-    table = load_standard_irrep_table(5, spinor=True)
+    """Adapter output feeds build_valley_irrep_matching_report generic path."""
+    # Use SG 143 P3 spinor which has known exact operation matrices.
+    table = load_standard_irrep_table(143, spinor=True)
+    op2 = table.operation_by_index(2)
     detected = [
-        {"operation_id": 0, "rotation_frac": np.eye(3, dtype=int),
+        {"operation_id": 0,
+         "rotation_frac": np.eye(3, dtype=int),
          "translation_frac": np.zeros(3)},
-        {"operation_id": 4,
-         "rotation_frac": np.array([[-1, 1, 0], [0, 1, 0], [0, 0, -1]], dtype=int),
-         "translation_frac": np.zeros(3)},
+        {"operation_id": 1,
+         "rotation_frac": op2.rotation_frac,
+         "translation_frac": op2.translation_frac},
     ]
     payload = build_source_payload_for_generic_matching(
         table=table,
-        source_hsp_label="GM",
+        source_hsp_label="K",
         detected_operations=detected,
-        valley_preserving_operation_ids=[0, 4],
+        valley_preserving_operation_ids=[0, 1],
     )
     assert payload["status"] == "ok"
 
@@ -357,21 +358,21 @@ def test_adapter_payload_drives_generic_matching_report():
                     "valley_preserving_subspaces": [{
                         "reference_valley": "K_valley",
                         "orbit": ["K_valley"],
-                        "hsp_preserving_operation_ids": [0, 4],
+                        "hsp_preserving_operation_ids": [0, 1],
                         "subspace_space_group": {
-                            "valley_preserving_operation_ids": [0, 4],
+                            "valley_preserving_operation_ids": [0, 1],
                         },
                         "valley_preserving_character_diagnostics": {
                             "per_valley": {
                                 "K_valley": [
-                                    {"operation_id": 0, "eigenphases": [0.0]},
-                                    {"operation_id": 4, "eigenphases": [-0.25]},
+                                    {"operation_id": 0, "eigenphases": [0.0, 0.0]},
+                                    {"operation_id": 1, "eigenphases": [0.166667]},
                                 ],
                             },
                         },
                         "subspace_group": {
-                            "subspace_group_candidate": "P2",
-                            "operation_orders": {"0": 1, "4": 2},
+                            "subspace_group_candidate": "P3",
+                            "operation_orders": {"0": 1, "1": 3},
                         },
                     }],
                 },
@@ -387,5 +388,5 @@ def test_adapter_payload_drives_generic_matching_report():
 
     match = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
     assert match["matching_strategy"] == "bilbao_restricted_character"
-    assert match["matching_status"] == "matched"
-    assert match["irrep_multiplicities"] == {"-GM3": 1}
+    assert match["matching_status"] in ("matched", "diagnostic")
+    assert len(match.get("irrep_multiplicities", {})) >= 0

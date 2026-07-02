@@ -38,13 +38,20 @@ def build_valley_irrep_matching_report(
         Mapping[str, Mapping[str, Mapping[str, Mapping[int, complex]]]] | None
     ) = None,
     source_payload_blocked_rows: list[Mapping[str, Any]] | None = None,
+    resolved_subspace_groups: (
+        Mapping[str, Mapping[str, Mapping[str, object]]] | None
+    ) = None,
 ) -> dict[str, object]:
     """Build per-(kpoint, valley) irrep matching results.
 
     Cross-references the workflow decision report with character diagnostics
     from the symmetry-adapted valley analysis using the generic
     ``match_restricted_characters`` strategy over ``G_k^(a)``.
-    When no generic source is available, returns ``not_evaluated``.
+
+    ``resolved_subspace_groups`` carries the canonical per-valley
+    subspace-space-group identity resolved from
+    ``per_valley_standard_matches``.  When provided, it replaces the
+    SA-report ``subspace_space_group`` (which may be unresolved).
     """
     _generic_mode = (
         source_irrep_characters_flattened is not None
@@ -91,6 +98,23 @@ def build_valley_irrep_matching_report(
                     ),
                 }
 
+    # --- Resolve canonical subgroup identity ---
+    def _canonical_ssg(
+        kp_name: str, v_name: str, sa_ssg: object,
+    ) -> dict[str, object]:
+        """Return the canonical subspace_space_group for a (kpoint, valley).
+
+        Prefers the resolved identity from per_valley_standard_matches;
+        falls back to the SA-report value.
+        """
+        if isinstance(resolved_subspace_groups, Mapping):
+            r = resolved_subspace_groups.get(kp_name, {}).get(v_name)
+            if isinstance(r, Mapping) and r:
+                return dict(r)
+        if isinstance(sa_ssg, Mapping):
+            return dict(sa_ssg)
+        return {}
+
     generic_matches: dict[str, dict[str, dict[str, object]]] = {}
 
     # --- Generic matching from flattened per-row source payloads ---
@@ -106,7 +130,8 @@ def build_valley_irrep_matching_report(
                     continue
                 sa = sa_by_kp.get(kp_name, {}).get(v_name, {})
                 sg_fl = sa.get("subspace_group", {})
-                ssg_fl = sa.get("subspace_space_group", {})
+                ssg_raw = sa.get("subspace_space_group", {})
+                ssg_fl = _canonical_ssg(kp_name, v_name, ssg_raw)
                 decision = (
                     decisions_by_kp.get(kp_name, {}).get(v_name, {})
                     if isinstance(decisions_by_kp.get(kp_name, {}), dict)
@@ -144,6 +169,37 @@ def build_valley_irrep_matching_report(
                 hsp_ids_fl = hsp_lg_fl or vp_ids_fl
                 if hsp_lg_fl:
                     vp_ids_fl = [op for op in vp_ids_fl if op in hsp_lg_fl]
+                # --- Identity-only G_k^(a) detection ---
+                if vp_ids_fl == [0]:
+                    generic_matches.setdefault(kp_name, {})[v_name] = {
+                        "matching_status": "identity_only_not_irrep_distinguishing",
+                        "matching_strategy": "bilbao_restricted_character",
+                        "irrep_multiplicities": {},
+                        "source_operation_map": {},
+                        "valley_preserving_operation_ids": [0],
+                        "hsp_little_group_operation_ids": (
+                            hsp_ids_fl if hsp_ids_fl else [0]
+                        ),
+                        "diagnostic_only": True,
+                        "reason": (
+                            "identity_only_Gka: local valley-preserving "
+                            "subgroup is identity-only and cannot "
+                            "distinguish irreps"
+                        ),
+                        "workflow_path": path_wf,
+                        "readiness_level": readiness,
+                        "subspace_group_candidate": (
+                            _generic_group_identity(sg=sg_fl, ssg=ssg_fl)
+                        ),
+                        "subspace_space_group": (
+                            dict(ssg_fl) if isinstance(ssg_fl, Mapping)
+                            else {}
+                        ),
+                        "local_representation_dimension": (
+                            len(computed_fl) if computed_fl else 1
+                        ),
+                    }
+                    continue
                 if not vp_ids_fl or not computed_fl or not isinstance(op_map, Mapping) or not op_map:
                     generic_matches.setdefault(kp_name, {})[v_name] = {
                         "matching_status": "blocked",

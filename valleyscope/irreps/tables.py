@@ -155,57 +155,7 @@ def _match_one_operation(
             continue
         if _translation_matches(translation, table_operation.translation_frac, tolerance):
             return table_operation.table_index
-    fallback = _match_single_generator_table_operation(
-        rotation=rotation,
-        translation=translation,
-        table=table,
-        tolerance=tolerance,
-    )
-    if fallback is not None:
-        return fallback
     return None
-
-
-def _match_single_generator_table_operation(
-    *,
-    rotation: np.ndarray,
-    translation: np.ndarray,
-    table: StandardIrrepTable,
-    tolerance: float,
-) -> int | None:
-    """Map conjugate one-generator subgroups to the standard table generator.
-
-    A valley subgroup such as {E, C2} can be embedded in the parent moire
-    basis along several symmetry-related axes.  The standard subgroup table has
-    the same two-element group in its conventional setting, so exact fractional
-    matrix equality is too strict but the non-identity generator is unique.
-    """
-    if len(table.operations) != 2:
-        return None
-    identity_ops = [
-        operation for operation in table.operations
-        if np.array_equal(operation.rotation_frac, np.eye(3, dtype=int))
-    ]
-    if len(identity_ops) != 1:
-        return None
-    non_identity_ops = [
-        operation for operation in table.operations
-        if operation.table_index != identity_ops[0].table_index
-    ]
-    if len(non_identity_ops) != 1:
-        return None
-    table_operation = non_identity_ops[0]
-    if not _translation_matches(translation, table_operation.translation_frac, tolerance):
-        return None
-    if np.array_equal(rotation, np.eye(3, dtype=int)):
-        return None
-    if _rotation_order(rotation) != _rotation_order(table_operation.rotation_frac):
-        return None
-    if int(round(np.linalg.det(rotation))) != int(round(np.linalg.det(table_operation.rotation_frac))):
-        return None
-    if int(np.trace(rotation)) != int(np.trace(table_operation.rotation_frac)):
-        return None
-    return table_operation.table_index
 
 
 def _rotation_order(rotation: np.ndarray, max_order: int = 12) -> int | None:
