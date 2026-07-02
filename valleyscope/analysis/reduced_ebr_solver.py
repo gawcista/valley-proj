@@ -157,10 +157,31 @@ def search_nonnegative_bounded(
     ebr_vectors: list[list[int]],
     bounds: list[int],
 ) -> list[int] | None:
-    """Exhaustive bounded search for nonnegative integer solution.
+    """Exhaustive bounded search for a nonnegative integer solution.
+
+    Returns the first solution found, or None.  For uniqueness analysis
+    use ``search_all_nonnegative_bounded``.
+    """
+    all_solutions = search_all_nonnegative_bounded(
+        target, ebr_vectors, bounds, limit=1,
+    )
+    return all_solutions[0] if all_solutions else None
+
+
+def search_all_nonnegative_bounded(
+    target: list[int],
+    ebr_vectors: list[list[int]],
+    bounds: list[int],
+    *,
+    limit: int = 100,
+) -> list[list[int]]:
+    """Exhaustive bounded search for ALL nonnegative integer solutions.
 
     Uses pruning: aborts a branch when any component of the accumulated
-    vector exceeds the target.
+    vector exceeds the target.  Stops when ``limit`` solutions are found
+    to avoid combinatorial explosion.
+
+    Returns a list of coefficient lists (each aligned with ``ebr_vectors``).
     """
     _validate_solver_inputs(target, ebr_vectors, ebr_labels=None)
     n_ebrs = len(ebr_vectors)
@@ -173,21 +194,27 @@ def search_nonnegative_bounded(
         if not isinstance(bound, int) or isinstance(bound, bool) or bound < 0:
             raise ValueError(f"bounds[{i}] must be a nonnegative integer")
 
-    def _search(idx: int, accum: list[int], coeffs: list[int]) -> list[int] | None:
+    all_solutions: list[list[int]] = []
+
+    def _search(idx: int, accum: list[int], coeffs: list[int]) -> None:
+        if len(all_solutions) >= limit:
+            return
         if idx == n_ebrs:
-            return coeffs if accum == target else None
+            if accum == target:
+                all_solutions.append(list(coeffs))
+            return
         vec = ebr_vectors[idx]
         max_c = bounds[idx]
         for c in range(max_c + 1):
             new_accum = [accum[i] + c * vec[i] for i in range(n_rows)]
             if any(new_accum[i] > target[i] for i in range(n_rows)):
                 continue
-            result = _search(idx + 1, new_accum, coeffs + [c])
-            if result is not None:
-                return result
-        return None
+            _search(idx + 1, new_accum, coeffs + [c])
+            if len(all_solutions) >= limit:
+                return
 
-    return _search(0, [0] * n_rows, [])
+    _search(0, [0] * n_rows, [])
+    return all_solutions
 
 
 def classify_bundle(
@@ -251,33 +278,92 @@ def classify_bundle(
         for b in bounds
     ]
 
-    nonneg_solution = search_nonnegative_bounded(
+    all_nonneg = search_all_nonnegative_bounded(
         target, ebr_vectors, effective_bounds,
     )
 
-    if nonneg_solution is not None:
-        result = {
-            "status": "solved_exact",
-            "classification": "atomic-compatible-candidate",
-            "integer_span_status": "in_integer_span",
-            "nonnegative_solution_status": "solved_exact",
-            "ebr_decomposition": [
+    if all_nonneg:
+        decompositions = [
+            [
                 {"label": ebr_labels[i], "coefficient": int(c)}
-                for i, c in enumerate(nonneg_solution) if c > 0
-            ],
-        }
-    else:
-        result = {
-            "status": "no_exact_solution",
-            "classification": "fragile-topology-candidate",
-            "integer_span_status": "in_integer_span",
-            "nonnegative_solution_status": "no_nonnegative_solution",
-        }
-        if integer_solution is not None:
-            result["integer_solution"] = [
-                {"label": ebr_labels[i], "coefficient": int(c)}
-                for i, c in enumerate(integer_solution) if c != 0
+                for i, c in enumerate(coeffs) if c > 0
             ]
+            for coeffs in all_nonneg
+        ]
+
+        # Uniqueness reporting.
+        if truncated:
+            uniqueness = "unknown_truncated"
+        elif len(all_nonneg) == 1:
+            uniqueness = "unique"
+        else:
+            uniqueness = "non_unique"
+
+        # When truncated and no solution found, don't claim fragile.
+        # Check if we have at least one nonnegative solution.
+        if truncated and len(all_nonneg) >= 1:
+            # Found solution(s) but search may be incomplete.
+            result = {
+                "status": "solved_exact",
+                "classification": "atomic-compatible-candidate",
+                "integer_span_status": "in_integer_span",
+                "nonnegative_solution_status": "solved_exact",
+                "decomposition_uniqueness": uniqueness,
+                "ebr_decomposition": decompositions[0],
+            }
+        elif len(all_nonneg) >= 1:
+            result = {
+                "status": "solved_exact",
+                "classification": "atomic-compatible-candidate",
+                "integer_span_status": "in_integer_span",
+                "nonnegative_solution_status": "solved_exact",
+                "decomposition_uniqueness": uniqueness,
+                "ebr_decomposition": decompositions[0],
+            }
+        else:
+            result = {
+                "status": "solved_exact",
+                "classification": "atomic-compatible-candidate",
+                "integer_span_status": "in_integer_span",
+                "nonnegative_solution_status": "solved_exact",
+                "decomposition_uniqueness": uniqueness,
+                "ebr_decomposition": decompositions[0],
+            }
+
+        # Report extra witnesses for non_unique.
+        if uniqueness == "non_unique" and len(decompositions) >= 2:
+            result["decomposition_witnesses"] = decompositions[:3]
+        elif uniqueness == "unknown_truncated" and len(decompositions) >= 2:
+            result["decomposition_witnesses"] = decompositions[:3]
+    else:
+        # No nonnegative solution found.
+        if truncated:
+            # Search incomplete — don't claim fragile or unique.
+            result = {
+                "status": "no_exact_solution",
+                "classification": "indeterminate_truncated",
+                "integer_span_status": "in_integer_span",
+                "nonnegative_solution_status": "no_nonnegative_solution_truncated",
+                "decomposition_uniqueness": "unknown_truncated",
+            }
+            if integer_solution is not None:
+                result["integer_solution"] = [
+                    {"label": ebr_labels[i], "coefficient": int(c)}
+                    for i, c in enumerate(integer_solution) if c != 0
+                ]
+        else:
+            result = {
+                "status": "no_exact_solution",
+                "classification": "fragile-topology-candidate",
+                "integer_span_status": "in_integer_span",
+                "nonnegative_solution_status": "no_nonnegative_solution",
+                "decomposition_uniqueness": "unique",
+            }
+            if integer_solution is not None:
+                result["integer_solution"] = [
+                    {"label": ebr_labels[i], "coefficient": int(c)}
+                    for i, c in enumerate(integer_solution) if c != 0
+                ]
 
     if truncated:
         result["search_status"] = "truncated_by_max_coefficient"

@@ -741,6 +741,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     if config.reduced_ebr.enabled:
         table = None
         reduced_ebr_input: dict[str, object] = {"source": "not_provided"}
+        reduced_ebr_mapping = None
         if config.reduced_ebr.table_file:
             table = load_reduced_ebr_table(config.reduced_ebr.table_file)
             reduced_ebr_input = {
@@ -762,18 +763,19 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 "data_source": provenance.get("data_source", ""),
             }
         else:
-            # --- Auto-canonical path: derive reduced EBR table from
-            # canonical irrep data without user-supplied mapping ---
-            table, reduced_ebr_input = _resolve_auto_canonical_ebr_table(
+            # --- Auto-canonical path: per-group auto tables + merged result ---
+            reduced_ebr_mapping = _build_auto_canonical_mapping(
                 ebr_export_bundle=ebr_export_bundle,
                 spinor_wf=spinor_wf,
+                max_coefficient=config.reduced_ebr.max_coefficient,
             )
-        reduced_ebr_mapping = build_reduced_ebr_mapping(
-            ebr_export_bundle=ebr_export_bundle,
-            table=table,
-            max_coefficient=config.reduced_ebr.max_coefficient,
-            reduced_ebr_input=reduced_ebr_input,
-        )
+        if reduced_ebr_mapping is None:
+            reduced_ebr_mapping = build_reduced_ebr_mapping(
+                ebr_export_bundle=ebr_export_bundle,
+                table=table,
+                max_coefficient=config.reduced_ebr.max_coefficient,
+                reduced_ebr_input=reduced_ebr_input,
+            )
 
 
 # --- Valley-projected representation report ---
@@ -2458,37 +2460,37 @@ def _warn_fixed_center_distance(
 
 
 # ---------------------------------------------------------------------------
-# Auto-canonical reduced EBR table resolution
+# Auto-canonical reduced EBR mapping (multi-group)
 # ---------------------------------------------------------------------------
 
-def _resolve_auto_canonical_ebr_table(
+def _build_auto_canonical_mapping(
     *,
     ebr_export_bundle: dict[str, object] | None,
     spinor_wf: bool,
-) -> tuple[dict[str, object] | None, dict[str, object]]:
-    """Attempt automatic canonical reduced EBR table construction.
+    max_coefficient: int = 6,
+) -> dict[str, object] | None:
+    """Build per-group auto-canonical tables and merge reduced EBR results.
 
-    Derives the reduced EBR table from the canonical irrep labels in the
-    export bundle without a user-supplied table file or spec file.
-
-    Returns (table, reduced_ebr_input).  On failure, table is None and
-    reduced_ebr_input carries the reason.
+    Groups ready bundles by compatible physical reduction signature
+    (subspace SG + ordered HSP basis), builds one auto table per group,
+    runs the solver, and merges all per-group results.  Global
+    ``solved_exact`` is only reported when every ready, canonically
+    resolvable bundle was evaluated and solved exactly.
     """
     if ebr_export_bundle is None:
-        return None, {
-            "source": "auto_canonical_blocked",
-            "reason": "no export bundle available",
-        }
+        return None
 
     bundles = ebr_export_bundle.get("bundles", [])
     if not isinstance(bundles, list) or not bundles:
-        return None, {
-            "source": "auto_canonical_blocked",
-            "reason": "no ready bundles in export",
-        }
+        return None
 
-    # Collect subspace groups from ready bundles.
-    sg_bundles: dict[int, dict[str, object]] = {}
+    # --- Group ready bundles by compatible physical signature ---
+    # Each group is keyed by (sg_number, frozenset(expected_hsps)).
+    # Only bundles with a resolved subspace SG and complete data are grouped.
+    group_keys: list[tuple[int, frozenset[str]]] = []
+    group_bundles: dict[tuple[int, frozenset[str]], list[dict[str, object]]] = {}
+    group_meta: dict[tuple[int, frozenset[str]], dict[str, object]] = {}
+
     for b in bundles:
         if not isinstance(b, dict):
             continue
@@ -2501,71 +2503,173 @@ def _resolve_auto_canonical_ebr_table(
         if not isinstance(sg_num, int) or isinstance(sg_num, bool) or sg_num <= 0:
             continue
         sg_num = int(sg_num)
-        if sg_num not in sg_bundles:
-            sg_bundles[sg_num] = b
+        irreps_by_kp = b.get("irreps_by_kpoint", {})
+        if not isinstance(irreps_by_kp, dict) or not irreps_by_kp:
+            continue
+        expected_hsps = b.get("expected_hsps", [])
+        if not isinstance(expected_hsps, list) or not expected_hsps:
+            continue
 
-    if not sg_bundles:
-        return None, {
-            "source": "auto_canonical_blocked",
-            "reason": "no bundle with resolved subspace space group number",
-        }
+        key = (sg_num, frozenset(expected_hsps))
+        if key not in group_bundles:
+            group_keys.append(key)
+            group_bundles[key] = []
+            group_meta[key] = {
+                "subspace_group_candidate": str(b.get("subspace_group_candidate", "")),
+                "subspace_space_group": (
+                    dict(ssg) if isinstance(ssg, dict) else {}
+                ),
+            }
+        group_bundles[key].append(b)
 
-    # Use the first resolved subspace group as canonical table source.
-    # Additional subspace groups would need separate tables.
-    sg_num, first_bundle = next(iter(sg_bundles.items()))
-    irreps_by_kp = first_bundle.get("irreps_by_kpoint", {})
-    if not isinstance(irreps_by_kp, dict) or not irreps_by_kp:
-        return None, {
-            "source": "auto_canonical_blocked",
-            "reason": "bundle has no irreps_by_kpoint",
-        }
-
-    expected_hsps = first_bundle.get("expected_hsps", [])
-    if not isinstance(expected_hsps, list) or not expected_hsps:
-        return None, {
-            "source": "auto_canonical_blocked",
-            "reason": "bundle has no expected_hsps",
-        }
-
-    sg_candidate = str(first_bundle.get("subspace_group_candidate", ""))
-    ssg = first_bundle.get("subspace_space_group", {})
+    if not group_bundles:
+        return None
 
     from valleyscope.analysis.irreptables_runtime_table_builder import (
         build_auto_canonical_reduced_ebr_table,
     )
+    from valleyscope.analysis.reduced_ebr_mapping import (
+        build_reduced_ebr_mapping as _solve_mapping,
+    )
 
-    try:
-        table = build_auto_canonical_reduced_ebr_table(
-            subspace_sg_number=sg_num,
-            spinor=spinor_wf,
-            bundle_irreps_by_kpoint=irreps_by_kp,
-            expected_hsps=expected_hsps,
-            subspace_group_candidate=sg_candidate,
-            subspace_space_group=ssg if isinstance(ssg, dict) else None,
-        )
-    except Exception as exc:
-        return None, {
-            "source": "auto_canonical_failed",
-            "reason": f"{type(exc).__name__}: {exc}",
-            "subspace_sg_number": sg_num,
-            "spinor": spinor_wf,
+    all_solutions: list[dict[str, object]] = []
+    all_excluded: list[dict[str, object]] = []
+    group_statuses: list[dict[str, object]] = []
+
+    for key in group_keys:
+        sg_num, hsps_frozen = key
+        meta = group_meta[key]
+        expected_hsps = sorted(hsps_frozen)
+        sg_candidate = str(meta.get("subspace_group_candidate", ""))
+        ssg = meta.get("subspace_space_group", {})
+
+        # Merge irreps_by_kpoint across all bundles in this group
+        # to capture the complete canonical label set.
+        merged_irreps: dict[str, list[str]] = {}
+        for b in group_bundles[key]:
+            ik = b.get("irreps_by_kpoint", {})
+            if isinstance(ik, dict):
+                for hsp, labels in ik.items():
+                    if isinstance(labels, list):
+                        merged_irreps.setdefault(str(hsp), []).extend(
+                            str(l) for l in labels
+                        )
+
+        try:
+            table = build_auto_canonical_reduced_ebr_table(
+                subspace_sg_number=sg_num,
+                spinor=spinor_wf,
+                bundle_irreps_by_kpoint=merged_irreps,
+                expected_hsps=expected_hsps,
+                subspace_group_candidate=sg_candidate,
+                subspace_space_group=ssg if isinstance(ssg, dict) else None,
+            )
+        except Exception as exc:
+            # Group failed: all its bundles are excluded with the reason.
+            group_statuses.append({
+                "sg_number": sg_num,
+                "expected_hsps": expected_hsps,
+                "status": "auto_canonical_failed",
+                "reason": f"{type(exc).__name__}: {exc}",
+            })
+            for b in group_bundles[key]:
+                all_excluded.append({
+                    "bundle_id": b.get("bundle_id", "?"),
+                    "subspace_group_candidate": b.get("subspace_group_candidate", ""),
+                    "subspace_space_group": b.get("subspace_space_group", {}),
+                    "reason": (
+                        f"auto-canonical table build failed for SG {sg_num}: "
+                        f"{type(exc).__name__}: {exc}"
+                    ),
+                })
+            continue
+
+        # Solve with the per-group table.
+        group_export = {"bundles": group_bundles[key]}
+        prov = table.get("provenance", {}) if isinstance(table.get("provenance"), dict) else {}
+        group_input: dict[str, object] = {
+            "source": "auto_canonical",
+            "subspace_group_candidate": table.get("subspace_group_candidate", ""),
+            "data_source": prov.get("data_source", ""),
+            "auto_canonical": True,
+            "space_group_number": prov.get("space_group_number", sg_num),
+            "spinful": prov.get("spinful", spinor_wf),
         }
 
-    provenance = table.get("provenance", {}) if isinstance(table.get("provenance"), dict) else {}
-    reduced_ebr_input: dict[str, object] = {
-        "source": "auto_canonical",
-        "subspace_group_candidate": table.get("subspace_group_candidate", ""),
-        "data_source": provenance.get("data_source", ""),
-        "auto_canonical": True,
-        "space_group_number": provenance.get("space_group_number", sg_num),
-        "spinful": provenance.get("spinful", spinor_wf),
-    }
-
-    if len(sg_bundles) > 1:
-        reduced_ebr_input["note"] = (
-            f"auto table built for SG {sg_num}; "
-            f"bundles with other subspace groups ({sorted(sg_bundles)}) "
-            f"will be excluded"
+        group_result = _solve_mapping(
+            ebr_export_bundle=group_export,
+            table=table,
+            max_coefficient=max_coefficient,
+            reduced_ebr_input=group_input,
         )
 
-    return table, reduced_ebr_input
+        all_solutions.extend(group_result.get("solutions", []))
+        all_excluded.extend(group_result.get("excluded_bundles", []))
+        group_statuses.append({
+            "sg_number": sg_num,
+            "expected_hsps": expected_hsps,
+            "status": group_result.get("mapping_status", "unknown"),
+            "bundle_count": len(group_bundles[key]),
+            "solution_count": len(group_result.get("solutions", [])),
+            "excluded_count": len(group_result.get("excluded_bundles", [])),
+        })
+
+    if not all_solutions and not all_excluded:
+        return {
+            "status": "not_evaluated",
+            "mapping_status": "not_evaluated",
+            "reduced_ebr_decomposition_status": "not_evaluated",
+            "table_status": "not_provided",
+            "solutions": [],
+            "excluded_bundles": [],
+            "solver": "smith_normal_form_plus_bounded_nonnegative_search",
+            "max_coefficient": max_coefficient,
+            "interpretation": "no bundles could be evaluated via auto-canonical path",
+            "reduced_ebr_input": {
+                "source": "auto_canonical_blocked",
+                "reason": "no bundles could be evaluated",
+            },
+            "auto_canonical_groups": group_statuses,
+        }
+
+    # Global status: solved_exact only if every group solved and no
+    # ready bundle was excluded by its own group's solver failure.
+    all_group_solved = all(
+        g["status"] == "solved_exact" for g in group_statuses
+        if g["status"] != "auto_canonical_failed"
+    )
+    any_group_failed = any(
+        g["status"] == "auto_canonical_failed" for g in group_statuses
+    )
+
+    if any_group_failed:
+        global_status = "no_exact_solution"
+    elif all_group_solved and not all_excluded:
+        global_status = "solved_exact"
+    else:
+        global_status = "no_exact_solution"
+
+    result: dict[str, object] = {
+        "status": global_status,
+        "mapping_status": global_status,
+        "reduced_ebr_decomposition_status": global_status,
+        "table_status": "loaded",
+        "solutions": all_solutions,
+        "excluded_bundles": all_excluded,
+        "solver": "smith_normal_form_plus_bounded_nonnegative_search",
+        "max_coefficient": max_coefficient,
+        "interpretation": (
+            "Exact integer linear combination of EBR vectors matching the "
+            "bundle irrep count vector.  No heuristic fit; only exact matches "
+            "are reported.  Auto-canonical tables were built per compatible "
+            "subspace-group / HSP-basis group from irreptables source data."
+        ),
+        "reduced_ebr_input": {
+            "source": "auto_canonical",
+            "auto_canonical": True,
+            "spinful": spinor_wf,
+            "group_count": len(group_bundles),
+        },
+        "auto_canonical_groups": group_statuses,
+    }
+    return result

@@ -670,9 +670,42 @@ valley_ebr_export_bundle.json           ← complete ready bundles for external 
 valley_reduced_ebr_mapping.json         ← only when analysis.reduced_ebr.enabled
 ```
 
-A standalone offline CLI performs exact-integer reduced EBR mapping from an
-existing `valley_ebr_export_bundle.json` plus a user-supplied validated
-external table:
+When `analysis.reduced_ebr.enabled` is true, ValleyScope performs exact-integer
+reduced EBR decomposition using irreptables source data.  Three input modes are
+supported, in priority order:
+
+1. **`table_file`** — a user-supplied validated external reduced EBR table
+   (JSON with `schema_version`, `subspace_group_candidate`, `expected_hsps`,
+   `irreps`, and `ebrs`).
+
+2. **`spec_file`** — a JSON mapping spec that defines `source_hsp_by_irrep`,
+   `valleyscope_irrep_multiplicity_by_source_irrep`, and the canonical
+   irreptables space-group number.  ValleyScope loads public irreptables EBR
+   data through the isolated `irreptables.ebrs.load_ebr_data` boundary and
+   performs its own sampled-HSP valley-preserving reduction.
+
+3. **Auto-canonical** (when neither `table_file` nor `spec_file` is provided) —
+   ValleyScope derives the reduced EBR table automatically from the canonical
+   irreptables irrep labels already present in the EBR export bundle.  The
+   auto-canonical path:
+   - uses the computed valley-projected subspace space group (e.g. P3/SG143),
+     never the parent moire space group (e.g. P321/SG150);
+   - derives the Bilbao→ValleyScope HSP mapping from canonical irrep labels;
+   - loads irreptables EBR data for the correct subspace group and spinor
+     convention;
+   - reduces the full 3D EBR data to the sampled HSP basis;
+   - reports exact nonnegative integer decompositions with uniqueness status
+     (unique / non_unique / unknown_truncated);
+   - handles multiple subspace groups and HSP bases as separate compatible
+     groups, never silently selecting the first bundle.
+
+All three paths produce `valley_reduced_ebr_mapping.json` with solutions,
+excluded bundles, and solver provenance.  The auto-canonical path adds
+`auto_canonical_groups` listing per-group status.  No raw 3D `irrep.ebrs`
+decomposition is exposed as a ValleyScope result.
+
+A standalone offline CLI is also available for existing export bundles plus
+a user-supplied table:
 
 ```bash
 valleyscope map-reduced-ebr \
@@ -680,10 +713,6 @@ valleyscope map-reduced-ebr \
   external_reduced_ebr_table.json \
   --output valley_reduced_ebr_mapping.json
 ```
-
-The table path is required — no built-in EBR tables are provided. The external
-table is a JSON object with `schema_version`, `subspace_group_candidate`,
-`expected_hsps`, `irreps`, and `ebrs` keys.
 
 ### Debug / Detail Outputs (debug profile only)
 
