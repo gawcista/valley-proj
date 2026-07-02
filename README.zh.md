@@ -650,18 +650,21 @@ valley_reduced_ebr_mapping.json         ← 仅在 analysis.reduced_ebr.enabled 
 3. **Auto-canonical**（当 `table_file` 和 `spec_file` 均未提供时）—
    ValleyScope 直接从 EBR export bundle 中已有的 canonical irreptables irrep
    标签自动推导 reduced EBR 表。自动路径：
+   - 独立处理每个 ready bundle；
    - 使用计算得到的 valley-projected 子空间群（如 P3/SG143），而非母体 moire
      空间群（如 P321/SG150）；
-   - 从 canonical irrep 标签推导 Bilbao→ValleyScope HSP 映射；
-   - 以正确的子空间群和旋量约定加载 irreptables EBR 数据；
-   - 将完整 3D EBR 数据降维到已采样的 HSP 基；
-   - 报告精确非负整数分解及其唯一性状态（unique / non_unique /
-     unknown_truncated）；
-   - 将多个子空间群和 HSP 基作为独立兼容组处理，不会静默选择第一个 bundle。
+   - 从经过 `StandardIrrepTable` 校验的 canonical irrep 标签推导精确的
+     Bilbao→ValleyScope HSP 映射；
+   - 提取每个 irreptables EBR 基标签的 canonical k-vector token，仅保留
+     token 与已采样的 canonical Bilbao HSP 完全匹配的行；丢弃的行记录在
+     provenance 中；
+   - 报告精确非负整数分解及其分解唯一性（`unique` / `non_unique` /
+     `unknown_truncated`）；
+   - 区分源/约定失效（`blocked`）与完整的物理无解结果
+     （`no_exact_solution`）。
 
 三种路径均生成 `valley_reduced_ebr_mapping.json`，包含 solutions、excluded
-bundles 和 solver provenance。自动路径额外添加 `auto_canonical_groups` 列出
-每组状态。不将原始 3D `irrep.ebrs` 分解暴露为 ValleyScope 结果。
+bundles、solver provenance 和 per-bundle 状态条目。
 
 独立的离线 CLI 也可用于已有的 export bundle 加用户提供的表：
 

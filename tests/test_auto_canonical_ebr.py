@@ -33,7 +33,8 @@ def test_auto_canonical_mapping_returns_none_for_empty_bundles():
     assert result is None
 
 
-def test_auto_canonical_mapping_returns_none_for_no_subspace_sg():
+def test_malformed_ready_bundle_is_excluded():
+    """Missing subspace SG in ready bundle → excluded, not silent drop."""
     result = _build_auto_canonical_mapping(
         ebr_export_bundle={
             "bundles": [{
@@ -46,10 +47,14 @@ def test_auto_canonical_mapping_returns_none_for_no_subspace_sg():
         },
         spinor_wf=True,
     )
-    assert result is None
+    # Missing subspace SG → excluded.
+    assert result is not None
+    assert len(result["excluded_bundles"]) == 1
+    assert "subspace_space_group" in result["excluded_bundles"][0]["reason"]
 
 
-def test_auto_canonical_mapping_returns_none_for_no_irreps_by_kpoint():
+def test_missing_irreps_ready_bundle_is_excluded():
+    """Missing irreps_by_kpoint in ready bundle → excluded."""
     result = _build_auto_canonical_mapping(
         ebr_export_bundle={
             "bundles": [{
@@ -66,7 +71,9 @@ def test_auto_canonical_mapping_returns_none_for_no_irreps_by_kpoint():
         },
         spinor_wf=True,
     )
-    assert result is None
+    assert result is not None
+    assert len(result["excluded_bundles"]) == 1
+    assert "irreps_by_kpoint" in result["excluded_bundles"][0]["reason"]
 
 
 # -----------------------------------------------------------------------
@@ -502,12 +509,12 @@ def test_unknown_bundle_label_blocks():
 
 
 def test_unknown_ebr_basis_label_blocks():
-    """An unknown EBR source-basis label blocks the table."""
+    """A label with no k-vector token blocks the table."""
     from valleyscope.analysis.irreptables_runtime_table_builder import (
         build_auto_canonical_reduced_ebr_table,
     )
 
-    with pytest.raises(ValueError, match="could not be resolved to a Bilbao kpoint"):
+    with pytest.raises(ValueError, match="no k-vector token"):
         build_auto_canonical_reduced_ebr_table(
             subspace_sg_number=75,
             spinor=True,
@@ -515,7 +522,7 @@ def test_unknown_ebr_basis_label_blocks():
             expected_hsps=["GammaM"],
             subspace_group_candidate="P4",
             source_loader=lambda sg, spin: {
-                "basis": {"irrep_labels": ["-GM5", "-UNKNOWN99"]},
+                "basis": {"irrep_labels": ["-GM5", "999"]},
                 "ebrs": [
                     {"ebr_name": "EBR_A", "vector": [1, 0]},
                 ],
@@ -523,14 +530,14 @@ def test_unknown_ebr_basis_label_blocks():
         )
 
 
-def test_unsampled_hsp_labels_in_provenance():
-    """Known labels at genuinely unsampled HSPs are tracked in provenance."""
+def test_dropped_source_rows_in_provenance():
+    """Non-sampled k-vector source rows are tracked in provenance."""
     from valleyscope.analysis.irreptables_runtime_table_builder import (
         build_auto_canonical_reduced_ebr_table,
     )
 
-    # Bundle only declares GammaM labels.  X labels exist in the EBR
-    # data at an unsampled HSP (XM not in expected_hsps).
+    # Bundle only declares GammaM labels → only GM is a sampled Bilbao HSP.
+    # X labels in EBR data have k-vector token X, which is not sampled.
     table = build_auto_canonical_reduced_ebr_table(
         subspace_sg_number=75,
         spinor=True,
@@ -541,13 +548,14 @@ def test_unsampled_hsp_labels_in_provenance():
     )
 
     prov = table.get("provenance", {})
-    unsampled = prov.get("unsampled_hsp_labels", [])
-    # X labels should appear as unsampled (Bilbao X maps to no ValleyScope HSP).
-    assert len(unsampled) > 0, "unsampled HSP labels must be tracked"
-    assert any("Bilbao X" in u for u in unsampled), (
-        f"unsampled labels should mention Bilbao X: {unsampled}"
+    dropped = prov.get("dropped_source_rows", [])
+    assert len(dropped) > 0, "dropped source rows must be tracked"
+    assert any("token=X" in d for d in dropped), (
+        f"dropped rows should mention token=X: {dropped}"
     )
-    assert prov.get("unsampled_hsp_count", 0) == len(unsampled)
+    assert prov.get("dropped_source_row_count", 0) == len(dropped)
+    # Sampled Bilbao HSPs are documented.
+    assert "GM" in prov.get("sampled_bilbao_hsps", [])
 
 
 def test_conflicting_duplicate_label_hsp_raises():
@@ -601,7 +609,7 @@ def test_auto_canonical_blocks_when_no_labels_map_to_expected_hsps():
         build_auto_canonical_reduced_ebr_table,
     )
 
-    with pytest.raises(ValueError, match="no irreptables EBR basis labels map"):
+    with pytest.raises(ValueError, match="no EBR basis labels retained"):
         build_auto_canonical_reduced_ebr_table(
             subspace_sg_number=75,
             spinor=True,
@@ -709,13 +717,11 @@ def test_auto_canonical_non_unique_reports_witnesses():
     )
 
 
-def test_truncated_search_reports_unknown_uniqueness():
-    """Truncated search reports unknown_truncated, not fragile or unique."""
+def test_truncated_no_witness_is_indeterminate():
+    """Truncated search with no witness → indeterminate_truncated, no uniqueness."""
     from valleyscope.analysis.reduced_ebr_solver import classify_bundle
 
-    # [100] = 100 × [1] is in integer span, but max_coefficient=0
-    # truncates the search to coefficient 0, so no nonnegative solution
-    # is found within the truncated bound.
+    # [100] = 100 × [1], but max_coefficient=0 truncates search.
     target = [100]
     ebr_vectors = [[1]]
     ebr_labels = ["EBR_unit"]
@@ -724,28 +730,40 @@ def test_truncated_search_reports_unknown_uniqueness():
 
     assert result["integer_span_status"] == "in_integer_span"
     assert result["classification"] == "indeterminate_truncated"
-    assert result["decomposition_uniqueness"] == "unknown_truncated"
+    assert "decomposition_uniqueness" not in result  # no witness → no uniqueness
     assert "search_status" in result
-    # Must not claim fragile.
-    assert result["classification"] != "fragile-topology-candidate"
 
 
-def test_truncated_search_finds_solution_reports_unknown():
-    """Truncated search that finds solutions still reports unknown_truncated."""
+def test_truncated_one_witness_reports_unknown():
+    """One witness with truncated search → unknown_truncated."""
     from valleyscope.analysis.reduced_ebr_solver import classify_bundle
 
+    # [2] with [1], [1]: physical bounds [2,2], max_coefficient=1.
+    # Only [1,1] found; search truncated → unknown_truncated.
     target = [2]
-    ebr_vectors = [[1], [1]]  # can decompose with 2 = 2*EBR0 or 2*EBR1
+    ebr_vectors = [[1], [1]]
     ebr_labels = ["EBR_A", "EBR_B"]
 
-    # max_coefficient=2 is sufficient but physical bound is also 2.
-    # Use a case where max_coefficient is small enough.
-    result = classify_bundle(target, ebr_vectors, ebr_labels, max_coefficient=5)
+    result = classify_bundle(target, ebr_vectors, ebr_labels, max_coefficient=1)
 
     assert result["integer_span_status"] == "in_integer_span"
-    assert result["classification"] == "atomic-compatible-candidate"
+    assert result["decomposition_uniqueness"] == "unknown_truncated"
+    assert "search_status" in result
+
+
+def test_truncated_two_witnesses_still_non_unique():
+    """Two witnesses → non_unique even when search is truncated."""
+    from valleyscope.analysis.reduced_ebr_solver import classify_bundle
+
+    # [10] = 10 × [1] or 5 × [2], physical bound=10/5, max_coefficient=5.
+    target = [10]
+    ebr_vectors = [[1], [2]]
+    ebr_labels = ["EBR_A", "EBR_B"]
+
+    result = classify_bundle(target, ebr_vectors, ebr_labels, max_coefficient=5)
+
+    # Two witnesses exist, so non_unique even though physical bounds > max.
     assert result["decomposition_uniqueness"] == "non_unique"
-    assert len(result.get("decomposition_witnesses", [])) >= 2
 
 
 # -----------------------------------------------------------------------
@@ -904,11 +922,11 @@ def test_irrep_key_regex_accepts_minus_letter_label():
 
 
 # -----------------------------------------------------------------------
-# Multi-group auto-canonical (Finding 1)
+# Per-bundle auto-canonical (Findings 1, 2)
 # -----------------------------------------------------------------------
 
-def test_two_bundles_same_sg_same_hsp_share_table():
-    """Two ready bundles with same SG and HSP basis share one auto table."""
+def test_two_bundles_same_sg_both_solved():
+    """Two ready bundles, both solved → global solved_exact."""
     result = _build_auto_canonical_mapping(
         ebr_export_bundle={
             "bundles": [
@@ -941,21 +959,22 @@ def test_two_bundles_same_sg_same_hsp_share_table():
         spinor_wf=True,
     )
     assert result is not None
-    assert result["reduced_ebr_input"]["source"] == "auto_canonical"
-    # One group, both bundles evaluated.
-    groups = result.get("auto_canonical_groups", [])
-    assert len(groups) == 1
-    assert groups[0]["bundle_count"] == 2
+    # Per-bundle processing: both solved.
     assert result["mapping_status"] == "solved_exact"
+    assert result["reduced_ebr_input"]["ready_bundle_count"] == 2
+    assert len(result.get("auto_canonical_bundles", [])) == 2
+    assert len(result["solutions"]) == 2
+    assert len(result["excluded_bundles"]) == 0
 
 
-def test_two_bundles_different_sg_separate_groups():
-    """Two bundles with different subspace SGs form separate table groups."""
+def test_valid_plus_malformed_ready_not_solved():
+    """One valid + one malformed ready bundle → global not solved_exact,
+    counts reconcile."""
     result = _build_auto_canonical_mapping(
         ebr_export_bundle={
             "bundles": [
                 {
-                    "bundle_id": "b_p4", "valley": "K_valley",
+                    "bundle_id": "b_ok", "valley": "K_valley",
                     "subspace_group_candidate": "P4",
                     "subspace_space_group": {
                         "status": "resolved",
@@ -967,30 +986,73 @@ def test_two_bundles_different_sg_separate_groups():
                     "irreps_by_kpoint": {"GammaM": ["-GM5"]},
                 },
                 {
-                    "bundle_id": "b_p3", "valley": "K_valley",
-                    "subspace_group_candidate": "P3",
-                    "subspace_space_group": {
-                        "status": "resolved",
-                        "candidate_space_group_number": 143,
-                        "candidate_space_group_symbol": "P3",
-                    },
+                    "bundle_id": "b_malformed",
+                    "subspace_group_candidate": "XX",
                     "ready_for_external_solver": True,
-                    "expected_hsps": ["GammaM"],
-                    "irreps_by_kpoint": {"GammaM": ["-GM4"]},
                 },
             ],
         },
         spinor_wf=True,
     )
     assert result is not None
-    groups = result.get("auto_canonical_groups", [])
-    assert len(groups) == 2, f"expected 2 groups, got {groups}"
-    sg_nums = {g["sg_number"] for g in groups}
-    assert sg_nums == {75, 143}
+    assert result["mapping_status"] != "solved_exact"
+    # b_ok is solved, b_malformed excluded.
+    assert len(result["solutions"]) == 1
+    assert len(result["excluded_bundles"]) == 1
+    assert any("b_malformed" in str(e.get("bundle_id", "")) for e in result["excluded_bundles"])
 
 
-def test_same_sg_incompatible_hsp_bases_separate_groups():
-    """Same SG but different HSP bases form separate groups."""
+def test_non_ready_bundle_excluded_ready_still_valid():
+    """Non-ready bundle excluded, ready bundle solution still valid."""
+    result = _build_auto_canonical_mapping(
+        ebr_export_bundle={
+            "bundles": [
+                {
+                    "bundle_id": "b_ready", "valley": "K_valley",
+                    "subspace_group_candidate": "P4",
+                    "subspace_space_group": {
+                        "status": "resolved",
+                        "candidate_space_group_number": 75,
+                        "candidate_space_group_symbol": "P4",
+                    },
+                    "ready_for_external_solver": True,
+                    "expected_hsps": ["GammaM"],
+                    "irreps_by_kpoint": {"GammaM": ["-GM5"]},
+                },
+                {
+                    "bundle_id": "b_not_ready",
+                    "ready_for_external_solver": False,
+                },
+            ],
+        },
+        spinor_wf=True,
+    )
+    assert result is not None
+    assert result["mapping_status"] == "solved_exact"
+    assert len(result["solutions"]) == 1
+    assert len(result["excluded_bundles"]) == 1
+    assert any("b_not_ready" in str(e.get("bundle_id", "")) for e in result["excluded_bundles"])
+
+
+def test_no_buildable_bundle_auto_blocked():
+    """No buildable ready bundle → explicit auto-canonical blocked result."""
+    result = _build_auto_canonical_mapping(
+        ebr_export_bundle={
+            "bundles": [{
+                "bundle_id": "b_bad",
+                "ready_for_external_solver": True,
+                "subspace_group_candidate": "P3",
+            }],
+        },
+        spinor_wf=True,
+    )
+    assert result is not None
+    assert result["status"] == "blocked"
+    assert result["mapping_status"] == "blocked"
+
+
+def test_same_sg_diff_hsp_processed_independently():
+    """Same SG, different HSP bases → processed independently."""
     result = _build_auto_canonical_mapping(
         ebr_export_bundle={
             "bundles": [
@@ -1007,7 +1069,7 @@ def test_same_sg_incompatible_hsp_bases_separate_groups():
                     "irreps_by_kpoint": {"GammaM": ["-GM5"]},
                 },
                 {
-                    "bundle_id": "b_gm_xm", "valley": "K_valley",
+                    "bundle_id": "b_gm_xm", "valley": "Kp_valley",
                     "subspace_group_candidate": "P4",
                     "subspace_space_group": {
                         "status": "resolved",
@@ -1026,53 +1088,35 @@ def test_same_sg_incompatible_hsp_bases_separate_groups():
         spinor_wf=True,
     )
     assert result is not None
-    groups = result.get("auto_canonical_groups", [])
-    assert len(groups) == 2, f"incompatible HSP bases must form separate groups"
+    # Both processed independently; each gets its own table.
+    assert len(result.get("auto_canonical_bundles", [])) == 2
 
 
-def test_failed_group_preserves_global_status():
-    """A failed group prevents global solved_exact."""
-    # This bundle has an invalid SG number that will fail to load.
+def test_source_failure_never_called_physical():
+    """Source/convention failure → blocked, never stable/fragile."""
+    # SG 9999 will fail to build a table.
     result = _build_auto_canonical_mapping(
         ebr_export_bundle={
-            "bundles": [
-                {
-                    "bundle_id": "b_ok", "valley": "K_valley",
-                    "subspace_group_candidate": "P4",
-                    "subspace_space_group": {
-                        "status": "resolved",
-                        "candidate_space_group_number": 75,
-                        "candidate_space_group_symbol": "P4",
-                    },
-                    "ready_for_external_solver": True,
-                    "expected_hsps": ["GammaM"],
-                    "irreps_by_kpoint": {"GammaM": ["-GM5"]},
+            "bundles": [{
+                "bundle_id": "b_bad",
+                "subspace_group_candidate": "XX",
+                "subspace_space_group": {
+                    "status": "resolved",
+                    "candidate_space_group_number": 9999,
                 },
-                {
-                    "bundle_id": "b_bad", "valley": "Kp_valley",
-                    "subspace_group_candidate": "P3",
-                    "subspace_space_group": {
-                        "status": "resolved",
-                        "candidate_space_group_number": 9999,
-                        "candidate_space_group_symbol": "XX",
-                    },
-                    "ready_for_external_solver": True,
-                    "expected_hsps": ["GammaM"],
-                    "irreps_by_kpoint": {"GammaM": ["-GM4"]},
-                },
-            ],
+                "ready_for_external_solver": True,
+                "expected_hsps": ["GammaM"],
+                "irreps_by_kpoint": {"GammaM": ["-GM4"]},
+            }],
         },
         spinor_wf=True,
     )
     assert result is not None
-    # One group succeeded, one failed.
-    groups = result.get("auto_canonical_groups", [])
-    assert any(g["status"] == "auto_canonical_failed" for g in groups)
-    # Global status must NOT be solved_exact when a group failed.
     assert result["mapping_status"] != "solved_exact"
-    # The failed group's bundles are in excluded.
-    excluded = result.get("excluded_bundles", [])
-    assert any("b_bad" in str(e.get("bundle_id", "")) for e in excluded)
+    assert result["mapping_status"] != "no_exact_solution"
+    # Source failure → blocked, not a physical classification.
+    bundles = result.get("auto_canonical_bundles", [])
+    assert any(b["status"] == "blocked" for b in bundles)
 
 
 # -----------------------------------------------------------------------

@@ -377,6 +377,26 @@ def _package_version(package_name: str) -> str | None:
 # Auto-canonical EBR table builder
 # ---------------------------------------------------------------------------
 
+def _extract_kvector_token(label: str) -> str:
+    """Extract the canonical k-vector token from an irreptables label.
+
+    Strips an optional leading ``-`` (spinor convention) then takes all
+    leading ASCII letters as the k-vector token.  Examples: ``-GM4`` →
+    ``GM``, ``-KA4`` → ``KA``, ``WA1`` → ``WA``, ``-HA4`` → ``HA``.
+
+    This is a pure string extraction; it does not consult the
+    ``StandardIrrepTable``, infer endpoints, or decompose composite names.
+    """
+    stripped = label[1:] if label.startswith("-") else label
+    token: list[str] = []
+    for ch in stripped:
+        if ch.isascii() and ch.isalpha():
+            token.append(ch)
+        else:
+            break
+    return "".join(token)
+
+
 def build_auto_canonical_reduced_ebr_table(
     *,
     subspace_sg_number: int,
@@ -432,15 +452,12 @@ def build_auto_canonical_reduced_ebr_table(
     if not expected_hsps:
         raise ValueError("expected_hsps must be non-empty")
 
-    # --- 1. Load irreptables irrep table to build label → Bilbao kpoint ---
+    # --- 1. Load StandardIrrepTable; validate canonical bundle labels ---
     irrep_table = load_standard_irrep_table(subspace_sg_number, spinor=spinor)
     label_to_bilbao_kp: dict[str, str] = {}
-    bilbao_kp_set: set[str] = set()
     for irrep in irrep_table.irreps:
         label_to_bilbao_kp[irrep.label] = irrep.kpoint_label
-        bilbao_kp_set.add(irrep.kpoint_label)
 
-    # --- 2a. Validate every canonical bundle label resolves ---
     unresolved_bundle_labels: list[str] = []
     for vs_hsp, labels in bundle_irreps_by_kpoint.items():
         if not isinstance(labels, Sequence) or isinstance(labels, (str, bytes)):
@@ -458,7 +475,7 @@ def build_auto_canonical_reduced_ebr_table(
             f"{unresolved_bundle_labels}"
         )
 
-    # --- 2b. Build Bilbao kpoint → ValleyScope HSP from canonical data ---
+    # --- 2. Build Bilbao kpoint → ValleyScope HSP mapping ---
     bilbao_to_valleyscope: dict[str, str] = {}
     for vs_hsp, labels in bundle_irreps_by_kpoint.items():
         if not isinstance(labels, Sequence) or isinstance(labels, (str, bytes)):
@@ -482,7 +499,10 @@ def build_auto_canonical_reduced_ebr_table(
             "canonical irrep labels"
         )
 
-    # --- 3. Load irreptables EBR data (once, cached for downstream) ---
+    # Canonical Bilbao HSPs present in this bundle.
+    sampled_bilbao_hsps: set[str] = set(bilbao_to_valleyscope.keys())
+
+    # --- 3. Load irreptables EBR data ---
     loader = source_loader or _load_ebr_data_from_irreptables
     try:
         ebr_data = loader(subspace_sg_number, spinor)
@@ -497,94 +517,60 @@ def build_auto_canonical_reduced_ebr_table(
 
     ebr_basis_labels = _extract_ebr_basis_labels(ebr_data)
 
-    # Wrap loader so downstream build_reduced_table_from_irreptables
-    # reuses the already-loaded data.
     def _cached_loader(_sg: int | str, _spin: bool) -> Mapping[str, object]:
         return ebr_data
 
-    # --- 4a. Validate and derive source_hsp_by_irrep ---
-    # Every EBR basis label must resolve to a known Bilbao kpoint.
-    # Labels from the IrrepTable resolve directly.  Compatibility labels
-    # (e.g. -HA4, -KA4) that only appear in the EBR data are resolved
-    # by matching the longest known kpoint prefix.
+    # --- 4. Reduce EBR basis by exact k-vector token match ---
+    # Each EBR basis label carries a canonical k-vector token.
+    # Retain only rows whose token exactly equals a sampled canonical
+    # Bilbao HSP; drop all others with provenance.
+    dropped_source_rows: list[str] = []
     unresolved_ebr_labels: list[str] = []
-    unsampled_hsp_labels: list[str] = []
-    source_hsp_by_irrep: dict[str, str] = {}
+    retained_labels: list[str] = []
+    hsps_set = set(expected_hsps)
 
-    kpoint_labels_sorted = sorted(bilbao_kp_set, key=len, reverse=True)
-
-    def _resolve_ebr_bilbao_kp(label: str) -> str | None:
-        """Resolve a Bilbao kpoint for an EBR basis label.
-
-        Labels known to the IrrepTable resolve directly.  Unknown labels
-        are matched against the longest known kpoint prefix.
-
-        Returns the kpoint string, or ``None`` if the label cannot be
-        resolved at all (no known kpoint prefix match).
-        """
-        if label in label_to_bilbao_kp:
-            return label_to_bilbao_kp[label]
-        stripped = label[1:] if label.startswith("-") else label
-        for kp in kpoint_labels_sorted:
-            if stripped.startswith(kp):
-                return kp
-        return None
-
-    def _is_compatibility_label(label: str, bilbao_kp: str) -> bool:
-        """Check whether an EBR label is a compatibility (composite) label.
-
-        A compatibility label like ``-KA4`` bridges two kpoints (K and A).
-        After stripping the matched kpoint prefix, the remainder starts
-        with another known kpoint label.
-        """
-        if label in label_to_bilbao_kp:
-            return False  # known to IrrepTable — trusted
-        stripped = label[1:] if label.startswith("-") else label
-        remainder = stripped[len(bilbao_kp):]
-        for kp2 in kpoint_labels_sorted:
-            if kp2 != bilbao_kp and remainder.startswith(kp2):
-                return True
-        return False
-
-    compatibility_labels: list[str] = []
     for label in ebr_basis_labels:
-        bilbao_kp = _resolve_ebr_bilbao_kp(label)
-        if bilbao_kp is None:
+        token = _extract_kvector_token(label)
+        if not token:
             unresolved_ebr_labels.append(label)
             continue
-        if _is_compatibility_label(label, bilbao_kp):
-            # Composite label bridging two kpoints (e.g. K↔A).
-            # Map to a composite HSP name so it is filtered out.
-            compatibility_labels.append(label)
-            source_hsp_by_irrep[label] = f"_{bilbao_kp}_compat"
-            continue
-        if bilbao_kp in bilbao_to_valleyscope:
-            source_hsp_by_irrep[label] = bilbao_to_valleyscope[bilbao_kp]
+        if token in sampled_bilbao_hsps:
+            retained_labels.append(label)
         else:
-            source_hsp_by_irrep[label] = bilbao_kp
-            unsampled_hsp_labels.append(f"{label} (Bilbao {bilbao_kp})")
+            dropped_source_rows.append(f"{label} (token={token})")
 
     if unresolved_ebr_labels:
         raise ValueError(
-            "EBR basis labels could not be resolved to a Bilbao kpoint "
-            f"for SG {subspace_sg_number} spinor={spinor}: "
+            "EBR basis labels with no k-vector token for "
+            f"SG {subspace_sg_number} spinor={spinor}: "
             f"{unresolved_ebr_labels}"
         )
 
-    # --- 4b. Auto-derive valleyscope_irrep_multiplicity_by_source_irrep ---
-    hsps_set = set(expected_hsps)
-    valleyscope_irrep_multiplicity_by_source_irrep: dict[str, dict[str, int]] = {}
+    # --- 5. Auto-derive source mappings ---
+    source_hsp_by_irrep: dict[str, str] = {}
+    for label in retained_labels:
+        token = _extract_kvector_token(label)
+        source_hsp_by_irrep[label] = bilbao_to_valleyscope[token]
+
+    source_hsp_by_irrep_full = dict(source_hsp_by_irrep)
     for label in ebr_basis_labels:
-        bilbao_kp = _resolve_ebr_bilbao_kp(label)
-        vs_hsp = bilbao_to_valleyscope.get(bilbao_kp) if bilbao_kp else None
-        if vs_hsp and vs_hsp in hsps_set:
+        if label not in source_hsp_by_irrep_full:
+            token = _extract_kvector_token(label)
+            # Dropped row: assign a non-sampled HSP so the normalizer
+            # filters it during reduction.
+            source_hsp_by_irrep_full[label] = f"_{token}" if token else f"_dropped_{label}"
+
+    valleyscope_irrep_multiplicity_by_source_irrep: dict[str, dict[str, int]] = {}
+    for label in retained_labels:
+        vs_hsp = source_hsp_by_irrep[label]
+        if vs_hsp in hsps_set:
             valleyscope_irrep_multiplicity_by_source_irrep[label] = {
                 f"{vs_hsp}:{label}": 1
             }
 
-    # --- 4c. Build allowed_irrep_keys: all irrep keys at sampled HSPs ---
+    # Allowed irrep keys: all retained labels at sampled HSPs.
     allowed_irrep_keys: list[str] = []
-    for label in ebr_basis_labels:
+    for label in retained_labels:
         vs_hsp = source_hsp_by_irrep.get(label, "")
         if vs_hsp in hsps_set:
             key = f"{vs_hsp}:{label}"
@@ -593,11 +579,11 @@ def build_auto_canonical_reduced_ebr_table(
 
     if not allowed_irrep_keys:
         raise ValueError(
-            "no irreptables EBR basis labels map to expected_hsps "
+            "no EBR basis labels retained for sampled HSPs "
             f"{sorted(hsps_set)}"
         )
 
-    # --- 5. Build provenance ---
+    # --- 6. Build provenance ---
     provenance: dict[str, object] = {
         "data_source": "irreptables",
         "package": "irreptables",
@@ -609,20 +595,18 @@ def build_auto_canonical_reduced_ebr_table(
         "valleyscope_reduction": "sampled_hsp_valley_preserving",
         "auto_canonical": True,
         "bilbao_to_valleyscope_hsp": dict(bilbao_to_valleyscope),
+        "sampled_bilbao_hsps": sorted(sampled_bilbao_hsps),
     }
-    if unsampled_hsp_labels:
-        provenance["unsampled_hsp_labels"] = unsampled_hsp_labels
-        provenance["unsampled_hsp_count"] = len(unsampled_hsp_labels)
-    if compatibility_labels:
-        provenance["compatibility_labels"] = compatibility_labels
-        provenance["compatibility_label_count"] = len(compatibility_labels)
+    if dropped_source_rows:
+        provenance["dropped_source_rows"] = dropped_source_rows
+        provenance["dropped_source_row_count"] = len(dropped_source_rows)
 
-    # --- 6. Build reduced table ---
+    # --- 7. Build reduced table ---
     table = build_reduced_table_from_irreptables(
         space_group_number=subspace_sg_number,
         spinful=spinor,
         source_loader=_cached_loader,
-        source_hsp_by_irrep=source_hsp_by_irrep,
+        source_hsp_by_irrep=source_hsp_by_irrep_full,
         valleyscope_irrep_multiplicity_by_source_irrep=(
             valleyscope_irrep_multiplicity_by_source_irrep
         ),

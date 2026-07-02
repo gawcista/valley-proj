@@ -688,21 +688,21 @@ supported, in priority order:
    ValleyScope derives the reduced EBR table automatically from the canonical
    irreptables irrep labels already present in the EBR export bundle.  The
    auto-canonical path:
+   - processes each ready bundle independently;
    - uses the computed valley-projected subspace space group (e.g. P3/SG143),
      never the parent moire space group (e.g. P321/SG150);
-   - derives the Bilbao→ValleyScope HSP mapping from canonical irrep labels;
-   - loads irreptables EBR data for the correct subspace group and spinor
-     convention;
-   - reduces the full 3D EBR data to the sampled HSP basis;
-   - reports exact nonnegative integer decompositions with uniqueness status
-     (unique / non_unique / unknown_truncated);
-   - handles multiple subspace groups and HSP bases as separate compatible
-     groups, never silently selecting the first bundle.
+   - derives the exact Bilbao→ValleyScope HSP mapping from canonical irrep
+     labels validated against the `StandardIrrepTable`;
+   - extracts the canonical k-vector token from every irreptables EBR basis
+     label and retains only rows whose token exactly matches a sampled
+     canonical Bilbao HSP; dropped rows are recorded with provenance;
+   - reports exact nonnegative integer decompositions with decomposition
+     uniqueness (`unique` / `non_unique` / `unknown_truncated`);
+   - distinguishes source/convention failures (`blocked`) from completed
+     physical no-solution results (`no_exact_solution`).
 
 All three paths produce `valley_reduced_ebr_mapping.json` with solutions,
-excluded bundles, and solver provenance.  The auto-canonical path adds
-`auto_canonical_groups` listing per-group status.  No raw 3D `irrep.ebrs`
-decomposition is exposed as a ValleyScope result.
+excluded bundles, solver provenance, and per-bundle status entries.
 
 A standalone offline CLI is also available for existing export bundles plus
 a user-supplied table:

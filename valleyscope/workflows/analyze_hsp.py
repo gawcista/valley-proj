@@ -2460,7 +2460,7 @@ def _warn_fixed_center_distance(
 
 
 # ---------------------------------------------------------------------------
-# Auto-canonical reduced EBR mapping (multi-group)
+# Auto-canonical reduced EBR mapping (per-bundle processing)
 # ---------------------------------------------------------------------------
 
 def _build_auto_canonical_mapping(
@@ -2469,60 +2469,19 @@ def _build_auto_canonical_mapping(
     spinor_wf: bool,
     max_coefficient: int = 6,
 ) -> dict[str, object] | None:
-    """Build per-group auto-canonical tables and merge reduced EBR results.
+    """Build auto-canonical tables and solve reduced EBR per ready bundle.
 
-    Groups ready bundles by compatible physical reduction signature
-    (subspace SG + ordered HSP basis), builds one auto table per group,
-    runs the solver, and merges all per-group results.  Global
-    ``solved_exact`` is only reported when every ready, canonically
-    resolvable bundle was evaluated and solved exactly.
+    Each ready bundle is processed independently: its exact Bilbao→ValleyScope
+    HSP mapping is derived, a reduced table built, and the solver run.
+    Every input bundle must appear exactly once in the combined results
+    (solution or excluded).  Global ``solved_exact`` requires every ready
+    bundle to have an exact nonnegative witness.
     """
     if ebr_export_bundle is None:
         return None
 
     bundles = ebr_export_bundle.get("bundles", [])
     if not isinstance(bundles, list) or not bundles:
-        return None
-
-    # --- Group ready bundles by compatible physical signature ---
-    # Each group is keyed by (sg_number, frozenset(expected_hsps)).
-    # Only bundles with a resolved subspace SG and complete data are grouped.
-    group_keys: list[tuple[int, frozenset[str]]] = []
-    group_bundles: dict[tuple[int, frozenset[str]], list[dict[str, object]]] = {}
-    group_meta: dict[tuple[int, frozenset[str]], dict[str, object]] = {}
-
-    for b in bundles:
-        if not isinstance(b, dict):
-            continue
-        if not b.get("ready_for_external_solver"):
-            continue
-        ssg = b.get("subspace_space_group", {})
-        if not isinstance(ssg, dict):
-            continue
-        sg_num = ssg.get("candidate_space_group_number")
-        if not isinstance(sg_num, int) or isinstance(sg_num, bool) or sg_num <= 0:
-            continue
-        sg_num = int(sg_num)
-        irreps_by_kp = b.get("irreps_by_kpoint", {})
-        if not isinstance(irreps_by_kp, dict) or not irreps_by_kp:
-            continue
-        expected_hsps = b.get("expected_hsps", [])
-        if not isinstance(expected_hsps, list) or not expected_hsps:
-            continue
-
-        key = (sg_num, frozenset(expected_hsps))
-        if key not in group_bundles:
-            group_keys.append(key)
-            group_bundles[key] = []
-            group_meta[key] = {
-                "subspace_group_candidate": str(b.get("subspace_group_candidate", "")),
-                "subspace_space_group": (
-                    dict(ssg) if isinstance(ssg, dict) else {}
-                ),
-            }
-        group_bundles[key].append(b)
-
-    if not group_bundles:
         return None
 
     from valleyscope.analysis.irreptables_runtime_table_builder import (
@@ -2534,60 +2493,122 @@ def _build_auto_canonical_mapping(
 
     all_solutions: list[dict[str, object]] = []
     all_excluded: list[dict[str, object]] = []
-    group_statuses: list[dict[str, object]] = []
+    per_bundle_statuses: list[dict[str, object]] = []
+    ready_count = 0
 
-    for key in group_keys:
-        sg_num, hsps_frozen = key
-        meta = group_meta[key]
-        expected_hsps = sorted(hsps_frozen)
-        sg_candidate = str(meta.get("subspace_group_candidate", ""))
-        ssg = meta.get("subspace_space_group", {})
+    for b in bundles:
+        if not isinstance(b, dict):
+            continue
 
-        # Merge irreps_by_kpoint across all bundles in this group
-        # to capture the complete canonical label set.
-        merged_irreps: dict[str, list[str]] = {}
-        for b in group_bundles[key]:
-            ik = b.get("irreps_by_kpoint", {})
-            if isinstance(ik, dict):
-                for hsp, labels in ik.items():
-                    if isinstance(labels, list):
-                        merged_irreps.setdefault(str(hsp), []).extend(
-                            str(l) for l in labels
-                        )
+        bundle_id = str(b.get("bundle_id", "?"))
+        is_ready = bool(b.get("ready_for_external_solver"))
 
+        if not is_ready:
+            all_excluded.append({
+                "bundle_id": bundle_id,
+                "subspace_group_candidate": b.get("subspace_group_candidate", ""),
+                "subspace_space_group": b.get("subspace_space_group", {}),
+                "reason": "not ready for external solver",
+            })
+            continue
+
+        ready_count += 1
+
+        # Validate required fields for auto-canonical processing.
+        ssg = b.get("subspace_space_group", {})
+        if not isinstance(ssg, dict) or not ssg:
+            all_excluded.append({
+                "bundle_id": bundle_id,
+                "subspace_group_candidate": b.get("subspace_group_candidate", ""),
+                "subspace_space_group": b.get("subspace_space_group", {}),
+                "reason": "missing subspace_space_group in ready bundle",
+            })
+            per_bundle_statuses.append({
+                "bundle_id": bundle_id,
+                "status": "blocked",
+                "reason": "missing subspace_space_group",
+            })
+            continue
+
+        sg_num = ssg.get("candidate_space_group_number")
+        if not isinstance(sg_num, int) or isinstance(sg_num, bool) or sg_num <= 0:
+            all_excluded.append({
+                "bundle_id": bundle_id,
+                "subspace_group_candidate": b.get("subspace_group_candidate", ""),
+                "subspace_space_group": ssg,
+                "reason": "missing or invalid candidate_space_group_number",
+            })
+            per_bundle_statuses.append({
+                "bundle_id": bundle_id,
+                "status": "blocked",
+                "reason": "invalid candidate_space_group_number",
+            })
+            continue
+
+        irreps_by_kp = b.get("irreps_by_kpoint", {})
+        if not isinstance(irreps_by_kp, dict) or not irreps_by_kp:
+            all_excluded.append({
+                "bundle_id": bundle_id,
+                "subspace_group_candidate": b.get("subspace_group_candidate", ""),
+                "subspace_space_group": ssg,
+                "reason": "missing irreps_by_kpoint",
+            })
+            per_bundle_statuses.append({
+                "bundle_id": bundle_id,
+                "status": "blocked",
+                "reason": "missing irreps_by_kpoint",
+            })
+            continue
+
+        expected_hsps = b.get("expected_hsps", [])
+        if not isinstance(expected_hsps, list) or not expected_hsps:
+            all_excluded.append({
+                "bundle_id": bundle_id,
+                "subspace_group_candidate": b.get("subspace_group_candidate", ""),
+                "subspace_space_group": ssg,
+                "reason": "missing expected_hsps",
+            })
+            per_bundle_statuses.append({
+                "bundle_id": bundle_id,
+                "status": "blocked",
+                "reason": "missing expected_hsps",
+            })
+            continue
+
+        sg_num = int(sg_num)
+        sg_candidate = str(b.get("subspace_group_candidate", ""))
+
+        # Build auto table and solve for this single bundle.
         try:
             table = build_auto_canonical_reduced_ebr_table(
                 subspace_sg_number=sg_num,
                 spinor=spinor_wf,
-                bundle_irreps_by_kpoint=merged_irreps,
+                bundle_irreps_by_kpoint=irreps_by_kp,
                 expected_hsps=expected_hsps,
                 subspace_group_candidate=sg_candidate,
                 subspace_space_group=ssg if isinstance(ssg, dict) else None,
             )
         except Exception as exc:
-            # Group failed: all its bundles are excluded with the reason.
-            group_statuses.append({
+            all_excluded.append({
+                "bundle_id": bundle_id,
+                "subspace_group_candidate": sg_candidate,
+                "subspace_space_group": ssg,
+                "reason": (
+                    f"auto-canonical table build failed: "
+                    f"{type(exc).__name__}: {exc}"
+                ),
+            })
+            per_bundle_statuses.append({
+                "bundle_id": bundle_id,
                 "sg_number": sg_num,
                 "expected_hsps": expected_hsps,
-                "status": "auto_canonical_failed",
+                "status": "blocked",
                 "reason": f"{type(exc).__name__}: {exc}",
             })
-            for b in group_bundles[key]:
-                all_excluded.append({
-                    "bundle_id": b.get("bundle_id", "?"),
-                    "subspace_group_candidate": b.get("subspace_group_candidate", ""),
-                    "subspace_space_group": b.get("subspace_space_group", {}),
-                    "reason": (
-                        f"auto-canonical table build failed for SG {sg_num}: "
-                        f"{type(exc).__name__}: {exc}"
-                    ),
-                })
             continue
 
-        # Solve with the per-group table.
-        group_export = {"bundles": group_bundles[key]}
         prov = table.get("provenance", {}) if isinstance(table.get("provenance"), dict) else {}
-        group_input: dict[str, object] = {
+        bundle_input: dict[str, object] = {
             "source": "auto_canonical",
             "subspace_group_candidate": table.get("subspace_group_candidate", ""),
             "data_source": prov.get("data_source", ""),
@@ -2596,22 +2617,22 @@ def _build_auto_canonical_mapping(
             "spinful": prov.get("spinful", spinor_wf),
         }
 
-        group_result = _solve_mapping(
-            ebr_export_bundle=group_export,
+        # Solve this single bundle against its auto table.
+        single_export = {"bundles": [b]}
+        bundle_result = _solve_mapping(
+            ebr_export_bundle=single_export,
             table=table,
             max_coefficient=max_coefficient,
-            reduced_ebr_input=group_input,
+            reduced_ebr_input=bundle_input,
         )
 
-        all_solutions.extend(group_result.get("solutions", []))
-        all_excluded.extend(group_result.get("excluded_bundles", []))
-        group_statuses.append({
+        all_solutions.extend(bundle_result.get("solutions", []))
+        all_excluded.extend(bundle_result.get("excluded_bundles", []))
+        per_bundle_statuses.append({
+            "bundle_id": bundle_id,
             "sg_number": sg_num,
             "expected_hsps": expected_hsps,
-            "status": group_result.get("mapping_status", "unknown"),
-            "bundle_count": len(group_bundles[key]),
-            "solution_count": len(group_result.get("solutions", [])),
-            "excluded_count": len(group_result.get("excluded_bundles", [])),
+            "status": bundle_result.get("mapping_status", "unknown"),
         })
 
     if not all_solutions and not all_excluded:
@@ -2629,23 +2650,25 @@ def _build_auto_canonical_mapping(
                 "source": "auto_canonical_blocked",
                 "reason": "no bundles could be evaluated",
             },
-            "auto_canonical_groups": group_statuses,
+            "auto_canonical_bundles": per_bundle_statuses,
         }
 
-    # Global status: solved_exact only if every group solved and no
-    # ready bundle was excluded by its own group's solver failure.
-    all_group_solved = all(
-        g["status"] == "solved_exact" for g in group_statuses
-        if g["status"] != "auto_canonical_failed"
+    # Global status: solved_exact only if EVERY ready bundle has a solution.
+    # Infrastructure/convention failures are "blocked", not physical no-exact.
+    all_ready_solved = (
+        ready_count > 0
+        and len(all_solutions) == ready_count
+        and all(
+            s.get("status") == "solved_exact" for s in all_solutions
+        )
     )
-    any_group_failed = any(
-        g["status"] == "auto_canonical_failed" for g in group_statuses
+    any_build_failed = any(
+        s.get("status") == "blocked" for s in per_bundle_statuses
     )
-
-    if any_group_failed:
-        global_status = "no_exact_solution"
-    elif all_group_solved and not all_excluded:
+    if all_ready_solved:
         global_status = "solved_exact"
+    elif len(all_solutions) == 0 and any_build_failed:
+        global_status = "blocked"
     else:
         global_status = "no_exact_solution"
 
@@ -2661,15 +2684,15 @@ def _build_auto_canonical_mapping(
         "interpretation": (
             "Exact integer linear combination of EBR vectors matching the "
             "bundle irrep count vector.  No heuristic fit; only exact matches "
-            "are reported.  Auto-canonical tables were built per compatible "
-            "subspace-group / HSP-basis group from irreptables source data."
+            "are reported.  Auto-canonical tables were built per ready bundle "
+            "from irreptables source data."
         ),
         "reduced_ebr_input": {
             "source": "auto_canonical",
             "auto_canonical": True,
             "spinful": spinor_wf,
-            "group_count": len(group_bundles),
+            "ready_bundle_count": ready_count,
         },
-        "auto_canonical_groups": group_statuses,
+        "auto_canonical_bundles": per_bundle_statuses,
     }
     return result
