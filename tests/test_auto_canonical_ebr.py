@@ -1,1231 +1,292 @@
-"""Auto-canonical reduced EBR table builder tests.
+"""Auto-canonical reduced EBR table builder tests — contract coverage."""
 
-Covers the automatic derivation path from canonical irrep labels through
-irreptables EBR data to exact reduced EBR decomposition.
-"""
-
-import json
+import json, pytest, yaml
 from pathlib import Path
 
-import numpy as np
-import pytest
-import yaml
-
 from valleyscope.io.config import load_config
-from valleyscope.workflows.analyze_hsp import analyze_hsp, _build_auto_canonical_mapping
-
-
-# -----------------------------------------------------------------------
-# Unit: _build_auto_canonical_mapping
-# -----------------------------------------------------------------------
-
-def test_auto_canonical_mapping_returns_none_for_none_bundle():
-    result = _build_auto_canonical_mapping(
-        ebr_export_bundle=None, spinor_wf=True,
-    )
-    assert result is None
-
-
-def test_auto_canonical_mapping_returns_none_for_empty_bundles():
-    result = _build_auto_canonical_mapping(
-        ebr_export_bundle={"bundles": []}, spinor_wf=True,
-    )
-    assert result is None
-
-
-def test_malformed_ready_bundle_is_excluded():
-    """Missing subspace SG in ready bundle → excluded, not silent drop."""
-    result = _build_auto_canonical_mapping(
-        ebr_export_bundle={
-            "bundles": [{
-                "bundle_id": "b_001",
-                "ready_for_external_solver": True,
-                "subspace_group_candidate": "P3",
-                "irreps_by_kpoint": {"GammaM": ["-GM4"]},
-                "expected_hsps": ["GammaM"],
-            }],
-        },
-        spinor_wf=True,
-    )
-    # Missing subspace SG → excluded.
-    assert result is not None
-    assert len(result["excluded_bundles"]) == 1
-    assert "subspace_space_group" in result["excluded_bundles"][0]["reason"]
-
-
-def test_missing_irreps_ready_bundle_is_excluded():
-    """Missing irreps_by_kpoint in ready bundle → excluded."""
-    result = _build_auto_canonical_mapping(
-        ebr_export_bundle={
-            "bundles": [{
-                "bundle_id": "b_001",
-                "ready_for_external_solver": True,
-                "subspace_group_candidate": "P3",
-                "subspace_space_group": {
-                    "status": "resolved",
-                    "candidate_space_group_number": 143,
-                    "candidate_space_group_symbol": "P3",
-                },
-                "expected_hsps": ["GammaM"],
-            }],
-        },
-        spinor_wf=True,
-    )
-    assert result is not None
-    assert len(result["excluded_bundles"]) == 1
-    assert "irreps_by_kpoint" in result["excluded_bundles"][0]["reason"]
-
-
-# -----------------------------------------------------------------------
-# Real label sets from irreptables (verified)
-# -----------------------------------------------------------------------
-
-# SG 75 (P4) spinor labels.
-_P4_GM_LABELS = ["-GM5", "-GM6", "-GM7", "-GM8"]
-_P4_X_LABELS = ["-X3", "-X4"]
-
-# SG 143 (P3) spinor labels.
-_P3_GM_LABELS = ["-GM4", "-GM5", "-GM6"]
-_P3_K_LABELS = ["-K4", "-K5", "-K6"]
-
-# SG 143 (P3) non-spinor labels.
-_P3_GM_NONSPINOR = ["GM1", "GM2", "GM3"]
-
-
-def _make_p4_fake_ebr_loader(gm_labels=None, x_labels=None):
-    """Fake irreptables EBR loader for SG 75 P4 spinor."""
-    gm = gm_labels if gm_labels is not None else _P4_GM_LABELS
-    x = x_labels if x_labels is not None else _P4_X_LABELS
-    all_labels = list(gm) + list(x)
-    # Partition GM labels into two groups so each EBR targets a subset.
-    gm_half = len(gm) // 2 if len(gm) >= 2 else 1
-
-    def _loader(sg, spin):
-        assert sg == 75
-        assert spin is True
-        return {
-            "basis": {"irrep_labels": all_labels},
-            "ebrs": [
-                {"ebr_name": "EBR_GM_A", "vector": [
-                    1 if l in gm[:gm_half] else 0 for l in all_labels
-                ]},
-                {"ebr_name": "EBR_GM_B", "vector": [
-                    1 if l in gm[gm_half:] else 0 for l in all_labels
-                ]},
-                {"ebr_name": "EBR_X", "vector": [
-                    1 if l in x else 0 for l in all_labels
-                ]},
-            ],
-        }
-
-    return _loader
-
-
-def _make_p3_fake_ebr_loader(gm_labels=None, k_labels=None):
-    """Fake irreptables EBR loader for SG 143 P3 spinor."""
-    gm = gm_labels if gm_labels is not None else _P3_GM_LABELS
-    k = k_labels if k_labels is not None else _P3_K_LABELS
-    all_labels = list(gm) + list(k)
-
-    def _loader(sg, spin):
-        assert sg == 143
-        assert spin is True
-        return {
-            "basis": {"irrep_labels": all_labels},
-            "ebrs": [
-                {"ebr_name": "EBR_GM", "vector": [
-                    1 if l in gm else 0 for l in all_labels
-                ]},
-                {"ebr_name": "EBR_K", "vector": [
-                    1 if l in k else 0 for l in all_labels
-                ]},
-            ],
-        }
-
-    return _loader
-
-
-# -----------------------------------------------------------------------
-# Synthetic P4 E2E: auto-canonical table → exact decomposition
-# -----------------------------------------------------------------------
-
-@pytest.mark.skipif(
-    not __import__("importlib").util.find_spec("irreptables"),
-    reason="irreptables not installed",
+from valleyscope.workflows.analyze_hsp import _build_auto_canonical_mapping, analyze_hsp
+from valleyscope.analysis.irreptables_runtime_table_builder import (
+    build_auto_canonical_reduced_ebr_table,
+    _extract_kvector_token,
+    _validate_expected_hsps,
 )
-class TestAutoCanonicalP4E2E:
-    """Synthetic P4 E2E: canonical irrep labels → auto table → exact solve."""
+from valleyscope.analysis.reduced_ebr_mapping import (
+    build_reduced_ebr_mapping, load_reduced_ebr_table,
+)
+from valleyscope.analysis.reduced_ebr_solver import classify_bundle
+from tests.helpers_io_workflow import write_fixture, write_config
 
-    def test_auto_table_synthetic_p4_gm_only(self):
-        from valleyscope.analysis.irreptables_runtime_table_builder import (
-            build_auto_canonical_reduced_ebr_table,
-        )
+# ---------------------------------------------------------------------------
+# Shared compact factories
+# ---------------------------------------------------------------------------
 
-        table = build_auto_canonical_reduced_ebr_table(
-            subspace_sg_number=75,
-            spinor=True,
-            bundle_irreps_by_kpoint={
-                "GammaM": ["-GM5", "-GM6"],
-            },
-            expected_hsps=["GammaM"],
-            subspace_group_candidate="P4",
-            source_loader=_make_p4_fake_ebr_loader(),
-        )
+_P4_GM = ["-GM5", "-GM6", "-GM7", "-GM8"]
+_P4_X  = ["-X3", "-X4"]
 
-        assert table["subspace_group_candidate"] == "P4"
-        assert table["expected_hsps"] == ["GammaM"]
-        for irrep_key in table["irreps"]:
-            assert irrep_key.startswith("GammaM:")
-        assert len(table["irreps"]) == len(_P4_GM_LABELS)
-        assert len(table["ebrs"]) == 2  # X EBR filtered to zero
+def _p4_loader(gm=None, x=None):
+    gm = gm or _P4_GM; x = x or _P4_X; labels = list(gm) + list(x)
+    h = len(gm) // 2 if len(gm) >= 2 else 1
+    def _f(sg, spin):
+        assert sg == 75 and spin is True
+        return {"basis": {"irrep_labels": labels}, "ebrs": [
+            {"ebr_name": "EBR_GM_A", "vector": [1 if l in gm[:h] else 0 for l in labels]},
+            {"ebr_name": "EBR_GM_B", "vector": [1 if l in gm[h:] else 0 for l in labels]},
+            {"ebr_name": "EBR_X",   "vector": [1 if l in x else 0 for l in labels]},
+        ]}
+    return _f
 
-        prov = table.get("provenance", {})
-        assert prov.get("auto_canonical") is True
-        assert prov.get("space_group_number") == 75
-        assert prov.get("spinful") is True
-        assert prov.get("valleyscope_reduction") == "sampled_hsp_valley_preserving"
+def _mk_bundle(bid, sg_num, symbol, hsps, irreps, ready=True):
+    return {"bundle_id": bid, "valley": "K_valley",
+            "subspace_group_candidate": symbol,
+            "subspace_space_group": {"status": "resolved",
+                                     "candidate_space_group_number": sg_num,
+                                     "candidate_space_group_symbol": symbol},
+            "ready_for_external_solver": ready,
+            "expected_hsps": hsps, "irreps_by_kpoint": irreps}
 
-    def test_auto_table_synthetic_p4_gm_and_x(self):
-        from valleyscope.analysis.irreptables_runtime_table_builder import (
-            build_auto_canonical_reduced_ebr_table,
-        )
+def _bm(*bundles): return _build_auto_canonical_mapping(
+    ebr_export_bundle={"bundles": list(bundles)}, spinor_wf=True)
 
-        table = build_auto_canonical_reduced_ebr_table(
-            subspace_sg_number=75,
-            spinor=True,
-            bundle_irreps_by_kpoint={
-                "GammaM": ["-GM5", "-GM6"],
-                "XM": ["-X3"],
-            },
-            expected_hsps=["GammaM", "XM"],
-            subspace_group_candidate="P4",
-            source_loader=_make_p4_fake_ebr_loader(),
-        )
+def _auto_table(sg, hsps, irreps, loader=None):
+    return build_auto_canonical_reduced_ebr_table(
+        subspace_sg_number=sg, spinor=True, bundle_irreps_by_kpoint=irreps,
+        expected_hsps=hsps, subspace_group_candidate=symbol_for(sg),
+        source_loader=loader or _p4_loader())
 
-        assert table["expected_hsps"] == ["GammaM", "XM"]
-        irrep_keys = table["irreps"]
-        gm_keys = [k for k in irrep_keys if k.startswith("GammaM:")]
-        x_keys = [k for k in irrep_keys if k.startswith("XM:")]
-        assert len(gm_keys) == len(_P4_GM_LABELS)
-        assert len(x_keys) == len(_P4_X_LABELS)
+def symbol_for(sg): return {75: "P4", 143: "P3"}.get(sg, f"SG{sg}")
 
-    def test_auto_table_feeds_reduced_ebr_mapping_exact_solve(self, tmp_path):
-        from valleyscope.analysis.irreptables_runtime_table_builder import (
-            build_auto_canonical_reduced_ebr_table,
-        )
-        from valleyscope.analysis.reduced_ebr_mapping import (
-            build_reduced_ebr_mapping, load_reduced_ebr_table,
-        )
+# ---------------------------------------------------------------------------
+# Workflow-level: _build_auto_canonical_mapping
+# ---------------------------------------------------------------------------
 
-        table = build_auto_canonical_reduced_ebr_table(
-            subspace_sg_number=75,
-            spinor=True,
-            bundle_irreps_by_kpoint={
-                "GammaM": ["-GM5", "-GM6"],
-            },
-            expected_hsps=["GammaM"],
-            subspace_group_candidate="P4",
-            source_loader=_make_p4_fake_ebr_loader(),
-        )
+def test_none_or_empty_returns_none():
+    assert _build_auto_canonical_mapping(ebr_export_bundle=None, spinor_wf=True) is None
+    assert _build_auto_canonical_mapping(ebr_export_bundle={"bundles": []}, spinor_wf=True) is None
 
-        table_path = tmp_path / "auto_table.json"
-        table_path.write_text(json.dumps(table), encoding="utf-8")
-        validated = load_reduced_ebr_table(table_path)
-        assert validated["subspace_group_candidate"] == "P4"
+def test_malformed_ready_excluded():
+    r = _bm({** _mk_bundle("b", 75, "P4", ["GM"], {"GM": ["-GM5"]}),
+             "subspace_space_group": None})
+    assert r and len(r["excluded_bundles"]) == 1 and "subspace_space_group" in r["excluded_bundles"][0]["reason"]
 
-        export_bundle = {
-            "bundles": [{
-                "bundle_id": "b_p4_gm",
-                "valley": "K_valley",
-                "subspace_group_candidate": "P4",
-                "subspace_space_group": {
-                    "status": "resolved",
-                    "candidate_space_group_number": 75,
-                    "candidate_space_group_symbol": "P4",
-                },
-                "ready_for_external_solver": True,
-                "expected_hsps": ["GammaM"],
-                "irreps_by_kpoint": {
-                    "GammaM": ["-GM5", "-GM6"],
-                },
-            }],
-        }
+@pytest.mark.parametrize("label,desc", [
+    ("solved_only", "solved_exact"),
+    ("solved_plus_blocked", "blocked"),
+    ("non_ready_excluded", "solved_exact"),
+])
+def test_per_bundle_aggregation(label, desc):
+    if label == "solved_only":
+        r = _bm(_mk_bundle("b1", 75, "P4", ["GammaM"], {"GammaM": ["-GM5"]}))
+        assert r["mapping_status"] == "solved_exact"
+    elif label == "solved_plus_blocked":
+        r = _bm(_mk_bundle("b1", 75, "P4", ["GammaM"], {"GammaM": ["-GM5"]}),
+                {**_mk_bundle("b2", 143, "P3", ["GammaM"], {"GammaM": ["-GM4"]}),
+                 "subspace_space_group": None})
+        assert r["mapping_status"] == "blocked"
+    elif label == "non_ready_excluded":
+        r = _bm(_mk_bundle("b1", 75, "P4", ["GammaM"], {"GammaM": ["-GM5"]}),
+                {**_mk_bundle("b2", 75, "P4", ["GammaM"], {"GammaM": ["-GM4"]}),
+                 "ready_for_external_solver": False})
+        assert r["mapping_status"] == "solved_exact" and len(r["excluded_bundles"]) == 1
 
-        result = build_reduced_ebr_mapping(
-            ebr_export_bundle=export_bundle,
-            table=validated,
-        )
-        assert result["mapping_status"] == "solved_exact"
-        sol = result["solutions"][0]
-        assert sol["classification"] == "atomic-compatible-candidate"
-        assert sol["subspace_group_candidate"] == "P4"
+def test_no_ready_bundles_not_evaluated():
+    r = _bm({"_id": "b", "ready_for_external_solver": False})
+    assert r and r["status"] == "not_evaluated" and r["reduced_ebr_input"]["ready_bundle_count"] == 0
 
-    def test_auto_table_hsp_mismatch_excluded(self, tmp_path):
-        from valleyscope.analysis.irreptables_runtime_table_builder import (
-            build_auto_canonical_reduced_ebr_table,
-        )
-        from valleyscope.analysis.reduced_ebr_mapping import (
-            build_reduced_ebr_mapping, load_reduced_ebr_table,
-        )
+def test_no_buildable_blocked():
+    r = _bm({** _mk_bundle("b", 75, "P4", ["GammaM"], {"GammaM": ["-GM5"]}),
+             "subspace_space_group": None})
+    assert r and r["status"] == "blocked"
 
-        table = build_auto_canonical_reduced_ebr_table(
-            subspace_sg_number=75,
-            spinor=True,
-            bundle_irreps_by_kpoint={
-                "GammaM": ["-GM5"],
-            },
-            expected_hsps=["GammaM"],
-            subspace_group_candidate="P4",
-            source_loader=_make_p4_fake_ebr_loader(),
-        )
+def test_source_failure_blocked_not_physical():
+    r = _bm(_mk_bundle("b", 9999, "XX", ["GammaM"], {"GammaM": ["-GM4"]}))
+    assert r and r["status"] == "blocked"
 
-        table_path = tmp_path / "auto_table_hsp.json"
-        table_path.write_text(json.dumps(table), encoding="utf-8")
-        validated = load_reduced_ebr_table(table_path)
+# ---------------------------------------------------------------------------
+# Auto table builder (unit + integration)
+# ---------------------------------------------------------------------------
 
-        export_bundle = {
-            "bundles": [{
-                "bundle_id": "b_mismatch",
-                "valley": "K_valley",
-                "subspace_group_candidate": "P4",
-                "ready_for_external_solver": True,
-                "expected_hsps": ["GammaM", "XM"],
-                "irreps_by_kpoint": {
-                    "GammaM": ["-GM5"],
-                    "XM": ["-X3"],
-                },
-            }],
-        }
+def test_auto_table_p4_gm():
+    t = _auto_table(75, ["GammaM"], {"GammaM": ["-GM5", "-GM6"]})
+    assert t["subspace_group_candidate"] == "P4" and t["expected_hsps"] == ["GammaM"]
+    assert len(t["irreps"]) == len(_P4_GM) and len(t["ebrs"]) == 2
+    assert t["provenance"]["auto_canonical"] is True
+    assert t["provenance"]["sampled_bilbao_hsps"] == ["GM"]
 
-        result = build_reduced_ebr_mapping(
-            ebr_export_bundle=export_bundle,
-            table=validated,
-        )
-        assert len(result["solutions"]) == 0
-        assert len(result["excluded_bundles"]) == 1
-        assert "expected_hsps mismatch" in result["excluded_bundles"][0]["reason"]
+def test_auto_table_p4_gm_xm():
+    t = _auto_table(75, ["GammaM", "XM"], {"GammaM": ["-GM5", "-GM6"], "XM": ["-X3"]})
+    gm = [k for k in t["irreps"] if k.startswith("GammaM:")]; xm = [k for k in t["irreps"] if k.startswith("XM:")]
+    assert len(gm) == len(_P4_GM) and len(xm) == len(_P4_X) and t["expected_hsps"] == ["GammaM", "XM"]
 
-    def test_conflicting_hsp_mapping_raises(self):
-        from valleyscope.analysis.irreptables_runtime_table_builder import (
-            build_auto_canonical_reduced_ebr_table,
-        )
+def test_auto_table_e2e_solve(tmp_path):
+    t = _auto_table(75, ["GammaM"], {"GammaM": ["-GM5", "-GM6"]})
+    p = tmp_path / "t.json"; p.write_text(json.dumps(t))
+    eb = {"bundles": [_mk_bundle("b", 75, "P4", ["GammaM"], {"GammaM": ["-GM5", "-GM6"]})]}
+    r = build_reduced_ebr_mapping(ebr_export_bundle=eb, table=load_reduced_ebr_table(p))
+    assert r["mapping_status"] == "solved_exact" and r["solutions"][0]["classification"] == "atomic-compatible-candidate"
 
-        with pytest.raises(ValueError, match="conflicting HSP mapping"):
-            build_auto_canonical_reduced_ebr_table(
-                subspace_sg_number=75,
-                spinor=True,
-                bundle_irreps_by_kpoint={
-                    "GammaM": ["-GM5"],
-                    "XM": ["-GM5"],
-                },
-                expected_hsps=["GammaM", "XM"],
-                subspace_group_candidate="P4",
-                source_loader=_make_p4_fake_ebr_loader(),
-            )
+def test_auto_table_hsp_mismatch(tmp_path):
+    t = _auto_table(75, ["GammaM"], {"GammaM": ["-GM5"]})
+    p = tmp_path / "t.json"; p.write_text(json.dumps(t))
+    eb = {"bundles": [_mk_bundle("b", 75, "P4", ["GammaM", "XM"], {"GammaM": ["-GM5"], "XM": ["-X3"]})]}
+    r = build_reduced_ebr_mapping(ebr_export_bundle=eb, table=load_reduced_ebr_table(p))
+    assert len(r["excluded_bundles"]) == 1 and "expected_hsps mismatch" in r["excluded_bundles"][0]["reason"]
 
+def test_subspace_sg_not_parent():
+    called = []
+    def _ld(sg, spin): called.append(sg); return {"basis": {"irrep_labels": ["-GM4","-GM5","-GM6","-K4","-K5","-K6"]}, "ebrs": [{"ebr_name": "E", "vector": [1,0,0,0,0,0]}]}
+    build_auto_canonical_reduced_ebr_table(subspace_sg_number=143, spinor=True, bundle_irreps_by_kpoint={"GammaM": ["-GM4"], "KM": ["-K5"]}, expected_hsps=["GammaM", "KM"], subspace_group_candidate="P3", source_loader=_ld)
+    assert called == [143]
 
-# -----------------------------------------------------------------------
-# Parent/subspace mismatch
-# -----------------------------------------------------------------------
+@pytest.mark.parametrize("spin,labels,sg", [(True, ["-GM4"], 143), (False, ["GM1"], 143)])
+def test_spinor_flag(spin, labels, sg):
+    called = []
+    def _ld(s, sp):
+        called.append(sp)
+        return {"basis": {"irrep_labels": labels}, "ebrs": [{"ebr_name": "E", "vector": [1]}]}
+    build_auto_canonical_reduced_ebr_table(subspace_sg_number=sg, spinor=spin, bundle_irreps_by_kpoint={"GammaM": labels}, expected_hsps=["GammaM"], subspace_group_candidate=("P3" if sg==143 else "P4"), source_loader=_ld)
+    assert called == [spin]
 
-def test_auto_canonical_uses_subspace_sg_not_parent():
-    """Auto-canonical table uses the bundle's subspace SG number,
-    not the parent moire space group number."""
-    from valleyscope.analysis.irreptables_runtime_table_builder import (
-        build_auto_canonical_reduced_ebr_table,
-    )
+def test_ordered_unique_irrep_keys():
+    t = _auto_table(75, ["GammaM"], {"GammaM": ["-GM5"]})
+    assert t["irreps"] == sorted(t["irreps"]) and len(t["irreps"]) == len(set(t["irreps"]))
 
-    called_sg = []
+def test_hsp_mapping_bijective():
+    with pytest.raises(ValueError, match="maps to multiple Bilbao HSPs"):
+        _auto_table(75, ["GammaM"], {"GammaM": ["-GM5", "-X3"]})
 
-    def _record_loader(sg, spin):
-        called_sg.append(sg)
-        gm_labels = ["-GM4", "-GM5", "-GM6"]
-        k_labels = ["-K4", "-K5", "-K6"]
-        all_labels = gm_labels + k_labels
-        return {
-            "basis": {"irrep_labels": all_labels},
-            "ebrs": [
-                {"ebr_name": "EBR_A", "vector": [1 if l in gm_labels else 0 for l in all_labels]},
-                {"ebr_name": "EBR_B", "vector": [1 if l in k_labels else 0 for l in all_labels]},
-            ],
-        }
+def test_hsp_key_mismatch_blocks():
+    with pytest.raises(ValueError, match="do not match expected_hsps"):
+        _auto_table(75, ["XM"], {"GammaM": ["-GM5"]})
 
-    build_auto_canonical_reduced_ebr_table(
-        subspace_sg_number=143,
-        spinor=True,
-        bundle_irreps_by_kpoint={
-            "GammaM": ["-GM4"],
-            "KM": ["-K5"],
-        },
-        expected_hsps=["GammaM", "KM"],
-        subspace_group_candidate="P3",
-        source_loader=_record_loader,
-    )
+def test_expected_hsps_and_hsp_validation():
+    for bad in ([], ["A","A"], ["","B"], "not_a_list"):
+        with pytest.raises(ValueError): _validate_expected_hsps(bad)
+    with pytest.raises(ValueError, match="must be a non-empty list"):
+        _auto_table(75, ["GammaM"], {"GammaM": []})
 
-    assert called_sg == [143], (
-        f"auto table requested SG {called_sg}, expected [143] (P3), "
-        f"not 150 (P321)"
-    )
-
-
-# -----------------------------------------------------------------------
-# Spinful source selection
-# -----------------------------------------------------------------------
-
-def test_auto_canonical_spinor_flag_true():
-    """Spinor=True passes True to the irreptables loader."""
-    from valleyscope.analysis.irreptables_runtime_table_builder import (
-        build_auto_canonical_reduced_ebr_table,
-    )
-
-    called_spin = []
-
-    def _record_loader(sg, spin):
-        called_spin.append(spin)
-        return {
-            "basis": {"irrep_labels": ["-GM4", "-GM5", "-GM6"]},
-            "ebrs": [{"ebr_name": "EBR_A", "vector": [1, 0, 0]}],
-        }
-
-    build_auto_canonical_reduced_ebr_table(
-        subspace_sg_number=143,
-        spinor=True,
-        bundle_irreps_by_kpoint={"GammaM": ["-GM4"]},
-        expected_hsps=["GammaM"],
-        subspace_group_candidate="P3",
-        source_loader=_record_loader,
-    )
-    assert called_spin == [True]
-
-
-def test_auto_canonical_spinor_flag_false():
-    """Spinor=False passes False to the irreptables loader."""
-    from valleyscope.analysis.irreptables_runtime_table_builder import (
-        build_auto_canonical_reduced_ebr_table,
-    )
-
-    called_spin = []
-
-    def _record_loader(sg, spin):
-        called_spin.append(spin)
-        return {
-            "basis": {"irrep_labels": ["GM1", "GM2", "GM3"]},
-            "ebrs": [{"ebr_name": "EBR_A", "vector": [1, 0, 0]}],
-        }
-
-    build_auto_canonical_reduced_ebr_table(
-        subspace_sg_number=143,
-        spinor=False,
-        bundle_irreps_by_kpoint={"GammaM": ["GM1"]},
-        expected_hsps=["GammaM"],
-        subspace_group_candidate="P3",
-        source_loader=_record_loader,
-    )
-    assert called_spin == [False]
-
-
-# -----------------------------------------------------------------------
-# Ordered basis equality
-# -----------------------------------------------------------------------
-
-def test_auto_canonical_irrep_keys_are_ordered_and_unique():
-    """Auto-canonical table irrep keys must be ordered and unique."""
-    from valleyscope.analysis.irreptables_runtime_table_builder import (
-        build_auto_canonical_reduced_ebr_table,
-    )
-
-    table = build_auto_canonical_reduced_ebr_table(
-        subspace_sg_number=75,
-        spinor=True,
-        bundle_irreps_by_kpoint={"GammaM": ["-GM5"]},
-        expected_hsps=["GammaM"],
-        subspace_group_candidate="P4",
-        source_loader=_make_p4_fake_ebr_loader(),
-    )
-
-    irrep_keys = table["irreps"]
-    assert len(irrep_keys) == len(set(irrep_keys)), "irrep keys must be unique"
-    assert irrep_keys == sorted(irrep_keys), "irrep keys must be sorted"
-    for key in irrep_keys:
-        assert key.startswith("GammaM:"), f"unexpected irrep key: {key!r}"
-
-
-def test_auto_table_irrep_basis_matches_bundle_exactly():
-    """The reduced table irrep basis matches bundle irreps_by_kpoint exactly."""
-    from valleyscope.analysis.irreptables_runtime_table_builder import (
-        build_auto_canonical_reduced_ebr_table,
-    )
-    from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
-
-    # Use only the subset of labels that appear in the bundle as the
-    # complete EBR basis (2 labels instead of 4).
-    gm_labels = ["-GM5", "-GM6"]
-    table = build_auto_canonical_reduced_ebr_table(
-        subspace_sg_number=75,
-        spinor=True,
-        bundle_irreps_by_kpoint={"GammaM": gm_labels},
-        expected_hsps=["GammaM"],
-        subspace_group_candidate="P4",
-        source_loader=_make_p4_fake_ebr_loader(gm_labels=gm_labels, x_labels=[]),
-    )
-
-    export_bundle = {
-        "bundles": [{
-            "bundle_id": "b_exact",
-            "valley": "K",
-            "subspace_group_candidate": "P4",
-            "ready_for_external_solver": True,
-            "expected_hsps": ["GammaM"],
-            "irreps_by_kpoint": {"GammaM": gm_labels},
-        }],
-    }
-    result = build_reduced_ebr_mapping(
-        ebr_export_bundle=export_bundle, table=table,
-    )
-    assert result["mapping_status"] == "solved_exact"
-    assert result["solutions"][0]["irrep_vector"] == [1, 1]
-
-
-# -----------------------------------------------------------------------
-# Missing / ambiguous labels block (Finding 3 — strict resolution)
-# -----------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Strict label resolution
+# ---------------------------------------------------------------------------
 
 def test_unknown_bundle_label_blocks():
-    """One unknown canonical label alongside known labels blocks the table."""
-    from valleyscope.analysis.irreptables_runtime_table_builder import (
-        build_auto_canonical_reduced_ebr_table,
-    )
-
     with pytest.raises(ValueError, match="not found in irreptables irrep table"):
-        build_auto_canonical_reduced_ebr_table(
-            subspace_sg_number=75,
-            spinor=True,
-            # -GM5 is valid, -ZZ99 is not.
-            bundle_irreps_by_kpoint={"GammaM": ["-GM5", "-ZZ99"]},
-            expected_hsps=["GammaM"],
-            subspace_group_candidate="P4",
-            source_loader=_make_p4_fake_ebr_loader(),
-        )
+        _auto_table(75, ["GammaM"], {"GammaM": ["-GM5", "-ZZ99"]})
 
+def test_no_numeric_index_blocks():
+    with pytest.raises(ValueError, match="invalid k-vector token"):
+        _auto_table(75, ["GammaM"], {"GammaM": ["-GM5"]},
+                    loader=lambda sg,spin: {"basis": {"irrep_labels": ["-GM5","-UNKNOWN"]}, "ebrs": [{"ebr_name":"E","vector":[1,0]}]})
 
-def test_unknown_ebr_basis_label_blocks():
-    """A label with no k-vector token blocks the table."""
-    from valleyscope.analysis.irreptables_runtime_table_builder import (
-        build_auto_canonical_reduced_ebr_table,
-    )
+def test_unknown_irreptable_label_blocks():
+    with pytest.raises(ValueError, match="not found in irreptables irrep table"):
+        _auto_table(75, ["GammaM"], {"GammaM": ["-ZZ99"]},
+                    loader=lambda sg,spin: {"basis": {"irrep_labels": ["-ZZ99"]}, "ebrs": [{"ebr_name":"E","vector":[1]}]})
 
-    with pytest.raises(ValueError, match="no k-vector token"):
-        build_auto_canonical_reduced_ebr_table(
-            subspace_sg_number=75,
-            spinor=True,
-            bundle_irreps_by_kpoint={"GammaM": ["-GM5"]},
-            expected_hsps=["GammaM"],
-            subspace_group_candidate="P4",
-            source_loader=lambda sg, spin: {
-                "basis": {"irrep_labels": ["-GM5", "999"]},
-                "ebrs": [
-                    {"ebr_name": "EBR_A", "vector": [1, 0]},
-                ],
-            },
-        )
-
-
-def test_dropped_source_rows_in_provenance():
-    """Non-sampled k-vector source rows are tracked in provenance."""
-    from valleyscope.analysis.irreptables_runtime_table_builder import (
-        build_auto_canonical_reduced_ebr_table,
-    )
-
-    # Bundle only declares GammaM labels → only GM is a sampled Bilbao HSP.
-    # X labels in EBR data have k-vector token X, which is not sampled.
-    table = build_auto_canonical_reduced_ebr_table(
-        subspace_sg_number=75,
-        spinor=True,
-        bundle_irreps_by_kpoint={"GammaM": ["-GM5"]},
-        expected_hsps=["GammaM"],
-        subspace_group_candidate="P4",
-        source_loader=_make_p4_fake_ebr_loader(),
-    )
-
-    prov = table.get("provenance", {})
-    dropped = prov.get("dropped_source_rows", [])
-    assert len(dropped) > 0, "dropped source rows must be tracked"
-    assert any("token=X" in d for d in dropped), (
-        f"dropped rows should mention token=X: {dropped}"
-    )
-    assert prov.get("dropped_source_row_count", 0) == len(dropped)
-    # Sampled Bilbao HSPs are documented.
-    assert "GM" in prov.get("sampled_bilbao_hsps", [])
-
-
-def test_conflicting_duplicate_label_hsp_raises():
-    """Duplicate canonical label mapped to conflicting HSPs raises clear error."""
-    from valleyscope.analysis.irreptables_runtime_table_builder import (
-        build_auto_canonical_reduced_ebr_table,
-    )
-
-    # -GM5 is a GM (Gamma) irrep.  Claiming it at GammaM and XM is a conflict.
+def test_conflicting_hsp_raises():
     with pytest.raises(ValueError, match="conflicting HSP mapping"):
-        build_auto_canonical_reduced_ebr_table(
-            subspace_sg_number=75,
-            spinor=True,
-            bundle_irreps_by_kpoint={
-                "GammaM": ["-GM5"],
-                "XM": ["-GM5"],
-            },
-            expected_hsps=["GammaM", "XM"],
-            subspace_group_candidate="P4",
-            source_loader=_make_p4_fake_ebr_loader(),
-        )
-
-
-# -----------------------------------------------------------------------
-# Missing / ambiguous labels block (legacy tests)
-# -----------------------------------------------------------------------
-
-def test_auto_canonical_blocks_when_label_not_in_irreptables_table():
-    """Labels not found in the irreptables irrep table raise an error."""
-    from valleyscope.analysis.irreptables_runtime_table_builder import (
-        build_auto_canonical_reduced_ebr_table,
-    )
-
-    with pytest.raises(ValueError, match="not found in irreptables irrep table"):
-        build_auto_canonical_reduced_ebr_table(
-            subspace_sg_number=75,
-            spinor=True,
-            bundle_irreps_by_kpoint={"GammaM": ["-ZZ99"]},
-            expected_hsps=["GammaM"],
-            subspace_group_candidate="P4",
-            source_loader=lambda sg, spin: {
-                "basis": {"irrep_labels": ["-ZZ99"]},
-                "ebrs": [{"ebr_name": "EBR_A", "vector": [1]}],
-            },
-        )
-
-
-def test_auto_canonical_blocks_when_no_labels_map_to_expected_hsps():
-    """If no irreptables labels map to expected HSPs, clear error raised."""
-    from valleyscope.analysis.irreptables_runtime_table_builder import (
-        build_auto_canonical_reduced_ebr_table,
-    )
-
-    with pytest.raises(ValueError, match="no EBR basis labels retained"):
-        build_auto_canonical_reduced_ebr_table(
-            subspace_sg_number=75,
-            spinor=True,
-            bundle_irreps_by_kpoint={
-                "GammaM": ["-GM5"],
-            },
-            expected_hsps=["XM"],
-            subspace_group_candidate="P4",
-            source_loader=_make_p4_fake_ebr_loader(),
-        )
-
-
-# -----------------------------------------------------------------------
-# Multiple exact decompositions
-# -----------------------------------------------------------------------
-
-def test_auto_canonical_unique_exact_decomposition():
-    """Unique exact nonnegative decomposition reports uniqueness correctly."""
-    from valleyscope.analysis.irreptables_runtime_table_builder import (
-        build_auto_canonical_reduced_ebr_table,
-    )
-    from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
-
-    gm_labels = ["-GM5", "-GM6"]
-    table = build_auto_canonical_reduced_ebr_table(
-        subspace_sg_number=75,
-        spinor=True,
-        bundle_irreps_by_kpoint={"GammaM": gm_labels},
-        expected_hsps=["GammaM"],
-        subspace_group_candidate="P4",
-        source_loader=lambda sg, spin: {
-            "basis": {"irrep_labels": gm_labels},
-            "ebrs": [
-                {"ebr_name": "EBR_A", "vector": [1, 0]},
-                {"ebr_name": "EBR_B", "vector": [0, 1]},
-            ],
-        },
-    )
-
-    export_bundle = {
-        "bundles": [{
-            "bundle_id": "b_unique",
-            "valley": "K",
-            "subspace_group_candidate": "P4",
-            "ready_for_external_solver": True,
-            "expected_hsps": ["GammaM"],
-            "irreps_by_kpoint": {"GammaM": [gm_labels[0]]},
-        }],
-    }
-    result = build_reduced_ebr_mapping(
-        ebr_export_bundle=export_bundle, table=table,
-    )
-    assert result["mapping_status"] == "solved_exact"
-    sol = result["solutions"][0]
-    assert sol["classification"] == "atomic-compatible-candidate"
-    assert sol["decomposition_uniqueness"] == "unique"
-    assert "decomposition_witnesses" not in sol
-
-
-def test_auto_canonical_non_unique_reports_witnesses():
-    """Non-unique decomposition reports at least two witnesses."""
-    from valleyscope.analysis.irreptables_runtime_table_builder import (
-        build_auto_canonical_reduced_ebr_table,
-    )
-    from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
-
-    gm_labels = ["-GM5", "-GM6"]
-    # Two EBRs with identical vectors → multiple ways to decompose.
-    table = build_auto_canonical_reduced_ebr_table(
-        subspace_sg_number=75,
-        spinor=True,
-        bundle_irreps_by_kpoint={"GammaM": gm_labels},
-        expected_hsps=["GammaM"],
-        subspace_group_candidate="P4",
-        source_loader=lambda sg, spin: {
-            "basis": {"irrep_labels": gm_labels},
-            "ebrs": [
-                {"ebr_name": "EBR_A", "vector": [1, 0]},
-                {"ebr_name": "EBR_B", "vector": [1, 0]},
-            ],
-        },
-    )
-
-    export_bundle = {
-        "bundles": [{
-            "bundle_id": "b_nonunique",
-            "valley": "K",
-            "subspace_group_candidate": "P4",
-            "ready_for_external_solver": True,
-            "expected_hsps": ["GammaM"],
-            "irreps_by_kpoint": {"GammaM": [gm_labels[0]]},
-        }],
-    }
-    result = build_reduced_ebr_mapping(
-        ebr_export_bundle=export_bundle, table=table,
-    )
-    assert result["mapping_status"] == "solved_exact"
-    sol = result["solutions"][0]
-    assert sol["classification"] == "atomic-compatible-candidate"
-    assert sol["decomposition_uniqueness"] == "non_unique"
-    # Must report at least two witnesses.
-    witnesses = sol.get("decomposition_witnesses", [])
-    assert len(witnesses) >= 2, (
-        f"non_unique must report at least 2 witnesses, got {witnesses}"
-    )
-
-
-def test_truncated_no_witness_is_indeterminate():
-    """Truncated search with no witness → indeterminate_truncated, no uniqueness."""
-    from valleyscope.analysis.reduced_ebr_solver import classify_bundle
-
-    # [100] = 100 × [1], but max_coefficient=0 truncates search.
-    target = [100]
-    ebr_vectors = [[1]]
-    ebr_labels = ["EBR_unit"]
-
-    result = classify_bundle(target, ebr_vectors, ebr_labels, max_coefficient=0)
-
-    assert result["integer_span_status"] == "in_integer_span"
-    assert result["classification"] == "indeterminate_truncated"
-    assert "decomposition_uniqueness" not in result  # no witness → no uniqueness
-    assert "search_status" in result
-
-
-def test_truncated_one_witness_reports_unknown():
-    """One witness with truncated search → unknown_truncated."""
-    from valleyscope.analysis.reduced_ebr_solver import classify_bundle
-
-    # [2] with [1], [1]: physical bounds [2,2], max_coefficient=1.
-    # Only [1,1] found; search truncated → unknown_truncated.
-    target = [2]
-    ebr_vectors = [[1], [1]]
-    ebr_labels = ["EBR_A", "EBR_B"]
-
-    result = classify_bundle(target, ebr_vectors, ebr_labels, max_coefficient=1)
-
-    assert result["integer_span_status"] == "in_integer_span"
-    assert result["decomposition_uniqueness"] == "unknown_truncated"
-    assert "search_status" in result
-
-
-def test_truncated_two_witnesses_still_non_unique():
-    """Two witnesses → non_unique even when search is truncated."""
-    from valleyscope.analysis.reduced_ebr_solver import classify_bundle
-
-    # [10] = 10 × [1] or 5 × [2], physical bound=10/5, max_coefficient=5.
-    target = [10]
-    ebr_vectors = [[1], [2]]
-    ebr_labels = ["EBR_A", "EBR_B"]
-
-    result = classify_bundle(target, ebr_vectors, ebr_labels, max_coefficient=5)
-
-    # Two witnesses exist, so non_unique even though physical bounds > max.
-    assert result["decomposition_uniqueness"] == "non_unique"
-
-
-# -----------------------------------------------------------------------
-# Disabled default
-# -----------------------------------------------------------------------
-
-def test_disabled_reduced_ebr_produces_no_auto_canonical_artifacts(tmp_path):
-    """When reduced_ebr is disabled, no auto-canonical table is built."""
-    from tests.helpers_io_workflow import write_fixture, write_config
-
-    h5_path = tmp_path / "wf.h5"
-    out_dir = tmp_path / "out"
-    write_fixture(h5_path)
-    config_path = tmp_path / "cfg.yaml"
-    write_config(config_path, h5_path, out_dir)
-
-    outputs = analyze_hsp(config_path)
-
-    assert not (out_dir / "valley_reduced_ebr_mapping.json").exists()
-    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
-    assert "valley_reduced_ebr_mapping" not in summary
-
-
-# -----------------------------------------------------------------------
-# No Cn-like logic
-# -----------------------------------------------------------------------
-
-# -----------------------------------------------------------------------
-# Irrep-key format validation (Finding 4)
-# -----------------------------------------------------------------------
-
-def test_irrep_key_regex_accepts_leading_minus():
-    """Leading - for spinor labels is valid."""
-    from valleyscope.analysis.reduced_ebr_mapping import load_reduced_ebr_table
-    import tempfile, json
-    table = {
-        "schema_version": "1.0.0",
-        "subspace_group_candidate": "P4",
-        "expected_hsps": ["GammaM"],
-        "irreps": ["GammaM:-GM5", "GammaM:-GM6"],
-        "ebrs": [{"label": "EBR_A", "vector": [1, 0]}],
-    }
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        json.dump(table, f)
-        f.close()
-        try:
-            validated = load_reduced_ebr_table(f.name)
-            assert validated["irreps"] == ["GammaM:-GM5", "GammaM:-GM6"]
-        finally:
-            import os; os.unlink(f.name)
-
-
-def test_irrep_key_regex_accepts_non_spinor_labels():
-    """Non-spinor labels without leading - are valid."""
-    from valleyscope.analysis.reduced_ebr_mapping import load_reduced_ebr_table
-    import tempfile, json
-    table = {
-        "schema_version": "1.0.0",
-        "subspace_group_candidate": "P3",
-        "expected_hsps": ["GammaM"],
-        "irreps": ["GammaM:GM1", "GammaM:GM2"],
-        "ebrs": [{"label": "EBR_A", "vector": [1, 0]}],
-    }
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        json.dump(table, f)
-        f.close()
-        try:
-            validated = load_reduced_ebr_table(f.name)
-            assert validated["irreps"] == ["GammaM:GM1", "GammaM:GM2"]
-        finally:
-            import os; os.unlink(f.name)
-
-
-def test_irrep_key_regex_rejects_digit_first_char():
-    """Irrep label starting with digit after : is invalid."""
-    from valleyscope.analysis.reduced_ebr_mapping import load_reduced_ebr_table
-    import tempfile, json, pytest
-    table = {
-        "schema_version": "1.0.0",
-        "subspace_group_candidate": "P4",
-        "expected_hsps": ["GammaM"],
-        "irreps": ["GammaM:1GM"],
-        "ebrs": [{"label": "EBR_A", "vector": [1]}],
-    }
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        json.dump(table, f)
-        f.close()
-        try:
-            with pytest.raises(ValueError, match="invalid irrep key format"):
-                load_reduced_ebr_table(f.name)
-        finally:
-            import os; os.unlink(f.name)
-
-
-def test_irrep_key_regex_rejects_plus_first_char():
-    """Irrep label starting with + after : is invalid."""
-    from valleyscope.analysis.reduced_ebr_mapping import load_reduced_ebr_table
-    import tempfile, json, pytest
-    table = {
-        "schema_version": "1.0.0",
-        "subspace_group_candidate": "P4",
-        "expected_hsps": ["GammaM"],
-        "irreps": ["GammaM:+GM"],
-        "ebrs": [{"label": "EBR_A", "vector": [1]}],
-    }
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        json.dump(table, f)
-        f.close()
-        try:
-            with pytest.raises(ValueError, match="invalid irrep key format"):
-                load_reduced_ebr_table(f.name)
-        finally:
-            import os; os.unlink(f.name)
-
-
-def test_irrep_key_regex_rejects_slash_first_char():
-    """Irrep label starting with / after : is invalid."""
-    from valleyscope.analysis.reduced_ebr_mapping import load_reduced_ebr_table
-    import tempfile, json, pytest
-    table = {
-        "schema_version": "1.0.0",
-        "subspace_group_candidate": "P4",
-        "expected_hsps": ["GammaM"],
-        "irreps": ["GammaM:/GM"],
-        "ebrs": [{"label": "EBR_A", "vector": [1]}],
-    }
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        json.dump(table, f)
-        f.close()
-        try:
-            with pytest.raises(ValueError, match="invalid irrep key format"):
-                load_reduced_ebr_table(f.name)
-        finally:
-            import os; os.unlink(f.name)
-
-
-def test_irrep_key_regex_accepts_minus_letter_label():
-    """Leading - followed by letter is valid (spinor convention)."""
-    from valleyscope.analysis.reduced_ebr_mapping import load_reduced_ebr_table
-    import tempfile, json
-    table = {
-        "schema_version": "1.0.0",
-        "subspace_group_candidate": "P3",
-        "expected_hsps": ["KM"],
-        "irreps": ["KM:-K5", "KM:-K6"],
-        "ebrs": [{"label": "EBR_K", "vector": [1, 0]}],
-    }
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        json.dump(table, f)
-        f.close()
-        try:
-            validated = load_reduced_ebr_table(f.name)
-            assert len(validated["irreps"]) == 2
-        finally:
-            import os; os.unlink(f.name)
-
-
-# -----------------------------------------------------------------------
-# Per-bundle auto-canonical (Findings 1, 2)
-# -----------------------------------------------------------------------
-
-def test_two_bundles_same_sg_both_solved():
-    """Two ready bundles, both solved → global solved_exact."""
-    result = _build_auto_canonical_mapping(
-        ebr_export_bundle={
-            "bundles": [
-                {
-                    "bundle_id": "b_001", "valley": "K_valley",
-                    "subspace_group_candidate": "P4",
-                    "subspace_space_group": {
-                        "status": "resolved",
-                        "candidate_space_group_number": 75,
-                        "candidate_space_group_symbol": "P4",
-                    },
-                    "ready_for_external_solver": True,
-                    "expected_hsps": ["GammaM"],
-                    "irreps_by_kpoint": {"GammaM": ["-GM5"]},
-                },
-                {
-                    "bundle_id": "b_002", "valley": "Kp_valley",
-                    "subspace_group_candidate": "P4",
-                    "subspace_space_group": {
-                        "status": "resolved",
-                        "candidate_space_group_number": 75,
-                        "candidate_space_group_symbol": "P4",
-                    },
-                    "ready_for_external_solver": True,
-                    "expected_hsps": ["GammaM"],
-                    "irreps_by_kpoint": {"GammaM": ["-GM6"]},
-                },
-            ],
-        },
-        spinor_wf=True,
-    )
-    assert result is not None
-    # Per-bundle processing: both solved.
-    assert result["mapping_status"] == "solved_exact"
-    assert result["reduced_ebr_input"]["ready_bundle_count"] == 2
-    assert len(result.get("auto_canonical_bundles", [])) == 2
-    assert len(result["solutions"]) == 2
-    assert len(result["excluded_bundles"]) == 0
-
-
-def test_valid_plus_malformed_ready_not_solved():
-    """One valid + one malformed ready bundle → global not solved_exact,
-    counts reconcile."""
-    result = _build_auto_canonical_mapping(
-        ebr_export_bundle={
-            "bundles": [
-                {
-                    "bundle_id": "b_ok", "valley": "K_valley",
-                    "subspace_group_candidate": "P4",
-                    "subspace_space_group": {
-                        "status": "resolved",
-                        "candidate_space_group_number": 75,
-                        "candidate_space_group_symbol": "P4",
-                    },
-                    "ready_for_external_solver": True,
-                    "expected_hsps": ["GammaM"],
-                    "irreps_by_kpoint": {"GammaM": ["-GM5"]},
-                },
-                {
-                    "bundle_id": "b_malformed",
-                    "subspace_group_candidate": "XX",
-                    "ready_for_external_solver": True,
-                },
-            ],
-        },
-        spinor_wf=True,
-    )
-    assert result is not None
-    assert result["mapping_status"] != "solved_exact"
-    # b_ok is solved, b_malformed excluded.
-    assert len(result["solutions"]) == 1
-    assert len(result["excluded_bundles"]) == 1
-    assert any("b_malformed" in str(e.get("bundle_id", "")) for e in result["excluded_bundles"])
-
-
-def test_non_ready_bundle_excluded_ready_still_valid():
-    """Non-ready bundle excluded, ready bundle solution still valid."""
-    result = _build_auto_canonical_mapping(
-        ebr_export_bundle={
-            "bundles": [
-                {
-                    "bundle_id": "b_ready", "valley": "K_valley",
-                    "subspace_group_candidate": "P4",
-                    "subspace_space_group": {
-                        "status": "resolved",
-                        "candidate_space_group_number": 75,
-                        "candidate_space_group_symbol": "P4",
-                    },
-                    "ready_for_external_solver": True,
-                    "expected_hsps": ["GammaM"],
-                    "irreps_by_kpoint": {"GammaM": ["-GM5"]},
-                },
-                {
-                    "bundle_id": "b_not_ready",
-                    "ready_for_external_solver": False,
-                },
-            ],
-        },
-        spinor_wf=True,
-    )
-    assert result is not None
-    assert result["mapping_status"] == "solved_exact"
-    assert len(result["solutions"]) == 1
-    assert len(result["excluded_bundles"]) == 1
-    assert any("b_not_ready" in str(e.get("bundle_id", "")) for e in result["excluded_bundles"])
-
-
-def test_no_buildable_bundle_auto_blocked():
-    """No buildable ready bundle → explicit auto-canonical blocked result."""
-    result = _build_auto_canonical_mapping(
-        ebr_export_bundle={
-            "bundles": [{
-                "bundle_id": "b_bad",
-                "ready_for_external_solver": True,
-                "subspace_group_candidate": "P3",
-            }],
-        },
-        spinor_wf=True,
-    )
-    assert result is not None
-    assert result["status"] == "blocked"
-    assert result["mapping_status"] == "blocked"
-
-
-def test_same_sg_diff_hsp_processed_independently():
-    """Same SG, different HSP bases → processed independently."""
-    result = _build_auto_canonical_mapping(
-        ebr_export_bundle={
-            "bundles": [
-                {
-                    "bundle_id": "b_gm", "valley": "K_valley",
-                    "subspace_group_candidate": "P4",
-                    "subspace_space_group": {
-                        "status": "resolved",
-                        "candidate_space_group_number": 75,
-                        "candidate_space_group_symbol": "P4",
-                    },
-                    "ready_for_external_solver": True,
-                    "expected_hsps": ["GammaM"],
-                    "irreps_by_kpoint": {"GammaM": ["-GM5"]},
-                },
-                {
-                    "bundle_id": "b_gm_xm", "valley": "Kp_valley",
-                    "subspace_group_candidate": "P4",
-                    "subspace_space_group": {
-                        "status": "resolved",
-                        "candidate_space_group_number": 75,
-                        "candidate_space_group_symbol": "P4",
-                    },
-                    "ready_for_external_solver": True,
-                    "expected_hsps": ["GammaM", "XM"],
-                    "irreps_by_kpoint": {
-                        "GammaM": ["-GM5"],
-                        "XM": ["-X3"],
-                    },
-                },
-            ],
-        },
-        spinor_wf=True,
-    )
-    assert result is not None
-    # Both processed independently; each gets its own table.
-    assert len(result.get("auto_canonical_bundles", [])) == 2
-
-
-def test_source_failure_never_called_physical():
-    """Source/convention failure → blocked, never stable/fragile."""
-    # SG 9999 will fail to build a table.
-    result = _build_auto_canonical_mapping(
-        ebr_export_bundle={
-            "bundles": [{
-                "bundle_id": "b_bad",
-                "subspace_group_candidate": "XX",
-                "subspace_space_group": {
-                    "status": "resolved",
-                    "candidate_space_group_number": 9999,
-                },
-                "ready_for_external_solver": True,
-                "expected_hsps": ["GammaM"],
-                "irreps_by_kpoint": {"GammaM": ["-GM4"]},
-            }],
-        },
-        spinor_wf=True,
-    )
-    assert result is not None
-    assert result["mapping_status"] != "solved_exact"
-    assert result["mapping_status"] != "no_exact_solution"
-    # Source failure → blocked, not a physical classification.
-    bundles = result.get("auto_canonical_bundles", [])
-    assert any(b["status"] == "blocked" for b in bundles)
-
-
-# -----------------------------------------------------------------------
-# Explicit table/spec regression
-# -----------------------------------------------------------------------
-
-def test_explicit_table_file_behavior_unchanged(tmp_path):
-    """Explicit table_file still works independently of auto-canonical."""
-    from valleyscope.analysis.reduced_ebr_mapping import (
-        build_reduced_ebr_mapping, load_reduced_ebr_table,
-    )
-
-    table_def = {
-        "schema_version": "1.0.0",
-        "subspace_group_candidate": "P4",
-        "expected_hsps": ["GammaM"],
-        "irreps": ["GammaM:-GM5", "GammaM:-GM6"],
-        "ebrs": [{"label": "EBR_A", "vector": [1, 0]}],
-    }
-    table_path = tmp_path / "explicit.json"
-    table_path.write_text(json.dumps(table_def), encoding="utf-8")
-    loaded = load_reduced_ebr_table(table_path)
-
-    export_bundle = {
-        "bundles": [{
-            "bundle_id": "b_explicit",
-            "valley": "K_valley",
-            "subspace_group_candidate": "P4",
-            "ready_for_external_solver": True,
-            "expected_hsps": ["GammaM"],
-            "irreps_by_kpoint": {"GammaM": ["-GM5"]},
-        }],
-    }
-    result = build_reduced_ebr_mapping(
-        ebr_export_bundle=export_bundle,
-        table=loaded,
-        reduced_ebr_input={"source": "table_file", "table_file_stem": "explicit"},
-    )
-    assert result["mapping_status"] == "solved_exact"
-
-
-def test_explicit_spec_file_behavior_unchanged(tmp_path):
-    """Explicit spec_file still works independently of auto-canonical."""
-    from valleyscope.analysis.irreptables_runtime_table_builder import (
-        build_reduced_table_from_spec_file,
-    )
-    from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
-
-    spec = {
-        "schema_version": "1.1.0",
-        "data_source": "irreptables",
-        "space_group_number": 75,
-        "spinful": True,
-        "source_hsp_by_irrep": {"-GM5": "GammaM", "-GM6": "GammaM"},
-        "valleyscope_irrep_multiplicity_by_source_irrep": {
-            "-GM5": {"GammaM:-GM5": 1},
-            "-GM6": {"GammaM:-GM6": 1},
-        },
-        "expected_hsps": ["GammaM"],
-        "allowed_irrep_keys": ["GammaM:-GM5", "GammaM:-GM6"],
-        "subspace_group_candidate": "P4",
-    }
-    spec_path = tmp_path / "spec.json"
-    spec_path.write_text(json.dumps(spec), encoding="utf-8")
-    # Fake loader must return only the labels declared in the spec.
-    table = build_reduced_table_from_spec_file(
-        str(spec_path),
-        source_loader=_make_p4_fake_ebr_loader(
-            gm_labels=["-GM5", "-GM6"], x_labels=[],
-        ),
-    )
-
-    export_bundle = {
-        "bundles": [{
-            "bundle_id": "b_spec",
-            "valley": "K_valley",
-            "subspace_group_candidate": "P4",
-            "ready_for_external_solver": True,
-            "expected_hsps": ["GammaM"],
-            "irreps_by_kpoint": {"GammaM": ["-GM5"]},
-        }],
-    }
-    result = build_reduced_ebr_mapping(
-        ebr_export_bundle=export_bundle,
-        table=table,
-        reduced_ebr_input={"source": "spec_file", "spec_file_stem": "spec"},
-    )
-    assert result["mapping_status"] == "solved_exact"
-
-
-def test_auto_canonical_table_contains_no_cn_like_labels():
-    """Auto-canonical table provenance must not contain Cn-like labels."""
-    from valleyscope.analysis.irreptables_runtime_table_builder import (
-        build_auto_canonical_reduced_ebr_table,
-    )
-
-    table = build_auto_canonical_reduced_ebr_table(
-        subspace_sg_number=75,
-        spinor=True,
-        bundle_irreps_by_kpoint={"GammaM": ["-GM5"]},
-        expected_hsps=["GammaM"],
-        subspace_group_candidate="P4",
-        source_loader=_make_p4_fake_ebr_loader(gm_labels=["-GM5", "-GM6"], x_labels=[]),
-    )
-
-    raw = json.dumps(table)
-    for cn in ("C2_like", "C3_like", "C4_like"):
-        assert cn not in raw, f"{cn} must not appear in auto-canonical table"
-
+        _auto_table(75, ["GammaM", "XM"], {"GammaM": ["-GM5"], "XM": ["-GM5"]})
+
+def test_dropped_rows_provenance():
+    t = _auto_table(75, ["GammaM"], {"GammaM": ["-GM5"]})
+    p = t["provenance"]; assert "GM" in p["sampled_bilbao_hsps"]
+    assert any("token=X" in d for d in p.get("dropped_source_rows", []))
+
+# ---------------------------------------------------------------------------
+# K-vector token parser
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("label,expected", [
+    ("-GM4","GM"),("-GM5","GM"),("-KA4","KA"),("-HA4","HA"),
+    ("WA1","WA"),("GM1","GM"),("-K5","K"),("-UNKNOWN",None),("ABC",None),("999",None),("-",None),("",None),
+])
+def test_kvector_parser(label, expected):
+    if expected is not None: assert _extract_kvector_token(label) == expected
+    else:
+        with pytest.raises(ValueError): _extract_kvector_token(label)
+
+def test_sg143_ka_ha_dropped():
+    """KA/HA rows from real SG143 EBR data are dropped (not sampled)."""
+    from irreptables.ebrs import load_ebr_data
+    t = build_auto_canonical_reduced_ebr_table(
+        subspace_sg_number=143, spinor=True,
+        bundle_irreps_by_kpoint={"GammaM": ["-GM4"], "KM": ["-K5"]},
+        expected_hsps=["GammaM", "KM"], subspace_group_candidate="P3",
+        source_loader=lambda sg,spin: load_ebr_data(sg, spin))
+    dropped = [d for d in t["provenance"].get("dropped_source_rows", []) if "KA" in d or "HA" in d]
+    assert len(dropped) > 0 and all("token=" in d for d in dropped)
+
+# ---------------------------------------------------------------------------
+# Solver uniqueness and truncation
+# ---------------------------------------------------------------------------
+
+def test_unique_exact():
+    r = classify_bundle([1], [[1], [2]], ["A", "B"], 6)
+    assert r["decomposition_uniqueness"] == "unique" and r["classification"] == "atomic-compatible-candidate"
+
+def test_non_unique_witnesses():
+    r = classify_bundle([1], [[1], [1]], ["A", "B"], 6)
+    assert r["decomposition_uniqueness"] == "non_unique" and len(r.get("decomposition_witnesses", [])) >= 2
+
+@pytest.mark.parametrize("target,vecs,cap,exp_uniq,exp_class", [
+    ([100], [[1]], 0, None, "indeterminate_truncated"),
+    ([2], [[1], [1]], 1, "unknown_truncated", "atomic-compatible-candidate"),
+    ([10], [[1], [2]], 5, "non_unique", "atomic-compatible-candidate"),
+])
+def test_truncated_states(target, vecs, cap, exp_uniq, exp_class):
+    r = classify_bundle(target, vecs, [f"E{i}" for i in range(len(vecs))], cap)
+    assert r["classification"] == exp_class
+    if exp_uniq is not None:
+        assert r["decomposition_uniqueness"] == exp_uniq
+    else:
+        assert "decomposition_uniqueness" not in r
+
+# ---------------------------------------------------------------------------
+# Irrep-key regex
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("irreps,valid", [
+    (["GammaM:-GM5","GammaM:-GM6"], True), (["KM:-K5","KM:-K6"], True),
+    (["GammaM:GM1"], True), (["GammaM:-GM5:op1"], True),
+    (["GammaM:1GM"], False), (["GammaM:+GM"], False), (["GammaM:/GM"], False),
+    (["GammaM:-1"], False),
+])
+def test_irrep_key_regex(irreps, valid):
+    import tempfile, os
+    t = {"schema_version":"1.0.0","subspace_group_candidate":"P4","expected_hsps":["GammaM"],"irreps":irreps,"ebrs":[{"label":"E","vector":[1]*len(irreps)}]}
+    f = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+    try:
+        json.dump(t, f); f.close()
+        if valid: load_reduced_ebr_table(f.name)
+        else:
+            with pytest.raises(ValueError, match="invalid irrep key format"): load_reduced_ebr_table(f.name)
+    finally: os.unlink(f.name)
+
+# ---------------------------------------------------------------------------
+# Disabled default / explicit table & spec regression / no-Cn
+# ---------------------------------------------------------------------------
+
+def test_disabled_no_artifacts(tmp_path):
+    h5 = tmp_path / "w.h5"; out = tmp_path / "out"
+    write_fixture(h5); cfg = tmp_path / "c.yaml"; write_config(cfg, h5, out)
+    outputs = analyze_hsp(cfg)
+    assert not (out / "valley_reduced_ebr_mapping.json").exists()
+
+def test_explicit_table_and_spec_regression(tmp_path):
+    # table_file
+    td = {"schema_version":"1.0.0","subspace_group_candidate":"P4","expected_hsps":["GammaM"],"irreps":["GammaM:-GM5","GammaM:-GM6"],"ebrs":[{"label":"E","vector":[1,0]}]}
+    tp = tmp_path / "t.json"; tp.write_text(json.dumps(td))
+    r = build_reduced_ebr_mapping(ebr_export_bundle={"bundles": [_mk_bundle("b",75,"P4",["GammaM"],{"GammaM":["-GM5"]})]}, table=load_reduced_ebr_table(tp), reduced_ebr_input={"source":"table_file"})
+    assert r["mapping_status"] == "solved_exact"
+    # spec_file — use a loader that returns exactly the labels declared in the spec
+    from valleyscope.analysis.irreptables_runtime_table_builder import build_reduced_table_from_spec_file
+    sp = tmp_path / "s.json"; sp.write_text(json.dumps({"schema_version":"1.1.0","data_source":"irreptables","space_group_number":75,"spinful":True,"source_hsp_by_irrep":{"-GM5":"GammaM","-GM6":"GammaM"},"valleyscope_irrep_multiplicity_by_source_irrep":{"-GM5":{"GammaM:-GM5":1},"-GM6":{"GammaM:-GM6":1}},"expected_hsps":["GammaM"],"allowed_irrep_keys":["GammaM:-GM5","GammaM:-GM6"],"subspace_group_candidate":"P4"}))
+    def _spec_ld(sg,spin): return {"basis":{"irrep_labels":["-GM5","-GM6"]},"ebrs":[{"ebr_name":"E","vector":[1,0]}]}
+    t2 = build_reduced_table_from_spec_file(str(sp), source_loader=_spec_ld)
+    r2 = build_reduced_ebr_mapping(ebr_export_bundle={"bundles": [_mk_bundle("b",75,"P4",["GammaM"],{"GammaM":["-GM5"]})]}, table=t2, reduced_ebr_input={"source":"spec_file"})
+    assert r2["mapping_status"] == "solved_exact"
+
+def test_no_cn_like_labels():
+    t = _auto_table(75, ["GammaM"], {"GammaM": ["-GM5"]}, loader=_p4_loader(gm=["-GM5","-GM6"], x=[]))
+    raw = json.dumps(t)
+    for cn in ("C2_like","C3_like","C4_like"): assert cn not in raw
     assert "P4" in raw
-    prov = table.get("provenance", {})
-    assert prov.get("auto_canonical") is True

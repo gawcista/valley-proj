@@ -264,7 +264,7 @@ def classify_bundle(
         # No nonnegative witness found.
         if truncated:
             result: dict = {
-                "status": "no_exact_solution",
+                "status": "indeterminate_truncated",
                 "classification": "indeterminate_truncated",
                 "integer_span_status": "in_integer_span",
                 "nonnegative_solution_status": "no_nonnegative_solution_truncated",

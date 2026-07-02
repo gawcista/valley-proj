@@ -2635,48 +2635,56 @@ def _build_auto_canonical_mapping(
             "status": bundle_result.get("mapping_status", "unknown"),
         })
 
-    if not all_solutions and not all_excluded:
+    # --- Aggregate top-level status ---
+    # Zero ready bundles → not_evaluated.
+    if ready_count == 0:
         return {
             "status": "not_evaluated",
             "mapping_status": "not_evaluated",
             "reduced_ebr_decomposition_status": "not_evaluated",
             "table_status": "not_provided",
             "solutions": [],
-            "excluded_bundles": [],
+            "excluded_bundles": all_excluded,
             "solver": "smith_normal_form_plus_bounded_nonnegative_search",
             "max_coefficient": max_coefficient,
-            "interpretation": "no bundles could be evaluated via auto-canonical path",
+            "interpretation": "no ready bundles available for auto-canonical evaluation",
             "reduced_ebr_input": {
                 "source": "auto_canonical_blocked",
-                "reason": "no bundles could be evaluated",
+                "ready_bundle_count": 0,
             },
             "auto_canonical_bundles": per_bundle_statuses,
         }
 
-    # Global status: solved_exact only if EVERY ready bundle has a solution.
-    # Infrastructure/convention failures are "blocked", not physical no-exact.
     all_ready_solved = (
-        ready_count > 0
-        and len(all_solutions) == ready_count
-        and all(
-            s.get("status") == "solved_exact" for s in all_solutions
-        )
+        len(all_solutions) == ready_count
+        and all(s.get("status") == "solved_exact" for s in all_solutions)
     )
-    any_build_failed = any(
+    any_blocked = any(
         s.get("status") == "blocked" for s in per_bundle_statuses
     )
+    any_indeterminate = any(
+        s.get("status") == "indeterminate_truncated" for s in per_bundle_statuses
+    ) or any(
+        s.get("status") == "indeterminate_truncated"
+        for s in all_solutions
+    )
+
     if all_ready_solved:
         global_status = "solved_exact"
-    elif len(all_solutions) == 0 and any_build_failed:
+    elif any_blocked:
         global_status = "blocked"
+    elif any_indeterminate:
+        global_status = "indeterminate_truncated"
     else:
         global_status = "no_exact_solution"
+
+    table_status = "loaded" if len(all_solutions) > 0 else "not_provided"
 
     result: dict[str, object] = {
         "status": global_status,
         "mapping_status": global_status,
         "reduced_ebr_decomposition_status": global_status,
-        "table_status": "loaded",
+        "table_status": table_status,
         "solutions": all_solutions,
         "excluded_bundles": all_excluded,
         "solver": "smith_normal_form_plus_bounded_nonnegative_search",

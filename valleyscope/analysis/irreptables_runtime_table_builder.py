@@ -377,24 +377,39 @@ def _package_version(package_name: str) -> str | None:
 # Auto-canonical EBR table builder
 # ---------------------------------------------------------------------------
 
+def _validate_expected_hsps(expected_hsps: Sequence[str]) -> None:
+    """Validate expected_hsps is a unique non-empty list of non-empty strings."""
+    if not isinstance(expected_hsps, Sequence) or isinstance(expected_hsps, (str, bytes)):
+        raise ValueError("expected_hsps must be a list of non-empty strings")
+    if len(expected_hsps) == 0:
+        raise ValueError("expected_hsps must be non-empty")
+    seen: set[str] = set()
+    for i, h in enumerate(expected_hsps):
+        if not isinstance(h, str) or not h:
+            raise ValueError(f"expected_hsps[{i}] must be a non-empty string")
+        if h in seen:
+            raise ValueError(f"expected_hsps must be unique; duplicate {h!r}")
+        seen.add(h)
+
+
 def _extract_kvector_token(label: str) -> str:
     """Extract the canonical k-vector token from an irreptables label.
 
-    Strips an optional leading ``-`` (spinor convention) then takes all
-    leading ASCII letters as the k-vector token.  Examples: ``-GM4`` →
-    ``GM``, ``-KA4`` → ``KA``, ``WA1`` → ``WA``, ``-HA4`` → ``HA``.
+    Labels must match ``^-?([A-Za-z]+)(?=[0-9])``: an optional leading
+    ``-`` (spinor convention), a non-empty ASCII-letter k-vector token,
+    and an irrep index beginning with a digit.  Returns the k-vector
+    token (e.g. ``-GM4`` → ``GM``, ``-KA4`` → ``KA``, ``WA1`` → ``WA``).
 
-    This is a pure string extraction; it does not consult the
-    ``StandardIrrepTable``, infer endpoints, or decompose composite names.
+    Raises ``ValueError`` when the label has no numeric irrep index.
     """
-    stripped = label[1:] if label.startswith("-") else label
-    token: list[str] = []
-    for ch in stripped:
-        if ch.isascii() and ch.isalpha():
-            token.append(ch)
-        else:
-            break
-    return "".join(token)
+    import re
+    m = re.match(r"^-?([A-Za-z]+)(?=[0-9])", label)
+    if not m:
+        raise ValueError(
+            f"cannot extract k-vector token from {label!r}: "
+            f"label must match ^-?([A-Za-z]+)(?=[0-9])"
+        )
+    return m.group(1)
 
 
 def build_auto_canonical_reduced_ebr_table(
@@ -452,6 +467,26 @@ def build_auto_canonical_reduced_ebr_table(
     if not expected_hsps:
         raise ValueError("expected_hsps must be non-empty")
 
+    # --- 0. Validate expected_hsps and irreps_by_kpoint structure ---
+    _validate_expected_hsps(expected_hsps)
+    # expected_hsps keys must agree exactly with irreps_by_kpoint keys.
+    bundle_hsp_keys = set(
+        k for k in bundle_irreps_by_kpoint
+        if isinstance(bundle_irreps_by_kpoint.get(k), Sequence)
+        and not isinstance(bundle_irreps_by_kpoint.get(k), (str, bytes))
+    )
+    if bundle_hsp_keys != set(expected_hsps):
+        raise ValueError(
+            f"irreps_by_kpoint keys {sorted(bundle_hsp_keys)} do not match "
+            f"expected_hsps {sorted(expected_hsps)}"
+        )
+    for hsp in expected_hsps:
+        labels = bundle_irreps_by_kpoint.get(hsp, [])
+        if not isinstance(labels, Sequence) or isinstance(labels, (str, bytes)) or not labels:
+            raise ValueError(
+                f"irreps_by_kpoint[{hsp!r}] must be a non-empty list"
+            )
+
     # --- 1. Load StandardIrrepTable; validate canonical bundle labels ---
     irrep_table = load_standard_irrep_table(subspace_sg_number, spinor=spinor)
     label_to_bilbao_kp: dict[str, str] = {}
@@ -499,7 +534,27 @@ def build_auto_canonical_reduced_ebr_table(
             "canonical irrep labels"
         )
 
-    # Canonical Bilbao HSPs present in this bundle.
+    # --- Bijective mapping check ---
+    # Each ValleyScope HSP must map to at most one Bilbao HSP, and each
+    # sampled Bilbao HSP must map to exactly one ValleyScope HSP.
+    vs_hsp_seen: set[str] = set()
+    for vs_hsp in expected_hsps:
+        mapped_bilbao = [
+            bk for bk, vs in bilbao_to_valleyscope.items() if vs == vs_hsp
+        ]
+        if len(mapped_bilbao) == 0:
+            raise ValueError(
+                f"ValleyScope HSP {vs_hsp!r} has no Bilbao HSP in the "
+                f"derived mapping; check canonical labels"
+            )
+        if len(mapped_bilbao) > 1:
+            raise ValueError(
+                f"ValleyScope HSP {vs_hsp!r} maps to multiple Bilbao HSPs "
+                f"{mapped_bilbao}; mapping must be one-to-one"
+            )
+        vs_hsp_seen.add(vs_hsp)
+
+    # Every sampled Bilbao HSP must be in the mapping.
     sampled_bilbao_hsps: set[str] = set(bilbao_to_valleyscope.keys())
 
     # --- 3. Load irreptables EBR data ---
@@ -529,10 +584,12 @@ def build_auto_canonical_reduced_ebr_table(
     retained_labels: list[str] = []
     hsps_set = set(expected_hsps)
 
+    unresolved_ebr_labels: list[str] = []
     for label in ebr_basis_labels:
-        token = _extract_kvector_token(label)
-        if not token:
-            unresolved_ebr_labels.append(label)
+        try:
+            token = _extract_kvector_token(label)
+        except ValueError as exc:
+            unresolved_ebr_labels.append(f"{label}: {exc}")
             continue
         if token in sampled_bilbao_hsps:
             retained_labels.append(label)
@@ -541,7 +598,7 @@ def build_auto_canonical_reduced_ebr_table(
 
     if unresolved_ebr_labels:
         raise ValueError(
-            "EBR basis labels with no k-vector token for "
+            "EBR basis labels with invalid k-vector token for "
             f"SG {subspace_sg_number} spinor={spinor}: "
             f"{unresolved_ebr_labels}"
         )
@@ -556,9 +613,7 @@ def build_auto_canonical_reduced_ebr_table(
     for label in ebr_basis_labels:
         if label not in source_hsp_by_irrep_full:
             token = _extract_kvector_token(label)
-            # Dropped row: assign a non-sampled HSP so the normalizer
-            # filters it during reduction.
-            source_hsp_by_irrep_full[label] = f"_{token}" if token else f"_dropped_{label}"
+            source_hsp_by_irrep_full[label] = f"_{token}"
 
     valleyscope_irrep_multiplicity_by_source_irrep: dict[str, dict[str, int]] = {}
     for label in retained_labels:
