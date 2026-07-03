@@ -954,20 +954,6 @@ def test_summary_preserves_valley_preserving_subgroup_report(tmp_path):
             "operation_ids": [0, 1, 2],
         },
         "standard_group_match_status": "matched",
-        "irrep_matching": {
-            "status": "table_mapping_complete",
-            "table_source": "irreptables",
-            "label_matching": "matched",
-            "character_matching_status": "matched",
-            "irrep_results_by_kpoint": {
-                "KM": {
-                    "status": "matched",
-                    "table_kpoint_label": "K",
-                    "irrep_multiplicities": {"-K5": 1, "-K6": 1},
-                    "failure_reasons": [],
-                }
-            },
-        },
         "by_kpoint": {
             "KM": {
                 "operation_set_label": "G_tau,k(KM)",
