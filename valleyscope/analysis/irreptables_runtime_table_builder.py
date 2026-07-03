@@ -3,7 +3,7 @@
 This is an offline/library adapter.  It uses the projected-subspace / moire
 space group supplied by ValleyScope, loads public package-style 3D EBR data,
 then applies ValleyScope's explicit sampled-HSP and valley-preserving reduction.
-It is not wired into ``analyze_hsp.py`` and never calls raw 3D decomposition.
+It never calls or exposes raw 3D EBR decomposition.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from collections.abc import Callable, Mapping, Sequence
 import importlib.metadata
 import json
 from pathlib import Path
+import re
 import tempfile
 from typing import Any
 
@@ -402,7 +403,6 @@ def _extract_kvector_token(label: str) -> str:
 
     Raises ``ValueError`` when the label has no numeric irrep index.
     """
-    import re
     m = re.match(r"^-?([A-Za-z]+)(?=[0-9])", label)
     if not m:
         raise ValueError(
@@ -537,7 +537,6 @@ def build_auto_canonical_reduced_ebr_table(
     # --- Bijective mapping check ---
     # Each ValleyScope HSP must map to at most one Bilbao HSP, and each
     # sampled Bilbao HSP must map to exactly one ValleyScope HSP.
-    vs_hsp_seen: set[str] = set()
     for vs_hsp in expected_hsps:
         mapped_bilbao = [
             bk for bk, vs in bilbao_to_valleyscope.items() if vs == vs_hsp
@@ -552,8 +551,6 @@ def build_auto_canonical_reduced_ebr_table(
                 f"ValleyScope HSP {vs_hsp!r} maps to multiple Bilbao HSPs "
                 f"{mapped_bilbao}; mapping must be one-to-one"
             )
-        vs_hsp_seen.add(vs_hsp)
-
     # Every sampled Bilbao HSP must be in the mapping.
     sampled_bilbao_hsps: set[str] = set(bilbao_to_valleyscope.keys())
 
@@ -584,7 +581,6 @@ def build_auto_canonical_reduced_ebr_table(
     retained_labels: list[str] = []
     hsps_set = set(expected_hsps)
 
-    unresolved_ebr_labels: list[str] = []
     for label in ebr_basis_labels:
         try:
             token = _extract_kvector_token(label)
