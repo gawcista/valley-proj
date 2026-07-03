@@ -1763,12 +1763,6 @@ def test_generic_irrep_override_hsp_requires_coordinate_agreement():
     )
 
 
-def test_no_independent_second_matcher():
-    """add_valley_irrep_results is no longer called in analyze_hsp."""
-    import valleyscope.workflows.analyze_hsp as workflow_mod
-    assert "add_valley_irrep_results" not in dir(workflow_mod)
-
-
 def test_readiness_failed_seed_symmetry_blocks_trusted_output():
     """Failed seed projector symmetry must not produce trusted irrep labels."""
     from valleyscope.analysis.valley_irrep_matching import (

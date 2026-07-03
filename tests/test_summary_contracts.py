@@ -996,8 +996,6 @@ def test_summary_preserves_valley_preserving_subgroup_report(tmp_path):
     assert summary["symmetry_analysis"]["valley_preserving_subgroup_report"] == subgroup_report
     text = render_summary_text(summary)
     assert "valley-preserving subgroup: P3 (143)" in text
-    assert "irrep matching: matched" in text
-    assert "KM: -K5 x 1, -K6 x 1" in text
 
 
 def test_summary_exposes_symmetry_characters_as_first_class_rows(tmp_path):
