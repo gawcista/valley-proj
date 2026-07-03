@@ -97,6 +97,7 @@ def build_source_payload_for_generic_matching(
         table=table,
         detected_operations=vp_detected_operations,
         tolerance=tol,
+        source_hsp_label=source_hsp_label,
     )
     if op_match.unmatched_operation_ids:
         return _blocked(
@@ -164,6 +165,10 @@ def build_source_payload_for_generic_matching(
             "source_table_operation_indices": mapped_table_indices,
             "unused_table_operation_indices": op_match.unused_table_operation_indices,
             "table_operations_mapped": len(source_operation_map),
+            "operation_mapping_provenance": (
+                op_match.provenance if hasattr(op_match, "provenance")
+                else "exact_spatial"
+            ),
         },
         "blocker_reasons": [],
     }

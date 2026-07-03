@@ -437,6 +437,18 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             operations=symmetry_payload.get("detected_operations", []),
         )
 
+    # --- Valley-preserving subgroup report (before symmetry-adapted) ---
+    # Build before the symmetry-adapted valley report so that
+    # per_valley_standard_matches is available for subspace_space_group
+    # resolution during initial construction.
+    if symmetry_payload["status"] == "ok":
+        build_valley_preserving_subgroup_report(
+            symmetry_payload=symmetry_payload,
+            target_kpoints=config.analysis.kpoints,
+        )
+        # The canonical downstream Bilbao/irreptables restricted-character
+        # matcher is build_valley_irrep_matching_report().
+
     # --- Formal symmetry-adapted valley report ---
     symmetry_adapted_valley_report: dict[str, object] | None = None
     hsp_star_conjugation_report: dict[str, object] | None = None
@@ -467,22 +479,6 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 kpoint_frac_by_name=symmetry_payload.get("kpoint_frac_by_name", {}),
                 operations=symmetry_payload.get("detected_operations", []),
             )
-
-    if symmetry_payload["status"] == "ok":
-        build_valley_preserving_subgroup_report(
-            symmetry_payload=symmetry_payload,
-            target_kpoints=config.analysis.kpoints,
-        )
-        # The canonical downstream Bilbao/irreptables restricted-character
-        # matcher is build_valley_irrep_matching_report().
-
-        # Post-process: propagate resolved per_valley_standard_matches
-        # to subspace_space_group fields in the already-built
-        # symmetry_adapted_valley_report.
-        _apply_resolved_subspace_sg_to_valley_report(
-            symmetry_adapted_valley_report=symmetry_adapted_valley_report,
-            symmetry_payload=symmetry_payload,
-        )
 
     sector_names = list(projectors_by_kpoint[next(iter(projectors_by_kpoint))].sector_masks)
     symmetry_eigenvalue_summary = _build_symmetry_eigenvalue_summary(symmetry_payload, symmetry_rows)
@@ -606,10 +602,6 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
 
                 # --- Standard-setting HSP correspondence (conservative) ---
                 # --- G_k^(a) operation IDs (before HSP labelling) ---
-                # Identity-only G_k^(a) is a valid local representation
-                # and does not require an HSP label or restricted-character
-                # matching.  Check this first so that HSP-label resolution
-                # cannot block an identity-only subgroup.
                 ssg = vs.get("subspace_space_group", {})
                 full_vp_ids = ssg.get("valley_preserving_operation_ids", []) if isinstance(ssg, dict) else []
                 hsp_lg_ids = vs.get("hsp_preserving_operation_ids", [])
@@ -617,15 +609,30 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     vp_ids = [op for op in full_vp_ids if op in hsp_lg_ids]
                 else:
                     vp_ids = list(full_vp_ids)
+
+                # --- Identity detection from operation content ---
+                identity_id = _detected_identity_operation_id(
+                    symmetry_payload, [str(v_name)],
+                )
+                non_identity_vp = [op for op in vp_ids if op != identity_id]
+
                 if not vp_ids:
-                    # Identity-only G_k^(a): valid local representation,
-                    # not a numerical failure.  No restricted-character
-                    # matching is attempted.
+                    # Empty G_k^(a): inconsistent input, blocked.
+                    generic_source_blocked_rows.append({
+                        "kpoint": kp_name, "valley": v_name,
+                        "reason": (
+                            "empty_valley_preserving_hsp_subgroup: "
+                            "no valley-preserving operation in the HSP "
+                            "little group"
+                        ),
+                    })
                     continue
-                if vp_ids == [0]:
-                    # Identity-only G_k^(a): all non-identity valley-
-                    # preserving operations are outside the HSP little
-                    # group.  Valid physical local result.
+                if not non_identity_vp:
+                    # Identity-only G_k^(a): valid local representation.
+                    # No restricted-character matching is attempted, but
+                    # the row must remain visible in compact output.
+                    # Handled by the canonical matching layer as
+                    # identity_only_not_irrep_distinguishing.
                     continue
 
                 k_frac_raw = kpoint_frac.get(kp_name)
@@ -1924,71 +1931,6 @@ def _space_group_valley_mapping_payload(
         except (TypeError, ValueError):
             pass
     return mappings, orders
-
-
-def _apply_resolved_subspace_sg_to_valley_report(
-    *,
-    symmetry_adapted_valley_report: dict[str, Any] | None,
-    symmetry_payload: dict[str, Any],
-) -> None:
-    """Propagate resolved per_valley_standard_matches to subspace_space_group.
-
-    The subgroup report is built after the symmetry-adapted valley report,
-    so the subspace_space_group fields in the latter are initially
-    \"unresolved\".  This function patches them with the standard match
-    when available.
-    """
-    if symmetry_adapted_valley_report is None:
-        return
-    matches = _extract_per_valley_matches(symmetry_payload)
-    if not matches:
-        return
-    by_kp = symmetry_adapted_valley_report.get("by_kpoint", {})
-    if not isinstance(by_kp, dict):
-        return
-    for kp_data in by_kp.values():
-        if not isinstance(kp_data, dict):
-            continue
-        for vs in kp_data.get("valley_preserving_subspaces", []):
-            if not isinstance(vs, dict):
-                continue
-            orbit = vs.get("orbit", [])
-            if not orbit:
-                continue
-            valley = str(orbit[0])
-            vm = matches.get(valley, {})
-            if not isinstance(vm, dict):
-                continue
-            if vm.get("standard_group_match_status") != "matched":
-                continue
-            sm = vm.get("standard_group_match")
-            if not isinstance(sm, dict):
-                continue
-            sg_number = sm.get("number")
-            sg_symbol = sm.get("international_short")
-            if sg_number is None:
-                continue
-            ssg = vs.get("subspace_space_group", {})
-            if not isinstance(ssg, dict):
-                ssg = {}
-            ssg["status"] = "resolved"
-            ssg["candidate_space_group_number"] = int(sg_number)
-            ssg["candidate_space_group_symbol"] = (
-                str(sg_symbol) if sg_symbol else ""
-            )
-            ssg["source"] = (
-                "symmetry_analysis.valley_preserving_subgroup_report"
-                ".per_valley_standard_matches"
-            )
-            vs["subspace_space_group"] = ssg
-            # Also update ebr_mapping_input if present.
-            ebr = vs.get("ebr_mapping_input")
-            if isinstance(ebr, dict):
-                ebr["subspace_space_group"] = ssg
-            _refine_ebr_mapping_with_subspace_space_group(
-                ebr_mapping=ebr,
-                subspace_space_group=ssg,
-            ) if isinstance(ebr, dict) else None
 
 
 def _extract_per_valley_matches(

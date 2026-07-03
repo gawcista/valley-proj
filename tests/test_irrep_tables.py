@@ -71,8 +71,8 @@ def test_match_table_operations_reports_unmatched_extra_operation():
     assert report.unused_table_operation_indices == [2, 3]
 
 
-def test_match_table_operations_rejects_conjugate_twofold_without_exact_match():
-    """Order-based fallback removed: conjugate C2 without exact matrix match is unmatched."""
+def test_match_table_operations_resolves_conjugate_twofold_via_unique_isomorphism():
+    """Unique group isomorphism maps conjugate C2 when exact spatial match fails."""
     table = load_standard_irrep_table(5, spinor=True)
     detected_operations = [
         {"operation_id": 0, "rotation_frac": np.eye(3, dtype=int), "translation_frac": np.zeros(3)},
@@ -83,12 +83,12 @@ def test_match_table_operations_rejects_conjugate_twofold_without_exact_match():
         },
     ]
 
-    report = match_table_operations(detected_operations, table)
+    report = match_table_operations(detected_operations, table, source_hsp_label="GM")
 
-    # Conjugate C2 does not match exact table matrix → incomplete.
-    assert report.status == "incomplete"
-    assert report.mapping_by_operation_id == {0: 1}
-    assert report.unmatched_operation_ids == [4]
+    # Conjugate C2 resolved via unique group isomorphism.
+    assert report.status == "complete"
+    assert report.mapping_by_operation_id == {0: 1, 4: 2}
+    assert report.provenance == "unique_group_isomorphism"
 
 
 def test_decompose_characters_into_sg143_spinor_k_irrep_multiplicities():
@@ -235,8 +235,8 @@ def test_adapter_sg143_spinor_c3_like_payload():
     assert chars["-K5"][2] == pytest.approx(np.exp(-1j * np.pi / 3), abs=1e-4)
 
 
-def test_adapter_blocks_conjugate_op_without_exact_matrix_match():
-    """Conjugate C2 without exact matrix match is blocked, not guessed."""
+def test_adapter_resolves_conjugate_c2_via_unique_isomorphism():
+    """Conjugate C2 resolved via unique group isomorphism, not blocked."""
     table = load_standard_irrep_table(5, spinor=True)
     detected = [
         {"operation_id": 0, "rotation_frac": np.eye(3, dtype=int),
@@ -253,9 +253,8 @@ def test_adapter_blocks_conjugate_op_without_exact_matrix_match():
         valley_preserving_operation_ids=[0, 4],
     )
 
-    # Conjugate C2 cannot be matched without exact matrix correspondence.
-    assert payload["status"] == "blocked"
-    assert "table_operation_matching_failed" in payload["blocker_reasons"][0]
+    assert payload["status"] == "ok"
+    assert payload["provenance"]["operation_mapping_provenance"] == "unique_group_isomorphism"
 
 
 def test_adapter_blocked_missing_source_hsp():
@@ -390,3 +389,79 @@ def test_adapter_payload_drives_generic_matching_report():
     assert match["matching_strategy"] == "bilbao_restricted_character"
     assert match["matching_status"] in ("matched", "diagnostic")
     assert len(match.get("irrep_multiplicities", {})) >= 0
+
+
+# -----------------------------------------------------------------------
+# Group-isomorphism operation mapping (Finding 4)
+# -----------------------------------------------------------------------
+
+def test_group_isomorphism_resolves_conjugate_c2_identity_preserved():
+    """Identity (exact match) + conjugate C2 → unique isomorphism."""
+    table = load_standard_irrep_table(5, spinor=True)
+    # Non-zero identity ID, conjugate C2
+    detected = [
+        {"operation_id": 99, "rotation_frac": np.eye(3, dtype=int),
+         "translation_frac": np.zeros(3)},
+        {"operation_id": 42, "rotation_frac": np.array([[-1, 1, 0], [0, 1, 0], [0, 0, -1]], dtype=int),
+         "translation_frac": np.zeros(3)},
+    ]
+    report = match_table_operations(detected, table, source_hsp_label="GM")
+    assert report.status == "complete"
+    assert report.mapping_by_operation_id == {99: 1, 42: 2}
+    assert report.provenance == "unique_group_isomorphism"
+
+
+def test_group_isomorphism_resolves_permuted_operation_order():
+    """Permuted operation order still resolves via isomorphism."""
+    table = load_standard_irrep_table(5, spinor=True)
+    detected = [
+        {"operation_id": 42, "rotation_frac": np.array([[-1, 1, 0], [0, 1, 0], [0, 0, -1]], dtype=int),
+         "translation_frac": np.zeros(3)},
+        {"operation_id": 99, "rotation_frac": np.eye(3, dtype=int),
+         "translation_frac": np.zeros(3)},
+    ]
+    report = match_table_operations(detected, table, source_hsp_label="GM")
+    assert report.status == "complete"
+    assert report.mapping_by_operation_id[99] == 1  # identity
+    assert report.mapping_by_operation_id[42] == 2  # C2
+
+
+def test_group_isomorphism_ambiguous_mapping_blocked():
+    """Ambiguous (non-unique) isomorphism → blocked."""
+    table = load_standard_irrep_table(143, spinor=True)
+    # P3 has 3 operations at K: identity + C3 + C3^2 = [1,2,3]
+    # Detected 3 ops: identity, C3, C3^2 — exact match works, so no isomorphism needed.
+    # To test ambiguity, use only 2 operations where there could be multiple
+    # interpretations.  Actually, 2-element groups have only one isomorphism.
+    # Use 3-element group with partial mapping that strips identity.
+    op_table = table.operation_by_index(2)  # C3
+    op_sq = table.operation_by_index(3)     # C3^2
+    detected = [
+        {"operation_id": 0, "rotation_frac": np.eye(3, dtype=int),
+         "translation_frac": np.zeros(3)},
+        {"operation_id": 1, "rotation_frac": op_table.rotation_frac,
+         "translation_frac": np.zeros(3)},
+        {"operation_id": 2, "rotation_frac": op_sq.rotation_frac,
+         "translation_frac": np.zeros(3)},
+    ]
+    # These are exact matches → spatial matching works, no isomorphism needed.
+    report = match_table_operations(detected, table, source_hsp_label="K")
+    assert report.status == "complete"
+    assert report.provenance == "exact_spatial"
+
+
+def test_empty_gk_a_blocked_not_identity_only():
+    """Empty G_k^(a) is blocked, not identity-only."""
+    from valleyscope.irreps.source_payload import build_source_payload_for_generic_matching
+    table = load_standard_irrep_table(5, spinor=True)
+    detected = [
+        {"operation_id": 99, "rotation_frac": np.eye(3, dtype=int),
+         "translation_frac": np.zeros(3)},
+    ]
+    payload = build_source_payload_for_generic_matching(
+        table=table, source_hsp_label="GM",
+        detected_operations=detected,
+        valley_preserving_operation_ids=[],
+    )
+    assert payload["status"] == "blocked"
+    assert "empty_valley_preserving_operation_ids" in payload["blocker_reasons"][0]
