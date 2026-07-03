@@ -1,15 +1,9 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import quote
-
 import numpy as np
 import spglib
 
-from valleyscope.irreps.matching import (
-    decompose_characters_into_irreps,
-    match_single_state_irrep,
-)
 from valleyscope.symmetry.little_group import is_little_group_operation
 
 
@@ -258,9 +252,6 @@ def build_valley_preserving_subgroup_report(
     symmetry_payload["valley_preserving_subgroup_report"] = report
     return report
 
-_IRREP_TABLE_CACHE: dict[tuple[int, bool], Any] = {}
-
-
 def _operation_preserves_valley(operation: dict[str, Any], valley_name: str) -> bool:
     mapping = operation.get("sector_mapping", {})
     target = mapping.get(valley_name)
@@ -407,182 +398,6 @@ def _compute_valley_orbits(
         })
 
     return orbits
-
-
-def _collect_state_diagonal_characters(
-    *,
-    representation_payload: dict[str, Any] | None,
-    kpoint: str,
-    table_to_operation: dict[int, Any],
-    table_operation_indices: Any,
-    symmetry_rows: list[dict[str, Any]],
-    operation_to_table: dict[Any, int],
-    target_valley: str | None = None,
-    state_diagonal_tol: float = 1e-3,
-) -> dict[str, Any]:
-    """Collect per-state characters from D_valley diagonal, filtered by target_valley."""
-    state_characters: dict[int, dict[int, complex]] = {}
-    offdiag_warnings: list[str] = []
-
-    if representation_payload is None:
-        return {"state_characters": state_characters, "offdiag_warnings": ["no_representation_payload"]}
-
-    kp_representations = representation_payload.get(kpoint, {})
-    if not isinstance(kp_representations, dict):
-        return {"state_characters": state_characters, "offdiag_warnings": ["no_kpoint_representations"]}
-
-    rows_by_table: dict[int, list[dict[str, Any]]] = {}
-    for row in symmetry_rows:
-        if str(row.get("kpoint", "")) != kpoint:
-            continue
-        row_valley = str(row.get("target_valley", ""))
-        if target_valley is not None and row_valley and row_valley != target_valley:
-            continue
-        if not bool(row.get("little_group_passed", False)):
-            continue
-        if not bool(row.get("valley_preserving", False)):
-            continue
-        operation_id = row.get("operation_id")
-        if operation_id not in operation_to_table:
-            continue
-        table_index = operation_to_table[operation_id]
-        rows_by_table.setdefault(table_index, []).append(row)
-
-    ready_table_indices: set[int] = set()
-    for table_index, rows in rows_by_table.items():
-        if rows and all(bool(r.get("topology_input_ready", False)) for r in rows):
-            ready_table_indices.add(table_index)
-
-    for table_index in table_operation_indices:
-        if table_index not in ready_table_indices:
-            continue
-        operation_id = table_to_operation.get(table_index)
-        if operation_id is None:
-            continue
-        op_payload = kp_representations.get(_representation_payload_key(operation_id, target_valley or ""))
-        if op_payload is None:
-            op_payload = kp_representations.get(f"operation_{operation_id}")
-        if op_payload is None and target_valley is not None:
-            prefix = f"operation_{operation_id}__valley_"
-            op_payload = next(
-                (
-                    payload
-                    for key, payload in kp_representations.items()
-                    if str(key).startswith(prefix)
-                    and isinstance(payload, dict)
-                    and str(payload.get("target_valley", "")) == str(target_valley)
-                ),
-                None,
-            )
-        if op_payload is None:
-            op_payload = kp_representations.get(str(operation_id), {})
-        if not isinstance(op_payload, dict):
-            continue
-        d_valley = op_payload.get("D_valley")
-        if d_valley is None:
-            continue
-        d_valley = np.asarray(d_valley, dtype=np.complex128)
-        if d_valley.ndim != 2 or d_valley.shape[0] != d_valley.shape[1]:
-            continue
-        n = d_valley.shape[0]
-        if n < 1:
-            continue
-
-        off_diag = d_valley.copy()
-        np.fill_diagonal(off_diag, 0.0)
-        off_norm = float(np.linalg.norm(off_diag))
-        if off_norm > state_diagonal_tol:
-            offdiag_warnings.append(
-                f"D_valley off-diagonal norm {off_norm:.2e} exceeds "
-                f"state_diagonal_tol={state_diagonal_tol:.2e} for operation {operation_id}"
-            )
-            continue
-
-        for i in range(n):
-            state_characters.setdefault(i, {})[table_index] = d_valley[i, i]
-
-    return {
-        "state_characters": state_characters,
-        "offdiag_warnings": offdiag_warnings,
-    }
-
-
-def _match_single_state_irreps(
-    *,
-    table,
-    table_kpoint_label: str,
-    table_operation_indices: Any,
-    state_characters: dict[int, dict[int, complex]],
-    tolerance: float,
-) -> dict[str, Any]:
-    table_indices = list(table_operation_indices)
-    results: list[dict[str, Any]] = []
-    for state_index in sorted(state_characters):
-        characters = dict(state_characters[state_index])
-        if 1 in table_indices and 1 not in characters:
-            characters[1] = 1.0 + 0.0j
-        result = match_single_state_irrep(
-            table=table,
-            table_kpoint_label=table_kpoint_label,
-            state_index=state_index,
-            computed_characters=characters,
-            tolerance=tolerance,
-        )
-        results.append(
-            {
-                "state_index": result.state_index,
-                "status": result.status,
-                "irrep_label": result.irrep_label,
-                "computed_characters": _format_complex_character_dict(result.computed_characters),
-                "irrep_multiplicities": result.irrep_multiplicities,
-                "missing_table_operation_indices": result.missing_table_operation_indices,
-                "failure_reasons": result.failure_reasons,
-            }
-        )
-
-    if not results:
-        status = "not_attempted"
-    elif all(result["status"] == "matched" for result in results):
-        status = "matched"
-    else:
-        status = "incomplete"
-    return {"status": status, "results": results}
-
-
-def _fill_identity_character_if_needed(
-    *,
-    computed_characters: dict[int, complex],
-    table_operation_indices: Any,
-    ready_row_counts: dict[int, int],
-) -> str:
-    if 1 not in table_operation_indices:
-        return "not_required"
-    if 1 in computed_characters:
-        return "computed"
-    if not ready_row_counts:
-        return "missing"
-    inferred_dimension = max(ready_row_counts.values())
-    computed_characters[1] = complex(float(inferred_dimension), 0.0)
-    return "inferred_from_ready_rows"
-
-
-def _parse_complex_character(value: Any) -> complex:
-    if isinstance(value, complex):
-        return value
-    if isinstance(value, (int, float, np.number)):
-        return complex(float(value), 0.0)
-    return complex(str(value).replace(" ", ""))
-
-
-def _format_complex_character_dict(values: dict[int, complex]) -> dict[str, str]:
-    return {
-        str(table_index): f"{value.real:.6f}{value.imag:+.6f}j"
-        for table_index, value in sorted(values.items())
-    }
-
-
-def _representation_payload_key(operation_id: Any, target_valley: str) -> str:
-    return f"operation_{operation_id}__valley_{quote(str(target_valley), safe='')}"
 
 
 def _global_valley_preserving_operation_set_report(

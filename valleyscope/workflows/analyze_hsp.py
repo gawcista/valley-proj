@@ -473,12 +473,8 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             symmetry_payload=symmetry_payload,
             target_kpoints=config.analysis.kpoints,
         )
-        # Legacy per-valley irrep table matching and character
-        # decomposition (add_valley_irrep_results) is superseded by
-        # the canonical generic restricted-character matcher.  The
-        # subgroup_report still carries the operation-level table
-        # matching from _build_per_valley_irrep_table_matching for
-        # summary-text diagnostic display.
+        # The canonical downstream Bilbao/irreptables restricted-character
+        # matcher is build_valley_irrep_matching_report().
 
     sector_names = list(projectors_by_kpoint[next(iter(projectors_by_kpoint))].sector_masks)
     symmetry_eigenvalue_summary = _build_symmetry_eigenvalue_summary(symmetry_payload, symmetry_rows)

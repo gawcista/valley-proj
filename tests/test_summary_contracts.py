@@ -1149,9 +1149,8 @@ def test_readme_symmetry_example_uses_parser_schema(tmp_path):
     assert "`unreliable`" in readme
     assert "valley-preserving irrep" in readme
     assert "valley-preserving subgroup" in readme
-    assert "irrep_results_by_kpoint" in readme
     assert "irrep_multiplicities" in readme
-    assert "state_irrep_results" in readme
+    assert "valley_resolved_irreps" in readme
     assert "P321 No.150" not in readme
     assert "P3 No.143" not in readme
     assert "Benchmark:" not in readme
@@ -1216,9 +1215,8 @@ def test_chinese_readme_uses_public_valley_vocabulary():
     assert "`unreliable`" in readme
     assert "valley-preserving irrep" in readme
     assert "谷保持子群" in readme
-    assert "irrep_results_by_kpoint" in readme
     assert "irrep_multiplicities" in readme
-    assert "state_irrep_results" in readme
+    assert "valley_resolved_irreps" in readme
     # Material names may appear in physics benchmark descriptions.
     assert "P321 No.150" not in readme
     assert "P3 No.143" not in readme

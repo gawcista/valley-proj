@@ -897,7 +897,7 @@ def _render_symmetry_adapted_valley_analysis(
     lines.append("trusted_irrep_label: false")
     lines.append(
         "local_irrep_ready reports internal consistency of this analysis layer; "
-        "irrep_matching_input_ready remains the gate for future table matching."
+        "irrep_matching_input_ready gates the canonical Bilbao/irreptables restricted-character matcher."
     )
     by_kpoint = report.get("by_kpoint", {})
     if not isinstance(by_kpoint, dict) or not by_kpoint:
