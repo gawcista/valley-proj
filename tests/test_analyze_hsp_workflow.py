@@ -1901,6 +1901,7 @@ def test_unmock_generic_source_adapter_positive_full_pipeline():
         },
     }
     op_maps = {"GammaM": {"K_valley": payload["source_operation_map"]}}
+    provenance = {"GammaM": {"K_valley": payload["provenance"]}}
 
     # 1. Matcher with real adapter payload.
     matching = build_valley_irrep_matching_report(
@@ -1910,6 +1911,7 @@ def test_unmock_generic_source_adapter_positive_full_pipeline():
             "GammaM": {"K_valley": payload["source_irrep_characters"]},
         },
         source_operation_maps=op_maps,
+        source_payload_provenance=provenance,
         resolved_subspace_groups={"GammaM": {"K_valley": {
             "status": "resolved",
             "candidate_space_group_number": 143,
@@ -1923,6 +1925,8 @@ def test_unmock_generic_source_adapter_positive_full_pipeline():
     assert gm["irrep_multiplicities"] == {"-K5": 1, "-K6": 1}
     assert gm["subspace_space_group"]["candidate_space_group_symbol"] == "P3"
     assert gm["subspace_group_candidate"] == "P3"
+    assert gm["operation_mapping_provenance"] == "exact_spatial"
+    assert gm["source_payload_provenance"]["source_hsp_label"] == "K"
 
     # 2. EBR input candidates.
     candidates = build_ebr_input_candidates(

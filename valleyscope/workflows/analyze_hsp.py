@@ -535,6 +535,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
 
     src_chars: dict[str, dict[str, dict[str, dict[int, complex]]]] = {}
     src_op_maps: dict[str, dict[str, dict[int, int]]] = {}
+    src_provenance: dict[str, dict[str, dict[str, Any]]] = {}
     by_kp = symmetry_adapted_valley_report.get("by_kpoint", {}) if isinstance(symmetry_adapted_valley_report, dict) else {}
 
     if isinstance(by_kp, dict):
@@ -675,6 +676,9 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     src_op_maps.setdefault(kp_name, {})[v_name] = (
                         payload["source_operation_map"]
                     )
+                    provenance = payload.get("provenance", {})
+                    if isinstance(provenance, dict):
+                        src_provenance.setdefault(kp_name, {})[v_name] = provenance
                 else:
                     generic_source_blocked_rows.append({
                         "kpoint": kp_name,
@@ -727,6 +731,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         generic_source_payloads = {
             "source_irrep_characters": src_chars,
             "source_operation_maps": src_op_maps,
+            "source_payload_provenance": src_provenance,
         }
 
     valley_irrep_matching = build_valley_irrep_matching_report(
@@ -738,6 +743,10 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         ),
         source_operation_maps=(
             generic_source_payloads.get("source_operation_maps", {})
+            if generic_source_payloads else None
+        ),
+        source_payload_provenance=(
+            generic_source_payloads.get("source_payload_provenance", {})
             if generic_source_payloads else None
         ),
         source_payload_blocked_rows=generic_source_blocked_rows,

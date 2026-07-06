@@ -37,6 +37,9 @@ def build_valley_irrep_matching_report(
     source_irrep_characters_flattened: (
         Mapping[str, Mapping[str, Mapping[str, Mapping[int, complex]]]] | None
     ) = None,
+    source_payload_provenance: (
+        Mapping[str, Mapping[str, Mapping[str, Any]]] | None
+    ) = None,
     source_payload_blocked_rows: list[Mapping[str, Any]] | None = None,
     resolved_subspace_groups: (
         Mapping[str, Mapping[str, Mapping[str, object]]] | None
@@ -56,6 +59,7 @@ def build_valley_irrep_matching_report(
     _generic_mode = (
         source_irrep_characters_flattened is not None
         or source_operation_maps is not None
+        or source_payload_provenance is not None
         or (source_payload_blocked_rows is not None and len(source_payload_blocked_rows) > 0)
     )
 
@@ -143,6 +147,11 @@ def build_valley_irrep_matching_report(
                     if source_operation_maps and isinstance(source_operation_maps, Mapping)
                     else {}
                 )
+                source_provenance = _source_payload_provenance_fields(
+                    source_payload_provenance,
+                    kp_name,
+                    v_name,
+                )
                 # Extract character items list for this valley, matching existing path.
                 char_diag_fl = sa.get("char_diag", {})
                 per_valley_fl = char_diag_fl.get("per_valley", {}) if isinstance(char_diag_fl, dict) else {}
@@ -208,6 +217,7 @@ def build_valley_irrep_matching_report(
                             else {}
                         ),
                         "local_representation_dimension": local_dimension,
+                        **source_provenance,
                     }
                     continue
                 if not vp_ids_fl or not computed_fl or not isinstance(op_map, Mapping) or not op_map:
@@ -227,6 +237,7 @@ def build_valley_irrep_matching_report(
                         ),
                         "subspace_space_group": dict(ssg_fl)
                         if isinstance(ssg_fl, Mapping) else {},
+                        **source_provenance,
                     }
                     continue
                 if readiness not in ("trusted",):
@@ -246,6 +257,7 @@ def build_valley_irrep_matching_report(
                         ),
                         "subspace_space_group": dict(ssg_fl)
                         if isinstance(ssg_fl, Mapping) else {},
+                        **source_provenance,
                     }
                     continue
                 g_result = match_restricted_characters(
@@ -271,6 +283,7 @@ def build_valley_irrep_matching_report(
                     ),
                     "subspace_space_group": dict(ssg_fl)
                     if isinstance(ssg_fl, Mapping) else {},
+                    **source_provenance,
                 }
 
     # --- Blocked source-payload rows (adapter/preflight diagnostics) ---
@@ -328,6 +341,11 @@ def build_valley_irrep_matching_report(
                 existing = generic_matches.get(kp_name, {}).get(v_name)
                 if existing is not None:
                     continue
+                source_provenance = _source_payload_provenance_fields(
+                    source_payload_provenance,
+                    kp_name,
+                    v_name,
+                )
                 sa = sa_by_kp.get(kp_name, {}).get(v_name, {})
                 sg = sa.get("subspace_group", {})
                 ssg = sa.get("subspace_space_group", {})
@@ -384,6 +402,7 @@ def build_valley_irrep_matching_report(
                     ),
                     "subspace_space_group": dict(ssg)
                     if isinstance(ssg, Mapping) else {},
+                    **source_provenance,
                 }
 
     # --- Strategy boundary: in generic mode, suppress legacy by_kpoint entries ---
@@ -398,6 +417,28 @@ def build_valley_irrep_matching_report(
         **({"generic_matches_by_kpoint": generic_matches}
            if generic_matches else {}),
     }
+
+
+def _source_payload_provenance_fields(
+    source_payload_provenance: (
+        Mapping[str, Mapping[str, Mapping[str, Any]]] | None
+    ),
+    kpoint: str,
+    valley: str,
+) -> dict[str, Any]:
+    if not isinstance(source_payload_provenance, Mapping):
+        return {}
+    by_valley = source_payload_provenance.get(kpoint)
+    if not isinstance(by_valley, Mapping):
+        return {}
+    provenance = by_valley.get(valley)
+    if not isinstance(provenance, Mapping):
+        return {}
+    out: dict[str, Any] = {"source_payload_provenance": dict(provenance)}
+    op_mapping = provenance.get("operation_mapping_provenance")
+    if isinstance(op_mapping, str) and op_mapping:
+        out["operation_mapping_provenance"] = op_mapping
+    return out
 
 
 def _operation_ids_from_value(value: object) -> list[int]:
