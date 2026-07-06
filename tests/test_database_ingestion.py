@@ -675,3 +675,160 @@ def test_database_index_preserves_generic_irrep_fields_with_run_provenance():
     assert ir["legacy_subspace_group_candidate"] == "C3_like"
     assert ir["valley_preserving_operation_ids"] == [0, 2, 3]
     assert ir["source_operation_map"] == {0: 1, 2: 2, 3: 3}
+
+
+# ---------------------------------------------------------------------------
+# Compact reduced EBR table provenance in ingestion records
+# ---------------------------------------------------------------------------
+
+def _auto_table_provenance():
+    """Minimal auto-canonical table_provenance dict."""
+    return {
+        "source": "auto_canonical",
+        "auto_canonical": True,
+        "subspace_group_candidate": "P3",
+        "space_group_number": 143,
+        "spinful": True,
+        "data_source": "irreptables",
+        "package": "irreptables",
+        "package_version": "3.1.0",
+        "expected_hsps": ["GammaM", "KM"],
+        "valleyscope_reduction": "sampled_hsp_valley_preserving",
+        "source_basis_count": 20,
+        "reduction_basis_count": 6,
+        "dropped_source_row_count": 14,
+        "dropped_source_rows": ["label1", "label2"],
+    }
+
+
+def test_reduced_ebr_records_pick_up_table_provenance():
+    """Compact ingestion records carry table_provenance fields when present."""
+    mapping = {
+        "status": "solved_exact",
+        "table_status": "loaded",
+        "solutions": [{
+            "bundle_id": "b_001", "valley": "K_valley",
+            "subspace_group_candidate": "P3",
+            "subspace_space_group": {"candidate_space_group_symbol": "P3"},
+            "status": "solved_exact",
+            "classification": "atomic-compatible-candidate",
+            "integer_span_status": "in_integer_span",
+            "nonnegative_solution_status": "solved_exact",
+            "irrep_vector": [1, 0],
+            "ebr_decomposition": [{"label": "E@1a", "coefficient": 1}],
+            "table_provenance": _auto_table_provenance(),
+            "table_status": "loaded",
+        }],
+    }
+    record = build_database_ingestion_record(
+        valley_summary={"target_kpoints": ["GammaM", "KM"], "iband": [1, 2],
+                        "input": {}},
+        valley_reduced_ebr_mapping=mapping,
+    )
+    recs = record["reduced_ebr_records"]
+    assert len(recs) == 1
+    r = recs[0]
+    assert r["table_source"] == "auto_canonical"
+    assert r["data_source"] == "irreptables"
+    assert r["package"] == "irreptables"
+    assert r["package_version"] == "3.1.0"
+    assert r["space_group_number"] == 143
+    assert r["spinful"] is True
+    assert r["expected_hsps"] == ["GammaM", "KM"]
+    assert r["valleyscope_reduction"] == "sampled_hsp_valley_preserving"
+    assert r["source_basis_count"] == 20
+    assert r["reduction_basis_count"] == 6
+    assert r["dropped_source_row_count"] == 14
+    assert r["table_status"] == "loaded"
+    # Verbose provenance must NOT leak into compact records.
+    assert "dropped_source_rows" not in r
+    assert "auto_canonical" not in r
+
+
+def test_reduced_ebr_records_no_table_provenance_still_works():
+    """Records without table_provenance work (backward compat)."""
+    mapping = {
+        "status": "solved_exact", "table_status": "loaded",
+        "solutions": [{
+            "bundle_id": "b_001", "valley": "K_valley",
+            "subspace_group_candidate": "P3",
+            "classification": "atomic-compatible-candidate",
+            "status": "solved_exact",
+            "integer_span_status": "in_integer_span",
+            "nonnegative_solution_status": "solved_exact",
+            "irrep_vector": [1],
+        }],
+    }
+    record = build_database_ingestion_record(
+        valley_summary={"target_kpoints": [], "iband": [], "input": {}},
+        valley_reduced_ebr_mapping=mapping,
+    )
+    r = record["reduced_ebr_records"][0]
+    assert r["bundle_id"] == "b_001"
+    assert "table_source" not in r
+    assert "table_provenance" not in r
+
+
+def test_reduced_ebr_records_from_directory_with_table_provenance(tmp_path):
+    """Directory loading preserves compact table_provenance in records."""
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    summary = {"target_kpoints": ["GammaM", "KM"], "iband": [1, 2], "input": {}}
+    mapping = {
+        "status": "solved_exact", "table_status": "loaded",
+        "solutions": [{
+            "bundle_id": "b_001", "valley": "K_valley",
+            "subspace_group_candidate": "P3",
+            "subspace_space_group": {"candidate_space_group_symbol": "P3"},
+            "status": "solved_exact",
+            "classification": "atomic-compatible-candidate",
+            "integer_span_status": "in_integer_span",
+            "nonnegative_solution_status": "solved_exact",
+            "irrep_vector": [1, 0],
+            "ebr_decomposition": [{"label": "E@1a", "coefficient": 1}],
+            "table_provenance": _auto_table_provenance(),
+            "table_status": "loaded",
+        }],
+    }
+    (run_dir / "valley_summary.json").write_text(json.dumps(summary), encoding="utf-8")
+    (run_dir / "valley_reduced_ebr_mapping.json").write_text(
+        json.dumps(mapping), encoding="utf-8"
+    )
+
+    record = load_database_ingestion_record_from_directory(run_dir)
+    recs = record["reduced_ebr_records"]
+    assert len(recs) == 1
+    r = recs[0]
+    assert r["table_source"] == "auto_canonical"
+    assert r["space_group_number"] == 143
+    assert r["expected_hsps"] == ["GammaM", "KM"]
+    assert r["reduction_basis_count"] == 6
+    assert "dropped_source_rows" not in r
+
+
+def test_tmote2_ingestion_compact_reduced_ebr_records():
+    """tMoTe2 fixture: two compact P3 records, GammaM+KM basis, no MM."""
+    ing = load_database_ingestion_record_from_directory(
+        Path(__file__).parent.parent / "real_tests" / "tMoTe2" / "output"
+        / "valley_analysis_wave",
+    )
+    recs = ing.get("reduced_ebr_records", [])
+    if not recs:
+        pytest.skip("tMoTe2 fixture output not found or no reduced EBR records")
+
+    assert len(recs) == 2
+    for r in recs:
+        assert r["subspace_group_candidate"] == "P3"
+        assert r["classification"] == "atomic-compatible-candidate"
+        assert r["table_source"] == "auto_canonical"
+        assert r["data_source"] == "irreptables"
+        assert r["space_group_number"] == 143
+        assert r["spinful"] is True
+        assert r["expected_hsps"] == ["GammaM", "KM"]
+        assert r["valleyscope_reduction"] == "sampled_hsp_valley_preserving"
+        assert r["source_basis_count"] > r["reduction_basis_count"] > 0
+        assert r["table_status"] == "loaded"
+        assert "dropped_source_rows" not in r
+    # No MM entry
+    mm_recs = [r for r in recs if r.get("expected_hsps") and "MM" in r["expected_hsps"]]
+    assert len(mm_recs) == 0

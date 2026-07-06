@@ -153,6 +153,23 @@ def build_database_ingestion_record(
                     rec["integer_solution"] = s["integer_solution"]
                 if "search_status" in s:
                     rec["search_status"] = s["search_status"]
+                # --- Compact table provenance (when present) ---
+                tp = s.get("table_provenance")
+                if isinstance(tp, dict) and tp:
+                    rec["table_source"] = tp.get("source", "")
+                    rec["data_source"] = tp.get("data_source", "")
+                    rec["package"] = tp.get("package", "")
+                    rec["package_version"] = tp.get("package_version", "")
+                    rec["space_group_number"] = tp.get("space_group_number")
+                    rec["spinful"] = tp.get("spinful")
+                    rec["expected_hsps"] = tp.get("expected_hsps", [])
+                    rec["valleyscope_reduction"] = tp.get("valleyscope_reduction", "")
+                    rec["source_basis_count"] = tp.get("source_basis_count")
+                    rec["reduction_basis_count"] = tp.get("reduction_basis_count")
+                    rec["dropped_source_row_count"] = tp.get("dropped_source_row_count")
+                ts = s.get("table_status")
+                if ts is not None:
+                    rec["table_status"] = ts
                 reduced_ebr_records.append(rec)
             record["reduced_ebr_records"] = reduced_ebr_records
         else:
