@@ -165,6 +165,7 @@ def build_reduced_ebr_mapping(
                     "bundle_id": b.get("bundle_id", "?"),
                     "subspace_group_candidate": b.get("subspace_group_candidate", ""),
                     "subspace_space_group": b.get("subspace_space_group", {}),
+                    "irrep_source_provenance_by_kpoint": _per_kpoint_prov(b),
                     "reason": "missing_table",
                 }
                 for b in bundles if isinstance(b, dict)
@@ -190,7 +191,7 @@ def build_reduced_ebr_mapping(
                 "bundle_id": bundle.get("bundle_id", "?"),
                 "subspace_group_candidate": bundle.get("subspace_group_candidate", ""),
                 "subspace_space_group": bundle.get("subspace_space_group", {}),
-                "irrep_source_provenance": _extract_bundle_irrep_provenance(bundle),
+                "irrep_source_provenance_by_kpoint": _per_kpoint_prov(bundle),
                 "reason": "not ready for external solver",
             })
             continue
@@ -201,6 +202,7 @@ def build_reduced_ebr_mapping(
                 "bundle_id": bundle.get("bundle_id", "?"),
                 "subspace_group_candidate": bundle_group,
                 "subspace_space_group": bundle.get("subspace_space_group", {}),
+                "irrep_source_provenance_by_kpoint": _per_kpoint_prov(bundle),
                 "reason": (
                     f"table group {table_group} != "
                     f"bundle group {bundle_group}"
@@ -229,6 +231,7 @@ def build_reduced_ebr_mapping(
                 "bundle_id": bundle.get("bundle_id", "?"),
                 "subspace_group_candidate": bundle.get("subspace_group_candidate", ""),
                 "subspace_space_group": bundle.get("subspace_space_group", {}),
+                "irrep_source_provenance_by_kpoint": _per_kpoint_prov(bundle),
                 "reason": (
                     "malformed expected_hsps: expected a unique list of "
                     "non-empty HSP labels"
@@ -241,6 +244,7 @@ def build_reduced_ebr_mapping(
                 "bundle_id": bundle.get("bundle_id", "?"),
                 "subspace_group_candidate": bundle.get("subspace_group_candidate", ""),
                 "subspace_space_group": bundle.get("subspace_space_group", {}),
+                "irrep_source_provenance_by_kpoint": _per_kpoint_prov(bundle),
                 "reason": (
                     f"expected_hsps mismatch: "
                     f"table has {sorted(table_expected)}, "
@@ -254,6 +258,7 @@ def build_reduced_ebr_mapping(
                 "bundle_id": bundle.get("bundle_id", "?"),
                 "subspace_group_candidate": bundle.get("subspace_group_candidate", ""),
                 "subspace_space_group": bundle.get("subspace_space_group", {}),
+                "irrep_source_provenance_by_kpoint": _per_kpoint_prov(bundle),
                 "reason": (
                     f"irrep HSP basis mismatch: "
                     f"table expects {sorted(table_expected)}, "
@@ -267,6 +272,7 @@ def build_reduced_ebr_mapping(
                 "bundle_id": bundle.get("bundle_id", "?"),
                 "subspace_group_candidate": bundle.get("subspace_group_candidate", ""),
                 "subspace_space_group": bundle.get("subspace_space_group", {}),
+                "irrep_source_provenance_by_kpoint": _per_kpoint_prov(bundle),
                 "reason": "could not resolve irrep keys to table irreps",
             })
             continue
@@ -278,15 +284,15 @@ def build_reduced_ebr_mapping(
         result = classify_bundle(
             irrep_counts, ebr_vectors, ebr_labels_list, max_coefficient,
         )
-        # Extract compact irrep source provenance from bundle records.
-        irrep_source_provenance = _extract_bundle_irrep_provenance(bundle)
+        # Extract per-kpoint irrep source provenance from bundle records.
+        per_kp_prov = _build_per_kpoint_provenance(bundle)
         solutions.append({
             "bundle_id": bundle.get("bundle_id", ""),
             "valley": bundle.get("valley", ""),
             "subspace_group_candidate": bundle_group,
             "subspace_space_group": bundle.get("subspace_space_group", {}),
             "irrep_vector": irrep_counts,
-            "irrep_source_provenance": irrep_source_provenance,
+            **(per_kp_prov if per_kp_prov else {}),
             **result,
         })
 
@@ -386,21 +392,57 @@ def _resolve_table_irrep_index(
     return None
 
 
-def _extract_bundle_irrep_provenance(bundle: dict) -> dict[str, object] | None:
-    """Extract compact irrep source provenance from a bundle's irrep records."""
+def _build_per_kpoint_provenance(bundle: dict) -> dict[str, object] | None:
+    """Extract per-HSP/per-irrep compact provenance from bundle records.
+
+    Returns ``irrep_source_provenance_by_kpoint`` keyed by HSP label,
+    preserving all contributing irrep records so the reduced EBR audit
+    trail covers the full sampled HSP basis.
+    """
     records = bundle.get("irrep_records_by_kpoint", {})
-    if not isinstance(records, dict):
+    if not isinstance(records, dict) or not records:
         return None
-    for kp_records in records.values():
+    by_kpoint: dict[str, list[dict[str, object]]] = {}
+    for kp, kp_records in sorted(records.items()):
         if not isinstance(kp_records, list):
             continue
+        kp_entries: list[dict[str, object]] = []
         for rec in kp_records:
             if not isinstance(rec, dict):
                 continue
             prov = rec.get("irrep_source_provenance")
-            if isinstance(prov, dict) and prov:
-                return dict(prov)
-    return None
+            if not isinstance(prov, dict) or not prov:
+                continue
+            entry: dict[str, object] = {
+                "matched_irrep": rec.get("matched_irrep", ""),
+                "irrep_multiplicity": rec.get("irrep_multiplicity", 1),
+            }
+            for key in (
+                "source_hsp_label", "source_table_sg_number",
+                "source_table_spinor",
+                "valley_preserving_operation_ids",
+                "source_table_operation_indices",
+                "operation_mapping_provenance",
+            ):
+                if key in prov:
+                    entry[key] = prov[key]
+            kp_entries.append(entry)
+        if kp_entries:
+            by_kpoint[str(kp)] = kp_entries
+    if not by_kpoint:
+        return None
+    return {"irrep_source_provenance_by_kpoint": by_kpoint}
+
+
+def _extract_bundle_irrep_provenance(bundle: dict) -> dict[str, object] | None:
+    """Legacy single-record extractor — use _build_per_kpoint_provenance."""
+    return _build_per_kpoint_provenance(bundle)
+
+
+def _per_kpoint_prov(bundle: dict) -> dict[str, object] | None:
+    """Shorthand: return per-kpoint provenance dict if available."""
+    result = _build_per_kpoint_provenance(bundle)
+    return result.get("irrep_source_provenance_by_kpoint", None) if result else None
 
 
 def _status(status: str, reason: str,

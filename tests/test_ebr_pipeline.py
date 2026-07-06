@@ -1340,3 +1340,161 @@ def test_standard_outputs_no_cn_like_guardrail(tmp_path):
     assert '"subspace_group_candidate": "P4"' in raw_matching or "P4" in raw_matching
     assert "P4" in json.dumps(bundle)
     assert "P4" in json.dumps(summary)
+
+
+# -----------------------------------------------------------------------
+# Irrep source provenance propagation tests
+# -----------------------------------------------------------------------
+
+def test_candidate_carries_irrep_source_provenance():
+    """Trusted EBR input candidate includes irrep_source_provenance."""
+    from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
+
+    workflow = {"by_kpoint": {"GammaM": {"K_valley": {
+        "readiness_level": "trusted", "workflow_path": "direct_qcut"}}}}
+    matching = {
+        "matching_mode": "generic",
+        "generic_matches_by_kpoint": {"GammaM": {"K_valley": {
+            "matching_status": "matched",
+            "matching_strategy": "bilbao_restricted_character",
+            "irrep_multiplicities": {"-GM5": 1},
+            "subspace_space_group": {
+                "status": "resolved", "candidate_space_group_number": 75,
+                "candidate_space_group_symbol": "P4"},
+            "valley_preserving_operation_ids": [0, 1],
+            "source_operation_map": {0: 1, 1: 2},
+            "source_payload_provenance": {
+                "table_sg_number": 75, "table_name": "P4",
+                "table_spinor": True, "source_hsp_label": "GM",
+                "source_table_operation_indices": [1, 2]},
+            "operation_mapping_provenance": "exact_spatial",
+        }},
+    }}
+    report = build_ebr_input_candidates(
+        irrep_workflow_decisions=workflow, valley_irrep_matching=matching)
+    assert report["candidate_count"] == 1
+    c = report["candidates"][0]
+    prov = c.get("irrep_source_provenance", {})
+    assert prov["subspace_space_group_number"] == 75
+    assert prov["subspace_space_group_symbol"] == "P4"
+    assert prov["source_table_sg_number"] == 75
+    assert prov["source_table_spinor"] is True
+    assert prov["source_hsp_label"] == "GM"
+    assert prov["operation_mapping_provenance"] == "exact_spatial"
+    assert prov["valley_preserving_operation_ids"] == [0, 1]
+
+
+def test_problem_instance_preserves_multi_hsp_provenance():
+    """Problem instance irrep_records carry provenance for multiple HSPs."""
+    from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
+
+    candidates = {"status": "has_candidates", "candidates": [
+        {"kpoint": "GammaM", "valley": "K_valley", "ready_for_ebr_input": True,
+         "subspace_group_candidate": "P4", "workflow_path": "direct_qcut",
+         "readiness_level": "trusted", "matched_irrep": "-GM5",
+         "irrep_multiplicity": 1, "operation_id": 1,
+         "subspace_space_group": {"status": "resolved",
+                                  "candidate_space_group_number": 75,
+                                  "candidate_space_group_symbol": "P4"},
+         "irrep_source_provenance": {
+             "source_hsp_label": "GM", "source_table_sg_number": 75,
+             "source_table_spinor": True, "operation_mapping_provenance": "exact_spatial",
+             "valley_preserving_operation_ids": [0, 1]}},
+        {"kpoint": "KM", "valley": "K_valley", "ready_for_ebr_input": True,
+         "subspace_group_candidate": "P4", "workflow_path": "direct_qcut",
+         "readiness_level": "trusted", "matched_irrep": "-K5",
+         "irrep_multiplicity": 1, "operation_id": 1,
+         "subspace_space_group": {"status": "resolved",
+                                  "candidate_space_group_number": 75,
+                                  "candidate_space_group_symbol": "P4"},
+         "irrep_source_provenance": {
+             "source_hsp_label": "K", "source_table_sg_number": 75,
+             "source_table_spinor": True,
+             "valley_preserving_operation_ids": [0, 1]}},
+    ]}
+    report = build_ebr_problem_instances(ebr_input_candidates=candidates)
+    inst = report["instances"][0]
+    records = inst["irrep_records_by_kpoint"]
+    assert "GammaM" in records and "KM" in records
+    gm_prov = records["GammaM"][0]["irrep_source_provenance"]
+    km_prov = records["KM"][0]["irrep_source_provenance"]
+    assert gm_prov["source_hsp_label"] == "GM"
+    assert km_prov["source_hsp_label"] == "K"
+
+
+def test_reduced_ebr_solution_preserves_multi_hsp_provenance():
+    """Reduced EBR solution carries per-kpoint provenance for both HSPs."""
+    from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
+
+    table = {"schema_version": "1.0.0", "subspace_group_candidate": "P4",
+             "expected_hsps": ["GammaM", "KM"],
+             "irreps": ["GammaM:-GM5", "KM:-K5"],
+             "ebrs": [{"label": "EBR_A", "vector": [1, 1]}]}
+    bundle = {"bundles": [{
+        "bundle_id": "b_001", "valley": "K", "subspace_group_candidate": "P4",
+        "ready_for_external_solver": True,
+        "expected_hsps": ["GammaM", "KM"],
+        "irreps_by_kpoint": {"GammaM": ["-GM5"], "KM": ["-K5"]},
+        "irrep_records_by_kpoint": {
+            "GammaM": [{"matched_irrep": "-GM5", "irrep_multiplicity": 1,
+                        "irrep_source_provenance": {"source_hsp_label": "GM",
+                        "source_table_sg_number": 75, "source_table_spinor": True}}],
+            "KM": [{"matched_irrep": "-K5", "irrep_multiplicity": 1,
+                    "irrep_source_provenance": {"source_hsp_label": "K",
+                    "source_table_sg_number": 75, "source_table_spinor": True}}],
+        },
+    }]}
+    r = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
+    assert r["mapping_status"] == "solved_exact"
+    sol = r["solutions"][0]
+    by_kp = sol.get("irrep_source_provenance_by_kpoint", {})
+    assert "GammaM" in by_kp and "KM" in by_kp
+    assert by_kp["GammaM"][0]["source_hsp_label"] == "GM"
+    assert by_kp["KM"][0]["source_hsp_label"] == "K"
+
+
+def test_reduced_ebr_excluded_preserves_provenance():
+    """Excluded bundle with HSP mismatch retains provenance for audit."""
+    from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
+
+    table = {"schema_version": "1.0.0", "subspace_group_candidate": "P4",
+             "expected_hsps": ["GammaM"],
+             "irreps": ["GammaM:-GM5"],
+             "ebrs": [{"label": "EBR_A", "vector": [1]}]}
+    bundle = {"bundles": [{
+        "bundle_id": "b_001", "valley": "K", "subspace_group_candidate": "P4",
+        "ready_for_external_solver": True,
+        "expected_hsps": ["GammaM", "KM"],
+        "irreps_by_kpoint": {"GammaM": ["-GM5"], "KM": ["-K5"]},
+        "irrep_records_by_kpoint": {
+            "GammaM": [{"matched_irrep": "-GM5", "irrep_multiplicity": 1,
+                        "irrep_source_provenance": {"source_hsp_label": "GM"}}],
+        },
+    }]}
+    r = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
+    assert len(r["excluded_bundles"]) == 1
+    exc = r["excluded_bundles"][0]
+    assert "expected_hsps mismatch" in exc["reason"]
+    by_kp = exc.get("irrep_source_provenance_by_kpoint", {})
+    assert "GammaM" in by_kp
+
+
+def test_blocked_diagnostic_no_candidate():
+    """Blocked/diagnostic-only generic match does not produce a candidate."""
+    from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
+
+    workflow = {"by_kpoint": {"GammaM": {"K_valley": {
+        "readiness_level": "blocked", "workflow_path": "blocked"}}}}
+    matching = {"matching_mode": "generic",
+                "generic_matches_by_kpoint": {"GammaM": {"K_valley": {
+                    "matching_status": "blocked",
+                    "diagnostic_only": True,
+                    "irrep_multiplicities": {},
+                    "subspace_space_group": {"status": "resolved",
+                        "candidate_space_group_number": 143,
+                        "candidate_space_group_symbol": "P3"},
+                }}}}
+    report = build_ebr_input_candidates(
+        irrep_workflow_decisions=workflow, valley_irrep_matching=matching)
+    assert report["candidate_count"] == 0
+    assert report["blocked_count"] == 1
