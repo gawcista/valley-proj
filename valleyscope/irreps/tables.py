@@ -356,6 +356,8 @@ def _find_group_isomorphisms(
         if len(results) >= 2:
             return
         if pos == n:
+            if not _is_product_preserving_bijection(mapping, det_mult, tbl_mult):
+                return
             results.append(list(mapping))
             return
         if mapping[pos] >= 0:
@@ -389,6 +391,19 @@ def _find_group_isomorphisms(
 
     _search(0)
     return results
+
+
+def _is_product_preserving_bijection(
+    mapping: list[int],
+    det_mult: list[list[int]],
+    tbl_mult: list[list[int]],
+) -> bool:
+    """Verify the full multiplication-table homomorphism condition."""
+    for i, row in enumerate(det_mult):
+        for j, det_product in enumerate(row):
+            if mapping[det_product] != tbl_mult[mapping[i]][mapping[j]]:
+                return False
+    return True
 
 
 def _match_one_operation(

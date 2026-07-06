@@ -427,26 +427,27 @@ def test_group_isomorphism_resolves_permuted_operation_order():
 
 
 def test_group_isomorphism_ambiguous_mapping_blocked():
-    """Ambiguous (non-unique) isomorphism → blocked."""
+    """Conjugate C3 has two automorphisms, so fallback stays blocked."""
     table = load_standard_irrep_table(143, spinor=True)
-    # P3 has 3 operations at K: identity + C3 + C3^2 = [1,2,3]
-    # Detected 3 ops: identity, C3, C3^2 — exact match works, so no isomorphism needed.
-    # To test ambiguity, use only 2 operations where there could be multiple
-    # interpretations.  Actually, 2-element groups have only one isomorphism.
-    # Use 3-element group with partial mapping that strips identity.
-    op_table = table.operation_by_index(2)  # C3
-    op_sq = table.operation_by_index(3)     # C3^2
+    c3 = np.array([[0, -1], [1, -1]], dtype=int)
+    basis = np.array([[1, 1], [0, 1]], dtype=int)
+    basis_inv = np.rint(np.linalg.inv(basis)).astype(int)
+    conjugate_c3_2d = basis @ c3 @ basis_inv
+    conjugate_c3 = np.eye(3, dtype=int)
+    conjugate_c3[:2, :2] = conjugate_c3_2d
+
     detected = [
         {"operation_id": 0, "rotation_frac": np.eye(3, dtype=int),
          "translation_frac": np.zeros(3)},
-        {"operation_id": 1, "rotation_frac": op_table.rotation_frac,
+        {"operation_id": 1, "rotation_frac": conjugate_c3,
          "translation_frac": np.zeros(3)},
-        {"operation_id": 2, "rotation_frac": op_sq.rotation_frac,
+        {"operation_id": 2, "rotation_frac": conjugate_c3 @ conjugate_c3,
          "translation_frac": np.zeros(3)},
     ]
-    # These are exact matches → spatial matching works, no isomorphism needed.
     report = match_table_operations(detected, table, source_hsp_label="K")
-    assert report.status == "complete"
+    assert report.status == "incomplete"
+    assert report.mapping_by_operation_id == {0: 1}
+    assert report.unmatched_operation_ids == [1, 2]
     assert report.provenance == "exact_spatial"
 
 
