@@ -991,7 +991,7 @@ def test_summary_text_generic_first_legacy_explicit():
     assert "tables implemented:" not in text
 
 
-def test_summary_text_labels_legacy_rows_as_compatibility_only():
+def test_summary_text_labels_legacy_rows_as_deprecated_diagnostic():
     """Legacy by_kpoint rows remain explicit compatibility-only diagnostics."""
     from valleyscope.reports.summary_report import render_summary_text
 
@@ -1048,7 +1048,7 @@ def test_summary_text_labels_legacy_rows_as_compatibility_only():
         },
     }
     text = render_summary_text(summary)
-    assert "compatibility-only legacy fallback rows:" in text
+    assert "deprecated legacy phase-table entries (diagnostic provenance only; not an active matching path):" in text
     assert "C2_spinor_phase_+1/4" in text
 
 

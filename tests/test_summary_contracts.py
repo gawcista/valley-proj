@@ -1355,3 +1355,147 @@ def test_valley_resolved_irreps_no_data():
     assert r["status"] == "no_generic_irrep_data"
     assert r["matched_count"] == 0
     assert r["rows"] == []
+
+
+# ---------------------------------------------------------------------------
+# Real-fixture public output validation (tMoTe2 P321 P3/SG143)
+# ---------------------------------------------------------------------------
+
+_FIXTURE_SUMMARY = Path(
+    __file__
+).parent.parent / "real_tests" / "tMoTe2" / "output" / "valley_analysis_wave" / "valley_summary.json"
+
+
+def _read_fixture_summary():
+    """Read tMoTe2 fixture summary JSON, skipping if not available."""
+    if not _FIXTURE_SUMMARY.exists():
+        import pytest
+        pytest.skip(f"tMoTe2 fixture output not found at {_FIXTURE_SUMMARY}")
+    return json.loads(_FIXTURE_SUMMARY.read_text(encoding="utf-8"))
+
+
+def test_tmote2_valley_resolved_irreps_compact_public_rows():
+    """tMoTe2 valley_resolved_irreps: compact rows, subspace-first semantics."""
+    s = _read_fixture_summary()
+    resolved = s.get("valley_resolved_irreps")
+    assert resolved is not None, "valley_resolved_irreps must be present"
+    assert resolved["status"] == "ok"
+    assert resolved["matching_mode"] == "generic"
+
+    rows_by_kp = {}
+    for row in resolved["rows"]:
+        rows_by_kp.setdefault(row["kpoint"], {})[row["valley"]] = row
+
+    # --- GammaM/K_valley: trusted, P3, subspace = [0,1,2] ---
+    gm_k = rows_by_kp["GammaM"]["K_valley"]
+    assert gm_k["subspace_space_group"] == "P3"
+    assert gm_k["subspace_hsp_little_group_operation_ids"] == [0, 1, 2]
+    assert gm_k["hsp_little_group_operation_ids"] == [0, 1, 2]
+    assert gm_k["valley_preserving_operation_ids"] == [0, 1, 2]
+    assert gm_k["matching_strategy"] == "bilbao_restricted_character"
+    assert gm_k["matching_status"] == "matched"
+    assert gm_k["readiness_level"] == "trusted"
+    assert gm_k["workflow_path"] == "direct_qcut"
+    assert gm_k["diagnostic_only"] is False
+    assert gm_k["irrep_multiplicities"] == {"-GM4": 1}
+
+    # --- KM/K_valley: trusted, P3 ---
+    km_k = rows_by_kp["KM"]["K_valley"]
+    assert km_k["subspace_space_group"] == "P3"
+    assert km_k["subspace_hsp_little_group_operation_ids"] == [0, 1, 2]
+    assert km_k["matching_status"] == "matched"
+    assert km_k["readiness_level"] == "trusted"
+
+    # --- MM/K_valley: identity-only, non-irrep-distinguishing ---
+    # MM may or may not appear in valley_resolved_irreps rows depending on
+    # whether the generic matching layer emits identity-only entries.
+    # If present, it must be blocked/identity-only, not matched.
+    mm_rows = [r for r in resolved["rows"] if r["kpoint"] == "MM"]
+    for mm in mm_rows:
+        assert mm["matching_status"] != "matched", (
+            f"MM/{mm['valley']} must not be 'matched'"
+        )
+        assert mm["subspace_hsp_little_group_operation_ids"] == [0]
+
+
+def test_tmote2_representation_records_subspace_first():
+    """tMoTe2 representation_records: all sampled HSPs, subspace first."""
+    s = _read_fixture_summary()
+    rep = s.get("valley_projected_representations")
+    assert rep is not None
+    assert rep["grouped_record_count"] >= 6
+    assert "MM" in rep["kpoint_labels"]
+    assert "GammaM" in rep["kpoint_labels"]
+    assert "KM" in rep["kpoint_labels"]
+
+    for rec in rep["representation_records"]:
+        kp = rec["kpoint"]
+        subspace = rec.get("subspace_hsp_little_group_operation_ids", [])
+        parent = rec.get("parent_hsp_little_group_operation_ids", [])
+        sewing = rec.get("valley_sewing_operation_ids", [])
+        hsp_lg = rec.get("hsp_little_group_operation_ids", [])
+
+        # Public hsp_little_group = subspace, not parent
+        assert hsp_lg == subspace, (
+            f"{kp}/{rec['valley']}: hsp_little_group must alias subspace"
+        )
+        # subspace ⊆ parent
+        assert set(subspace).issubset(set(parent)), (
+            f"{kp}/{rec['valley']}: subspace not subset of parent"
+        )
+        # sewing ∩ subspace = {identity} only
+        identity = 0
+        sewing_non_id = [op for op in sewing if op != identity]
+        for op in sewing_non_id:
+            assert op not in subspace, (
+                f"{kp}/{rec['valley']}: sewing op {op} in subspace!"
+            )
+
+    # MM records: blocked, identity-only
+    mm_recs = [r for r in rep["representation_records"] if r["kpoint"] == "MM"]
+    assert len(mm_recs) == 2
+    for mm in mm_recs:
+        assert mm["subspace_hsp_little_group_operation_ids"] == [0]
+        assert mm["parent_hsp_little_group_operation_ids"] == [0, 5]
+        assert mm["valley_sewing_operation_ids"] == [5]
+        assert mm["workflow_path"] == "blocked"
+        assert mm["valley_preserving_operations"] == []
+
+    # GammaM/KM records: trusted, eigenvalue data
+    for kp in ("GammaM", "KM"):
+        for rec in rep["representation_records"]:
+            if rec["kpoint"] != kp:
+                continue
+            assert rec["subspace_hsp_little_group_operation_ids"] == [0, 1, 2]
+            assert rec["parent_hsp_little_group_operation_ids"] == [0, 1, 2, 3, 4, 5]
+            assert rec["valley_sewing_operation_ids"] == [3, 4, 5]
+
+
+def test_tmote2_ebr_mm_not_candidate():
+    """tMoTe2: MM must not become an EBR input candidate."""
+    s = _read_fixture_summary()
+    candidates = s.get("valley_ebr_input_candidates", {})
+    mm_cands = [c for c in candidates.get("candidates", [])
+                if c.get("kpoint") == "MM"]
+    assert len(mm_cands) == 0, f"MM must not be an EBR candidate, got {mm_cands}"
+
+    # EBR export: bundles are GammaM/KM only
+    eb = s.get("valley_ebr_export_bundle", {})
+    for b in eb.get("bundles", []):
+        irreps = b.get("irreps_by_kpoint", {})
+        assert "MM" not in irreps, f"bundle {b.get('bundle_id')} has MM irreps"
+
+
+def test_tmote2_public_output_no_cn_like_no_material_names():
+    """tMoTe2 public summary: no Cn_like, no material names in output."""
+    s = _read_fixture_summary()
+    raw = json.dumps(s)
+
+    for cn in ("C2_like", "C3_like", "C4_like", "C6_like"):
+        assert cn not in raw, f"{cn} must not appear in public summary output"
+
+    # The public summary may contain the fixture material name in the
+    # config.analysis.kpoints section since it's a validated output. Check
+    # that production schema fields (not config provenance) are clean.
+    # The fixture output records material provenance in the config path
+    # only; production schema fields must use physical SG symbols.

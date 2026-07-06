@@ -1463,6 +1463,7 @@ def _build_valley_resolved_irreps(
                 "kpoint": kp_name,
                 "valley": v_name,
                 "subspace_space_group": ssg.get("candidate_space_group_symbol") if isinstance(ssg, dict) else None,
+                "subspace_hsp_little_group_operation_ids": list(hsp_ids) if isinstance(hsp_ids, list) else [],
                 "hsp_little_group_operation_ids": list(hsp_ids) if isinstance(hsp_ids, list) else [],
                 "valley_preserving_operation_ids": list(vp_ids) if isinstance(vp_ids, list) else [],
                 "matching_strategy": gm.get("matching_strategy"),
@@ -1597,7 +1598,7 @@ def _render_valley_irrep_matching(
                     m.get("readiness_level", ""),
                 ])
     if rows:
-        lines.append("compatibility-only legacy fallback rows:")
+        lines.append("deprecated legacy phase-table entries (diagnostic provenance only; not an active matching path):")
         lines.extend(
             _table(
                 ["kpoint", "valley", "op", "group", "status",
