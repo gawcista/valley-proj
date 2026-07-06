@@ -70,7 +70,7 @@ def test_malformed_ready_excluded():
 
 @pytest.mark.parametrize("label,desc", [
     ("solved_only", "solved_exact"),
-    ("solved_plus_blocked", "blocked"),
+    ("solved_plus_blocked", "partial"),
     ("non_ready_excluded", "solved_exact"),
 ])
 def test_per_bundle_aggregation(label, desc):
@@ -81,7 +81,7 @@ def test_per_bundle_aggregation(label, desc):
         r = _bm(_mk_bundle("b1", 75, "P4", ["GammaM"], {"GammaM": ["-GM5"]}),
                 {**_mk_bundle("b2", 143, "P3", ["GammaM"], {"GammaM": ["-GM4"]}),
                  "subspace_space_group": None})
-        assert r["mapping_status"] == "blocked"
+        assert r["mapping_status"] == "partial"
     elif label == "non_ready_excluded":
         r = _bm(_mk_bundle("b1", 75, "P4", ["GammaM"], {"GammaM": ["-GM5"]}),
                 {**_mk_bundle("b2", 75, "P4", ["GammaM"], {"GammaM": ["-GM4"]}),

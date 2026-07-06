@@ -2684,14 +2684,35 @@ def _build_auto_canonical_mapping(
             continue
 
         prov = table.get("provenance", {}) if isinstance(table.get("provenance"), dict) else {}
+        table_irreps = table.get("irreps", [])
+        num_irreps = len(table_irreps) if isinstance(table_irreps, list) else 0
+        # source_basis_count = total irreptables EBR basis labels before HSP
+        # reduction; reduction_basis_count = after sampled-HSP k-vector filtering.
+        source_basis = int(prov.get("source_basis_count", num_irreps))
+        reduction_basis = int(prov.get("reduction_basis_count", num_irreps))
         bundle_input: dict[str, object] = {
             "source": "auto_canonical",
-            "subspace_group_candidate": table.get("subspace_group_candidate", ""),
-            "data_source": prov.get("data_source", ""),
             "auto_canonical": True,
+            "subspace_group_candidate": table.get("subspace_group_candidate", ""),
             "space_group_number": prov.get("space_group_number", sg_num),
             "spinful": prov.get("spinful", spinor_wf),
+            "data_source": prov.get("data_source", ""),
+            "package": prov.get("package", ""),
+            "package_version": prov.get("package_version", ""),
+            "expected_hsps": list(expected_hsps) if isinstance(expected_hsps, list) else [],
+            "valleyscope_reduction": prov.get("valleyscope_reduction", ""),
+            "source_basis_count": source_basis,
+            "reduction_basis_count": reduction_basis,
         }
+        zero_ebrs = prov.get("filtered_zero_vector_ebrs")
+        zero_count = prov.get("filtered_zero_vector_ebr_count")
+        if isinstance(zero_ebrs, list) and zero_ebrs:
+            bundle_input["filtered_zero_vector_ebrs"] = list(zero_ebrs)
+        elif isinstance(zero_count, int) and not isinstance(zero_count, bool) and zero_count > 0:
+            bundle_input["filtered_zero_vector_ebr_count"] = int(zero_count)
+        if prov.get("dropped_source_rows"):
+            bundle_input["dropped_source_rows"] = prov["dropped_source_rows"]
+            bundle_input["dropped_source_row_count"] = prov.get("dropped_source_row_count", len(prov["dropped_source_rows"]))
 
         # Solve this single bundle against its auto table.
         single_export = {"bundles": [b]}
@@ -2702,13 +2723,20 @@ def _build_auto_canonical_mapping(
             reduced_ebr_input=bundle_input,
         )
 
+        # Inject table-level provenance into each solution so the
+        # reduced EBR output is self-auditing.
+        for sol in bundle_result.get("solutions", []):
+            if isinstance(sol, dict):
+                sol["table_provenance"] = dict(bundle_input)
+                sol["table_status"] = "loaded"
         all_solutions.extend(bundle_result.get("solutions", []))
         all_excluded.extend(bundle_result.get("excluded_bundles", []))
         per_bundle_statuses.append({
             "bundle_id": bundle_id,
             "sg_number": sg_num,
-            "expected_hsps": expected_hsps,
+            "expected_hsps": list(expected_hsps) if isinstance(expected_hsps, list) else [],
             "status": bundle_result.get("mapping_status", "unknown"),
+            "table_status": "loaded",
         })
 
     # --- Aggregate top-level status ---
@@ -2745,8 +2773,11 @@ def _build_auto_canonical_mapping(
         for s in all_solutions
     )
 
+    any_solved = len(all_solutions) > 0
     if all_ready_solved:
         global_status = "solved_exact"
+    elif any_blocked and any_solved:
+        global_status = "partial"
     elif any_blocked:
         global_status = "blocked"
     elif any_indeterminate:
@@ -2754,7 +2785,7 @@ def _build_auto_canonical_mapping(
     else:
         global_status = "no_exact_solution"
 
-    table_status = "loaded" if len(all_solutions) > 0 else "not_provided"
+    table_status = "loaded" if any_solved else "not_provided"
 
     result: dict[str, object] = {
         "status": global_status,
@@ -2776,6 +2807,12 @@ def _build_auto_canonical_mapping(
             "auto_canonical": True,
             "spinful": spinor_wf,
             "ready_bundle_count": ready_count,
+            "solved_count": len(all_solutions),
+            "blocked_count": sum(
+                1 for s in per_bundle_statuses
+                if s.get("status") in ("blocked", "unknown")
+            ),
+            "excluded_count": len(all_excluded),
         },
         "auto_canonical_bundles": per_bundle_statuses,
     }

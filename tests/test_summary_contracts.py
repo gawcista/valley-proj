@@ -1507,3 +1507,89 @@ def test_tmote2_public_output_no_cn_like_and_production_no_material_names():
     )
     for material in ("tMoTe2", "tZrSe2"):
         assert material not in production_text
+
+
+# ---------------------------------------------------------------------------
+# Auto-canonical reduced EBR provenance regression (tMoTe2)
+# ---------------------------------------------------------------------------
+
+_FIXTURE_REDUCED_EBR = Path(
+    __file__
+).parent.parent / "real_tests" / "tMoTe2" / "output" / "valley_analysis_wave" / "valley_reduced_ebr_mapping.json"
+
+
+def _read_fixture_reduced_ebr():
+    """Read tMoTe2 reduced EBR mapping JSON, skipping if not available."""
+    if not _FIXTURE_REDUCED_EBR.exists():
+        pytest.skip(f"tMoTe2 reduced EBR fixture not found at {_FIXTURE_REDUCED_EBR}")
+    return json.loads(_FIXTURE_REDUCED_EBR.read_text(encoding="utf-8"))
+
+
+def test_tmote2_reduced_ebr_auto_canonical_provenance():
+    """tMoTe2 reduced EBR: auto_canonical source, irreptables data, P3 subspace."""
+    r = _read_fixture_reduced_ebr()
+
+    # Top-level status
+    assert r["mapping_status"] == "solved_exact"
+    assert r["table_status"] == "loaded"
+
+    # reduced_ebr_input self-auditing
+    inp = r.get("reduced_ebr_input", {})
+    assert inp["source"] == "auto_canonical"
+    assert inp["auto_canonical"] is True
+    assert inp["spinful"] is True
+    assert inp["ready_bundle_count"] == 2
+    assert inp["solved_count"] == 2
+    assert inp["blocked_count"] == 0
+
+    # auto_canonical_bundles
+    bundles = r.get("auto_canonical_bundles", [])
+    assert len(bundles) == 2
+    for b in bundles:
+        assert b["sg_number"] == 143
+        assert b["expected_hsps"] == ["GammaM", "KM"]
+        assert b["status"] == "solved_exact"
+        assert b["table_status"] == "loaded"
+
+    # Solutions
+    for sol in r.get("solutions", []):
+        # classification
+        assert sol["classification"] == "atomic-compatible-candidate"
+        assert sol["decomposition_uniqueness"] == "unique"
+        assert len(sol["ebr_decomposition"]) == 1
+
+        # table_provenance injected per solution
+        tp = sol.get("table_provenance", {})
+        assert tp["source"] == "auto_canonical"
+        assert tp["space_group_number"] == 143
+        assert tp["spinful"] is True
+        assert tp["data_source"] == "irreptables"
+        assert tp["package"] == "irreptables"
+        assert isinstance(tp.get("package_version"), str) and tp["package_version"]
+        assert tp["expected_hsps"] == ["GammaM", "KM"]
+        assert tp["valleyscope_reduction"] == "sampled_hsp_valley_preserving"
+        assert tp["source_basis_count"] > 0
+        assert tp["reduction_basis_count"] > 0
+        assert tp["source_basis_count"] > tp["reduction_basis_count"]
+        assert tp.get("dropped_source_row_count", 0) > 0
+
+        # subspace group
+        assert sol["subspace_group_candidate"] == "P3"
+
+        # per-kpoint provenance
+        prov = sol.get("irrep_source_provenance_by_kpoint", {})
+        assert set(prov.keys()) == {"GammaM", "KM"}, f"unexpected HSPs: {set(prov.keys())}"
+        for hsp_entries in prov.values():
+            for entry in hsp_entries:
+                assert entry["source_table_sg_number"] == 143
+                assert entry["source_table_spinor"] is True
+                assert entry["operation_mapping_provenance"] == "exact_spatial"
+                assert isinstance(entry["valley_preserving_operation_ids"], list)
+
+
+def test_tmote2_reduced_ebr_no_mm_irrep_in_vectors():
+    """tMoTe2 reduced EBR: no MM irrep enters the reduced EBR vector basis."""
+    r = _read_fixture_reduced_ebr()
+    for sol in r.get("solutions", []):
+        prov = sol.get("irrep_source_provenance_by_kpoint", {})
+        assert "MM" not in prov, f"MM must not appear in reduced EBR provenance"
