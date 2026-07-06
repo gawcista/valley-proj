@@ -144,11 +144,11 @@ def test_blocked_rows_excluded():
 
 
 # -----------------------------------------------------------------------
-# 4. C2 valley-preserving: table-authoritative, no legacy policy needed
+# 4. P2 valley-preserving: table-authoritative, no legacy policy needed
 # -----------------------------------------------------------------------
 
-def test_c2_like_table_authoritative():
-    """Table-authoritative: C2 valley-preserving no longer blocked by legacy policy."""
+def test_p2_valley_preserving_table_authoritative():
+    """Table-authoritative: P2 valley-preserving data is not blocked by legacy policy."""
     cands = {
         "candidates": [
             {

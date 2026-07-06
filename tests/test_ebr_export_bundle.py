@@ -75,7 +75,7 @@ def test_no_policy_excluded():
             "subspace_space_group": {"candidate_space_group_symbol": "P2"},
             "status": "no_policy",
             "ready_for_ebr_decomposition": False,
-            "blocked_by": ["no expected-HSP policy for C2_like"],
+            "blocked_by": ["no expected-HSP policy for P2"],
         }],
     })
     assert r["bundle_count"] == 0
@@ -134,7 +134,7 @@ def test_mixed_partial_export():
                 "subspace_space_group": {"candidate_space_group_symbol": "P2"},
                 "status": "no_policy",
                 "ready_for_ebr_decomposition": False,
-                "blocked_by": ["no expected-HSP policy for C2_like"],
+                "blocked_by": ["no expected-HSP policy for P2"],
             },
         ],
     })
