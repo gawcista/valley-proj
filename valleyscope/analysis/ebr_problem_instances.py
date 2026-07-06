@@ -34,9 +34,8 @@ def build_ebr_problem_instances(
     if not candidates:
         return _empty_report("no trusted EBR input candidates")
 
-    # Group by physical subspace-space-group symbol when present; fall back
-    # to legacy subgroup candidate for older candidates.
-    groups: dict[tuple[str, str, str, str, str], list[dict[str, object]]] = {}
+    # Group by physical subspace-space-group symbol.
+    groups: dict[tuple[str, str, str, str], list[dict[str, object]]] = {}
     for c in candidates:
         ssg = c.get("subspace_space_group", {})
         sg_symbol = (
@@ -44,19 +43,18 @@ def build_ebr_problem_instances(
             if isinstance(ssg, dict) else None
         )
         sg = str(sg_symbol) if sg_symbol else str(c.get("subspace_group_candidate", ""))
-        legacy_sg = ""
         valley = str(c.get("valley", ""))
         workflow_path = str(c.get("workflow_path", ""))
         readiness_level = str(c.get("readiness_level", ""))
         groups.setdefault(
-            (sg, legacy_sg, valley, workflow_path, readiness_level),
+            (sg, valley, workflow_path, readiness_level),
             [],
         ).append(c)
 
     instances: list[dict[str, object]] = []
     instance_counter = 0
 
-    for (sg, legacy_sg, valley, workflow_path, readiness_level), cands in groups.items():
+    for (sg, valley, workflow_path, readiness_level), cands in groups.items():
         instance_counter += 1
         instance_id = f"ebr_instance_{instance_counter:03d}"
 
