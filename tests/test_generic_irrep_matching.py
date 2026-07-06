@@ -706,13 +706,10 @@ def test_source_payload_blocked_no_legacy_fallback():
     gm = report["generic_matches_by_kpoint"]["GammaM"]["M_valley"]
     assert gm["matching_status"] == "blocked"
     assert gm["matching_strategy"] == "bilbao_restricted_character"
-    # Legacy entry suppressed because generic coverage exists for this pair.
-    no_legacy = report["by_kpoint"].get("GammaM", {})
-    assert "M_valley" not in no_legacy, "legacy entry must be suppressed in generic mode"
 
 
 def test_no_workflow_decisions_returns_matching_mode():
-    """irrep_workflow_decisions=None still returns matching_mode and legacy tables."""
+    """irrep_workflow_decisions=None still returns matching_mode."""
     from valleyscope.analysis.valley_irrep_matching import (
         build_valley_irrep_matching_report,
     )
@@ -722,8 +719,6 @@ def test_no_workflow_decisions_returns_matching_mode():
     )
     assert report["status"] == "not_evaluated"
     assert report["matching_mode"] in ("generic", "not_evaluated")
-    assert "by_kpoint" in report
-    assert report["by_kpoint"] == {}
 
 
 def test_source_op_map_without_chars_blocked_no_legacy():
@@ -774,8 +769,6 @@ def test_source_op_map_without_chars_blocked_no_legacy():
     gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
     assert gm["matching_status"] == "blocked"
     assert "missing_source_irrep_characters" in gm["reason"]
-    # Legacy entry suppressed.
-    assert "K_valley" not in report["by_kpoint"].get("GammaM", {})
 
 
 def test_ebr_candidates_generic_mode_no_legacy_promotion():
@@ -991,8 +984,8 @@ def test_summary_text_generic_first_legacy_explicit():
     assert "tables implemented:" not in text
 
 
-def test_summary_text_labels_legacy_rows_as_deprecated_diagnostic():
-    """Legacy by_kpoint rows remain explicit compatibility-only diagnostics."""
+def test_summary_text_legacy_by_kpoint_rendering_removed():
+    """Legacy by_kpoint rendering has been removed; only generic matches render."""
     from valleyscope.reports.summary_report import render_summary_text
 
     summary = {
@@ -1032,24 +1025,11 @@ def test_summary_text_labels_legacy_rows_as_deprecated_diagnostic():
         "valley_irrep_matching": {
             "status": "ok",
             "matching_mode": "legacy",
-            "by_kpoint": {
-                "GammaM": {
-                    "K_valley": {
-                        "2": {
-                            "matching_status": "matched",
-                            "matched_irrep": "C2_spinor_phase_+1/4",
-                            "subspace_group_candidate": "P2",
-                            "eigenphases": [0.25],
-                            "readiness_level": "trusted",
-                        },
-                    },
-                },
-            },
         },
     }
     text = render_summary_text(summary)
-    assert "deprecated legacy phase-table entries (diagnostic provenance only; not an active matching path):" in text
-    assert "C2_spinor_phase_+1/4" in text
+    # Legacy phase-table rendering has been removed; only generic matches render.
+    assert "legacy phase-table" not in text
 
 
 # -----------------------------------------------------------------------

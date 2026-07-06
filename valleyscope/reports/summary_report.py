@@ -1571,41 +1571,10 @@ def _render_valley_irrep_matching(
             )
         )
 
-    by_kpoint = report.get("by_kpoint", {})
-    if not isinstance(by_kpoint, dict):
-        by_kpoint = {}
-    if not by_kpoint and not generic_rows:
+    if not generic_rows:
         lines.append("(none)")
         lines.append("")
         return
-    rows: list[list[Any]] = []
-    for kp_name, valleys in by_kpoint.items():
-        if not isinstance(valleys, dict):
-            continue
-        for v_name, ops in valleys.items():
-            if not isinstance(ops, dict):
-                continue
-            for op_id, m in ops.items():
-                if not isinstance(m, dict):
-                    continue
-                rows.append([
-                    kp_name, v_name, op_id,
-                    m.get("subspace_group_candidate", ""),
-                    m.get("matching_status", ""),
-                    m.get("matched_irrep", "") or "",
-                    _short_list(m.get("eigenphases", [])),
-                    str(m.get("reason", ""))[:80],
-                    m.get("readiness_level", ""),
-                ])
-    if rows:
-        lines.append("deprecated legacy phase-table entries (diagnostic provenance only; not an active matching path):")
-        lines.extend(
-            _table(
-                ["kpoint", "valley", "op", "group", "status",
-                 "irrep", "phases", "reason", "readiness"],
-                rows,
-            )
-        )
     lines.append("")
 
 

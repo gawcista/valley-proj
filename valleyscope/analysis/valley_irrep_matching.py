@@ -68,10 +68,8 @@ def build_valley_irrep_matching_report(
             "status": "not_evaluated",
             "matching_mode": "generic" if _generic_mode else "not_evaluated",
             "matching_statuses": list(MATCHING_STATUSES),
-            "by_kpoint": {},
         }
 
-    by_kpoint: dict[str, object] = {}
     decisions_by_kp = irrep_workflow_decisions.get("by_kpoint", {})
 
     # Collect subspace diagnostics for character data
@@ -308,6 +306,12 @@ def build_valley_irrep_matching_report(
                 for key, value in row.items()
                 if key not in {"kpoint", "valley", "blocker_reasons", "reason"}
             }
+            # Carry resolved subspace_space_group to top level so downstream
+            # layers (compact rows, EBR candidates) see the SG identity even
+            # when the source HSP label cannot be assigned.
+            ssg = row.get("subspace_space_group")
+            if not isinstance(ssg, Mapping):
+                ssg = provenance.get("subspace_space_group")
             generic_matches.setdefault(kp_name, {})[v_name] = {
                 "matching_status": "blocked",
                 "matching_strategy": "bilbao_restricted_character",
@@ -325,6 +329,8 @@ def build_valley_irrep_matching_report(
                 "reason": reason,
                 "source_payload_status": "blocked",
                 "source_payload_provenance": provenance,
+                **({"subspace_space_group": dict(ssg)}
+                   if isinstance(ssg, Mapping) else {}),
             }
 
     # --- Rows with operation maps but no source characters ---
@@ -410,10 +416,9 @@ def build_valley_irrep_matching_report(
     # source (including blocked rows) is the authoritative matching path.
 
     return {
-        "status": "ok" if (by_kpoint or generic_matches) else "not_evaluated",
+        "status": "ok" if generic_matches else "not_evaluated",
         "matching_mode": "generic" if _generic_mode else "not_evaluated",
         "matching_statuses": list(MATCHING_STATUSES),
-        "by_kpoint": by_kpoint,
         **({"generic_matches_by_kpoint": generic_matches}
            if generic_matches else {}),
     }

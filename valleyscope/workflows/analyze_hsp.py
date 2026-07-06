@@ -651,9 +651,17 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     override_label=override_label,
                 )
                 if hsp_blocker is not None:
+                    # Carry resolved subspace-space-group identity even
+                    # when no source Bilbao HSP label can be assigned.
                     generic_source_blocked_rows.append({
                         "kpoint": kp_name, "valley": v_name,
                         "reason": hsp_blocker,
+                        "subspace_space_group": _resolved_subspace_group_context(
+                            sg_number=sg_number,
+                            table_name=str(table.name),
+                            valley_preserving_operation_ids=list(vp_ids),
+                        ),
+                        "valley_preserving_operation_ids": list(vp_ids),
                     })
                     continue
 
@@ -2245,6 +2253,31 @@ def _empty_subspace_space_group(reason: str) -> dict[str, object]:
         "operation_orders": {},
         "source": "full_space_group_valley_mapping",
         "reason": reason,
+    }
+
+
+def _resolved_subspace_group_context(
+    *,
+    sg_number: int,
+    table_name: str,
+    valley_preserving_operation_ids: list[object],
+) -> dict[str, object]:
+    """Minimal resolved subspace-space-group context for blocked-source rows.
+
+    When the source Bilbao HSP label cannot be determined but the
+    valley-projected subspace space group IS resolved, this compact
+    context carries the resolved identity forward so downstream layers
+    (matching, EBR candidates) have the physical SG symbol and number.
+    """
+    return {
+        "status": "resolved",
+        "candidate_space_group_number": int(sg_number),
+        "candidate_space_group_symbol": str(table_name),
+        "valley_preserving_operation_ids": list(valley_preserving_operation_ids),
+        "source": (
+            "symmetry_analysis.valley_preserving_subgroup_report"
+            ".per_valley_standard_matches"
+        ),
     }
 
 

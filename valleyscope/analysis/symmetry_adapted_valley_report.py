@@ -254,10 +254,7 @@ def build_symmetry_adapted_valley_report(
             spinor_convention_verified=spinor_convention_verified,
             proj_diag=proj_diag,
             char_diag=char_diag,
-            subspace_group_candidate=_subspace_group_candidate_from_orders(
-                rep_diag=rep_diag,
-                operation_orders=operation_orders,
-            ),
+            subspace_group_candidate=None,
             ebr_seed_overlap_min=ebr_seed_overlap_min,
             ebr_unitarity_max=ebr_unitarity_max,
         ),
@@ -624,16 +621,6 @@ def _build_ebr_mapping_input(
             "external table (see required_tables)."
         ),
     }
-
-
-def _subspace_group_candidate_from_orders(
-    *,
-    rep_diag: dict[str, object],
-    operation_orders: dict[object, int] | None,
-) -> str | None:
-    """Returns None — subspace-space-group identity is not inferred from
-    operation orders.  A reviewed or generic identification source is required."""
-    return None
 
 
 def _blocked_subspace_group(
