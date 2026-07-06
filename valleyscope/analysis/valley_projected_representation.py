@@ -18,6 +18,7 @@ def build_valley_projected_representation_report(
     symmetry_adapted_valley_report: dict[str, Any] | None = None,
     irrep_workflow_decisions: dict[str, Any] | None = None,
     valley_irrep_matching: dict[str, Any] | None = None,
+    symmetry_analysis: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a representation report from computed per-row data.
 
@@ -27,6 +28,13 @@ def build_valley_projected_representation_report(
     matching data (for per-group irrep status).  Produces per-row records
     with ``subspace_space_group`` as the primary identifier, plus
     per-``(kpoint, valley)`` grouped ``representation_records``.
+
+    When ``symmetry_analysis`` is provided, every sampled ``(kpoint,
+    valley)`` with workflow or symmetry information produces a
+    ``representation_record``, including blocked and identity-only cases
+    that have no symmetry eigenvalue rows.  Full HSP little group
+    ``G_k``, valley-preserving subgroup ``G_k^(a)``, and valley-changing
+    operations are distinguished from the per-valley inventory.
     """
     rows: list[dict[str, Any]] = []
     subspace_space_group_counts: dict[str, int] = {}
@@ -84,6 +92,44 @@ def build_valley_projected_representation_report(
                     if isinstance(ssg, dict):
                         matching_ssg_lookup[(kp_name, valley_name)] = ssg
 
+    # Per-(kpoint, valley) group-theoretic inventory from symmetry_analysis.
+    # Provides full HSP little group G_k, valley-preserving G_k^(a), and
+    # valley-changing operations for every sampled (kpoint, valley).
+    sym_analysis_lookup: dict[tuple[str, str], dict[str, Any]] = {}
+    if symmetry_analysis is not None:
+        subgroup_report = symmetry_analysis.get(
+            "valley_preserving_subgroup_report", {}
+        )
+        if isinstance(subgroup_report, dict):
+            by_kp_sa = subgroup_report.get("by_kpoint", {})
+            if isinstance(by_kp_sa, dict):
+                for kp_name, kp_data in by_kp_sa.items():
+                    if not isinstance(kp_data, dict):
+                        continue
+                    for v_name, pv_data in kp_data.items():
+                        if not isinstance(pv_data, dict):
+                            continue
+                        # Skip legacy kpoint-level keys.
+                        if v_name in (
+                            "hsp_little_group_operation_ids",
+                            "all_valley_intersection_operation_ids",
+                        ):
+                            continue
+                        sym_analysis_lookup[(str(kp_name), str(v_name))] = {
+                            "hsp_little_group_operation_ids": pv_data.get(
+                                "little_group_operation_ids", []
+                            ),
+                            "valley_preserving_operation_ids": pv_data.get(
+                                "allowed_operation_ids", []
+                            ),
+                            "valley_changing_operation_ids": pv_data.get(
+                                "valley_changing_operation_ids", []
+                            ),
+                            "identity_operation_id": pv_data.get(
+                                "identity_operation_id"
+                            ),
+                        }
+
     # Process eigenvalue rows.
     if symmetry_eigenvalue_rows is not None:
         for row in symmetry_eigenvalue_rows:
@@ -115,6 +161,25 @@ def build_valley_projected_representation_report(
             # Build representation record.
             diag_only = bool(row.get("diagnostic_only", False))
             topology_ready = bool(row.get("topology_input_ready", False))
+            # Full G_k from symmetry_analysis overrides the subspace-level
+            # hsp_preserving_operation_ids (which is G_k^(a), not full G_k).
+            sa_data = sym_analysis_lookup.get((str(kp), str(valley)), {})
+            hsp_lg_ids = (
+                sa_data.get("hsp_little_group_operation_ids")
+                or _list_field(subspace_data, "hsp_preserving_operation_ids")
+            )
+            vp_ids = (
+                sa_data.get("valley_preserving_operation_ids")
+                or _list_field(
+                    subspace_space_group_data, "valley_preserving_operation_ids"
+                )
+            )
+            vc_ids = (
+                sa_data.get("valley_changing_operation_ids")
+                or _list_field(
+                    subspace_space_group_data, "valley_changing_operation_ids"
+                )
+            )
             rec: dict[str, Any] = {
                 "kpoint": kp,
                 "valley": valley,
@@ -123,17 +188,9 @@ def build_valley_projected_representation_report(
                 "subspace_space_group": _compact_subspace_space_group(
                     subspace_space_group_data
                 ),
-                "hsp_little_group_operation_ids": _list_field(
-                    subspace_data, "hsp_preserving_operation_ids"
-                ),
-                "valley_preserving_operation_ids": _list_field(
-                    subspace_space_group_data,
-                    "valley_preserving_operation_ids",
-                ),
-                "valley_changing_operation_ids": _list_field(
-                    subspace_space_group_data,
-                    "valley_changing_operation_ids",
-                ),
+                "hsp_little_group_operation_ids": hsp_lg_ids,
+                "valley_preserving_operation_ids": vp_ids,
+                "valley_changing_operation_ids": vc_ids,
                 "readiness_level": wf_data.get("readiness_level", "?"),
                 "workflow_path": wf_data.get("workflow_path", "?"),
                 "diagnostic_only": diag_only,
@@ -170,6 +227,108 @@ def build_valley_projected_representation_report(
         valley_irrep_matching=valley_irrep_matching,
     )
 
+    # --- Completeness: ensure every sampled (kpoint, valley) with
+    #     symmetry_analysis or workflow data produces a record,
+    #     including blocked / identity-only cases with no eigenvalue rows.
+    existing_pairs: set[tuple[str, str]] = set()
+    for rec in representation_records:
+        existing_pairs.add((str(rec.get("kpoint", "")), str(rec.get("valley", ""))))
+
+    for kp_name in kpoint_names:
+        for v_name in valley_names:
+            pair = (str(kp_name), str(v_name))
+            if pair in existing_pairs:
+                continue
+            sa_data = sym_analysis_lookup.get(pair, {})
+            wf_data = wf_lookup.get(pair, {})
+            if not sa_data and not wf_data:
+                # No symmetry or workflow data for this pair — skip.
+                continue
+
+            hsp_lg_ids = sa_data.get("hsp_little_group_operation_ids", [])
+            vp_ids = sa_data.get("valley_preserving_operation_ids", [])
+            vc_ids = sa_data.get("valley_changing_operation_ids", [])
+
+            # Subspace space group — prefer matched (resolved) identity.
+            matched_ssg = matching_ssg_lookup.get(pair)
+            subspace_ssg: dict[str, Any] = {}
+            if matched_ssg:
+                subspace_ssg = dict(matched_ssg)
+            else:
+                subspace_data = subspace_lookup.get(pair, {})
+                raw_ssg = subspace_data.get("subspace_space_group", {})
+                if isinstance(raw_ssg, dict):
+                    subspace_ssg = dict(raw_ssg)
+
+            readiness = wf_data.get("readiness_level", "not_evaluated")
+            wf_path = wf_data.get("workflow_path", "blocked")
+
+            # Blocking reasons — identity-only G_k^(a) is a valid physical
+            # local result, not a code defect.
+            blockers: list[str] = []
+            identity_id = sa_data.get("identity_operation_id")
+            non_identity_vp = [
+                op for op in vp_ids if op != identity_id
+            ]
+            if not non_identity_vp:
+                blockers.append(
+                    "identity_only_not_irrep_distinguishing: "
+                    "G_k^(a) contains only the identity operation; "
+                    "no non-identity valley-preserving operation in the "
+                    "HSP little group"
+                )
+            if readiness == "blocked" or wf_path == "blocked":
+                blockers.append("workflow_blocked")
+            wf_blockers = wf_data.get("blocking_reasons", [])
+            if isinstance(wf_blockers, list):
+                blockers.extend(wf_blockers)
+
+            # Irrep matching data — may exist even for identity-only cases.
+            irrep_matching: dict[str, Any] | None = None
+            gbkp = (
+                valley_irrep_matching.get("generic_matches_by_kpoint", {})
+                if isinstance(valley_irrep_matching, dict)
+                else {}
+            )
+            gm = gbkp.get(kp_name, {}).get(v_name)
+            if isinstance(gm, dict):
+                irrep_matching = {
+                    "matching_status": gm.get("matching_status"),
+                    "matching_strategy": gm.get("matching_strategy"),
+                    "irrep_multiplicities": gm.get("irrep_multiplicities"),
+                }
+
+            record: dict[str, Any] = {
+                "kpoint": kp_name,
+                "valley": v_name,
+                "subspace_space_group": _compact_subspace_space_group(
+                    subspace_ssg
+                ),
+                "hsp_little_group_operation_ids": list(hsp_lg_ids),
+                "valley_preserving_operation_ids": list(vp_ids),
+                "valley_changing_operation_ids": list(vc_ids),
+                "valley_preserving_operations": [],
+                "readiness_level": readiness,
+                "workflow_path": wf_path,
+                "blocking_reasons": blockers,
+                "irrep_matching": irrep_matching,
+            }
+            representation_records.append(record)
+
+            # Update counts for non-eigenvalue rows.
+            sg_symbol = subspace_ssg.get("candidate_space_group_symbol")
+            if sg_symbol:
+                key = str(sg_symbol)
+                subspace_space_group_counts[key] = (
+                    subspace_space_group_counts.get(key, 0) + 1
+                )
+            blocked_count += 1
+
+    # Sort records for deterministic output.
+    representation_records.sort(
+        key=lambda r: (str(r.get("kpoint", "")), str(r.get("valley", "")))
+    )
+
     return {
         "rows": rows,
         "representation_records": representation_records,
@@ -178,8 +337,8 @@ def build_valley_projected_representation_report(
         "trusted_representation_count": trusted_count,
         "blocked_representation_count": blocked_count,
         "diagnostic_only_count": diagnostic_count,
-        "valley_labels": sorted(set(r["valley"] for r in rows)),
-        "kpoint_labels": sorted(set(r["kpoint"] for r in rows)),
+        "valley_labels": sorted(set(r["valley"] for r in representation_records)),
+        "kpoint_labels": sorted(set(r["kpoint"] for r in representation_records)),
     }
 
 

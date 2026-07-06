@@ -815,6 +815,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         symmetry_adapted_valley_report=symmetry_adapted_valley_report,
         irrep_workflow_decisions=irrep_workflow_decisions,
         valley_irrep_matching=valley_irrep_matching,
+        symmetry_analysis=symmetry_payload,
     )
 
     # --- Folded-center report ---

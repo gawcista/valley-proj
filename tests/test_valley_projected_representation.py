@@ -458,6 +458,453 @@ def test_representation_records_p4_order4_group_agnostic():
     assert rec["subspace_space_group"]["candidate_space_group_symbol"] != "C4_like"
 
 
+# ---------------------------------------------------------------------------
+# Public representation completeness tests
+# ---------------------------------------------------------------------------
+
+def _symmetry_analysis_stub(*, by_kpoint: dict) -> dict:
+    """Minimal symmetry_analysis payload with valley_preserving_subgroup_report."""
+    return {
+        "valley_preserving_subgroup_report": {
+            "by_kpoint": by_kpoint,
+        },
+    }
+
+
+def test_blocked_identity_only_pair_produces_record_without_eigenvalue_rows():
+    """MM with identity-only G_k^(a) and no eigenvalue rows still gets a record."""
+    report = build_valley_projected_representation_report(
+        kpoint_names=["GammaM", "MM"],
+        valley_names=["K_valley", "Kp_valley"],
+        symmetry_eigenvalue_rows=[
+            {
+                "kpoint": "GammaM", "target_valley": "K_valley",
+                "operation_id": 1, "order": 3,
+                "diagnostic_only": False, "topology_input_ready": True,
+                "rotation_ready": True,
+            },
+        ],
+        symmetry_adapted_valley_report={
+            "by_kpoint": {
+                "GammaM": {
+                    "valley_preserving_subspaces": [{
+                        "orbit": ["K_valley"],
+                        "hsp_preserving_operation_ids": [0, 1, 2],
+                        "subspace_space_group": {
+                            "candidate_space_group_symbol": "P3",
+                            "valley_preserving_operation_ids": [0, 1, 2],
+                            "valley_changing_operation_ids": [3, 4, 5],
+                            "status": "candidate",
+                        },
+                    }],
+                },
+                "MM": {
+                    "valley_preserving_subspaces": [],
+                },
+            },
+        },
+        irrep_workflow_decisions={
+            "by_kpoint": {
+                "GammaM": {
+                    "K_valley": {"readiness_level": "trusted", "workflow_path": "direct_qcut"},
+                },
+                "MM": {
+                    "K_valley": {"readiness_level": "blocked", "workflow_path": "blocked"},
+                    "Kp_valley": {"readiness_level": "blocked", "workflow_path": "blocked"},
+                },
+            },
+        },
+        valley_irrep_matching={
+            "generic_matches_by_kpoint": {
+                "GammaM": {
+                    "K_valley": {
+                        "matching_status": "matched",
+                        "matching_strategy": "bilbao_restricted_character",
+                        "irrep_multiplicities": {"-GM4": 1},
+                        "subspace_space_group": {
+                            "status": "resolved",
+                            "candidate_space_group_number": 143,
+                            "candidate_space_group_symbol": "P3",
+                            "valley_preserving_operation_ids": [0, 1, 2],
+                        },
+                    },
+                },
+                "MM": {
+                    "K_valley": {
+                        "matching_status": "identity_only_not_irrep_distinguishing",
+                        "matching_strategy": "bilbao_restricted_character",
+                        "subspace_space_group": {
+                            "status": "resolved",
+                            "candidate_space_group_number": 143,
+                            "candidate_space_group_symbol": "P3",
+                            "valley_preserving_operation_ids": [0, 1, 2],
+                        },
+                    },
+                },
+            },
+        },
+        symmetry_analysis=_symmetry_analysis_stub(by_kpoint={
+            "GammaM": {
+                "K_valley": {
+                    "little_group_operation_ids": [0, 1, 2, 3, 4, 5],
+                    "allowed_operation_ids": [0, 1, 2],
+                    "valley_changing_operation_ids": [3, 4, 5],
+                    "identity_operation_id": 0,
+                },
+            },
+            "MM": {
+                "K_valley": {
+                    "little_group_operation_ids": [0, 5],
+                    "allowed_operation_ids": [0],
+                    "valley_changing_operation_ids": [5],
+                    "identity_operation_id": 0,
+                },
+                "Kp_valley": {
+                    "little_group_operation_ids": [0, 5],
+                    "allowed_operation_ids": [0],
+                    "valley_changing_operation_ids": [5],
+                    "identity_operation_id": 0,
+                },
+            },
+        }),
+    )
+
+    # MM/K_valley must appear — no eigenvalue rows, but symmetry + workflow exist.
+    mm_records = [
+        r for r in report["representation_records"]
+        if r["kpoint"] == "MM"
+    ]
+    assert len(mm_records) >= 1, "MM must produce a representation record"
+
+    mm_k = [r for r in mm_records if r["valley"] == "K_valley"]
+    assert len(mm_k) == 1
+    mm = mm_k[0]
+    assert mm["hsp_little_group_operation_ids"] == [0, 5]
+    assert mm["valley_preserving_operation_ids"] == [0]
+    assert mm["valley_changing_operation_ids"] == [5]
+    assert mm["valley_preserving_operations"] == []
+    assert mm["workflow_path"] == "blocked"
+    assert mm["readiness_level"] == "blocked"
+    assert any("identity_only" in b for b in mm["blocking_reasons"])
+    assert mm["irrep_matching"] is not None
+    assert mm["irrep_matching"]["matching_status"] == "identity_only_not_irrep_distinguishing"
+
+    # GammaM record still present.
+    gm_records = [
+        r for r in report["representation_records"]
+        if r["kpoint"] == "GammaM"
+    ]
+    assert len(gm_records) == 1
+
+    # kpoint_labels includes all sampled kpoints.
+    assert "MM" in report["kpoint_labels"]
+    assert "GammaM" in report["kpoint_labels"]
+    assert report["blocked_representation_count"] >= 2  # MM K + MM K'
+
+
+def test_full_hsp_little_group_distinct_from_valley_preserving():
+    """G_k and G_k^(a) are distinct when valley-changing ops exist."""
+    report = build_valley_projected_representation_report(
+        kpoint_names=["GammaM", "KM"],
+        valley_names=["K_valley"],
+        symmetry_eigenvalue_rows=[
+            {
+                "kpoint": "GammaM", "target_valley": "K_valley",
+                "operation_id": 1, "order": 3,
+                "diagnostic_only": False, "topology_input_ready": True,
+                "rotation_ready": True,
+            },
+            {
+                "kpoint": "KM", "target_valley": "K_valley",
+                "operation_id": 1, "order": 3,
+                "diagnostic_only": False, "topology_input_ready": True,
+                "rotation_ready": True,
+            },
+        ],
+        symmetry_adapted_valley_report={
+            "by_kpoint": {
+                "GammaM": {
+                    "valley_preserving_subspaces": [{
+                        "orbit": ["K_valley"],
+                        "hsp_preserving_operation_ids": [0, 1, 2],
+                        "subspace_space_group": {
+                            "candidate_space_group_symbol": "P3",
+                            "valley_preserving_operation_ids": [0, 1, 2],
+                            "valley_changing_operation_ids": [3, 4, 5],
+                            "status": "candidate",
+                        },
+                    }],
+                },
+                "KM": {
+                    "valley_preserving_subspaces": [{
+                        "orbit": ["K_valley"],
+                        "hsp_preserving_operation_ids": [0, 1, 2],
+                        "subspace_space_group": {
+                            "candidate_space_group_symbol": "P3",
+                            "valley_preserving_operation_ids": [0, 1, 2],
+                            "valley_changing_operation_ids": [3, 4, 5],
+                            "status": "candidate",
+                        },
+                    }],
+                },
+            },
+        },
+        irrep_workflow_decisions={
+            "by_kpoint": {
+                "GammaM": {
+                    "K_valley": {"readiness_level": "trusted", "workflow_path": "direct_qcut"},
+                },
+                "KM": {
+                    "K_valley": {"readiness_level": "trusted", "workflow_path": "direct_qcut"},
+                },
+            },
+        },
+        symmetry_analysis=_symmetry_analysis_stub(by_kpoint={
+            "GammaM": {
+                "K_valley": {
+                    "little_group_operation_ids": [0, 1, 2, 3, 4, 5],
+                    "allowed_operation_ids": [0, 1, 2],
+                    "valley_changing_operation_ids": [3, 4, 5],
+                    "identity_operation_id": 0,
+                },
+            },
+            "KM": {
+                "K_valley": {
+                    "little_group_operation_ids": [0, 1, 2, 3, 4, 5],
+                    "allowed_operation_ids": [0, 1, 2],
+                    "valley_changing_operation_ids": [3, 4, 5],
+                    "identity_operation_id": 0,
+                },
+            },
+        }),
+    )
+
+    for rec in report["representation_records"]:
+        # Full G_k (6 ops) ≠ G_k^(a) (3 ops)
+        assert rec["hsp_little_group_operation_ids"] == [0, 1, 2, 3, 4, 5], (
+            f"{rec['kpoint']}: hsp_little_group_operation_ids must be full G_k"
+        )
+        assert rec["valley_preserving_operation_ids"] == [0, 1, 2], (
+            f"{rec['kpoint']}: valley_preserving_operation_ids must be G_k^(a)"
+        )
+        assert rec["valley_changing_operation_ids"] == [3, 4, 5], (
+            f"{rec['kpoint']}: valley_changing_operation_ids must be reported"
+        )
+        # G_k^(a) is a proper subset of G_k.
+        assert set(rec["valley_preserving_operation_ids"]).issubset(
+            set(rec["hsp_little_group_operation_ids"])
+        )
+        assert set(rec["valley_changing_operation_ids"]).issubset(
+            set(rec["hsp_little_group_operation_ids"])
+        )
+
+
+def test_identity_only_gka_no_false_irrep_no_ebr_candidate():
+    """Identity-only G_k^(a) must not invent irrep labels or become EBR candidate."""
+    report = build_valley_projected_representation_report(
+        kpoint_names=["MM"],
+        valley_names=["K_valley"],
+        # No eigenvalue rows.
+        symmetry_eigenvalue_rows=None,
+        irrep_workflow_decisions={
+            "by_kpoint": {
+                "MM": {
+                    "K_valley": {
+                        "readiness_level": "blocked",
+                        "workflow_path": "blocked",
+                    },
+                },
+            },
+        },
+        valley_irrep_matching={
+            "generic_matches_by_kpoint": {
+                "MM": {
+                    "K_valley": {
+                        "matching_status": "identity_only_not_irrep_distinguishing",
+                        "matching_strategy": "bilbao_restricted_character",
+                        "irrep_multiplicities": None,
+                        "subspace_space_group": {
+                            "status": "resolved",
+                            "candidate_space_group_number": 143,
+                            "candidate_space_group_symbol": "P3",
+                            "valley_preserving_operation_ids": [0, 1, 2],
+                        },
+                    },
+                },
+            },
+        },
+        symmetry_analysis=_symmetry_analysis_stub(by_kpoint={
+            "MM": {
+                "K_valley": {
+                    "little_group_operation_ids": [0, 5],
+                    "allowed_operation_ids": [0],
+                    "valley_changing_operation_ids": [5],
+                    "identity_operation_id": 0,
+                },
+            },
+        }),
+    )
+
+    assert report["grouped_record_count"] == 1
+    rec = report["representation_records"][0]
+    assert rec["kpoint"] == "MM"
+    assert rec["valley"] == "K_valley"
+
+    # Must NOT claim irrep labels.
+    assert rec["valley_preserving_operations"] == []
+    if rec["irrep_matching"]:
+        # If present, must be identity_only or similar, not a material irrep.
+        status = rec["irrep_matching"].get("matching_status", "")
+        mults = rec["irrep_matching"].get("irrep_multiplicities")
+        # No positive irrep multiplicities.
+        assert not mults or mults == {}, (
+            f"identity-only must not have positive irrep multiplicities: {mults}"
+        )
+
+    # Must have blocking status — not trusted, not ready.
+    assert rec["readiness_level"] != "trusted"
+    assert rec["workflow_path"] == "blocked"
+    assert any("identity_only" in b for b in rec["blocking_reasons"])
+
+    # The physical subspace space group is still present.
+    assert rec["subspace_space_group"]["candidate_space_group_symbol"] == "P3"
+
+
+def test_target_kpoints_not_silently_dropped_from_records():
+    """All target kpoints with sym/workflow data appear in representation_records."""
+    report = build_valley_projected_representation_report(
+        kpoint_names=["GammaM", "KM", "MM"],
+        valley_names=["K_valley", "Kp_valley"],
+        symmetry_eigenvalue_rows=[
+            {
+                "kpoint": "GammaM", "target_valley": "K_valley",
+                "operation_id": 1, "order": 3,
+                "diagnostic_only": False, "topology_input_ready": True,
+                "rotation_ready": True,
+            },
+            {
+                "kpoint": "KM", "target_valley": "K_valley",
+                "operation_id": 1, "order": 3,
+                "diagnostic_only": False, "topology_input_ready": True,
+                "rotation_ready": True,
+            },
+        ],
+        symmetry_adapted_valley_report={
+            "by_kpoint": {
+                "GammaM": {
+                    "valley_preserving_subspaces": [{
+                        "orbit": ["K_valley"],
+                        "hsp_preserving_operation_ids": [0, 1, 2],
+                        "subspace_space_group": {
+                            "candidate_space_group_symbol": "P3",
+                            "valley_preserving_operation_ids": [0, 1, 2],
+                            "valley_changing_operation_ids": [3, 4, 5],
+                            "status": "candidate",
+                        },
+                    }],
+                },
+                "KM": {
+                    "valley_preserving_subspaces": [{
+                        "orbit": ["K_valley"],
+                        "hsp_preserving_operation_ids": [0, 1, 2],
+                        "subspace_space_group": {
+                            "candidate_space_group_symbol": "P3",
+                            "valley_preserving_operation_ids": [0, 1, 2],
+                            "valley_changing_operation_ids": [3, 4, 5],
+                            "status": "candidate",
+                        },
+                    }],
+                },
+            },
+        },
+        irrep_workflow_decisions={
+            "by_kpoint": {
+                "GammaM": {
+                    "K_valley": {"readiness_level": "trusted", "workflow_path": "direct_qcut"},
+                    "Kp_valley": {"readiness_level": "trusted", "workflow_path": "direct_qcut"},
+                },
+                "KM": {
+                    "K_valley": {"readiness_level": "trusted", "workflow_path": "direct_qcut"},
+                    "Kp_valley": {"readiness_level": "trusted", "workflow_path": "direct_qcut"},
+                },
+                "MM": {
+                    "K_valley": {"readiness_level": "blocked", "workflow_path": "blocked"},
+                    "Kp_valley": {"readiness_level": "blocked", "workflow_path": "blocked"},
+                },
+            },
+        },
+        symmetry_analysis=_symmetry_analysis_stub(by_kpoint={
+            "GammaM": {
+                "K_valley": {
+                    "little_group_operation_ids": [0, 1, 2, 3, 4, 5],
+                    "allowed_operation_ids": [0, 1, 2],
+                    "valley_changing_operation_ids": [3, 4, 5],
+                    "identity_operation_id": 0,
+                },
+                "Kp_valley": {
+                    "little_group_operation_ids": [0, 1, 2, 3, 4, 5],
+                    "allowed_operation_ids": [0, 1, 2],
+                    "valley_changing_operation_ids": [3, 4, 5],
+                    "identity_operation_id": 0,
+                },
+            },
+            "KM": {
+                "K_valley": {
+                    "little_group_operation_ids": [0, 1, 2, 3, 4, 5],
+                    "allowed_operation_ids": [0, 1, 2],
+                    "valley_changing_operation_ids": [3, 4, 5],
+                    "identity_operation_id": 0,
+                },
+                "Kp_valley": {
+                    "little_group_operation_ids": [0, 1, 2, 3, 4, 5],
+                    "allowed_operation_ids": [0, 1, 2],
+                    "valley_changing_operation_ids": [3, 4, 5],
+                    "identity_operation_id": 0,
+                },
+            },
+            "MM": {
+                "K_valley": {
+                    "little_group_operation_ids": [0, 5],
+                    "allowed_operation_ids": [0],
+                    "valley_changing_operation_ids": [5],
+                    "identity_operation_id": 0,
+                },
+                "Kp_valley": {
+                    "little_group_operation_ids": [0, 5],
+                    "allowed_operation_ids": [0],
+                    "valley_changing_operation_ids": [5],
+                    "identity_operation_id": 0,
+                },
+            },
+        }),
+    )
+
+    rec_kpoints = sorted(set(r["kpoint"] for r in report["representation_records"]))
+    assert "MM" in rec_kpoints, "MM must not be silently dropped"
+    assert "GammaM" in rec_kpoints
+    assert "KM" in rec_kpoints
+    assert sorted(report["kpoint_labels"]) == sorted(["GammaM", "KM", "MM"])
+
+    # MM records: blocked, identity-only.
+    mm_recs = [r for r in report["representation_records"] if r["kpoint"] == "MM"]
+    assert len(mm_recs) == 2  # K_valley, Kp_valley
+    for mm in mm_recs:
+        assert mm["hsp_little_group_operation_ids"] == [0, 5]
+        assert mm["valley_preserving_operation_ids"] == [0]
+        assert mm["valley_changing_operation_ids"] == [5]
+        assert mm["workflow_path"] == "blocked"
+        assert mm["valley_preserving_operations"] == []
+
+    # GammaM/KM records: trusted, eigenvalue rows.
+    gm_recs = [r for r in report["representation_records"] if r["kpoint"] == "GammaM"]
+    km_recs = [r for r in report["representation_records"] if r["kpoint"] == "KM"]
+    for recs in (gm_recs, km_recs):
+        for rec in recs:
+            assert rec["hsp_little_group_operation_ids"] == [0, 1, 2, 3, 4, 5]
+            assert rec["valley_preserving_operation_ids"] == [0, 1, 2]
+            assert rec["valley_changing_operation_ids"] == [3, 4, 5]
+
+
 def test_representation_records_empty_when_no_rows():
     report = build_valley_projected_representation_report(
         kpoint_names=[],
