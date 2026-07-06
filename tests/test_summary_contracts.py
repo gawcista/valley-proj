@@ -1339,9 +1339,14 @@ def test_summary_valley_resolved_irreps():
     assert r["matched_count"] == 1
     assert r["diagnostic_count"] == 1
     assert r["rows"][0]["subspace_space_group"] == "P3"
+    assert r["rows"][0]["subspace_hsp_little_group_operation_ids"] == [0, 1, 2]
+    assert r["rows"][0]["hsp_little_group_operation_ids"] == [0, 1, 2]
     assert r["rows"][0]["matching_strategy"] == "bilbao_restricted_character"
     assert r["rows"][0]["irrep_multiplicities"] == {"-GM4": 1}
     assert r["rows"][0]["diagnostic_only"] is False
+    assert r["rows"][1]["subspace_hsp_little_group_operation_ids"] == [0]
+    assert r["rows"][1]["hsp_little_group_operation_ids"] == [0]
+    assert r["rows"][1]["valley_preserving_operation_ids"] == [0]
     assert r["rows"][1]["diagnostic_only"] is True
     assert r["rows"][1]["reason"] == "spinor_convention_unverified"
     assert "C2_like" not in json.dumps(r)
@@ -1486,16 +1491,19 @@ def test_tmote2_ebr_mm_not_candidate():
         assert "MM" not in irreps, f"bundle {b.get('bundle_id')} has MM irreps"
 
 
-def test_tmote2_public_output_no_cn_like_no_material_names():
-    """tMoTe2 public summary: no Cn_like, no material names in output."""
+def test_tmote2_public_output_no_cn_like_and_production_no_material_names():
+    """tMoTe2 public summary avoids Cn-like labels; production code has no material branch."""
     s = _read_fixture_summary()
     raw = json.dumps(s)
 
     for cn in ("C2_like", "C3_like", "C4_like", "C6_like"):
         assert cn not in raw, f"{cn} must not appear in public summary output"
 
-    # The public summary may contain the fixture material name in the
-    # config.analysis.kpoints section since it's a validated output. Check
-    # that production schema fields (not config provenance) are clean.
-    # The fixture output records material provenance in the config path
-    # only; production schema fields must use physical SG symbols.
+    # Material labels are allowed in validation fixtures, but never in
+    # production logic or public schema names.
+    production_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in Path("valleyscope").rglob("*.py")
+    )
+    for material in ("tMoTe2", "tZrSe2"):
+        assert material not in production_text
