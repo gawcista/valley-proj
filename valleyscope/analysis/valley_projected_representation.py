@@ -93,8 +93,9 @@ def build_valley_projected_representation_report(
                         matching_ssg_lookup[(kp_name, valley_name)] = ssg
 
     # Per-(kpoint, valley) group-theoretic inventory from symmetry_analysis.
-    # Provides full HSP little group G_k, valley-preserving G_k^(a), and
-    # valley-changing operations for every sampled (kpoint, valley).
+    # The public irrep object is defined on the subspace HSP little group
+    # G_k^(a) (valley-preserving ops in the parent HSP little group).
+    # Parent full HSP little group and valley-sewing ops are provenance only.
     sym_analysis_lookup: dict[tuple[str, str], dict[str, Any]] = {}
     if symmetry_analysis is not None:
         subgroup_report = symmetry_analysis.get(
@@ -116,14 +117,14 @@ def build_valley_projected_representation_report(
                         ):
                             continue
                         sym_analysis_lookup[(str(kp_name), str(v_name))] = {
-                            "hsp_little_group_operation_ids": pv_data.get(
-                                "little_group_operation_ids", []
+                            "subspace_hsp_little_group_operation_ids": (
+                                pv_data.get("allowed_operation_ids", [])
                             ),
-                            "valley_preserving_operation_ids": pv_data.get(
-                                "allowed_operation_ids", []
+                            "parent_hsp_little_group_operation_ids": (
+                                pv_data.get("little_group_operation_ids", [])
                             ),
-                            "valley_changing_operation_ids": pv_data.get(
-                                "valley_changing_operation_ids", []
+                            "valley_sewing_operation_ids": (
+                                pv_data.get("valley_changing_operation_ids", [])
                             ),
                             "identity_operation_id": pv_data.get(
                                 "identity_operation_id"
@@ -161,21 +162,19 @@ def build_valley_projected_representation_report(
             # Build representation record.
             diag_only = bool(row.get("diagnostic_only", False))
             topology_ready = bool(row.get("topology_input_ready", False))
-            # Full G_k from symmetry_analysis overrides the subspace-level
-            # hsp_preserving_operation_ids (which is G_k^(a), not full G_k).
+            # Public irrep group = subspace HSP little group G_k^(a).
+            # Parent full HSP little group and valley-sewing ops are
+            # provenance only — they must not feed irrep matching or EBR.
             sa_data = sym_analysis_lookup.get((str(kp), str(valley)), {})
-            hsp_lg_ids = (
-                sa_data.get("hsp_little_group_operation_ids")
+            subspace_hsp_lg = (
+                sa_data.get("subspace_hsp_little_group_operation_ids")
                 or _list_field(subspace_data, "hsp_preserving_operation_ids")
             )
-            vp_ids = (
-                sa_data.get("valley_preserving_operation_ids")
-                or _list_field(
-                    subspace_space_group_data, "valley_preserving_operation_ids"
-                )
+            parent_hsp_lg = sa_data.get(
+                "parent_hsp_little_group_operation_ids", []
             )
-            vc_ids = (
-                sa_data.get("valley_changing_operation_ids")
+            valley_sewing = (
+                sa_data.get("valley_sewing_operation_ids")
                 or _list_field(
                     subspace_space_group_data, "valley_changing_operation_ids"
                 )
@@ -188,9 +187,11 @@ def build_valley_projected_representation_report(
                 "subspace_space_group": _compact_subspace_space_group(
                     subspace_space_group_data
                 ),
-                "hsp_little_group_operation_ids": hsp_lg_ids,
-                "valley_preserving_operation_ids": vp_ids,
-                "valley_changing_operation_ids": vc_ids,
+                "subspace_hsp_little_group_operation_ids": list(subspace_hsp_lg),
+                "hsp_little_group_operation_ids": list(subspace_hsp_lg),
+                "valley_preserving_operation_ids": list(subspace_hsp_lg),
+                "parent_hsp_little_group_operation_ids": list(parent_hsp_lg),
+                "valley_sewing_operation_ids": list(valley_sewing),
                 "readiness_level": wf_data.get("readiness_level", "?"),
                 "workflow_path": wf_data.get("workflow_path", "?"),
                 "diagnostic_only": diag_only,
@@ -245,9 +246,13 @@ def build_valley_projected_representation_report(
                 # No symmetry or workflow data for this pair — skip.
                 continue
 
-            hsp_lg_ids = sa_data.get("hsp_little_group_operation_ids", [])
-            vp_ids = sa_data.get("valley_preserving_operation_ids", [])
-            vc_ids = sa_data.get("valley_changing_operation_ids", [])
+            subspace_hsp_lg = sa_data.get(
+                "subspace_hsp_little_group_operation_ids", []
+            )
+            parent_hsp_lg = sa_data.get(
+                "parent_hsp_little_group_operation_ids", []
+            )
+            valley_sewing = sa_data.get("valley_sewing_operation_ids", [])
 
             # Subspace space group — prefer matched (resolved) identity.
             matched_ssg = matching_ssg_lookup.get(pair)
@@ -268,7 +273,7 @@ def build_valley_projected_representation_report(
             blockers: list[str] = []
             identity_id = sa_data.get("identity_operation_id")
             non_identity_vp = [
-                op for op in vp_ids if op != identity_id
+                op for op in subspace_hsp_lg if op != identity_id
             ]
             if not non_identity_vp:
                 blockers.append(
@@ -304,9 +309,11 @@ def build_valley_projected_representation_report(
                 "subspace_space_group": _compact_subspace_space_group(
                     subspace_ssg
                 ),
-                "hsp_little_group_operation_ids": list(hsp_lg_ids),
-                "valley_preserving_operation_ids": list(vp_ids),
-                "valley_changing_operation_ids": list(vc_ids),
+                "subspace_hsp_little_group_operation_ids": list(subspace_hsp_lg),
+                "hsp_little_group_operation_ids": list(subspace_hsp_lg),
+                "valley_preserving_operation_ids": list(subspace_hsp_lg),
+                "parent_hsp_little_group_operation_ids": list(parent_hsp_lg),
+                "valley_sewing_operation_ids": list(valley_sewing),
                 "valley_preserving_operations": [],
                 "readiness_level": readiness,
                 "workflow_path": wf_path,
@@ -503,14 +510,20 @@ def _build_representation_records(
             "kpoint": kpoint,
             "valley": valley,
             "subspace_space_group": ssg,
+            "subspace_hsp_little_group_operation_ids": first.get(
+                "subspace_hsp_little_group_operation_ids", []
+            ),
             "hsp_little_group_operation_ids": first.get(
                 "hsp_little_group_operation_ids", []
             ),
             "valley_preserving_operation_ids": first.get(
                 "valley_preserving_operation_ids", []
             ),
-            "valley_changing_operation_ids": first.get(
-                "valley_changing_operation_ids", []
+            "parent_hsp_little_group_operation_ids": first.get(
+                "parent_hsp_little_group_operation_ids", []
+            ),
+            "valley_sewing_operation_ids": first.get(
+                "valley_sewing_operation_ids", []
             ),
             "valley_preserving_operations": operations,
             "readiness_level": first.get("readiness_level", "?"),

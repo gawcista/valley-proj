@@ -52,7 +52,7 @@ def test_resolved_matching_group_overlays_unresolved_subspace_report():
     row = report["rows"][0]
     assert row["subspace_space_group"]["candidate_space_group_symbol"] == "P3"
     assert row["subspace_space_group"]["candidate_space_group_number"] == 143
-    assert row["valley_changing_operation_ids"] == [3, 4, 5]
+    assert row["valley_sewing_operation_ids"] == [3, 4, 5]
     assert report["representation_records"][0]["subspace_space_group"][
         "candidate_space_group_symbol"
     ] == "P3"
@@ -117,8 +117,9 @@ def test_representation_report_uses_subspace_space_group_as_primary():
     row = report["rows"][0]
     assert row["subspace_space_group"]["candidate_space_group_symbol"] == "P2"
     assert row["hsp_little_group_operation_ids"] == [0, 4]
+    assert row["subspace_hsp_little_group_operation_ids"] == [0, 4]
     assert row["valley_preserving_operation_ids"] == [0, 4]
-    assert row["valley_changing_operation_ids"] == [5]
+    assert row["valley_sewing_operation_ids"] == [5]
     # removed
     assert report["subspace_space_group_counts"] == {"P2": 1}
     # removed
@@ -132,8 +133,9 @@ def test_representation_report_uses_subspace_space_group_as_primary():
     assert rec["valley"] == "M1_valley"
     assert rec["subspace_space_group"]["candidate_space_group_symbol"] == "P2"
     assert rec["hsp_little_group_operation_ids"] == [0, 4]
+    assert rec["subspace_hsp_little_group_operation_ids"] == [0, 4]
     assert rec["valley_preserving_operation_ids"] == [0, 4]
-    assert rec["valley_changing_operation_ids"] == [5]
+    assert rec["valley_sewing_operation_ids"] == [5]
     assert rec["readiness_level"] == "trusted"
     assert rec["workflow_path"] == "direct_qcut"
     # removed
@@ -459,7 +461,7 @@ def test_representation_records_p4_order4_group_agnostic():
 
 
 # ---------------------------------------------------------------------------
-# Public representation completeness tests
+# Public representation completeness tests (subspace-first semantics)
 # ---------------------------------------------------------------------------
 
 def _symmetry_analysis_stub(*, by_kpoint: dict) -> dict:
@@ -579,9 +581,13 @@ def test_blocked_identity_only_pair_produces_record_without_eigenvalue_rows():
     mm_k = [r for r in mm_records if r["valley"] == "K_valley"]
     assert len(mm_k) == 1
     mm = mm_k[0]
-    assert mm["hsp_little_group_operation_ids"] == [0, 5]
+    # Public irrep group = subspace HSP little group G_k^(a).
+    assert mm["subspace_hsp_little_group_operation_ids"] == [0]
+    assert mm["hsp_little_group_operation_ids"] == [0]
     assert mm["valley_preserving_operation_ids"] == [0]
-    assert mm["valley_changing_operation_ids"] == [5]
+    # Parent provenance — NOT the irrep group.
+    assert mm["parent_hsp_little_group_operation_ids"] == [0, 5]
+    assert mm["valley_sewing_operation_ids"] == [5]
     assert mm["valley_preserving_operations"] == []
     assert mm["workflow_path"] == "blocked"
     assert mm["readiness_level"] == "blocked"
@@ -589,12 +595,17 @@ def test_blocked_identity_only_pair_produces_record_without_eigenvalue_rows():
     assert mm["irrep_matching"] is not None
     assert mm["irrep_matching"]["matching_status"] == "identity_only_not_irrep_distinguishing"
 
-    # GammaM record still present.
+    # GammaM record: public irrep group = [0,1,2], parent = [0,1,2,3,4,5].
     gm_records = [
         r for r in report["representation_records"]
         if r["kpoint"] == "GammaM"
     ]
     assert len(gm_records) == 1
+    gm = gm_records[0]
+    assert gm["subspace_hsp_little_group_operation_ids"] == [0, 1, 2]
+    assert gm["hsp_little_group_operation_ids"] == [0, 1, 2]
+    assert gm["parent_hsp_little_group_operation_ids"] == [0, 1, 2, 3, 4, 5]
+    assert gm["valley_sewing_operation_ids"] == [3, 4, 5]
 
     # kpoint_labels includes all sampled kpoints.
     assert "MM" in report["kpoint_labels"]
@@ -602,8 +613,8 @@ def test_blocked_identity_only_pair_produces_record_without_eigenvalue_rows():
     assert report["blocked_representation_count"] >= 2  # MM K + MM K'
 
 
-def test_full_hsp_little_group_distinct_from_valley_preserving():
-    """G_k and G_k^(a) are distinct when valley-changing ops exist."""
+def test_subspace_hsp_little_group_is_public_irrep_group():
+    """Public irrep group = subspace G_k^(a); parent is provenance only."""
     report = build_valley_projected_representation_report(
         kpoint_names=["GammaM", "KM"],
         valley_names=["K_valley"],
@@ -680,23 +691,33 @@ def test_full_hsp_little_group_distinct_from_valley_preserving():
     )
 
     for rec in report["representation_records"]:
-        # Full G_k (6 ops) ≠ G_k^(a) (3 ops)
-        assert rec["hsp_little_group_operation_ids"] == [0, 1, 2, 3, 4, 5], (
-            f"{rec['kpoint']}: hsp_little_group_operation_ids must be full G_k"
+        # Public irrep group = subspace HSP little group G_k^(a).
+        assert rec["subspace_hsp_little_group_operation_ids"] == [0, 1, 2], (
+            f"{rec['kpoint']}: subspace HSP little group must be [0,1,2]"
+        )
+        assert rec["hsp_little_group_operation_ids"] == [0, 1, 2], (
+            f"{rec['kpoint']}: legacy alias must match subspace value"
         )
         assert rec["valley_preserving_operation_ids"] == [0, 1, 2], (
-            f"{rec['kpoint']}: valley_preserving_operation_ids must be G_k^(a)"
+            f"{rec['kpoint']}: valley_preserving = subspace HSP little group"
         )
-        assert rec["valley_changing_operation_ids"] == [3, 4, 5], (
-            f"{rec['kpoint']}: valley_changing_operation_ids must be reported"
+        # Parent provenance — must NOT be the irrep group.
+        assert rec["parent_hsp_little_group_operation_ids"] == [0, 1, 2, 3, 4, 5], (
+            f"{rec['kpoint']}: parent full G_k is provenance only"
         )
-        # G_k^(a) is a proper subset of G_k.
-        assert set(rec["valley_preserving_operation_ids"]).issubset(
-            set(rec["hsp_little_group_operation_ids"])
+        assert rec["valley_sewing_operation_ids"] == [3, 4, 5], (
+            f"{rec['kpoint']}: valley-sewing ops are provenance only"
         )
-        assert set(rec["valley_changing_operation_ids"]).issubset(
-            set(rec["hsp_little_group_operation_ids"])
+        # Parent is a strict superset of the subspace HSP little group.
+        assert set(rec["subspace_hsp_little_group_operation_ids"]).issubset(
+            set(rec["parent_hsp_little_group_operation_ids"])
         )
+        # Valley-sewing ops must not appear in the subspace irrep group.
+        for op in rec["valley_sewing_operation_ids"]:
+            assert op not in rec["subspace_hsp_little_group_operation_ids"], (
+                f"{rec['kpoint']}: sewing op {op} must not be in "
+                f"subspace irrep group"
+            )
 
 
 def test_identity_only_gka_no_false_irrep_no_ebr_candidate():
@@ -750,10 +771,17 @@ def test_identity_only_gka_no_false_irrep_no_ebr_candidate():
     assert rec["kpoint"] == "MM"
     assert rec["valley"] == "K_valley"
 
+    # Public irrep group = G_k^(a) = [0].
+    assert rec["subspace_hsp_little_group_operation_ids"] == [0]
+    assert rec["hsp_little_group_operation_ids"] == [0]
+    assert rec["valley_preserving_operation_ids"] == [0]
+    # Parent provenance.
+    assert rec["parent_hsp_little_group_operation_ids"] == [0, 5]
+    assert rec["valley_sewing_operation_ids"] == [5]
+
     # Must NOT claim irrep labels.
     assert rec["valley_preserving_operations"] == []
     if rec["irrep_matching"]:
-        # If present, must be identity_only or similar, not a material irrep.
         status = rec["irrep_matching"].get("matching_status", "")
         mults = rec["irrep_matching"].get("irrep_multiplicities")
         # No positive irrep multiplicities.
@@ -885,24 +913,28 @@ def test_target_kpoints_not_silently_dropped_from_records():
     assert "KM" in rec_kpoints
     assert sorted(report["kpoint_labels"]) == sorted(["GammaM", "KM", "MM"])
 
-    # MM records: blocked, identity-only.
+    # MM records: blocked, identity-only, subspace HSP little group = [0].
     mm_recs = [r for r in report["representation_records"] if r["kpoint"] == "MM"]
     assert len(mm_recs) == 2  # K_valley, Kp_valley
     for mm in mm_recs:
-        assert mm["hsp_little_group_operation_ids"] == [0, 5]
+        assert mm["subspace_hsp_little_group_operation_ids"] == [0]
+        assert mm["hsp_little_group_operation_ids"] == [0]
         assert mm["valley_preserving_operation_ids"] == [0]
-        assert mm["valley_changing_operation_ids"] == [5]
+        assert mm["parent_hsp_little_group_operation_ids"] == [0, 5]
+        assert mm["valley_sewing_operation_ids"] == [5]
         assert mm["workflow_path"] == "blocked"
         assert mm["valley_preserving_operations"] == []
 
-    # GammaM/KM records: trusted, eigenvalue rows.
+    # GammaM/KM records: subspace HSP little group = [0,1,2].
     gm_recs = [r for r in report["representation_records"] if r["kpoint"] == "GammaM"]
     km_recs = [r for r in report["representation_records"] if r["kpoint"] == "KM"]
     for recs in (gm_recs, km_recs):
         for rec in recs:
-            assert rec["hsp_little_group_operation_ids"] == [0, 1, 2, 3, 4, 5]
+            assert rec["subspace_hsp_little_group_operation_ids"] == [0, 1, 2]
+            assert rec["hsp_little_group_operation_ids"] == [0, 1, 2]
             assert rec["valley_preserving_operation_ids"] == [0, 1, 2]
-            assert rec["valley_changing_operation_ids"] == [3, 4, 5]
+            assert rec["parent_hsp_little_group_operation_ids"] == [0, 1, 2, 3, 4, 5]
+            assert rec["valley_sewing_operation_ids"] == [3, 4, 5]
 
 
 def test_representation_records_empty_when_no_rows():
