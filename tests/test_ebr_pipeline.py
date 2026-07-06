@@ -1422,6 +1422,66 @@ def test_problem_instance_preserves_multi_hsp_provenance():
     assert km_prov["source_hsp_label"] == "K"
 
 
+def test_export_bundle_preserves_multi_hsp_provenance():
+    """Export bundle preserves per-HSP irrep source provenance."""
+    from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
+
+    records = {
+        "GammaM": [{
+            "valley": "K_valley",
+            "matched_irrep": "-GM5",
+            "irrep_multiplicity": 1,
+            "workflow_path": "direct_qcut",
+            "readiness_level": "trusted",
+            "source": "valley_irrep_matching/generic/GammaM/K_valley",
+            "irrep_source_provenance": {
+                "source_hsp_label": "GM",
+                "source_table_sg_number": 75,
+                "source_table_spinor": True,
+            },
+        }],
+        "KM": [{
+            "valley": "K_valley",
+            "matched_irrep": "-K5",
+            "irrep_multiplicity": 1,
+            "workflow_path": "direct_qcut",
+            "readiness_level": "trusted",
+            "source": "valley_irrep_matching/generic/KM/K_valley",
+            "irrep_source_provenance": {
+                "source_hsp_label": "K",
+                "source_table_sg_number": 75,
+                "source_table_spinor": True,
+            },
+        }],
+    }
+    problem_instances = {"instances": [{
+        "instance_id": "ebr_instance_001",
+        "valley": "K_valley",
+        "subspace_group_candidate": "P4",
+        "subspace_space_group": {
+            "status": "resolved",
+            "candidate_space_group_number": 75,
+            "candidate_space_group_symbol": "P4",
+        },
+        "workflow_path": "direct_qcut",
+        "readiness_level": "trusted",
+        "irreps_by_kpoint": {"GammaM": ["-GM5"], "KM": ["-K5"]},
+        "operations_by_kpoint": {"GammaM": [1], "KM": [1]},
+        "expected_hsps": ["GammaM", "KM"],
+        "optional_hsps": [],
+        "missing_optional_hsps": [],
+        "irrep_records_by_kpoint": records,
+        "status": "complete",
+        "ready_for_ebr_decomposition": True,
+    }]}
+
+    report = build_ebr_export_bundle(ebr_problem_instances=problem_instances)
+    bundle = report["bundles"][0]
+    out_records = bundle["irrep_records_by_kpoint"]
+    assert out_records["GammaM"][0]["irrep_source_provenance"]["source_hsp_label"] == "GM"
+    assert out_records["KM"][0]["irrep_source_provenance"]["source_hsp_label"] == "K"
+
+
 def test_reduced_ebr_solution_preserves_multi_hsp_provenance():
     """Reduced EBR solution carries per-kpoint provenance for both HSPs."""
     from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
