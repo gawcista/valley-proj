@@ -44,6 +44,7 @@ def build_valley_irrep_matching_report(
     resolved_subspace_groups: (
         Mapping[str, Mapping[str, Mapping[str, object]]] | None
     ) = None,
+    identity_only_entries: list[Mapping[str, Any]] | None = None,
 ) -> dict[str, object]:
     """Build per-(kpoint, valley) irrep matching results.
 
@@ -61,6 +62,7 @@ def build_valley_irrep_matching_report(
         or source_operation_maps is not None
         or source_payload_provenance is not None
         or (source_payload_blocked_rows is not None and len(source_payload_blocked_rows) > 0)
+        or (identity_only_entries is not None and len(identity_only_entries) > 0)
     )
 
     if irrep_workflow_decisions is None:
@@ -329,6 +331,42 @@ def build_valley_irrep_matching_report(
                 "reason": reason,
                 "source_payload_status": "blocked",
                 "source_payload_provenance": provenance,
+                **({"subspace_space_group": dict(ssg)}
+                   if isinstance(ssg, Mapping) else {}),
+            }
+
+    # --- Identity-only G_k^(a) entries (dedicated path) ---
+    # Not blocked — identity-only is a valid local representation with a
+    # trivial subgroup.  No restricted-character matching is attempted.
+    if identity_only_entries:
+        for row in identity_only_entries:
+            if not isinstance(row, Mapping):
+                continue
+            kp_name = row.get("kpoint")
+            v_name = row.get("valley")
+            if not isinstance(kp_name, str) or not isinstance(v_name, str):
+                continue
+            existing = generic_matches.get(kp_name, {}).get(v_name)
+            if existing is not None:
+                continue
+            ssg = row.get("subspace_space_group")
+            generic_matches.setdefault(kp_name, {})[v_name] = {
+                "matching_status": str(row.get("matching_status", "")),
+                "matching_strategy": str(row.get("matching_strategy", "")),
+                "irrep_multiplicities": dict(row.get("irrep_multiplicities", {}))
+                if isinstance(row.get("irrep_multiplicities"), Mapping)
+                else {},
+                "local_representation_dimension": row.get(
+                    "local_representation_dimension"
+                ),
+                "valley_preserving_operation_ids": _operation_ids_from_value(
+                    row.get("valley_preserving_operation_ids", [])
+                ),
+                "hsp_little_group_operation_ids": _operation_ids_from_value(
+                    row.get("hsp_little_group_operation_ids", [])
+                ),
+                "diagnostic_only": bool(row.get("diagnostic_only", False)),
+                "reason": str(row.get("reason", "")) if row.get("reason") else "",
                 **({"subspace_space_group": dict(ssg)}
                    if isinstance(ssg, Mapping) else {}),
             }

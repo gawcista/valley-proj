@@ -1469,6 +1469,7 @@ def _build_valley_resolved_irreps(
                 "matching_strategy": gm.get("matching_strategy"),
                 "matching_status": status,
                 "irrep_multiplicities": dict(irrep_mults) if isinstance(irrep_mults, dict) else {},
+                "local_representation_dimension": gm.get("local_representation_dimension"),
                 "readiness_level": gm.get("readiness_level"),
                 "workflow_path": gm.get("workflow_path"),
                 "diagnostic_only": bool(gm.get("diagnostic_only", False)),

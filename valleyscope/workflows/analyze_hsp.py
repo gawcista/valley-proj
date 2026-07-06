@@ -536,6 +536,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     src_chars: dict[str, dict[str, dict[str, dict[int, complex]]]] = {}
     src_op_maps: dict[str, dict[str, dict[int, int]]] = {}
     src_provenance: dict[str, dict[str, dict[str, Any]]] = {}
+    identity_only_entries: list[dict[str, Any]] = []
     by_kp = symmetry_adapted_valley_report.get("by_kpoint", {}) if isinstance(symmetry_adapted_valley_report, dict) else {}
 
     if isinstance(by_kp, dict):
@@ -630,10 +631,48 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     continue
                 if not non_identity_vp:
                     # Identity-only G_k^(a): valid local representation.
-                    # No restricted-character matching is attempted, but
-                    # the row must remain visible in compact output.
-                    # Handled by the canonical matching layer as
-                    # identity_only_not_irrep_distinguishing.
+                    # Extract the identity character/representation dimension
+                    # from valley-preserving character diagnostics; validate
+                    # integer/reality before recording.
+                    local_dim = _identity_representation_dimension(
+                        vs=vs,
+                        v_name=str(v_name),
+                        identity_id=identity_id,
+                    )
+                    identity_only_entries.append({
+                        "kpoint": kp_name,
+                        "valley": v_name,
+                        "matching_status": (
+                            "identity_only_not_irrep_distinguishing"
+                        ),
+                        "matching_strategy": "bilbao_restricted_character",
+                        "irrep_multiplicities": {},
+                        "local_representation_dimension": local_dim,
+                        "subspace_space_group": (
+                            _resolved_subspace_group_context(
+                                standard_match=(
+                                    standard_match
+                                    if isinstance(standard_match, dict)
+                                    else {}
+                                ),
+                                local_gka_operation_ids=list(vp_ids),
+                            )
+                            if isinstance(standard_match, dict) and standard_match
+                            else None
+                        ),
+                        "valley_preserving_operation_ids": list(vp_ids),
+                        "hsp_little_group_operation_ids": (
+                            list(hsp_lg_ids)
+                            if isinstance(hsp_lg_ids, list)
+                            else list(vp_ids)
+                        ),
+                        "diagnostic_only": False,
+                        "reason": (
+                            "G_k^(a) contains only the identity operation; "
+                            "no non-identity valley-preserving operation "
+                            "in the HSP little group"
+                        ),
+                    })
                     continue
 
                 k_frac_raw = kpoint_frac.get(kp_name)
@@ -657,9 +696,12 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                         "kpoint": kp_name, "valley": v_name,
                         "reason": hsp_blocker,
                         "subspace_space_group": _resolved_subspace_group_context(
-                            sg_number=sg_number,
-                            table_name=str(table.name),
-                            valley_preserving_operation_ids=list(vp_ids),
+                            standard_match=(
+                                standard_match
+                                if isinstance(standard_match, dict)
+                                else {}
+                            ),
+                            local_gka_operation_ids=list(vp_ids),
                         ),
                         "valley_preserving_operation_ids": list(vp_ids),
                     })
@@ -760,6 +802,9 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         source_payload_blocked_rows=generic_source_blocked_rows,
         resolved_subspace_groups=(
             resolved_subspace_groups if resolved_subspace_groups else None
+        ),
+        identity_only_entries=(
+            identity_only_entries if identity_only_entries else None
         ),
     )
 
@@ -2256,29 +2301,84 @@ def _empty_subspace_space_group(reason: str) -> dict[str, object]:
     }
 
 
+def _identity_representation_dimension(
+    *,
+    vs: dict[str, object],
+    v_name: str,
+    identity_id: object,
+) -> int | None:
+    """Extract local representation dimension from identity character.
+
+    Reads the valley-preserving character diagnostics for the identity
+    operation and validates that the trace (character) is a positive
+    integer.  Returns the dimension or None when unavailable/invalid.
+    """
+    char_diag = vs.get("valley_preserving_character_diagnostics", {})
+    if not isinstance(char_diag, dict):
+        return None
+    per_valley = char_diag.get("per_valley", {})
+    if not isinstance(per_valley, dict):
+        return None
+    entries = per_valley.get(v_name, [])
+    if not isinstance(entries, list):
+        return None
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("operation_id") != identity_id:
+            continue
+        eigenphases = entry.get("eigenphases", [])
+        if not isinstance(eigenphases, list):
+            continue
+        dim = len(eigenphases)
+        if dim > 0:
+            return dim
+    return None
+
+
 def _resolved_subspace_group_context(
     *,
-    sg_number: int,
-    table_name: str,
-    valley_preserving_operation_ids: list[object],
+    standard_match: dict[str, object],
+    local_gka_operation_ids: list[object],
 ) -> dict[str, object]:
-    """Minimal resolved subspace-space-group context for blocked-source rows.
+    """Resolved subspace-space-group context from per-valley standard match.
 
-    When the source Bilbao HSP label cannot be determined but the
-    valley-projected subspace space group IS resolved, this compact
-    context carries the resolved identity forward so downstream layers
-    (matching, EBR candidates) have the physical SG symbol and number.
+    Carries the full spglib subgroup identification including Hall/setting
+    provenance, global valley-preserving operation IDs, and the local
+    HSP-little-group G_k^(a) operation IDs separately.
     """
-    return {
+    sg_number = standard_match.get("number")
+    global_vp_ids = standard_match.get("operation_ids", [])
+    ssg: dict[str, object] = {
         "status": "resolved",
-        "candidate_space_group_number": int(sg_number),
-        "candidate_space_group_symbol": str(table_name),
-        "valley_preserving_operation_ids": list(valley_preserving_operation_ids),
+        "candidate_space_group_number": (
+            int(sg_number)
+            if isinstance(sg_number, int) and not isinstance(sg_number, bool)
+            else None
+        ),
+        "candidate_space_group_symbol": str(
+            standard_match.get("international_short", "")
+        ),
+        "valley_preserving_operation_ids": list(
+            global_vp_ids
+        ) if isinstance(global_vp_ids, (list, tuple)) else [],
         "source": (
             "symmetry_analysis.valley_preserving_subgroup_report"
             ".per_valley_standard_matches"
         ),
     }
+    # Hall/setting provenance when available.
+    hall_number = standard_match.get("hall_number")
+    if isinstance(hall_number, int) and not isinstance(hall_number, bool):
+        ssg["hall_number"] = int(hall_number)
+    hall_symbol = standard_match.get("hall_symbol")
+    if isinstance(hall_symbol, str) and hall_symbol:
+        ssg["hall_symbol"] = str(hall_symbol)
+    # Local G_k^(a) — may differ from global VP ops when some VP
+    # operations map the HSP to another star member.
+    if list(local_gka_operation_ids) != ssg.get("valley_preserving_operation_ids"):
+        ssg["hsp_little_group_gka_operation_ids"] = list(local_gka_operation_ids)
+    return ssg
 
 
 def _not_evaluated_symmetry_adapted_kpoint(reason: str) -> dict[str, object]:
