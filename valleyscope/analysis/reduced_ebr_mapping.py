@@ -190,6 +190,7 @@ def build_reduced_ebr_mapping(
                 "bundle_id": bundle.get("bundle_id", "?"),
                 "subspace_group_candidate": bundle.get("subspace_group_candidate", ""),
                 "subspace_space_group": bundle.get("subspace_space_group", {}),
+                "irrep_source_provenance": _extract_bundle_irrep_provenance(bundle),
                 "reason": "not ready for external solver",
             })
             continue
@@ -277,12 +278,15 @@ def build_reduced_ebr_mapping(
         result = classify_bundle(
             irrep_counts, ebr_vectors, ebr_labels_list, max_coefficient,
         )
+        # Extract compact irrep source provenance from bundle records.
+        irrep_source_provenance = _extract_bundle_irrep_provenance(bundle)
         solutions.append({
             "bundle_id": bundle.get("bundle_id", ""),
             "valley": bundle.get("valley", ""),
             "subspace_group_candidate": bundle_group,
             "subspace_space_group": bundle.get("subspace_space_group", {}),
             "irrep_vector": irrep_counts,
+            "irrep_source_provenance": irrep_source_provenance,
             **result,
         })
 
@@ -379,6 +383,23 @@ def _resolve_table_irrep_index(
     candidates = base_to_indices.get(key, [])
     if len(candidates) == 1:
         return candidates[0]
+    return None
+
+
+def _extract_bundle_irrep_provenance(bundle: dict) -> dict[str, object] | None:
+    """Extract compact irrep source provenance from a bundle's irrep records."""
+    records = bundle.get("irrep_records_by_kpoint", {})
+    if not isinstance(records, dict):
+        return None
+    for kp_records in records.values():
+        if not isinstance(kp_records, list):
+            continue
+        for rec in kp_records:
+            if not isinstance(rec, dict):
+                continue
+            prov = rec.get("irrep_source_provenance")
+            if isinstance(prov, dict) and prov:
+                return dict(prov)
     return None
 
 

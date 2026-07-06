@@ -111,6 +111,7 @@ def build_ebr_input_candidates(
                             "irrep_multiplicity": mult,
                             "valley_preserving_operation_ids": _list_or_empty(vp_ids),
                             "source_operation_map": dict(op_map) if isinstance(op_map, dict) else {},
+                            "irrep_source_provenance": _build_irrep_source_provenance(gm),
                             "source": f"valley_irrep_matching/generic/{kp_name}/{v_name}",
                             "ready_for_ebr_input": True,
                         })
@@ -171,6 +172,40 @@ def build_ebr_input_candidates(
 # ---------------------------------------------------------------------------
 # Internal
 # ---------------------------------------------------------------------------
+
+def _build_irrep_source_provenance(gm: dict[str, object]) -> dict[str, object]:
+    """Extract compact irrep source provenance from a generic match entry.
+
+    Captures the convention basis that produced the irrep label:
+    subspace SG, source table, HSP label, operation mapping, and
+    G_k^(a) operation IDs.
+    """
+    src_prov = gm.get("source_payload_provenance", {})
+    if not isinstance(src_prov, dict):
+        src_prov = {}
+    ssg = gm.get("subspace_space_group", {})
+    if not isinstance(ssg, dict):
+        ssg = {}
+    provenance: dict[str, object] = {
+        "matching_strategy": str(gm.get("matching_strategy", "")),
+        "subspace_space_group_number": ssg.get("candidate_space_group_number"),
+        "subspace_space_group_symbol": ssg.get("candidate_space_group_symbol"),
+        "source_table_sg_number": src_prov.get("table_sg_number"),
+        "source_table_name": src_prov.get("table_name"),
+        "source_table_spinor": src_prov.get("table_spinor"),
+        "source_hsp_label": src_prov.get("source_hsp_label"),
+        "valley_preserving_operation_ids": _list_or_empty(
+            gm.get("valley_preserving_operation_ids")
+        ),
+        "source_table_operation_indices": _list_or_empty(
+            src_prov.get("source_table_operation_indices")
+        ),
+    }
+    op_mapping = gm.get("operation_mapping_provenance")
+    if isinstance(op_mapping, str) and op_mapping:
+        provenance["operation_mapping_provenance"] = op_mapping
+    return provenance
+
 
 def _validated_multiplicities(
     mults: object,

@@ -108,6 +108,7 @@ def build_ebr_problem_instances(
                 "subspace_space_group",
                 "valley_preserving_operation_ids",
                 "source_operation_map",
+                "irrep_source_provenance",
             ):
                 if key in c:
                     record[key] = c[key]
