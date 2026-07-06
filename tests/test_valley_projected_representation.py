@@ -912,6 +912,8 @@ def test_target_kpoints_not_silently_dropped_from_records():
     assert "GammaM" in rec_kpoints
     assert "KM" in rec_kpoints
     assert sorted(report["kpoint_labels"]) == sorted(["GammaM", "KM", "MM"])
+    assert report["trusted_representation_count"] == 4
+    assert report["blocked_representation_count"] == 2
 
     # MM records: blocked, identity-only, subspace HSP little group = [0].
     mm_recs = [r for r in report["representation_records"] if r["kpoint"] == "MM"]

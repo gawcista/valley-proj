@@ -322,14 +322,20 @@ def build_valley_projected_representation_report(
             }
             representation_records.append(record)
 
-            # Update counts for non-eigenvalue rows.
+            # Update counts for non-eigenvalue records.  These records keep the
+            # same readiness semantics as eigenvalue-derived rows.
             sg_symbol = subspace_ssg.get("candidate_space_group_symbol")
             if sg_symbol:
                 key = str(sg_symbol)
                 subspace_space_group_counts[key] = (
                     subspace_space_group_counts.get(key, 0) + 1
                 )
-            blocked_count += 1
+            if readiness == "trusted":
+                trusted_count += 1
+            elif readiness == "diagnostic_only":
+                diagnostic_count += 1
+            else:
+                blocked_count += 1
 
     # Sort records for deterministic output.
     representation_records.sort(
