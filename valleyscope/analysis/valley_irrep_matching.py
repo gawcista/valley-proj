@@ -19,6 +19,7 @@ READINESS_BLOCKED = "blocked"
 MATCHING_STATUSES = [
     "matched", "diagnostic", "diagnostic_only", "not_applicable",
     "failed_no_table", "failed_ambiguous", "blocked",
+    "identity_only_not_irrep_distinguishing",
 ]
 
 

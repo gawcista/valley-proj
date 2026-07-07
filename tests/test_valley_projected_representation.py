@@ -534,7 +534,7 @@ def test_blocked_identity_only_pair_produces_record_without_eigenvalue_rows():
                 "MM": {
                     "K_valley": {
                         "matching_status": "identity_only_not_irrep_distinguishing",
-                        "matching_strategy": "bilbao_restricted_character",
+                        "matching_strategy": "identity_only_valley_preserving_subgroup",
                         "subspace_space_group": {
                             "status": "resolved",
                             "candidate_space_group_number": 143,
@@ -589,11 +589,12 @@ def test_blocked_identity_only_pair_produces_record_without_eigenvalue_rows():
     assert mm["parent_hsp_little_group_operation_ids"] == [0, 5]
     assert mm["valley_sewing_operation_ids"] == [5]
     assert mm["valley_preserving_operations"] == []
-    assert mm["workflow_path"] == "blocked"
-    assert mm["readiness_level"] == "blocked"
+    assert mm["workflow_path"] == "identity_only_valley_preserving_subgroup"
+    assert mm["readiness_level"] == "identity_only"
     assert any("identity_only" in b for b in mm["blocking_reasons"])
     assert mm["irrep_matching"] is not None
     assert mm["irrep_matching"]["matching_status"] == "identity_only_not_irrep_distinguishing"
+    assert mm["irrep_matching"]["matching_strategy"] == "identity_only_valley_preserving_subgroup"
 
     # GammaM record: public irrep group = [0,1,2], parent = [0,1,2,3,4,5].
     gm_records = [
@@ -742,7 +743,7 @@ def test_identity_only_gka_no_false_irrep_no_ebr_candidate():
                 "MM": {
                     "K_valley": {
                         "matching_status": "identity_only_not_irrep_distinguishing",
-                        "matching_strategy": "bilbao_restricted_character",
+                        "matching_strategy": "identity_only_valley_preserving_subgroup",
                         "irrep_multiplicities": None,
                         "subspace_space_group": {
                             "status": "resolved",
@@ -791,7 +792,8 @@ def test_identity_only_gka_no_false_irrep_no_ebr_candidate():
 
     # Must have blocking status — not trusted, not ready.
     assert rec["readiness_level"] != "trusted"
-    assert rec["workflow_path"] == "blocked"
+    assert rec["readiness_level"] == "identity_only"
+    assert rec["workflow_path"] == "identity_only_valley_preserving_subgroup"
     assert any("identity_only" in b for b in rec["blocking_reasons"])
 
     # The physical subspace space group is still present.
@@ -924,7 +926,8 @@ def test_target_kpoints_not_silently_dropped_from_records():
         assert mm["valley_preserving_operation_ids"] == [0]
         assert mm["parent_hsp_little_group_operation_ids"] == [0, 5]
         assert mm["valley_sewing_operation_ids"] == [5]
-        assert mm["workflow_path"] == "blocked"
+        assert mm["workflow_path"] == "identity_only_valley_preserving_subgroup"
+        assert mm["readiness_level"] == "identity_only"
         assert mm["valley_preserving_operations"] == []
 
     # GammaM/KM records: subspace HSP little group = [0,1,2].

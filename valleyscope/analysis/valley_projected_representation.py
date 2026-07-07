@@ -265,28 +265,39 @@ def build_valley_projected_representation_report(
                 if isinstance(raw_ssg, dict):
                     subspace_ssg = dict(raw_ssg)
 
-            readiness = wf_data.get("readiness_level", "not_evaluated")
-            wf_path = wf_data.get("workflow_path", "blocked")
-
-            # Blocking reasons — identity-only G_k^(a) is a valid physical
-            # local result, not a code defect.
-            blockers: list[str] = []
             identity_id = sa_data.get("identity_operation_id")
             non_identity_vp = [
                 op for op in subspace_hsp_lg if op != identity_id
             ]
-            if not non_identity_vp:
+            is_identity_only = not non_identity_vp and len(subspace_hsp_lg) >= 1
+
+            if is_identity_only:
+                # Identity-only G_k^(a) is a valid local valley-preserving
+                # representation.  It is not a workflow failure — the
+                # absence of non-identity VP operations is a physical
+                # property of the (kpoint, valley) pair, not a blocker.
+                readiness = "identity_only"
+                wf_path = "identity_only_valley_preserving_subgroup"
+            else:
+                readiness = wf_data.get("readiness_level", "not_evaluated")
+                wf_path = wf_data.get("workflow_path", "blocked")
+
+            # Blocking reasons — identity-only G_k^(a) is a valid physical
+            # local result, not a code defect.
+            blockers: list[str] = []
+            if is_identity_only:
                 blockers.append(
                     "identity_only_not_irrep_distinguishing: "
                     "G_k^(a) contains only the identity operation; "
                     "no non-identity valley-preserving operation in the "
                     "HSP little group"
                 )
-            if readiness == "blocked" or wf_path == "blocked":
-                blockers.append("workflow_blocked")
-            wf_blockers = wf_data.get("blocking_reasons", [])
-            if isinstance(wf_blockers, list):
-                blockers.extend(wf_blockers)
+            else:
+                if readiness == "blocked" or wf_path == "blocked":
+                    blockers.append("workflow_blocked")
+                wf_blockers = wf_data.get("blocking_reasons", [])
+                if isinstance(wf_blockers, list):
+                    blockers.extend(wf_blockers)
 
             # Irrep matching data — may exist even for identity-only cases.
             irrep_matching: dict[str, Any] | None = None
@@ -301,6 +312,9 @@ def build_valley_projected_representation_report(
                     "matching_status": gm.get("matching_status"),
                     "matching_strategy": gm.get("matching_strategy"),
                     "irrep_multiplicities": gm.get("irrep_multiplicities"),
+                    "local_representation_dimension": gm.get(
+                        "local_representation_dimension"
+                    ),
                 }
 
             record: dict[str, Any] = {
@@ -510,6 +524,9 @@ def _build_representation_records(
                 "matching_strategy": gm.get("matching_strategy"),
                 "irrep_multiplicities": gm.get("irrep_multiplicities"),
                 "source_operation_map": gm.get("source_operation_map"),
+                "local_representation_dimension": gm.get(
+                    "local_representation_dimension"
+                ),
             }
 
         record: dict[str, Any] = {

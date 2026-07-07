@@ -645,7 +645,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                         "matching_status": (
                             "identity_only_not_irrep_distinguishing"
                         ),
-                        "matching_strategy": "bilbao_restricted_character",
+                        "matching_strategy": "identity_only_valley_preserving_subgroup",
                         "irrep_multiplicities": {},
                         "local_representation_dimension": local_dim,
                         "subspace_space_group": (
@@ -690,20 +690,44 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     override_label=override_label,
                 )
                 if hsp_blocker is not None:
-                    # Carry resolved subspace-space-group identity even
-                    # when no source Bilbao HSP label can be assigned.
-                    generic_source_blocked_rows.append({
-                        "kpoint": kp_name, "valley": v_name,
-                        "reason": hsp_blocker,
-                        "subspace_space_group": _resolved_subspace_group_context(
-                            standard_match=(
-                                standard_match
-                                if isinstance(standard_match, dict)
-                                else {}
-                            ),
-                            local_gka_operation_ids=list(vp_ids),
+                    # Standard-setting HSP mapping unresolved: the
+                    # valley-projected subspace SG is resolved, but
+                    # the parent-setting k_frac does not correspond
+                    # to a standard-setting Bilbao HSP label for the
+                    # subspace SG.  Record explicit provenance.
+                    ssg_context = _resolved_subspace_group_context(
+                        standard_match=(
+                            standard_match
+                            if isinstance(standard_match, dict)
+                            else {}
                         ),
+                        local_gka_operation_ids=list(vp_ids),
+                    )
+                    generic_source_blocked_rows.append({
+                        "kpoint": kp_name,
+                        "valley": v_name,
+                        "reason": (
+                            "standard_setting_hsp_mapping_unresolved: "
+                            "valley-projected subspace SG "
+                            f"{ssg_context.get('candidate_space_group_symbol', '?')} "
+                            f"(No. {ssg_context.get('candidate_space_group_number', '?')}) "
+                            "is resolved, but the sampled moire k-point "
+                            "fractional coordinate does not uniquely map to "
+                            "a standard-setting Bilbao HSP label for this "
+                            "subspace group.  The HSP label matched in the "
+                            "parent setting is insufficient to select a "
+                            "source HSP in the irreptables standard setting."
+                        ),
+                        "subspace_space_group": ssg_context,
                         "valley_preserving_operation_ids": list(vp_ids),
+                        # Include k_frac and SG context as evidence.
+                        "parent_k_frac": (
+                            list(k_frac_raw)
+                            if k_frac_raw is not None else None
+                        ),
+                        "source_table_sg_number": int(table.number),
+                        "source_table_name": str(table.name),
+                        "source_table_spinor": bool(table.spinor),
                     })
                     continue
 
@@ -2307,11 +2331,16 @@ def _identity_representation_dimension(
     v_name: str,
     identity_id: object,
 ) -> int | None:
-    """Extract local representation dimension from identity character.
+    """Extract local representation dimension from identity eigenphase count.
 
     Reads the valley-preserving character diagnostics for the identity
-    operation and validates that the trace (character) is a positive
-    integer.  Returns the dimension or None when unavailable/invalid.
+    operation and counts the eigenphases to obtain the representation
+    dimension.  For a representation D_a(e), the identity character
+    chi_a(e) = dim, which equals the number of eigenstates in the
+    valley-adapted subspace.
+
+    Returns the dimension (positive integer ≥ 1), or None when the
+    identity character diagnostics are unavailable or empty.
     """
     char_diag = vs.get("valley_preserving_character_diagnostics", {})
     if not isinstance(char_diag, dict):
