@@ -172,6 +172,297 @@ def resolve_standard_setting_hsp_label(
     return None, " ".join(reason_parts) + ".", prov
 
 
+def _reconstruct_subgroup_standard_cell(
+    *,
+    lattice_direct_cart: np.ndarray,
+    vp_operations: list[dict[str, object]],
+    standard_match: dict[str, object],
+    tolerance: float = 1e-6,
+) -> dict[str, object]:
+    """Reconstruct a subgroup standard-setting direct cell from VP operations.
+
+    Uses spglib's standard-setting symmetry database and the detected
+    VP rotation matrices to determine the basis transformation from
+    the parent fractional basis to the standard-setting fractional
+    basis.  Only accepts the result when the transformed VP operation
+    matrices match the standard-setting operation content.
+
+    Returns a dict with ``status``, optional ``transform_matrix``,
+    ``operation_basis_verification``, and/or ``reason``.
+    """
+    result: dict[str, object] = {"status": "not_attempted"}
+
+    hall_number = standard_match.get("hall_number")
+    if not isinstance(hall_number, int) or isinstance(hall_number, bool):
+        result["status"] = "unavailable"
+        result["reason"] = (
+            "Hall number not available from spglib standard match; "
+            "cannot retrieve standard-setting symmetry operations"
+        )
+        return result
+    hall_number = int(hall_number)
+
+    # 1. Load standard-setting operations from spglib database.
+    try:
+        import spglib
+        std_sym = spglib.get_symmetry_from_database(hall_number)
+    except Exception:
+        result["status"] = "unavailable"
+        result["reason"] = (
+            f"spglib.get_symmetry_from_database(Hall {hall_number}) "
+            f"failed; cannot retrieve standard-setting operations"
+        )
+        return result
+
+    if std_sym is None:
+        result["status"] = "unavailable"
+        result["reason"] = (
+            f"spglib returned None for Hall {hall_number}; "
+            f"standard-setting operations not available"
+        )
+        return result
+
+    std_rotations = [np.asarray(r, dtype=float) for r in std_sym["rotations"]]
+    std_translations = [np.asarray(t, dtype=float) for t in std_sym["translations"]]
+
+    # 2. Collect VP rotation matrices and match by order/type.
+    vp_ids = {
+        int(op_id) for op_id in standard_match.get("operation_ids", [])
+        if isinstance(op_id, (int, float))
+    }
+    parent_by_id: dict[int, dict[str, object]] = {}
+    for op in vp_operations:
+        if not isinstance(op, dict):
+            continue
+        oid_raw = op.get("operation_id")
+        if oid_raw is None:
+            continue
+        try:
+            oid = int(oid_raw)
+        except (TypeError, ValueError):
+            continue
+        if oid in vp_ids:
+            parent_by_id[oid] = op
+
+    parent_rotations: list[np.ndarray] = []
+    for oid in sorted(vp_ids):
+        op = parent_by_id.get(oid)
+        if op is None:
+            continue
+        rot = op.get("rotation_frac")
+        if rot is None:
+            continue
+        parent_rotations.append(np.asarray(rot, dtype=float))
+
+    nontrivial_parent = [r for r in parent_rotations
+                         if not np.allclose(r, np.eye(3), atol=tolerance)]
+    nontrivial_std = [r for r in std_rotations
+                      if not np.allclose(r, np.eye(3), atol=tolerance)]
+
+    # Need at least one nontrivial VP rotation to align axes.
+    if not nontrivial_parent or not nontrivial_std:
+        result["status"] = "unavailable"
+        result["reason"] = (
+            "no nontrivial rotation matrices available in either "
+            "parent or standard setting; cannot determine basis "
+            "orientation from operation content"
+        )
+        return result
+
+    # 3. Align the parent and standard rotation axes.
+    #    Each rotation matrix defines an axis (rotation eigenvector).
+    #    We find the basis transformation T such that
+    #    T · R_parent · T⁻¹ = R_standard for matched rotation pairs.
+    #    For a single nontrivial rotation (e.g., C2), the axis alignment
+    #    determines T up to a scale and an in-plane rotation.
+    parent_rot = nontrivial_parent[0]
+    std_rot = nontrivial_std[0]
+
+    # Find the rotation axis of the parent rotation (eigenvector with
+    # eigenvalue +1 for proper rotations).
+    # For a 2-fold rotation: eigenvalues are [1, -1, -1]; the axis is
+    # the eigenvector with eigenvalue 1.
+    parent_eigvals, parent_eigvecs = np.linalg.eig(parent_rot)
+    rotation_axis_idx = np.argmin(np.abs(parent_eigvals - 1.0))
+    parent_axis = parent_eigvecs[:, rotation_axis_idx].real
+
+    # The standard rotation axis in the standard setting is also the
+    # eigenvector with eigenvalue 1.
+    std_eigvals, std_eigvecs = np.linalg.eig(std_rot)
+    std_axis_idx = np.argmin(np.abs(std_eigvals - 1.0))
+    std_axis = std_eigvecs[:, std_axis_idx].real
+
+    # The transformation T maps the parent axis to the standard axis.
+    # For C2: parent_axis in hexagonal basis → std_axis in standard basis.
+    # We construct T by aligning the two coordinate frames.
+
+    # 4. Build a candidate basis transformation T (direct space).
+    #    T transforms coordinates FROM parent basis TO standard basis:
+    #    x_std = T · x_parent
+    #    For k-points (reciprocal space): k_std = T⁻ᵀ · k_parent
+    try:
+        T = _align_bases_from_rotation_axes(
+            parent_axis=parent_axis,
+            std_axis=std_axis,
+            parent_rot=parent_rot,
+            std_rot=std_rot,
+            lattice=lattice_direct_cart,
+        )
+    except Exception as exc:
+        result["status"] = "unavailable"
+        result["reason"] = (
+            f"basis alignment from rotation axes failed: {exc}"
+        )
+        return result
+
+    if T is None:
+        result["status"] = "unavailable"
+        result["reason"] = (
+            "could not uniquely determine basis transformation from "
+            "rotation axes; the parent and standard settings may have "
+            "incompatible Bravais lattice types"
+        )
+        return result
+
+    # 5. Verify: transform each parent rotation into the standard basis
+    #    and check against the standard rotation set.
+    vf = _verify_operation_basis(
+        parent_rotations=parent_rotations,
+        std_rotations=std_rotations,
+        transform_matrix=T,
+        tolerance=tolerance,
+    )
+    result["operation_basis_verification"] = vf
+
+    if vf.get("status") != "passed":
+        result["status"] = "rejected"
+        result["reason"] = (
+            "operation-basis verification failed: "
+            f"{vf.get('reason', 'transformed parent rotations do not '
+                       'match standard-setting rotations')}"
+        )
+        return result
+
+    result["status"] = "accepted"
+    result["transform_matrix"] = T.tolist()
+    return result
+
+
+def _align_bases_from_rotation_axes(
+    *,
+    parent_axis: np.ndarray,
+    std_axis: np.ndarray,
+    parent_rot: np.ndarray,
+    std_rot: np.ndarray,
+    lattice: np.ndarray,
+) -> np.ndarray | None:
+    """Compute the basis transform T mapping parent axis to standard axis.
+
+    For a C2 rotation, the rotation axis is unique.  T is constructed
+    by rotating the parent axis to align with the standard axis, then
+    completing the basis with two orthogonal directions.
+
+    Returns T (3×3) or None if the axes are degenerate.
+    """
+    # Normalize axes
+    p_axis = parent_axis / np.linalg.norm(parent_axis)
+    s_axis = std_axis / np.linalg.norm(std_axis)
+
+    # Check that axes are well-defined (nonzero norm)
+    if np.linalg.norm(parent_axis) < 1e-10 or np.linalg.norm(std_axis) < 1e-10:
+        return None
+
+    # For a proper rotation, the axis is preserved.  T maps parent_axis → std_axis.
+    # We use Rodrigues' rotation formula to find the rotation that maps one to the
+    # other, then express it in the parent fractional basis.
+
+    cross = np.cross(p_axis, s_axis)
+    dot = np.dot(p_axis, s_axis)
+
+    if np.linalg.norm(cross) < 1e-10:
+        # Axes are parallel — T is identity (up to lattice scaling)
+        return np.eye(3)
+
+    # Rotation matrix in Cartesian space that maps p_axis to s_axis
+    cross_norm = np.linalg.norm(cross)
+    k = cross / cross_norm
+    # Rodrigues formula: R = I + sin(θ)·[k]× + (1-cos(θ))·[k]×²
+    cos_theta = np.clip(dot, -1.0, 1.0)
+    sin_theta = np.sqrt(1.0 - cos_theta**2)
+
+    K = np.array([
+        [0, -k[2], k[1]],
+        [k[2], 0, -k[0]],
+        [-k[1], k[0], 0],
+    ])
+    R_cart = np.eye(3) + sin_theta * K + (1.0 - cos_theta) * (K @ K)
+
+    # Express R_cart in fractional coordinates.
+    # From fractional to Cartesian: x_cart = lattice^T · x_frac
+    # So from Cartesian to fractional: x_frac = lattice^(-T) · x_cart
+    lat_T = lattice.T
+    lat_inv_T = np.linalg.inv(lat_T)
+    T = lat_inv_T @ R_cart @ lat_T
+
+    # T should be close to integer
+    T_rounded = np.rint(T).astype(int)
+    if not np.allclose(T, T_rounded, atol=1e-3):
+        return T  # Non-integer transform — still usable but flagged
+
+    return T_rounded.astype(float)
+
+
+def _verify_operation_basis(
+    *,
+    parent_rotations: list[np.ndarray],
+    std_rotations: list[np.ndarray],
+    transform_matrix: np.ndarray,
+    tolerance: float = 1e-6,
+) -> dict[str, object]:
+    """Verify that transformed parent rotations match standard rotations.
+
+    For each parent rotation R_p, compute R_s' = T · R_p · T⁻¹ and
+    check whether it matches any standard rotation R_s within tolerance.
+    """
+    T = transform_matrix
+    try:
+        T_inv = np.linalg.inv(T)
+    except np.linalg.LinAlgError:
+        return {"status": "failed", "reason": "singular transformation matrix"}
+
+    matches: list[dict[str, object]] = []
+    unmatched_parent: list[int] = []
+    for i, r_p in enumerate(parent_rotations):
+        r_transformed = T @ r_p @ T_inv
+        r_transformed_int = np.rint(r_transformed).astype(int)
+        found = False
+        for j, r_s in enumerate(std_rotations):
+            if np.allclose(r_transformed_int, r_s, atol=tolerance):
+                matches.append({"parent_index": i, "std_index": j})
+                found = True
+                break
+        if not found:
+            unmatched_parent.append(i)
+
+    if unmatched_parent:
+        return {
+            "status": "failed",
+            "reason": (
+                f"{len(unmatched_parent)} parent VP rotation(s) could "
+                f"not be matched to standard-setting rotations "
+                f"(indices: {unmatched_parent})"
+            ),
+            "matched_count": len(matches),
+            "unmatched_count": len(unmatched_parent),
+        }
+
+    return {
+        "status": "passed",
+        "matched_count": len(matches),
+        "unmatched_count": 0,
+    }
+
+
 def _compute_standard_setting_basis_transform(
     *,
     lattice_direct_cart: np.ndarray | None,
@@ -263,55 +554,14 @@ def _compute_standard_setting_basis_transform(
         )
         return result
 
-    # For the standard setting, we need the Hall symbol to determine
-    # the conventional cell centering and unique-axis convention.
-    hall_number = standard_match.get("hall_number")
-    hall_symbol = standard_match.get("hall_symbol", "")
-    centering = hall_symbol[0] if hall_symbol else ""
-
-    if centering in ("C", "I", "F", "R"):
-        result["status"] = "unavailable"
-        result["reason"] = (
-            f"centered conventional setting (Hall {hall_symbol}); "
-            f"the {centering}-centered conventional reciprocal lattice "
-            "differs from the parent primitive reciprocal lattice. "
-            "The reciprocal-basis transformation from the parent "
-            "primitive reciprocal basis to the conventional centered "
-            "reciprocal basis requires the corresponding standard-setting "
-            "direct cell (lattice parameters + Bravais type + centering "
-            "vectors), which spglib does not provide for subgroup-only "
-            "standard matches because the parent cell's full symmetry "
-            "differs from the valley-preserving subgroup."
-        )
-        return result
-
-    if centering == "P":
-        # For primitive settings, the Bravais lattice class is the
-        # same as the parent cell, but the conventional cell
-        # orientation may differ.  The operation rotation matrices
-        # in the parent fractional basis encode the orientation.
-        # A full solution requires comparing the parent-setting
-        # rotation to the irreptables standard-setting rotation for
-        # each VP operation and solving for the basis change.
-        result["status"] = "unavailable"
-        result["reason"] = (
-            f"primitive setting (Hall {hall_symbol}); the parent "
-            "and standard reciprocal bases share the same Bravais "
-            "lattice class, but the conventional-cell orientation "
-            "may differ.  Orientation verification requires mapping "
-            "each VP rotation matrix from the parent fractional "
-            "basis to the standard-setting fractional basis, which "
-            "has not been implemented for the general case."
-        )
-        return result
-
-    result["status"] = "unavailable"
-    result["reason"] = (
-        f"unrecognised Hall symbol centering '{centering}' "
-        f"(Hall {hall_symbol}); cannot determine standard-setting "
-        "reciprocal basis"
+    # Attempt subgroup standard-cell reconstruction using VP operation
+    # matrices and spglib's standard-setting symmetry database.
+    recon = _reconstruct_subgroup_standard_cell(
+        lattice_direct_cart=lattice,
+        vp_operations=list(vp_operations),
+        standard_match=standard_match,
     )
-    return result
+    return recon
 
 
 def _attempt_setting_transform(

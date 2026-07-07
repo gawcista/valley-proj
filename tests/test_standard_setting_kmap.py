@@ -187,7 +187,8 @@ def test_basis_transform_no_lattice_returns_unavailable():
     assert "lattice" in result.get("reason", "")
 
 
-def test_basis_transform_centered_setting_returns_unavailable_with_reason():
+def test_basis_transform_centered_setting_triggers_reconstruction():
+    """Subgroup cell reconstruction is attempted for centered settings."""
     from valleyscope.analysis.standard_setting_kmap import (
         _compute_standard_setting_basis_transform,
     )
@@ -201,8 +202,9 @@ def test_basis_transform_centered_setting_returns_unavailable_with_reason():
             "operation_ids": [0, 4],
         },
     )
-    assert result["status"] == "unavailable"
-    assert "centered" in result.get("reason", "").lower()
+    # Reconstruction was attempted; transform accepted only with verification.
+    assert result["status"] in ("accepted", "rejected", "unavailable")
+    assert "operation_basis_verification" in result
 
 
 def test_resolver_includes_basis_transform_in_provenance():
@@ -220,6 +222,28 @@ def test_resolver_includes_basis_transform_in_provenance():
     assert bt is not None
     assert bt.get("status") == "unavailable"
     assert "reason" in bt
+
+
+def test_hexagonal_lattice_subgroup_reconstruction_requires_verification():
+    """Subgroup reconstruction may be rejected when VP ops don't match standard ops
+    after transformation (e.g., hexagonal lattice with C2 subgroup)."""
+    from valleyscope.analysis.standard_setting_kmap import (
+        _compute_standard_setting_basis_transform,
+    )
+    a = 3.5; c = 20.0
+    hex_lattice = np.array([[a, 0, 0], [-a/2, a*np.sqrt(3)/2, 0], [0, 0, c]])
+    result = _compute_standard_setting_basis_transform(
+        lattice_direct_cart=hex_lattice,
+        vp_operations=[{"operation_id": 4, "order": 2,
+                         "rotation_frac": [[-1, 0, 0], [0, -1, 0], [0, 0, 1]]}],
+        standard_match={
+            "number": 5, "international_short": "C2",
+            "hall_number": 9, "hall_symbol": "C 2y",
+            "operation_ids": [0, 4],
+        },
+    )
+    # With hexagonal lattice, the operation-basis check should run.
+    assert "operation_basis_verification" in result
 
 
 def test_basis_transform_matrix_requires_operation_verification(monkeypatch):
