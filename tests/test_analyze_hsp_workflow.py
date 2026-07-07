@@ -1039,6 +1039,18 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
             "source_operation_map": {0: 1, 4: 2},
         },
     )
+    captured_matching_kwargs = {}
+    real_build_irrep_matching = workflow_mod.build_valley_irrep_matching_report
+
+    def _capturing_build_irrep_matching(**kwargs):
+        captured_matching_kwargs.update(kwargs)
+        return real_build_irrep_matching(**kwargs)
+
+    monkeypatch.setattr(
+        workflow_mod,
+        "build_valley_irrep_matching_report",
+        _capturing_build_irrep_matching,
+    )
 
     def write_cfg(config_path: Path, out_dir: Path, reduced_table_path: Path) -> None:
         config = {
@@ -1105,6 +1117,12 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     assert gm["matching_status"] == "matched"
     assert gm["matching_strategy"] == "bilbao_restricted_character"
     assert gm["irrep_multiplicities"] == {"A": 1, "B": 1}
+    gm_prov = captured_matching_kwargs["source_payload_provenance"][
+        "GammaM"
+    ]["K_valley"]
+    kmap_prov = gm_prov["standard_setting_hsp_mapping"]
+    assert kmap_prov["standard_setting_certificate"]["validation_status"] == "validated"
+    assert kmap_prov["standard_setting_certificate"]["resolved_hsp_label"] == "GM"
     assert gm["subspace_space_group"] in ("P4", "P3")
     assert "C2_like" not in json.dumps(resolved)
     # Public output contract: representation_records use physical subspace-space-group.

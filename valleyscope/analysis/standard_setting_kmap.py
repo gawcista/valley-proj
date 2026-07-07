@@ -263,6 +263,14 @@ def resolve_standard_setting_hsp_label(
                         resolved_hsp_label=label,
                     )
                     cert.standard_setting_source = "explicit_transform"
+                    cert.operation_mapping_status = (
+                        "operation_basis_verification_passed"
+                        if isinstance(
+                            tf_result.get("operation_basis_verification"),
+                            dict,
+                        )
+                        else "not_attempted"
+                    )
                     prov["standard_setting_certificate"] = cert.to_dict()
                     return label, None, prov
             except np.linalg.LinAlgError:
@@ -337,10 +345,15 @@ def resolve_standard_setting_hsp_label(
                         _operation_ids_list(standard_match)
                         if isinstance(standard_match, dict) else None
                     ),
+                    parent_to_standard_direct_transform=T,
+                    transform_provenance="operation_basis_reconstruction",
                     parent_k_frac=k_frac,
                     resolved_hsp_label=transformed_label,
                 )
                 cert.standard_setting_source = "operation_basis_reconstruction"
+                cert.operation_mapping_status = (
+                    "operation_basis_verification_passed"
+                )
                 prov["standard_setting_certificate"] = cert.to_dict()
                 return transformed_label, None, prov
         except np.linalg.LinAlgError:

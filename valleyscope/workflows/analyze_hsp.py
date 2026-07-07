@@ -759,6 +759,15 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     valley_preserving_operation_ids=list(vp_ids),
                     tol=tol,
                 )
+                payload_provenance = dict(
+                    payload.get("provenance", {})
+                    if isinstance(payload.get("provenance", {}), dict)
+                    else {}
+                )
+                if isinstance(hsp_provenance, dict) and hsp_provenance:
+                    payload_provenance["standard_setting_hsp_mapping"] = (
+                        dict(hsp_provenance)
+                    )
                 if payload["status"] == "ok":
                     src_chars.setdefault(kp_name, {})[v_name] = (
                         payload["source_irrep_characters"]
@@ -766,9 +775,9 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     src_op_maps.setdefault(kp_name, {})[v_name] = (
                         payload["source_operation_map"]
                     )
-                    provenance = payload.get("provenance", {})
-                    if isinstance(provenance, dict):
-                        src_provenance.setdefault(kp_name, {})[v_name] = provenance
+                    src_provenance.setdefault(kp_name, {})[v_name] = (
+                        payload_provenance
+                    )
                 else:
                     generic_source_blocked_rows.append({
                         "kpoint": kp_name,
@@ -782,7 +791,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                             list(hsp_lg_ids) if isinstance(hsp_lg_ids, list)
                             else list(vp_ids)
                         ),
-                        "provenance": payload.get("provenance", {}),
+                        "provenance": payload_provenance,
                         "blocker_reasons": payload["blocker_reasons"],
                     })
 

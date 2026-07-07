@@ -312,6 +312,13 @@ def test_explicit_transform_resolves_nonmatching_parent_kpoint():
     assert tf.get("status") == "valid"
     assert prov["explicit_transformed_match_succeeded"] is True
     np.testing.assert_allclose(prov["transformed_k_frac"], [0.5, 0.0, 0.0])
+    cert = prov["standard_setting_certificate"]
+    assert cert["validation_status"] == "validated"
+    assert cert["transform_provenance"] == "explicit_user_input"
+    np.testing.assert_allclose(
+        cert["parent_to_standard_direct_transform"],
+        T,
+    )
 
 
 def test_singular_transform_is_rejected():
