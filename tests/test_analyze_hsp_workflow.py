@@ -2081,7 +2081,10 @@ def test_spinful_p3_analyze_hsp_unmocked_feasibility(tmp_path):
 def test_hsp_override_does_not_bypass_unresolved_standard_setting_mapping():
     """Override must not silently accept an HSP when k-map is unresolved."""
     import numpy as np
-    from valleyscope.workflows.analyze_hsp import _resolve_generic_irrep_hsp_label
+    from valleyscope.workflows.analyze_hsp import (
+        _resolve_generic_irrep_hsp_label,
+        _resolve_generic_irrep_hsp_label_with_provenance,
+    )
 
     class _NoMatchTable:
         number = 5
@@ -2105,6 +2108,24 @@ def test_hsp_override_does_not_bypass_unresolved_standard_setting_mapping():
     assert blocker is not None
     assert "cannot be applied" in blocker
     assert "standard_setting_hsp_mapping_unresolved" in blocker
+
+    label, blocker, provenance = _resolve_generic_irrep_hsp_label_with_provenance(
+        table=_NoMatchTable(),
+        k_frac=np.array([0.123, 0.456, 0.0]),
+        override_label="M",
+        standard_match={
+            "number": 5,
+            "international_short": "C2",
+            "hall_number": 9,
+            "hall_symbol": "C 2y",
+        },
+    )
+    assert label is None
+    assert blocker is not None
+    assert provenance["direct_match_succeeded"] is False
+    assert provenance["hall_number"] == 9
+    assert "setting_transform" in provenance
+    assert "reason" in provenance["setting_transform"]
 
 
 def test_override_agrees_with_resolved_label():
@@ -2134,3 +2155,53 @@ def test_override_agrees_with_resolved_label():
     )
     assert label == "GM"
     assert blocker is None
+
+
+def test_blocked_source_payload_preserves_standard_setting_kmap_provenance():
+    """Blocked generic rows must retain standard-setting HSP mapping evidence."""
+    from valleyscope.analysis.valley_irrep_matching import (
+        build_valley_irrep_matching_report,
+    )
+
+    kmap_provenance = {
+        "attempted_direct_match": True,
+        "direct_match_succeeded": False,
+        "subspace_sg_number": 5,
+        "subspace_sg_symbol": "C2",
+        "hall_number": 9,
+        "hall_symbol": "C 2y",
+        "setting_transform": {
+            "reason": "centered setting requires reciprocal-basis mapping",
+        },
+    }
+    report = build_valley_irrep_matching_report(
+        irrep_workflow_decisions={
+            "by_kpoint": {
+                "KM": {
+                    "K_valley": {
+                        "readiness_level": "trusted",
+                        "workflow_path": "direct_qcut",
+                    },
+                },
+            },
+        },
+        symmetry_adapted_valley_report={"by_kpoint": {}},
+        source_payload_blocked_rows=[{
+            "kpoint": "KM",
+            "valley": "K_valley",
+            "reason": "standard_setting_hsp_mapping_unresolved",
+            "subspace_space_group": {
+                "candidate_space_group_number": 5,
+                "candidate_space_group_symbol": "C2",
+            },
+            "standard_setting_hsp_mapping": kmap_provenance,
+        }],
+    )
+
+    row = report["generic_matches_by_kpoint"]["KM"]["K_valley"]
+    provenance = row["source_payload_provenance"]
+    assert row["matching_status"] == "blocked"
+    assert provenance["standard_setting_hsp_mapping"] == kmap_provenance
+    assert provenance["standard_setting_hsp_mapping"]["setting_transform"][
+        "reason"
+    ]

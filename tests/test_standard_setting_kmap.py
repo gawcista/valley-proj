@@ -1,7 +1,6 @@
 """Tests for standard-setting HSP k-coordinate mapping."""
 
 import numpy as np
-import pytest
 
 from valleyscope.analysis.standard_setting_kmap import (
     resolve_standard_setting_hsp_label,
@@ -129,9 +128,9 @@ def test_p3_m_direct_match_with_standard_match():
     assert prov["direct_match_succeeded"] is True
 
 
-# --- C2 setting transform test ---
+# --- Centered-setting transform provenance tests ---
 
-def test_primitive_hall_symbol_documented_as_unavailable():
+def test_centered_hall_symbol_documented_as_unavailable():
     result = _attempt_setting_transform(
         k_frac=np.array([0.5, 0.0, 0.0]),
         hall_number=1,
@@ -140,7 +139,7 @@ def test_primitive_hall_symbol_documented_as_unavailable():
     )
     assert result["sg_number"] == 5
     assert result["reason"] is not None
-    assert "centered" in str(result["reason"]).lower() or "C-centered" in str(result["reason"])
+    assert "centered" in str(result["reason"]).lower()
 
 
 def test_centered_setting_documented():
@@ -153,10 +152,10 @@ def test_centered_setting_documented():
     assert "C 2y" in str(result.get("reason", ""))
 
 
-# --- Standard-setting kmap preserves tMoTe2 M-point match ---
+# --- Primitive-setting direct match remains coordinate based ---
 
-def test_tmote2_m_point_p3_matches_direct():
-    """M-point (1/2, 0, 0) in P3 matches directly — no transform needed."""
+def test_p3_m_point_matches_direct():
+    """M-point (1/2, 0, 0) in P3 matches directly; no transform needed."""
     label, blocker, prov = resolve_standard_setting_hsp_label(
         k_frac=np.array([0.5, 0.0, 0.0]),
         table=_table_p3(),

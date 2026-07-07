@@ -170,6 +170,22 @@ def _resolve_generic_irrep_hsp_label(
     override_label: str | None,
     standard_match: dict[str, object] | None = None,
 ) -> tuple[str | None, str | None]:
+    label, blocker, _ = _resolve_generic_irrep_hsp_label_with_provenance(
+        table=table,
+        k_frac=k_frac,
+        override_label=override_label,
+        standard_match=standard_match,
+    )
+    return label, blocker
+
+
+def _resolve_generic_irrep_hsp_label_with_provenance(
+    *,
+    table,
+    k_frac: np.ndarray | None,
+    override_label: str | None,
+    standard_match: dict[str, object] | None = None,
+) -> tuple[str | None, str | None, dict[str, object]]:
     """Resolve a standard-setting Bilbao HSP label.
 
     First tries direct coordinate match; if that fails, attempts
@@ -197,20 +213,20 @@ def _resolve_generic_irrep_hsp_label(
                 f"cannot be applied: "
                 f"standard_setting_hsp_mapping_unresolved; "
                 f"no standard-setting HSP label was resolved for this "
-                f"k-point — {blocker or 'mapping failed'}"
-            )
+                f"k-point - {blocker or 'mapping failed'}"
+            ), prov
         if override_label != label:
             return None, (
                 f"generic_irrep_source HSP override {override_label!r} "
                 f"disagrees with resolved HSP {label!r}"
-            )
-        # Override confirms the resolved label — pass through.
+            ), prov
+        # Override confirms the resolved label; pass through.
     if label is None:
         return None, blocker or (
             "no_source_hsp_label: could not determine Bilbao HSP label "
             "for this kpoint"
-        )
-    return label, None
+        ), prov
+    return label, None, prov
 
 
 def analyze_hsp(config_path: str | Path) -> dict[str, object]:
@@ -653,18 +669,20 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     if override_hsp is not None
                     else None
                 )
-                src_hsp, hsp_blocker = _resolve_generic_irrep_hsp_label(
-                    table=table,
-                    k_frac=(
-                        np.asarray(k_frac_raw, dtype=float)
-                        if k_frac_raw is not None else None
-                    ),
-                    override_label=override_label,
-                    standard_match=(
-                        standard_match
-                        if isinstance(standard_match, dict)
-                        else None
-                    ),
+                src_hsp, hsp_blocker, hsp_provenance = (
+                    _resolve_generic_irrep_hsp_label_with_provenance(
+                        table=table,
+                        k_frac=(
+                            np.asarray(k_frac_raw, dtype=float)
+                            if k_frac_raw is not None else None
+                        ),
+                        override_label=override_label,
+                        standard_match=(
+                            standard_match
+                            if isinstance(standard_match, dict)
+                            else None
+                        ),
+                    )
                 )
                 if hsp_blocker is not None:
                     # Standard-setting HSP mapping unresolved.
@@ -678,19 +696,25 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                         ),
                         local_gka_operation_ids=list(vp_ids),
                     )
-                    # Collect kmap provenance from the resolver output.
-                    kmap_prov: dict[str, object] = {
-                        "subspace_sg_number": ssg_context.get(
-                            "candidate_space_group_number"
-                        ),
-                        "subspace_sg_symbol": ssg_context.get(
-                            "candidate_space_group_symbol"
-                        ),
-                    }
+                    kmap_prov = dict(hsp_provenance)
+                    kmap_prov.setdefault(
+                        "subspace_sg_number",
+                        ssg_context.get("candidate_space_group_number"),
+                    )
+                    kmap_prov.setdefault(
+                        "subspace_sg_symbol",
+                        ssg_context.get("candidate_space_group_symbol"),
+                    )
                     if isinstance(ssg_context.get("hall_number"), int):
-                        kmap_prov["hall_number"] = ssg_context["hall_number"]
+                        kmap_prov.setdefault(
+                            "hall_number",
+                            ssg_context["hall_number"],
+                        )
                     if ssg_context.get("hall_symbol"):
-                        kmap_prov["hall_symbol"] = ssg_context["hall_symbol"]
+                        kmap_prov.setdefault(
+                            "hall_symbol",
+                            ssg_context["hall_symbol"],
+                        )
                     generic_source_blocked_rows.append({
                         "kpoint": kp_name,
                         "valley": v_name,

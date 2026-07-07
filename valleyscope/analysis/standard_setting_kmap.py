@@ -12,8 +12,6 @@ from the spglib per-valley standard group match.
 
 from __future__ import annotations
 
-from typing import Any
-
 import numpy as np
 
 
@@ -126,7 +124,7 @@ def resolve_standard_setting_hsp_label(
         "basis to the irreptables standard reciprocal basis"
     )
     if transform_result.get("reason"):
-        reason_parts.append(f" — {transform_result['reason']}")
+        reason_parts.append(f"- {transform_result['reason']}")
 
     return None, " ".join(reason_parts) + ".", prov
 
