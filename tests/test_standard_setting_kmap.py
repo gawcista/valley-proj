@@ -168,3 +168,55 @@ def test_p3_m_point_matches_direct():
     )
     assert label == "M"
     assert blocker is None
+
+
+# ---------------------------------------------------------------------------
+# Basis transform integration tests
+# ---------------------------------------------------------------------------
+
+def test_basis_transform_no_lattice_returns_unavailable():
+    from valleyscope.analysis.standard_setting_kmap import (
+        _compute_standard_setting_basis_transform,
+    )
+    result = _compute_standard_setting_basis_transform(
+        lattice_direct_cart=None,
+        vp_operations=None,
+        standard_match={"operation_ids": [0, 4]},
+    )
+    assert result["status"] == "unavailable"
+    assert "lattice" in result.get("reason", "")
+
+
+def test_basis_transform_centered_setting_returns_unavailable_with_reason():
+    from valleyscope.analysis.standard_setting_kmap import (
+        _compute_standard_setting_basis_transform,
+    )
+    result = _compute_standard_setting_basis_transform(
+        lattice_direct_cart=np.eye(3),
+        vp_operations=[{"operation_id": 4, "order": 2,
+                         "rotation_frac": [[-1, 0, 0], [0, -1, 0], [0, 0, 1]]}],
+        standard_match={
+            "number": 5, "international_short": "C2",
+            "hall_number": 9, "hall_symbol": "C 2y",
+            "operation_ids": [0, 4],
+        },
+    )
+    assert result["status"] == "unavailable"
+    assert "centered" in result.get("reason", "").lower()
+
+
+def test_resolver_includes_basis_transform_in_provenance():
+    _, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.123, 0.456, 0.0]),
+        table=_table_c2(),
+        standard_match={
+            "number": 5, "international_short": "C2",
+            "hall_number": 9, "hall_symbol": "C 2y",
+            "operation_ids": [0, 4],
+        },
+    )
+    assert blocker is not None
+    bt = prov.get("basis_transform")
+    assert bt is not None
+    assert bt.get("status") == "unavailable"
+    assert "reason" in bt

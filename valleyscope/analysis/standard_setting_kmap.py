@@ -21,6 +21,8 @@ def resolve_standard_setting_hsp_label(
     table,
     standard_match: dict[str, object] | None,
     tolerance: float = 1e-6,
+    lattice_direct_cart: np.ndarray | None = None,
+    detected_operations: list[dict[str, object]] | None = None,
 ) -> tuple[str | None, str | None, dict[str, object]]:
     """Resolve a standard-setting Bilbao HSP label for a sampled k-point.
 
@@ -37,6 +39,11 @@ def resolve_standard_setting_hsp_label(
         ``hall_symbol``, ``operation_ids``.
     tolerance : float
         Coordinate comparison tolerance.
+    lattice_direct_cart : np.ndarray or None
+        Parent moire direct lattice in Cartesian coordinates (3×3).
+    detected_operations : list[dict] or None
+        Detected symmetry operations, each with ``operation_id``,
+        ``rotation_frac``, ``order`` fields.
 
     Returns
     -------
@@ -85,11 +92,38 @@ def resolve_standard_setting_hsp_label(
     prov["hall_number"] = hall_number
     prov["hall_symbol"] = hall_symbol
 
-    # 2. Attempt setting-aware transformation.
-    #    The Hall symbol encodes the conventional cell centering and
-    #    unique-axis convention.  For centered settings (C, I, F, R),
-    #    the conventional reciprocal cell differs from the primitive
-    #    cell used in the parent DFT calculation.
+    # 2. Attempt standard-setting basis transform using crystallographic
+    #    data (lattice, VP operation matrices, Hall symbol).
+    basis_result = _compute_standard_setting_basis_transform(
+        lattice_direct_cart=lattice_direct_cart,
+        vp_operations=list(detected_operations) if detected_operations else None,
+        standard_match=dict(standard_match),
+    )
+    prov["basis_transform"] = basis_result
+
+    if basis_result.get("transform_matrix") is not None:
+        T = np.asarray(basis_result["transform_matrix"], dtype=float)
+        # Transform k_frac from parent reciprocal basis to standard setting.
+        # The reciprocal transform is the transpose of the inverse of the
+        # direct-lattice transform: k_std = T^(-T) · k_parent.
+        try:
+            T_inv = np.linalg.inv(T)
+            transformed_k = k_frac @ T_inv.T
+            prov["transformed_k_frac"] = transformed_k.tolist()
+            try:
+                transformed_label = table.match_kpoint_label(transformed_k, tolerance=tolerance)
+            except TypeError:
+                transformed_label = table.match_kpoint_label(transformed_k)
+            if transformed_label is not None:
+                prov["basis_transformed_match_succeeded"] = True
+                prov["transformed_hsp_label"] = transformed_label
+                return transformed_label, None, prov
+        except np.linalg.LinAlgError:
+            prov["basis_transform_error"] = "singular transformation matrix"
+
+    # 3. Attempt setting-aware transformation using Hall-symbol centering.
+    #    For centered settings (C, I, F, R), the conventional reciprocal
+    #    cell differs from the primitive cell used in the parent DFT.
     transform_result = _attempt_setting_transform(
         k_frac=k_frac,
         hall_number=int(hall_number) if isinstance(hall_number, int) and not isinstance(hall_number, bool) else None,
@@ -127,6 +161,148 @@ def resolve_standard_setting_hsp_label(
         reason_parts.append(f"- {transform_result['reason']}")
 
     return None, " ".join(reason_parts) + ".", prov
+
+
+def _compute_standard_setting_basis_transform(
+    *,
+    lattice_direct_cart: np.ndarray | None,
+    vp_operations: list[dict[str, object]] | None,
+    standard_match: dict[str, object],
+) -> dict[str, object]:
+    """Attempt to compute a standard-setting reciprocal-basis transform.
+
+    Uses the parent direct lattice and valley-preserving operations to
+    determine the basis-transformation matrix from the parent reciprocal
+    basis to the standard-setting reciprocal basis.  Accepts the
+    transformation only when operation matrices transformed into the
+    candidate basis match the standard-setting operation set.
+
+    Returns a dict with ``status`` and optional ``transform_matrix``,
+    ``transformed_k_frac``, and/or ``reason``.
+    """
+    result: dict[str, object] = {"status": "not_attempted"}
+
+    if lattice_direct_cart is None:
+        result["status"] = "unavailable"
+        result["reason"] = (
+            "parent direct lattice (lattice_direct_cart) is not available; "
+            "cannot compute standard-setting basis transform"
+        )
+        return result
+
+    lattice = np.asarray(lattice_direct_cart, dtype=float)
+    if lattice.shape != (3, 3):
+        result["status"] = "unavailable"
+        result["reason"] = (
+            f"parent direct lattice has unexpected shape {lattice.shape}; "
+            f"expected (3, 3)"
+        )
+        return result
+
+    vp_op_ids = standard_match.get("operation_ids", [])
+    if not isinstance(vp_op_ids, (list, tuple)) or len(vp_op_ids) < 2:
+        result["status"] = "unavailable"
+        result["reason"] = (
+            "fewer than two valley-preserving operations "
+            "(identity + at least one nontrivial operation) "
+            "in the standard match; cannot verify the basis "
+            "orientation against operation content"
+        )
+        return result
+
+    if vp_operations is None:
+        result["status"] = "unavailable"
+        result["reason"] = (
+            "detected operation matrices (rotation_frac) are not "
+            "available; cannot verify basis orientation"
+        )
+        return result
+
+    # Extract non-identity VP rotation matrices to verify orientation.
+    vp_set = set(int(op) for op in vp_op_ids if isinstance(op, (int, float)))
+    vp_rotations: list[tuple[int, np.ndarray]] = []
+    for op in vp_operations:
+        if not isinstance(op, dict):
+            continue
+        op_id_raw = op.get("operation_id")
+        if op_id_raw is None:
+            continue
+        try:
+            op_id = int(op_id_raw)
+        except (TypeError, ValueError):
+            continue
+        if op_id not in vp_set:
+            continue
+        order_raw = op.get("order")
+        try:
+            order = int(order_raw) if order_raw is not None else 0
+        except (TypeError, ValueError):
+            order = 0
+        if order <= 1:
+            continue  # skip identity
+        rot = op.get("rotation_frac")
+        if rot is None:
+            continue
+        vp_rotations.append((op_id, np.asarray(rot, dtype=float)))
+
+    if not vp_rotations:
+        result["status"] = "unavailable"
+        result["reason"] = (
+            "no non-identity valley-preserving operation with a "
+            "fractional rotation matrix found; cannot verify "
+            "basis orientation against operation content"
+        )
+        return result
+
+    # For the standard setting, we need the Hall symbol to determine
+    # the conventional cell centering and unique-axis convention.
+    hall_number = standard_match.get("hall_number")
+    hall_symbol = standard_match.get("hall_symbol", "")
+    centering = hall_symbol[0] if hall_symbol else ""
+
+    if centering in ("C", "I", "F", "R"):
+        result["status"] = "unavailable"
+        result["reason"] = (
+            f"centered conventional setting (Hall {hall_symbol}); "
+            f"the {centering}-centered conventional reciprocal lattice "
+            "differs from the parent primitive reciprocal lattice. "
+            "The direct-lattice transformation from the parent "
+            "reciprocal basis to the conventional centered reciprocal "
+            "basis requires a complete standard-setting cell "
+            "determination (lattice parameters + Bravais type + "
+            "centering vectors), which spglib does not provide for "
+            "subgroup-only standard matches because the parent cell's "
+            "full symmetry differs from the valley-preserving subgroup."
+        )
+        return result
+
+    if centering == "P":
+        # For primitive settings, the Bravais lattice class is the
+        # same as the parent cell, but the conventional cell
+        # orientation may differ.  The operation rotation matrices
+        # in the parent fractional basis encode the orientation.
+        # A full solution requires comparing the parent-setting
+        # rotation to the irreptables standard-setting rotation for
+        # each VP operation and solving for the basis change.
+        result["status"] = "unavailable"
+        result["reason"] = (
+            f"primitive setting (Hall {hall_symbol}); the parent "
+            "and standard reciprocal bases share the same Bravais "
+            "lattice class, but the conventional-cell orientation "
+            "may differ.  Orientation verification requires mapping "
+            "each VP rotation matrix from the parent fractional "
+            "basis to the standard-setting fractional basis, which "
+            "has not been implemented for the general case."
+        )
+        return result
+
+    result["status"] = "unavailable"
+    result["reason"] = (
+        f"unrecognised Hall symbol centering '{centering}' "
+        f"(Hall {hall_symbol}); cannot determine standard-setting "
+        "reciprocal basis"
+    )
+    return result
 
 
 def _attempt_setting_transform(

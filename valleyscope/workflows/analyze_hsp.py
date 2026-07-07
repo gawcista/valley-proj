@@ -185,6 +185,8 @@ def _resolve_generic_irrep_hsp_label_with_provenance(
     k_frac: np.ndarray | None,
     override_label: str | None,
     standard_match: dict[str, object] | None = None,
+    lattice_direct_cart: np.ndarray | None = None,
+    detected_operations: list[dict[str, object]] | None = None,
 ) -> tuple[str | None, str | None, dict[str, object]]:
     """Resolve a standard-setting Bilbao HSP label.
 
@@ -200,6 +202,8 @@ def _resolve_generic_irrep_hsp_label_with_provenance(
             k_frac=np.asarray(k_frac, dtype=float),
             table=table,
             standard_match=standard_match,
+            lattice_direct_cart=lattice_direct_cart,
+            detected_operations=detected_operations,
         )
     else:
         label, blocker, prov = None, (
@@ -680,6 +684,16 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                         standard_match=(
                             standard_match
                             if isinstance(standard_match, dict)
+                            else None
+                        ),
+                        lattice_direct_cart=(
+                            np.asarray(symmetry_payload.get("lattice_direct_cart"), dtype=float)
+                            if symmetry_payload.get("lattice_direct_cart") is not None
+                            else None
+                        ),
+                        detected_operations=(
+                            symmetry_payload.get("detected_operations")
+                            if isinstance(symmetry_payload.get("detected_operations"), list)
                             else None
                         ),
                     )
