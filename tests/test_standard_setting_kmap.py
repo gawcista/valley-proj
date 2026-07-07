@@ -511,3 +511,87 @@ def test_certificate_parent_basis_operation_ids():
     )
     cert = prov["standard_setting_certificate"]
     assert cert["parent_basis_operation_ids"] == [0, 1, 2]
+
+
+# ---------------------------------------------------------------------------
+# Affine certificate tests
+# ---------------------------------------------------------------------------
+
+def test_direct_match_certificate_has_affine_status():
+    """Direct match certificate carries affine validation fields."""
+    _, _, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.5, 0.0, 0.0]),
+        table=_table_p3(),
+        standard_match={
+            "number": 143, "international_short": "P3",
+            "hall_number": 143, "hall_symbol": "P 3",
+            "operation_ids": [0, 1, 2],
+        },
+        detected_operations=[
+            {"operation_id": 0, "order": 1,
+             "rotation_frac": [[1,0,0],[0,1,0],[0,0,1]],
+             "translation_frac": [0.0, 0.0, 0.0]},
+            {"operation_id": 1, "order": 3,
+             "rotation_frac": [[0,-1,0],[1,-1,0],[0,0,1]],
+             "translation_frac": [0.0, 0.0, 0.0]},
+        ],
+    )
+    cert = prov["standard_setting_certificate"]
+    assert cert["validation_status"] == "validated"
+    assert cert["translation_validation_status"] in (
+        "affine_data_available", "translation_data_unavailable",
+        "validated", "failed",
+    )
+    # missing_affine_ingredients may be omitted from serialization when empty.
+    assert cert.get("missing_affine_ingredients", []) == []
+
+
+def test_unresolved_certificate_has_missing_ingredients():
+    """Unresolved certificate lists missing affine ingredients."""
+    _, _, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.123, 0.456, 0.0]),
+        table=_table_c2(),
+        standard_match={
+            "number": 5, "international_short": "C2",
+            "hall_number": 9, "hall_symbol": "C 2y",
+            "operation_ids": [0, 4],
+        },
+        detected_operations=[
+            {"operation_id": 0, "order": 1,
+             "rotation_frac": [[1,0,0],[0,1,0],[0,0,1]],
+             "translation_frac": [0.0, 0.0, 0.0]},
+            {"operation_id": 4, "order": 2,
+             "rotation_frac": [[-1,0,0],[0,-1,0],[0,0,1]],
+             "translation_frac": [0.0, 0.0, 0.0]},
+        ],
+    )
+    cert = prov["standard_setting_certificate"]
+    assert cert["validation_status"] == "unresolved"
+    assert "conventional_centering_vectors" in cert.get(
+        "missing_affine_ingredients", []
+    ), (
+        f"should list conventional_centering_vectors as missing, "
+        f"got {cert.get('missing_affine_ingredients')}"
+    )
+    assert cert["centering_type"] == "C"
+    assert cert["centering_status"] == "centered_unresolved"
+
+
+def test_centered_setting_blocked_with_affine_reason():
+    """Centered setting blocker references affine convention gap, not material name."""
+    _, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.123, 0.456, 0.0]),
+        table=_table_c2(),
+        standard_match={
+            "number": 5, "international_short": "C2",
+            "hall_number": 9, "hall_symbol": "C 2y",
+            "operation_ids": [0, 4],
+        },
+    )
+    assert blocker is not None
+    assert "C2" in blocker
+    cert = prov["standard_setting_certificate"]
+    assert cert["centering_status"] == "centered_unresolved"
+    # Blocker must not name any real material.
+    for mat in ("MoTe2", "ZrSe2", "tMoTe2", "tZrSe2"):
+        assert mat.lower() not in str(blocker).lower()

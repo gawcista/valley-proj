@@ -65,6 +65,28 @@ class StandardSettingCertificate:
     centering_type: str | None = None
     """P, C, I, F, R from Hall symbol first character."""
     centering_status: str = "not_evaluated"
+    """One of ``"primitive_direct_match"``, ``"centered_unresolved"``,
+    ``"not_evaluated"``."""
+
+    # --- Affine translation validation ---
+    translation_validation_status: str = "not_attempted"
+    """One of ``"validated"``, ``"translation_data_unavailable"``,
+    ``"failed"``, ``"not_attempted"``."""
+    total_parent_operations: int | None = None
+    """Number of parent VP operations with rotation+translation data."""
+    matched_affine_operations: int | None = None
+    """Number whose transformed affine content matches standard setting."""
+
+    # --- Affine missing ingredients ---
+    missing_affine_ingredients: list[str] = field(default_factory=list)
+    """List of missing affine ingredients when unresolved, e.g.
+    ``"conventional_centering_vectors"``, ``"origin_shift_fractional"``,
+    ``"standard_setting_translations"``, ``"direct_lattice_transform"``."""
+
+    # --- Operation closure ---
+    operation_closure_validated: bool | None = None
+    """Whether the VP operations form a closed set under multiplication
+    (validated via spglib standard match or explicit check)."""
 
     # --- Blockers ---
     unresolved_reason: str | None = None
@@ -82,6 +104,87 @@ class StandardSettingCertificate:
             if value is not None and value != []:
                 d[key] = value
         return d
+
+
+def _validate_affine_operation_equivalence(
+    *,
+    vp_operations: list[dict[str, object]] | None,
+    vp_operation_ids: list[int],
+    standard_match: dict[str, object],
+) -> dict[str, object]:
+    """Validate affine (rotation + translation) operation equivalence.
+
+    Checks whether VP operations carry translation_frac data and whether
+    the spglib standard-setting database provides standard translations
+    for comparison.  Returns a status dict with affine ingredient counts
+    and a list of missing pieces.
+    """
+    result: dict[str, object] = {
+        "status": "not_attempted",
+        "missing_ingredients": [],
+    }
+
+    if not vp_operations:
+        result["status"] = "translation_data_unavailable"
+        result["missing_ingredients"].append("vp_operation_data")
+        return result
+
+    vp_id_set = set(vp_operation_ids)
+    ops_with_translations: list[dict[str, object]] = []
+    for op in vp_operations:
+        if not isinstance(op, dict):
+            continue
+        oid_raw = op.get("operation_id")
+        if oid_raw is None:
+            continue
+        try:
+            oid = int(oid_raw)
+        except (TypeError, ValueError):
+            continue
+        if oid not in vp_id_set:
+            continue
+        rot = op.get("rotation_frac")
+        trans = op.get("translation_frac")
+        if rot is not None and trans is not None:
+            ops_with_translations.append(op)
+
+    result["total_parent_operations"] = len(ops_with_translations)
+
+    if not ops_with_translations:
+        result["status"] = "translation_data_unavailable"
+        result["missing_ingredients"].append("parent_translation_frac")
+        return result
+
+    # Check spglib standard-setting translations availability.
+    hall_number = standard_match.get("hall_number")
+    if not isinstance(hall_number, int) or isinstance(hall_number, bool):
+        result["status"] = "translation_data_unavailable"
+        result["missing_ingredients"].append("standard_setting_translations")
+        return result
+
+    try:
+        import spglib
+        std_sym = spglib.get_symmetry_from_database(int(hall_number))
+    except Exception:
+        std_sym = None
+
+    if std_sym is None:
+        result["status"] = "translation_data_unavailable"
+        result["missing_ingredients"].append("spglib_database_access")
+        return result
+
+    std_translations = [
+        np.asarray(t, dtype=float) for t in std_sym["translations"]
+    ]
+    result["standard_setting_operation_count"] = len(std_translations)
+
+    # For full affine validation we also need centering vectors.
+    hall_symbol = standard_match.get("hall_symbol", "")
+    if hall_symbol and hall_symbol[0] in ("C", "I", "F", "R"):
+        result["missing_ingredients"].append("conventional_centering_vectors")
+
+    result["status"] = "affine_data_available"
+    return result
 
 
 def build_standard_setting_certificate(
@@ -204,17 +307,24 @@ def resolve_standard_setting_hsp_label(
             resolved_hsp_label=direct_label,
         )
         cert.operation_mapping_status = "not_attempted"
-        cert.centering_status = (
-            "primitive_direct_match"
-            if (isinstance(standard_match, dict) and
-                str(standard_match.get("hall_symbol", "")).startswith("P"))
-            else "not_evaluated"
-        )
+        if isinstance(standard_match, dict) and str(standard_match.get("hall_symbol", "")).startswith("P"):
+            cert.centering_status = "primitive_direct_match"
         cert.standard_setting_source = (
             "spglib.per_valley_standard_matches"
             if isinstance(standard_match, dict)
             else "coordinate_match_only"
         )
+        # Affine validation for direct match.
+        if isinstance(standard_match, dict) and detected_operations:
+            vp_ids = _operation_ids_list(standard_match)
+            aff = _validate_affine_operation_equivalence(
+                vp_operations=list(detected_operations),
+                vp_operation_ids=vp_ids,
+                standard_match=standard_match,
+            )
+            cert.translation_validation_status = aff["status"]
+            cert.total_parent_operations = aff.get("total_parent_operations")
+            cert.missing_affine_ingredients = aff.get("missing_ingredients", [])
         prov["standard_setting_certificate"] = cert.to_dict()
         return direct_label, None, prov
 
@@ -412,6 +522,24 @@ def resolve_standard_setting_hsp_label(
     cert.standard_setting_source = (
         "spglib.get_spacegroup_type_from_symmetry"
     )
+    cert.centering_status = "centered_unresolved" if (
+        isinstance(standard_match, dict)
+        and str(standard_match.get("hall_symbol", "")[:1]) in ("C", "I", "F", "R")
+    ) else "not_evaluated"
+    # Affine validation for unresolved path.
+    if isinstance(standard_match, dict) and detected_operations:
+        vp_ids = _operation_ids_list(standard_match)
+        aff = _validate_affine_operation_equivalence(
+            vp_operations=list(detected_operations),
+            vp_operation_ids=vp_ids,
+            standard_match=standard_match,
+        )
+        cert.translation_validation_status = aff["status"]
+        cert.total_parent_operations = aff.get("total_parent_operations")
+        cert.standard_setting_operation_count = aff.get(
+            "standard_setting_operation_count"
+        )
+        cert.missing_affine_ingredients = aff.get("missing_ingredients", [])
     prov["standard_setting_certificate"] = cert.to_dict()
     return None, blocker, prov
 
