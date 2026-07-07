@@ -2194,6 +2194,8 @@ def test_blocked_source_payload_preserves_standard_setting_kmap_provenance():
                 "candidate_space_group_number": 5,
                 "candidate_space_group_symbol": "C2",
             },
+            "valley_preserving_operation_ids": [0],
+            "hsp_little_group_operation_ids": [0],
             "standard_setting_hsp_mapping": kmap_provenance,
         }],
     )
@@ -2201,7 +2203,57 @@ def test_blocked_source_payload_preserves_standard_setting_kmap_provenance():
     row = report["generic_matches_by_kpoint"]["KM"]["K_valley"]
     provenance = row["source_payload_provenance"]
     assert row["matching_status"] == "blocked"
+    assert row["valley_preserving_operation_ids"] == [0]
+    assert row["hsp_little_group_operation_ids"] == [0]
     assert provenance["standard_setting_hsp_mapping"] == kmap_provenance
     assert provenance["standard_setting_hsp_mapping"]["setting_transform"][
         "reason"
     ]
+
+
+def test_refine_ebr_mapping_does_not_invent_missing_local_character_for_nonidentity_gka():
+    """Resolved subspace SG must not imply missing local character when G_k^(a) has one."""
+    from valleyscope.workflows.analyze_hsp import (
+        _refine_ebr_mapping_with_subspace_space_group,
+    )
+
+    ebr_mapping = {
+        "blocked_by": [
+            "spinor_convention_unverified",
+            "subspace_group_candidate_missing",
+        ],
+        "notes": "base note.",
+    }
+
+    _refine_ebr_mapping_with_subspace_space_group(
+        ebr_mapping=ebr_mapping,
+        subspace_space_group={"candidate_space_group_symbol": "C2"},
+        local_gka_operation_ids=[0, 4],
+    )
+
+    assert ebr_mapping["subspace_space_group_candidate"] == "C2"
+    assert "subspace_group_candidate_missing" not in ebr_mapping["blocked_by"]
+    assert "hsp_local_preserving_character_missing" not in ebr_mapping["blocked_by"]
+    assert "spinor_convention_unverified" in ebr_mapping["blocked_by"]
+    assert "does not contain a non-identity" not in ebr_mapping["notes"]
+
+
+def test_refine_ebr_mapping_marks_identity_only_gka_as_missing_local_character():
+    """Identity-only G_k^(a) may need HSP-star character provenance."""
+    from valleyscope.workflows.analyze_hsp import (
+        _refine_ebr_mapping_with_subspace_space_group,
+    )
+
+    ebr_mapping = {
+        "blocked_by": ["subspace_group_candidate_missing"],
+        "notes": "base note.",
+    }
+
+    _refine_ebr_mapping_with_subspace_space_group(
+        ebr_mapping=ebr_mapping,
+        subspace_space_group={"candidate_space_group_symbol": "C2"},
+        local_gka_operation_ids=[0],
+    )
+
+    assert ebr_mapping["blocked_by"] == ["hsp_local_preserving_character_missing"]
+    assert "does not contain a non-identity" in ebr_mapping["notes"]

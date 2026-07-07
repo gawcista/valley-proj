@@ -735,6 +735,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                         "reason": hsp_blocker,
                         "subspace_space_group": ssg_context,
                         "valley_preserving_operation_ids": list(vp_ids),
+                        "hsp_little_group_operation_ids": list(vp_ids),
                         "parent_k_frac": (
                             list(k_frac_raw)
                             if k_frac_raw is not None else None
@@ -1758,6 +1759,9 @@ def _build_valley_preserving_subspace_reports(
             _refine_ebr_mapping_with_subspace_space_group(
                 ebr_mapping=ebr_mapping,
                 subspace_space_group=summary["subspace_space_group"],
+                local_gka_operation_ids=summary.get(
+                    "hsp_preserving_operation_ids", []
+                ),
             )
             _apply_target_subspace_closure_gate(
                 ebr_mapping=ebr_mapping,
@@ -2294,8 +2298,9 @@ def _refine_ebr_mapping_with_subspace_space_group(
     *,
     ebr_mapping: dict[str, object],
     subspace_space_group: dict[str, object],
+    local_gka_operation_ids: list[object] | None = None,
 ) -> None:
-    """Attach full-space-group candidate without pretending local characters exist."""
+    """Attach subspace SG identity without inventing local character blockers."""
     candidate = subspace_space_group.get("candidate_space_group_symbol")
     ebr_mapping["subspace_space_group_candidate"] = candidate
     blockers = ebr_mapping.get("blocked_by")
@@ -2303,13 +2308,29 @@ def _refine_ebr_mapping_with_subspace_space_group(
         return
     if candidate in (None, "", "P1"):
         return
-    refined_blockers = [
-        (
-            "hsp_local_preserving_character_missing"
-            if blocker == "subspace_group_candidate_missing"
-            else blocker
+    local_ops = (
+        list(local_gka_operation_ids)
+        if isinstance(local_gka_operation_ids, list)
+        else list(
+            subspace_space_group.get("hsp_little_group_gka_operation_ids", [])
+            or []
         )
-        for blocker in blockers
+    )
+    has_nonidentity_local_op = any(
+        op not in (0, "0", "__identity__")
+        for op in local_ops
+    )
+    refined_blockers = []
+    for blocker in blockers:
+        if blocker == "subspace_group_candidate_missing":
+            if has_nonidentity_local_op:
+                continue
+            refined_blockers.append("hsp_local_preserving_character_missing")
+        else:
+            refined_blockers.append(blocker)
+    refined_blockers = [
+        blocker for blocker in refined_blockers
+        if isinstance(blocker, str) and blocker
     ]
     ebr_mapping["blocked_by"] = refined_blockers
     if "hsp_local_preserving_character_missing" in refined_blockers:

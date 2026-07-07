@@ -23,6 +23,7 @@ def resolve_standard_setting_hsp_label(
     tolerance: float = 1e-6,
     lattice_direct_cart: np.ndarray | None = None,
     detected_operations: list[dict[str, object]] | None = None,
+    parent_to_standard_direct_transform: np.ndarray | None = None,
 ) -> tuple[str | None, str | None, dict[str, object]]:
     """Resolve a standard-setting Bilbao HSP label for a sampled k-point.
 
@@ -44,6 +45,12 @@ def resolve_standard_setting_hsp_label(
     detected_operations : list[dict] or None
         Detected symmetry operations, each with ``operation_id``,
         ``rotation_frac``, ``order`` fields.
+    parent_to_standard_direct_transform : np.ndarray or None
+        Optional explicit parent-to-standard direct-lattice
+        transformation matrix (3×3).  Maps direct-space fractional
+        coordinates from the parent basis to the standard setting:
+        x_std = T * x_parent.  For k-points:
+        k_std = T^(-T) * k_parent.
 
     Returns
     -------
@@ -75,6 +82,40 @@ def resolve_standard_setting_hsp_label(
         "Bilbao HSP coordinate in the irreptables table"
     )
 
+    # 2. Explicit parent-to-standard direct-lattice transform.
+    #    When an explicit, validated transform matrix is provided, apply
+    #    the reciprocal rule k_std = T^(-T) k_parent and check against
+    #    the irreptables table.
+    if parent_to_standard_direct_transform is not None:
+        T = np.asarray(parent_to_standard_direct_transform, dtype=float)
+        tf_result = _validate_explicit_transform(
+            transform_matrix=T,
+            standard_match=standard_match,
+            vp_operations=(
+                list(detected_operations) if detected_operations else None
+            ),
+        )
+        prov["explicit_transform"] = tf_result
+        if tf_result.get("status") == "valid":
+            try:
+                T_inv = np.linalg.inv(T)
+                transformed_k = k_frac @ T_inv.T
+                prov["transformed_k_frac"] = transformed_k.tolist()
+                try:
+                    label = table.match_kpoint_label(transformed_k, tolerance=tolerance)
+                except TypeError:
+                    label = table.match_kpoint_label(transformed_k)
+                if label is not None:
+                    prov["explicit_transformed_match_succeeded"] = True
+                    prov["explicit_transformed_hsp_label"] = label
+                    return label, None, prov
+            except np.linalg.LinAlgError:
+                tf_result["status"] = "rejected"
+                tf_result["rejection_reason"] = "singular transformation matrix"
+                prov["explicit_transform"] = tf_result
+        # Explicit transform rejected — fall through to provenance-only paths.
+        # The rejection reason is recorded in prov["explicit_transform"].
+
     if standard_match is None or not isinstance(standard_match, dict):
         return None, (
             "standard_setting_hsp_mapping_unresolved: "
@@ -92,7 +133,7 @@ def resolve_standard_setting_hsp_label(
     prov["hall_number"] = hall_number
     prov["hall_symbol"] = hall_symbol
 
-    # 2. Attempt standard-setting basis transform using crystallographic
+    # 3. Attempt standard-setting basis transform using crystallographic
     #    data (lattice, VP operation matrices, Hall symbol).
     basis_result = _compute_standard_setting_basis_transform(
         lattice_direct_cart=lattice_direct_cart,
@@ -170,6 +211,123 @@ def resolve_standard_setting_hsp_label(
         reason_parts.append(f"- {transform_result['reason']}")
 
     return None, " ".join(reason_parts) + ".", prov
+
+
+def _validate_explicit_transform(
+    *,
+    transform_matrix: np.ndarray,
+    standard_match: dict[str, object] | None,
+    vp_operations: list[dict[str, object]] | None,
+    tolerance: float = 1e-6,
+) -> dict[str, object]:
+    """Validate an explicit parent-to-standard direct-lattice transform.
+
+    Checks: finite 3×3 real matrix, nonsingular, provenance present,
+    operation-basis verification passes (when VP ops available).
+
+    Returns a dict with ``status`` (``"valid"`` or ``"rejected"``)
+    and a ``rejection_reason`` when rejected.
+    """
+    T = np.asarray(transform_matrix, dtype=float)
+    result: dict[str, object] = {"status": "valid"}
+
+    # Shape check.
+    if T.shape != (3, 3):
+        result["status"] = "rejected"
+        result["rejection_reason"] = (
+            f"transform matrix has shape {T.shape}; expected (3, 3)"
+        )
+        return result
+
+    # Finite check.
+    if not np.all(np.isfinite(T)):
+        result["status"] = "rejected"
+        result["rejection_reason"] = (
+            "transform matrix is not finite (contains NaN or inf)"
+        )
+        return result
+
+    # Nonsingular check.
+    try:
+        T_inv = np.linalg.inv(T)
+    except np.linalg.LinAlgError:
+        result["status"] = "rejected"
+        result["rejection_reason"] = "transform matrix is singular"
+        return result
+
+    det = np.linalg.det(T)
+    if abs(det) < 1e-10:
+        result["status"] = "rejected"
+        result["rejection_reason"] = (
+            f"transform matrix has near-zero determinant ({det:.2e})"
+        )
+        return result
+
+    result["determinant"] = float(det)
+
+    # Provenance check: standard_match must be present.
+    if not isinstance(standard_match, dict):
+        result["status"] = "rejected"
+        result["rejection_reason"] = (
+            "explicit transform provided without standard group "
+            "match provenance"
+        )
+        return result
+
+    # Operation-basis verification (when VP ops available).
+    if vp_operations is not None:
+        vp_ids = {
+            int(op_id)
+            for op_id in standard_match.get("operation_ids", [])
+            if isinstance(op_id, (int, float))
+        }
+        parent_rotations: list[np.ndarray] = []
+        for op in vp_operations:
+            if not isinstance(op, dict):
+                continue
+            oid_raw = op.get("operation_id")
+            if oid_raw is None:
+                continue
+            try:
+                oid = int(oid_raw)
+            except (TypeError, ValueError):
+                continue
+            if oid not in vp_ids:
+                continue
+            rot = op.get("rotation_frac")
+            if rot is None:
+                continue
+            parent_rotations.append(np.asarray(rot, dtype=float))
+
+        if parent_rotations:
+            hall_number = standard_match.get("hall_number")
+            if isinstance(hall_number, int) and not isinstance(hall_number, bool):
+                try:
+                    import spglib
+                    std_sym = spglib.get_symmetry_from_database(int(hall_number))
+                except Exception:
+                    std_sym = None
+                if std_sym is not None:
+                    std_rotations = [
+                        np.asarray(r, dtype=float)
+                        for r in std_sym["rotations"]
+                    ]
+                    vf = _verify_operation_basis(
+                        parent_rotations=parent_rotations,
+                        std_rotations=std_rotations,
+                        transform_matrix=T,
+                        tolerance=tolerance,
+                    )
+                    result["operation_basis_verification"] = vf
+                    if vf.get("status") != "passed":
+                        result["status"] = "rejected"
+                        result["rejection_reason"] = (
+                            "operation-basis verification failed: "
+                            f"{vf.get('reason', 'unknown')}"
+                        )
+                        return result
+
+    return result
 
 
 def _reconstruct_subgroup_standard_cell(

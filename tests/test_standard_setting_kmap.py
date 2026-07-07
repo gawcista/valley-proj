@@ -267,6 +267,117 @@ def test_operation_basis_verification_does_not_round_away_shear():
     assert result["unmatched_count"] == 1
 
 
+# ---------------------------------------------------------------------------
+# Explicit transform source interface tests
+# ---------------------------------------------------------------------------
+
+def test_explicit_transform_resolves_synthetic_label():
+    """Valid explicit transform maps k-point to correct HSP label."""
+    T = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=float)  # identity
+    # k_frac = (0.5, 0.0, 0.0) in parent basis
+    # After identity transform: same coordinates → matches "M" in P3 table
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.5, 0.0, 0.0]),
+        table=_table_p3(),
+        standard_match={
+            "number": 143, "international_short": "P3",
+            "hall_number": 143, "hall_symbol": "P 3",
+            "operation_ids": [0, 1, 2],
+        },
+        parent_to_standard_direct_transform=T,
+    )
+    assert label == "M"
+    assert blocker is None
+    assert prov["direct_match_succeeded"] is True  # identity transform = direct
+
+
+def test_explicit_transform_resolves_hsp_via_transform():
+    """Explicit transform maps non-matching k_frac to a valid HSP label."""
+    # k_frac = (0.1, 0.2, 0.0) does NOT match any P3 HSP directly.
+    # The identity transform leaves it at (0.1, 0.2, 0.0) — still no match.
+    # A valid identity transform should be accepted but not resolve this k.
+    T_id = np.eye(3)
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.1, 0.2, 0.0]),
+        table=_table_p3(),
+        standard_match={
+            "number": 143, "international_short": "P3",
+            "hall_number": 143, "hall_symbol": "P 3",
+            "operation_ids": [0, 1, 2],
+        },
+        parent_to_standard_direct_transform=T_id,
+    )
+    # Identity transform doesn't help with an arbitrary k-point.
+    assert label is None
+    assert blocker is not None
+    # But the explicit transform was validated.
+    tf = prov.get("explicit_transform", {})
+    assert tf.get("status") == "valid"
+
+
+def test_singular_transform_is_rejected():
+    """Singular (zero-determinant) transform is rejected before k-point use."""
+    T_bad = np.array([[1, 0, 0], [0, 0, 0], [0, 0, 1]], dtype=float)
+    # Use a non-matching k_frac so direct match doesn't catch it.
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.123, 0.456, 0.0]),
+        table=_table_p3(),
+        standard_match={"operation_ids": [0, 1]},
+        parent_to_standard_direct_transform=T_bad,
+    )
+    assert label is None
+    tf = prov.get("explicit_transform", {})
+    assert tf.get("status") == "rejected"
+    assert "singular" in tf.get("rejection_reason", "").lower()
+
+
+def test_nonfinite_transform_is_rejected():
+    """Transform containing NaN or inf is rejected."""
+    T_bad = np.array([[1, 0, 0], [0, np.nan, 0], [0, 0, 1]], dtype=float)
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.123, 0.456, 0.0]),
+        table=_table_p3(),
+        standard_match={"operation_ids": [0, 1]},
+        parent_to_standard_direct_transform=T_bad,
+    )
+    assert label is None
+    tf = prov.get("explicit_transform", {})
+    assert tf.get("status") == "rejected"
+
+
+def test_centered_setting_without_explicit_transform_remains_blocked():
+    """Without explicit transform, centered settings stay unresolved."""
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.123, 0.456, 0.0]),
+        table=_table_c2(),
+        standard_match={
+            "number": 5, "international_short": "C2",
+            "hall_number": 9, "hall_symbol": "C 2y",
+            "operation_ids": [0, 4],
+        },
+    )
+    assert label is None
+    assert blocker is not None
+    assert "standard_setting_hsp_mapping_unresolved" in blocker
+
+
+def test_override_still_blocked_when_kmap_unresolved():
+    """Manual HSP override cannot bypass unresolved standard-setting mapping."""
+    from valleyscope.workflows.analyze_hsp import _resolve_generic_irrep_hsp_label
+
+    class _T:
+        number = 5; name = "C2"; spinor = True
+        def match_kpoint_label(self, k, tolerance=1e-6): return None
+
+    label, blocker = _resolve_generic_irrep_hsp_label(
+        table=_T(), k_frac=np.array([0.123, 0.456, 0.0]),
+        override_label="M",
+        standard_match={"number": 5, "hall_number": 9, "hall_symbol": "C 2y"},
+    )
+    assert label is None
+    assert blocker is not None
+    assert "cannot be applied" in blocker
+
 def test_basis_transform_matrix_requires_operation_verification(monkeypatch):
     """A transform matrix is not accepted without operation-basis validation."""
     import valleyscope.analysis.standard_setting_kmap as kmap
