@@ -45,7 +45,6 @@ def build_valley_irrep_matching_report(
     resolved_subspace_groups: (
         Mapping[str, Mapping[str, Mapping[str, object]]] | None
     ) = None,
-    identity_only_entries: list[Mapping[str, Any]] | None = None,
 ) -> dict[str, object]:
     """Build per-(kpoint, valley) irrep matching results.
 
@@ -63,7 +62,6 @@ def build_valley_irrep_matching_report(
         or source_operation_maps is not None
         or source_payload_provenance is not None
         or (source_payload_blocked_rows is not None and len(source_payload_blocked_rows) > 0)
-        or (identity_only_entries is not None and len(identity_only_entries) > 0)
     )
 
     if irrep_workflow_decisions is None:
@@ -178,49 +176,6 @@ def build_valley_irrep_matching_report(
                 hsp_ids_fl = hsp_lg_fl or vp_ids_fl
                 if hsp_lg_fl:
                     vp_ids_fl = [op for op in vp_ids_fl if op in hsp_lg_fl]
-                # --- Identity-only G_k^(a) detection ---
-                identity_ids = [
-                    op_id
-                    for op_id in vp_ids_fl
-                    if isinstance(op_map, Mapping) and op_map.get(op_id) == 1
-                ]
-                if len(vp_ids_fl) == 1 and identity_ids == vp_ids_fl:
-                    identity_character = computed_fl.get(identity_ids[0])
-                    local_dimension = (
-                        int(round(identity_character.real))
-                        if identity_character is not None
-                        and abs(identity_character.imag) <= 1e-6
-                        and identity_character.real > 0
-                        else None
-                    )
-                    generic_matches.setdefault(kp_name, {})[v_name] = {
-                        "matching_status": "identity_only_not_irrep_distinguishing",
-                        "matching_strategy": "bilbao_restricted_character",
-                        "irrep_multiplicities": {},
-                        "source_operation_map": dict(op_map),
-                        "valley_preserving_operation_ids": list(vp_ids_fl),
-                        "hsp_little_group_operation_ids": (
-                            hsp_ids_fl if hsp_ids_fl else [0]
-                        ),
-                        "diagnostic_only": True,
-                        "reason": (
-                            "identity_only_Gka: local valley-preserving "
-                            "subgroup is identity-only and cannot "
-                            "distinguish irreps"
-                        ),
-                        "workflow_path": path_wf,
-                        "readiness_level": readiness,
-                        "subspace_group_candidate": (
-                            _generic_group_identity(sg=sg_fl, ssg=ssg_fl)
-                        ),
-                        "subspace_space_group": (
-                            dict(ssg_fl) if isinstance(ssg_fl, Mapping)
-                            else {}
-                        ),
-                        "local_representation_dimension": local_dimension,
-                        **source_provenance,
-                    }
-                    continue
                 if not vp_ids_fl or not computed_fl or not isinstance(op_map, Mapping) or not op_map:
                     generic_matches.setdefault(kp_name, {})[v_name] = {
                         "matching_status": "blocked",
@@ -332,42 +287,6 @@ def build_valley_irrep_matching_report(
                 "reason": reason,
                 "source_payload_status": "blocked",
                 "source_payload_provenance": provenance,
-                **({"subspace_space_group": dict(ssg)}
-                   if isinstance(ssg, Mapping) else {}),
-            }
-
-    # --- Identity-only G_k^(a) entries (dedicated path) ---
-    # Not blocked — identity-only is a valid local representation with a
-    # trivial subgroup.  No restricted-character matching is attempted.
-    if identity_only_entries:
-        for row in identity_only_entries:
-            if not isinstance(row, Mapping):
-                continue
-            kp_name = row.get("kpoint")
-            v_name = row.get("valley")
-            if not isinstance(kp_name, str) or not isinstance(v_name, str):
-                continue
-            existing = generic_matches.get(kp_name, {}).get(v_name)
-            if existing is not None:
-                continue
-            ssg = row.get("subspace_space_group")
-            generic_matches.setdefault(kp_name, {})[v_name] = {
-                "matching_status": str(row.get("matching_status", "")),
-                "matching_strategy": str(row.get("matching_strategy", "")),
-                "irrep_multiplicities": dict(row.get("irrep_multiplicities", {}))
-                if isinstance(row.get("irrep_multiplicities"), Mapping)
-                else {},
-                "local_representation_dimension": row.get(
-                    "local_representation_dimension"
-                ),
-                "valley_preserving_operation_ids": _operation_ids_from_value(
-                    row.get("valley_preserving_operation_ids", [])
-                ),
-                "hsp_little_group_operation_ids": _operation_ids_from_value(
-                    row.get("hsp_little_group_operation_ids", [])
-                ),
-                "diagnostic_only": bool(row.get("diagnostic_only", False)),
-                "reason": str(row.get("reason", "")) if row.get("reason") else "",
                 **({"subspace_space_group": dict(ssg)}
                    if isinstance(ssg, Mapping) else {}),
             }

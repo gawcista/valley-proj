@@ -1632,13 +1632,13 @@ def test_valley_changing_op_excluded_from_gka():
     assert 5 not in gm["valley_preserving_operation_ids"]
 
 
-def test_identity_only_gka_no_false_label():
-    """Identity-only G_k^(a) is valid, not a numerical failure, no false irrep."""
+def test_identity_only_gka_table_driven_unique_match():
+    """Identity-only G_k^(a) uses restricted-character matcher; unique source irrep → matched."""
     from valleyscope.analysis.valley_irrep_matching import (
         build_valley_irrep_matching_report,
     )
     decisions = {"by_kpoint": {"MM": {"K_valley": {
-        "readiness_level": "blocked", "workflow_path": "blocked",
+        "readiness_level": "trusted", "workflow_path": "direct_qcut",
     }}}}
     sa_report = {"by_kpoint": {"MM": {"valley_preserving_subspaces": [{
         "orbit": ["K_valley"],
@@ -1667,14 +1667,13 @@ def test_identity_only_gka_no_false_label():
         }}},
     )
     gm = report.get("generic_matches_by_kpoint", {}).get("MM", {}).get("K_valley", {})
-    # Identity-only: valid local representation.
+    # Identity-only: valid local representation, table-driven matching.
     assert gm.get("valley_preserving_operation_ids") == [0]
     assert gm.get("hsp_little_group_operation_ids") == [0]
-    # Explicit identity-only status, not a generic "blocked".
-    assert gm.get("matching_status") == "identity_only_not_irrep_distinguishing"
-    assert gm.get("diagnostic_only") is True
-    assert "identity_only_Gka" in str(gm.get("reason", ""))
-    assert gm.get("local_representation_dimension") == 2
+    # Unique source irrep 'A' restricts to {E: 1}, matched by the matcher.
+    assert gm.get("matching_status") == "matched"
+    assert gm.get("irrep_multiplicities") == {"A": 2}
+    assert gm.get("diagnostic_only") is False
     assert gm["subspace_space_group"]["valley_changing_operation_ids"] == [5]
 
 

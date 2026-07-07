@@ -536,7 +536,6 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     src_chars: dict[str, dict[str, dict[str, dict[int, complex]]]] = {}
     src_op_maps: dict[str, dict[str, dict[int, int]]] = {}
     src_provenance: dict[str, dict[str, dict[str, Any]]] = {}
-    identity_only_entries: list[dict[str, Any]] = []
     by_kp = symmetry_adapted_valley_report.get("by_kpoint", {}) if isinstance(symmetry_adapted_valley_report, dict) else {}
 
     if isinstance(by_kp, dict):
@@ -629,52 +628,6 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                         ),
                     })
                     continue
-                if not non_identity_vp:
-                    # Identity-only G_k^(a): valid local representation.
-                    # Extract the identity character/representation dimension
-                    # from valley-preserving character diagnostics; validate
-                    # integer/reality before recording.
-                    local_dim = _identity_representation_dimension(
-                        vs=vs,
-                        v_name=str(v_name),
-                        identity_id=identity_id,
-                    )
-                    identity_only_entries.append({
-                        "kpoint": kp_name,
-                        "valley": v_name,
-                        "matching_status": (
-                            "identity_only_not_irrep_distinguishing"
-                        ),
-                        "matching_strategy": "identity_only_valley_preserving_subgroup",
-                        "irrep_multiplicities": {},
-                        "local_representation_dimension": local_dim,
-                        "subspace_space_group": (
-                            _resolved_subspace_group_context(
-                                standard_match=(
-                                    standard_match
-                                    if isinstance(standard_match, dict)
-                                    else {}
-                                ),
-                                local_gka_operation_ids=list(vp_ids),
-                            )
-                            if isinstance(standard_match, dict) and standard_match
-                            else None
-                        ),
-                        "valley_preserving_operation_ids": list(vp_ids),
-                        "hsp_little_group_operation_ids": (
-                            list(hsp_lg_ids)
-                            if isinstance(hsp_lg_ids, list)
-                            else list(vp_ids)
-                        ),
-                        "diagnostic_only": False,
-                        "reason": (
-                            "G_k^(a) contains only the identity operation; "
-                            "no non-identity valley-preserving operation "
-                            "in the HSP little group"
-                        ),
-                    })
-                    continue
-
                 k_frac_raw = kpoint_frac.get(kp_name)
                 override_label = (
                     override_hsp.get(kp_name, {}).get(v_name)
@@ -826,9 +779,6 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         source_payload_blocked_rows=generic_source_blocked_rows,
         resolved_subspace_groups=(
             resolved_subspace_groups if resolved_subspace_groups else None
-        ),
-        identity_only_entries=(
-            identity_only_entries if identity_only_entries else None
         ),
     )
 

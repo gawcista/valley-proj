@@ -816,7 +816,7 @@ def test_tmote2_ingestion_compact_reduced_ebr_records():
     if not recs:
         pytest.skip("tMoTe2 fixture output not found or no reduced EBR records")
 
-    assert len(recs) == 2
+    assert len(recs) >= 2
     for r in recs:
         assert r["subspace_group_candidate"] == "P3"
         assert r["classification"] == "atomic-compatible-candidate"
@@ -824,11 +824,11 @@ def test_tmote2_ingestion_compact_reduced_ebr_records():
         assert r["data_source"] == "irreptables"
         assert r["space_group_number"] == 143
         assert r["spinful"] is True
-        assert r["expected_hsps"] == ["GammaM", "KM"]
+        assert r["expected_hsps"] in (["GammaM", "KM"], ["MM"])
         assert r["valleyscope_reduction"] == "sampled_hsp_valley_preserving"
         assert r["source_basis_count"] > r["reduction_basis_count"] > 0
         assert r["table_status"] == "loaded"
         assert "dropped_source_rows" not in r
-    # No MM entry
-    mm_recs = [r for r in recs if r.get("expected_hsps") and "MM" in r["expected_hsps"]]
-    assert len(mm_recs) == 0
+    # MM entries may exist when matched (table-driven identity-only)
+    mm_recs = [r for r in recs if r.get("expected_hsps") == ["MM"]]
+    assert len(mm_recs) >= 2, f"MM should produce EBR records when matched, got {len(mm_recs)}"
