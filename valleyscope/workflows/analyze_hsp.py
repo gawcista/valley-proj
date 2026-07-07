@@ -168,20 +168,36 @@ def _resolve_generic_irrep_hsp_label(
     table,
     k_frac: np.ndarray | None,
     override_label: str | None,
+    standard_match: dict[str, object] | None = None,
 ) -> tuple[str | None, str | None]:
-    coordinate_label = (
-        table.match_kpoint_label(np.asarray(k_frac, dtype=float))
-        if k_frac is not None
-        else None
+    """Resolve a standard-setting Bilbao HSP label.
+
+    First tries direct coordinate match; if that fails, attempts
+    standard-setting HSP k-coordinate mapping using crystallographic
+    setting provenance from the per-valley standard group match.
+    """
+    from valleyscope.analysis.standard_setting_kmap import (
+        resolve_standard_setting_hsp_label,
     )
-    if override_label is not None and override_label != coordinate_label:
-        return None, (
-            f"generic_irrep_source HSP override {override_label!r} disagrees "
-            f"with coordinate-matched HSP {coordinate_label!r}"
+    if k_frac is not None:
+        label, blocker, prov = resolve_standard_setting_hsp_label(
+            k_frac=np.asarray(k_frac, dtype=float),
+            table=table,
+            standard_match=standard_match,
         )
-    label = override_label or coordinate_label
+    else:
+        label, blocker, prov = None, (
+            "no_source_hsp_label: k_frac is None"
+        ), {}
+    if override_label is not None:
+        if label is not None and override_label != label:
+            return None, (
+                f"generic_irrep_source HSP override {override_label!r} "
+                f"disagrees with resolved HSP {label!r}"
+            )
+        label = override_label
     if label is None:
-        return None, (
+        return None, blocker or (
             "no_source_hsp_label: could not determine Bilbao HSP label "
             "for this kpoint"
         )
@@ -635,6 +651,11 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                         if k_frac_raw is not None else None
                     ),
                     override_label=override_label,
+                    standard_match=(
+                        standard_match
+                        if isinstance(standard_match, dict)
+                        else None
+                    ),
                 )
                 if hsp_blocker is not None:
                     # Standard-setting HSP mapping unresolved: the

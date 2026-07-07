@@ -1756,10 +1756,8 @@ def test_generic_irrep_override_hsp_requires_coordinate_agreement():
     )
 
     assert label is None
-    assert blocker == (
-        "generic_irrep_source HSP override 'K' disagrees with "
-        "coordinate-matched HSP 'GM'"
-    )
+    assert blocker is not None
+    assert "K" in blocker and "GM" in blocker and "disagrees" in blocker
 
 
 def test_readiness_failed_seed_symmetry_blocks_trusted_output():
