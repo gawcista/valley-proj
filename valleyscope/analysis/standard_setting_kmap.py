@@ -140,9 +140,17 @@ def _attempt_setting_transform(
 ) -> dict[str, object]:
     """Attempt to transform k_frac using setting provenance.
 
-    Currently implements a general provenance-documenting structure.
-    Future work: use spglib basis-transformation matrices or
-    Hall-symbol-directed centering transforms.
+    Currently implements a provenance-documenting structure.  Future
+    work: use spglib basis-transformation matrices or Hall-symbol-
+    directed centering transforms to map the parent-setting k_frac
+    into the standard-setting reciprocal basis.
+
+    The Hall symbol classifies the standard setting by centering
+    type.  Primitive settings (P) share the same Bravais lattice
+    class as the parent cell; centered settings (C, I, F, R) and
+    rhombohedral settings (R) use a larger conventional cell where
+    the reciprocal lattice differs from the primitive reciprocal
+    lattice.
     """
     result: dict[str, object] = {}
 
@@ -152,10 +160,6 @@ def _attempt_setting_transform(
         )
         return result
 
-    # For primitive settings (Hall symbol starts with P), the
-    # primitive-to-standard transform is the identity in the
-    # spglib convention.  Centered settings (C, I, F, R) need
-    # centering-aware reciprocal-basis transforms.
     centering = hall_symbol[0] if hall_symbol else ""
     if centering == "P":
         result["reason"] = (
@@ -163,25 +167,23 @@ def _attempt_setting_transform(
             "parent-to-standard lattice vectors both primitive; "
             "the difference is in Bravais type/orientation, "
             "not in centering.  A Bravais-type change requires "
-            "the full direct-lattice transformation, which spglib "
-            "does not provide for subgroup-only standard matches."
+            "the full direct-lattice transformation, which is not "
+            "available for subgroup-only standard matches."
         )
     elif centering in ("C", "I", "F", "R"):
-        # Centered conventional cell → need centering transform.
-        # For C-centered monoclinic (SG 5), the C-centering adds
-        # (1/2, 1/2, 0) in the direct basis.  In the reciprocal
-        # basis, this modifies the allowed k-vectors.
         result["reason"] = (
-            f"centered setting {hall_symbol}; the C-centered "
-            "conventional reciprocal lattice differs from the "
-            "parent primitive reciprocal lattice.  A direct-to-"
-            "centered reciprocal transform requires the full "
-            "Bravais-type mapping, which is not yet implemented."
+            f"centered setting (Hall {hall_symbol}); "
+            "the conventional reciprocal lattice for a "
+            f"{centering}-centered cell differs from the parent "
+            "primitive reciprocal lattice.  The transformation "
+            "requires the full direct-to-conventional "
+            "reciprocal-basis mapping, which is not yet "
+            "implemented."
         )
     else:
         result["reason"] = (
             f"unrecognised Hall symbol centering '{centering}' "
-            f"({hall_symbol})"
+            f"(Hall {hall_symbol})"
         )
 
     if sg_number is not None:

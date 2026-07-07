@@ -190,12 +190,21 @@ def _resolve_generic_irrep_hsp_label(
             "no_source_hsp_label: k_frac is None"
         ), {}
     if override_label is not None:
-        if label is not None and override_label != label:
+        if label is None:
+            # Override cannot bypass an unresolved standard-setting mapping.
+            return None, (
+                f"generic_irrep_source HSP override {override_label!r} "
+                f"cannot be applied: "
+                f"standard_setting_hsp_mapping_unresolved; "
+                f"no standard-setting HSP label was resolved for this "
+                f"k-point — {blocker or 'mapping failed'}"
+            )
+        if override_label != label:
             return None, (
                 f"generic_irrep_source HSP override {override_label!r} "
                 f"disagrees with resolved HSP {label!r}"
             )
-        label = override_label
+        # Override confirms the resolved label — pass through.
     if label is None:
         return None, blocker or (
             "no_source_hsp_label: could not determine Bilbao HSP label "
@@ -658,11 +667,9 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     ),
                 )
                 if hsp_blocker is not None:
-                    # Standard-setting HSP mapping unresolved: the
-                    # valley-projected subspace SG is resolved, but
-                    # the parent-setting k_frac does not correspond
-                    # to a standard-setting Bilbao HSP label for the
-                    # subspace SG.  Record explicit provenance.
+                    # Standard-setting HSP mapping unresolved.
+                    # Preserve the detailed blocker and provenance
+                    # from the kmap resolver.
                     ssg_context = _resolved_subspace_group_context(
                         standard_match=(
                             standard_match
@@ -671,24 +678,25 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                         ),
                         local_gka_operation_ids=list(vp_ids),
                     )
+                    # Collect kmap provenance from the resolver output.
+                    kmap_prov: dict[str, object] = {
+                        "subspace_sg_number": ssg_context.get(
+                            "candidate_space_group_number"
+                        ),
+                        "subspace_sg_symbol": ssg_context.get(
+                            "candidate_space_group_symbol"
+                        ),
+                    }
+                    if isinstance(ssg_context.get("hall_number"), int):
+                        kmap_prov["hall_number"] = ssg_context["hall_number"]
+                    if ssg_context.get("hall_symbol"):
+                        kmap_prov["hall_symbol"] = ssg_context["hall_symbol"]
                     generic_source_blocked_rows.append({
                         "kpoint": kp_name,
                         "valley": v_name,
-                        "reason": (
-                            "standard_setting_hsp_mapping_unresolved: "
-                            "valley-projected subspace SG "
-                            f"{ssg_context.get('candidate_space_group_symbol', '?')} "
-                            f"(No. {ssg_context.get('candidate_space_group_number', '?')}) "
-                            "is resolved, but the sampled moire k-point "
-                            "fractional coordinate does not uniquely map to "
-                            "a standard-setting Bilbao HSP label for this "
-                            "subspace group.  The HSP label matched in the "
-                            "parent setting is insufficient to select a "
-                            "source HSP in the irreptables standard setting."
-                        ),
+                        "reason": hsp_blocker,
                         "subspace_space_group": ssg_context,
                         "valley_preserving_operation_ids": list(vp_ids),
-                        # Include k_frac and SG context as evidence.
                         "parent_k_frac": (
                             list(k_frac_raw)
                             if k_frac_raw is not None else None
@@ -696,6 +704,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                         "source_table_sg_number": int(table.number),
                         "source_table_name": str(table.name),
                         "source_table_spinor": bool(table.spinor),
+                        "standard_setting_hsp_mapping": kmap_prov,
                     })
                     continue
 

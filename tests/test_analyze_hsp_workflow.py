@@ -2072,3 +2072,65 @@ def test_spinful_p3_analyze_hsp_unmocked_feasibility(tmp_path):
     # Standard outputs exist.
     assert outputs["valley_summary_json"].exists()
     assert outputs["valley_ebr_export_bundle_json"].exists()
+
+
+# ---------------------------------------------------------------------------
+# Standard-setting HSP k-map regression tests
+# ---------------------------------------------------------------------------
+
+def test_hsp_override_does_not_bypass_unresolved_standard_setting_mapping():
+    """Override must not silently accept an HSP when k-map is unresolved."""
+    import numpy as np
+    from valleyscope.workflows.analyze_hsp import _resolve_generic_irrep_hsp_label
+
+    class _NoMatchTable:
+        number = 5
+        name = "C2"
+        spinor = True
+        def match_kpoint_label(self, k, tolerance=1e-6):
+            return None
+
+    label, blocker = _resolve_generic_irrep_hsp_label(
+        table=_NoMatchTable(),
+        k_frac=np.array([0.123, 0.456, 0.0]),
+        override_label="M",
+        standard_match={
+            "number": 5,
+            "international_short": "C2",
+            "hall_number": 9,
+            "hall_symbol": "C 2y",
+        },
+    )
+    assert label is None
+    assert blocker is not None
+    assert "cannot be applied" in blocker
+    assert "standard_setting_hsp_mapping_unresolved" in blocker
+
+
+def test_override_agrees_with_resolved_label():
+    """Override that agrees with resolved label passes through."""
+    import numpy as np
+    from valleyscope.workflows.analyze_hsp import _resolve_generic_irrep_hsp_label
+
+    class _GMTable:
+        number = 143
+        name = "P3"
+        spinor = True
+        def match_kpoint_label(self, k, tolerance=1e-6):
+            delta = k - np.array([0.0, 0.0, 0.0])
+            delta -= np.rint(delta)
+            if np.linalg.norm(delta) <= 1e-6:
+                return "GM"
+            return None
+
+    label, blocker = _resolve_generic_irrep_hsp_label(
+        table=_GMTable(),
+        k_frac=np.array([0.0, 0.0, 0.0]),
+        override_label="GM",
+        standard_match={
+            "number": 143,
+            "international_short": "P3",
+        },
+    )
+    assert label == "GM"
+    assert blocker is None
