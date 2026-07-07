@@ -220,3 +220,42 @@ def test_resolver_includes_basis_transform_in_provenance():
     assert bt is not None
     assert bt.get("status") == "unavailable"
     assert "reason" in bt
+
+
+def test_basis_transform_matrix_requires_operation_verification(monkeypatch):
+    """A transform matrix is not accepted without operation-basis validation."""
+    import valleyscope.analysis.standard_setting_kmap as kmap
+
+    class _SecondCallTable:
+        def __init__(self):
+            self.calls = 0
+
+        def match_kpoint_label(self, k_frac, *, tolerance=1e-6):
+            self.calls += 1
+            return "M" if self.calls > 1 else None
+
+    monkeypatch.setattr(
+        kmap,
+        "_compute_standard_setting_basis_transform",
+        lambda **kwargs: {
+            "status": "accepted",
+            "transform_matrix": np.eye(3).tolist(),
+        },
+    )
+
+    label, blocker, prov = kmap.resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.123, 0.456, 0.0]),
+        table=_SecondCallTable(),
+        standard_match={
+            "number": 143,
+            "international_short": "P3",
+            "hall_number": 143,
+            "hall_symbol": "P 3",
+            "operation_ids": [0, 1],
+        },
+    )
+
+    assert label is None
+    assert blocker is not None
+    assert prov["basis_transform"]["status"] == "accepted"
+    assert "operation_basis_verification" not in prov["basis_transform"]

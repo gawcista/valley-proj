@@ -101,11 +101,20 @@ def resolve_standard_setting_hsp_label(
     )
     prov["basis_transform"] = basis_result
 
-    if basis_result.get("transform_matrix") is not None:
+    basis_verification = basis_result.get("operation_basis_verification")
+    basis_verification_passed = (
+        isinstance(basis_verification, dict)
+        and basis_verification.get("status") == "passed"
+    )
+    if (
+        basis_result.get("status") == "accepted"
+        and basis_verification_passed
+        and basis_result.get("transform_matrix") is not None
+    ):
         T = np.asarray(basis_result["transform_matrix"], dtype=float)
         # Transform k_frac from parent reciprocal basis to standard setting.
         # The reciprocal transform is the transpose of the inverse of the
-        # direct-lattice transform: k_std = T^(-T) · k_parent.
+        # direct-lattice transform: k_std = T^(-T) * k_parent.
         try:
             T_inv = np.linalg.inv(T)
             transformed_k = k_frac @ T_inv.T
@@ -266,13 +275,13 @@ def _compute_standard_setting_basis_transform(
             f"centered conventional setting (Hall {hall_symbol}); "
             f"the {centering}-centered conventional reciprocal lattice "
             "differs from the parent primitive reciprocal lattice. "
-            "The direct-lattice transformation from the parent "
-            "reciprocal basis to the conventional centered reciprocal "
-            "basis requires a complete standard-setting cell "
-            "determination (lattice parameters + Bravais type + "
-            "centering vectors), which spglib does not provide for "
-            "subgroup-only standard matches because the parent cell's "
-            "full symmetry differs from the valley-preserving subgroup."
+            "The reciprocal-basis transformation from the parent "
+            "primitive reciprocal basis to the conventional centered "
+            "reciprocal basis requires the corresponding standard-setting "
+            "direct cell (lattice parameters + Bravais type + centering "
+            "vectors), which spglib does not provide for subgroup-only "
+            "standard matches because the parent cell's full symmetry "
+            "differs from the valley-preserving subgroup."
         )
         return result
 
