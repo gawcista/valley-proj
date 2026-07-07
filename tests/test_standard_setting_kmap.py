@@ -271,11 +271,9 @@ def test_operation_basis_verification_does_not_round_away_shear():
 # Explicit transform source interface tests
 # ---------------------------------------------------------------------------
 
-def test_explicit_transform_resolves_synthetic_label():
-    """Valid explicit transform maps k-point to correct HSP label."""
-    T = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=float)  # identity
-    # k_frac = (0.5, 0.0, 0.0) in parent basis
-    # After identity transform: same coordinates → matches "M" in P3 table
+def test_explicit_transform_not_needed_when_direct_match_succeeds():
+    """Direct HSP coordinate match short-circuits before explicit transform use."""
+    T = np.eye(3)
     label, blocker, prov = resolve_standard_setting_hsp_label(
         k_frac=np.array([0.5, 0.0, 0.0]),
         table=_table_p3(),
@@ -288,31 +286,32 @@ def test_explicit_transform_resolves_synthetic_label():
     )
     assert label == "M"
     assert blocker is None
-    assert prov["direct_match_succeeded"] is True  # identity transform = direct
+    assert prov["direct_match_succeeded"] is True
+    assert "explicit_transform" not in prov
 
 
-def test_explicit_transform_resolves_hsp_via_transform():
-    """Explicit transform maps non-matching k_frac to a valid HSP label."""
-    # k_frac = (0.1, 0.2, 0.0) does NOT match any P3 HSP directly.
-    # The identity transform leaves it at (0.1, 0.2, 0.0) — still no match.
-    # A valid identity transform should be accepted but not resolve this k.
-    T_id = np.eye(3)
+def test_explicit_transform_resolves_nonmatching_parent_kpoint():
+    """Explicit direct transform uses k_std = T^(-T) k_parent."""
+    # T maps direct coordinates x_parent -> x_std.  For reciprocal
+    # coordinates, k_std = T^(-T) k_parent.  This transform maps
+    # parent k=(1/4,0,0) to standard k=(1/2,0,0), i.e. the P3 M label.
+    T = np.diag([0.5, 1.0, 1.0])
     label, blocker, prov = resolve_standard_setting_hsp_label(
-        k_frac=np.array([0.1, 0.2, 0.0]),
+        k_frac=np.array([0.25, 0.0, 0.0]),
         table=_table_p3(),
         standard_match={
             "number": 143, "international_short": "P3",
             "hall_number": 143, "hall_symbol": "P 3",
             "operation_ids": [0, 1, 2],
         },
-        parent_to_standard_direct_transform=T_id,
+        parent_to_standard_direct_transform=T,
     )
-    # Identity transform doesn't help with an arbitrary k-point.
-    assert label is None
-    assert blocker is not None
-    # But the explicit transform was validated.
+    assert label == "M"
+    assert blocker is None
     tf = prov.get("explicit_transform", {})
     assert tf.get("status") == "valid"
+    assert prov["explicit_transformed_match_succeeded"] is True
+    np.testing.assert_allclose(prov["transformed_k_frac"], [0.5, 0.0, 0.0])
 
 
 def test_singular_transform_is_rejected():
