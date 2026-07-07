@@ -5,6 +5,7 @@ import numpy as np
 from valleyscope.analysis.standard_setting_kmap import (
     resolve_standard_setting_hsp_label,
     _attempt_setting_transform,
+    _verify_operation_basis,
 )
 
 
@@ -187,8 +188,8 @@ def test_basis_transform_no_lattice_returns_unavailable():
     assert "lattice" in result.get("reason", "")
 
 
-def test_basis_transform_centered_setting_triggers_reconstruction():
-    """Subgroup cell reconstruction is attempted for centered settings."""
+def test_basis_transform_centered_setting_requires_explicit_cell_transform():
+    """Centered settings cannot be accepted from rotation axes alone."""
     from valleyscope.analysis.standard_setting_kmap import (
         _compute_standard_setting_basis_transform,
     )
@@ -202,9 +203,10 @@ def test_basis_transform_centered_setting_triggers_reconstruction():
             "operation_ids": [0, 4],
         },
     )
-    # Reconstruction was attempted; transform accepted only with verification.
-    assert result["status"] in ("accepted", "rejected", "unavailable")
-    assert "operation_basis_verification" in result
+    assert result["status"] == "unavailable"
+    assert "transform_matrix" not in result
+    assert result["operation_basis_verification"]["status"] == "not_attempted"
+    assert "rotation matrices alone" in result["reason"]
 
 
 def test_resolver_includes_basis_transform_in_provenance():
@@ -225,8 +227,7 @@ def test_resolver_includes_basis_transform_in_provenance():
 
 
 def test_hexagonal_lattice_subgroup_reconstruction_requires_verification():
-    """Subgroup reconstruction may be rejected when VP ops don't match standard ops
-    after transformation (e.g., hexagonal lattice with C2 subgroup)."""
+    """Centered subgroup mapping stays blocked without an explicit cell transform."""
     from valleyscope.analysis.standard_setting_kmap import (
         _compute_standard_setting_basis_transform,
     )
@@ -242,8 +243,28 @@ def test_hexagonal_lattice_subgroup_reconstruction_requires_verification():
             "operation_ids": [0, 4],
         },
     )
-    # With hexagonal lattice, the operation-basis check should run.
-    assert "operation_basis_verification" in result
+    assert result["status"] == "unavailable"
+    assert result["operation_basis_verification"]["status"] == "not_attempted"
+    assert "centered" in result["operation_basis_verification"]["reason"]
+
+
+def test_operation_basis_verification_does_not_round_away_shear():
+    """A sheared transform that only matches after rounding must fail."""
+    rot = np.diag([-1.0, 1.0, -1.0])
+    sheared_transform = np.array([
+        [1.0, 0.2, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ])
+
+    result = _verify_operation_basis(
+        parent_rotations=[rot],
+        std_rotations=[rot],
+        transform_matrix=sheared_transform,
+    )
+
+    assert result["status"] == "failed"
+    assert result["unmatched_count"] == 1
 
 
 def test_basis_transform_matrix_requires_operation_verification(monkeypatch):

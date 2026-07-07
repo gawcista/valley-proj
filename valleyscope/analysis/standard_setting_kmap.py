@@ -201,6 +201,24 @@ def _reconstruct_subgroup_standard_cell(
         )
         return result
     hall_number = int(hall_number)
+    hall_symbol = str(standard_match.get("hall_symbol") or "").strip()
+    centering = hall_symbol[0] if hall_symbol else ""
+    if centering in {"A", "B", "C", "F", "I", "R"}:
+        result["status"] = "unavailable"
+        result["operation_basis_verification"] = {
+            "status": "not_attempted",
+            "reason": (
+                "centered/rhombohedral standard setting requires an explicit "
+                "parent-to-standard direct-lattice transformation, including "
+                "centering; rotation-axis alignment alone is underdetermined"
+            ),
+        }
+        result["reason"] = (
+            "standard-setting basis transform is unavailable: "
+            "centered/rhombohedral conventional reciprocal coordinates cannot "
+            "be reconstructed from valley-preserving rotation matrices alone"
+        )
+        return result
 
     # 1. Load standard-setting operations from spglib database.
     try:
@@ -223,7 +241,6 @@ def _reconstruct_subgroup_standard_cell(
         return result
 
     std_rotations = [np.asarray(r, dtype=float) for r in std_sym["rotations"]]
-    std_translations = [np.asarray(t, dtype=float) for t in std_sym["translations"]]
 
     # 2. Collect VP rotation matrices and match by order/type.
     vp_ids = {
@@ -364,13 +381,13 @@ def _align_bases_from_rotation_axes(
 
     Returns T (3×3) or None if the axes are degenerate.
     """
-    # Normalize axes
-    p_axis = parent_axis / np.linalg.norm(parent_axis)
-    s_axis = std_axis / np.linalg.norm(std_axis)
-
     # Check that axes are well-defined (nonzero norm)
     if np.linalg.norm(parent_axis) < 1e-10 or np.linalg.norm(std_axis) < 1e-10:
         return None
+
+    # Normalize axes
+    p_axis = parent_axis / np.linalg.norm(parent_axis)
+    s_axis = std_axis / np.linalg.norm(std_axis)
 
     # For a proper rotation, the axis is preserved.  T maps parent_axis → std_axis.
     # We use Rodrigues' rotation formula to find the rotation that maps one to the
@@ -434,10 +451,9 @@ def _verify_operation_basis(
     unmatched_parent: list[int] = []
     for i, r_p in enumerate(parent_rotations):
         r_transformed = T @ r_p @ T_inv
-        r_transformed_int = np.rint(r_transformed).astype(int)
         found = False
         for j, r_s in enumerate(std_rotations):
-            if np.allclose(r_transformed_int, r_s, atol=tolerance):
+            if np.allclose(r_transformed, r_s, atol=tolerance):
                 matches.append({"parent_index": i, "std_index": j})
                 found = True
                 break
