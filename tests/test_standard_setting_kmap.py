@@ -414,3 +414,93 @@ def test_basis_transform_matrix_requires_operation_verification(monkeypatch):
     assert blocker is not None
     assert prov["basis_transform"]["status"] == "accepted"
     assert "operation_basis_verification" not in prov["basis_transform"]
+
+
+# ---------------------------------------------------------------------------
+# Standard-setting certificate tests
+# ---------------------------------------------------------------------------
+
+def test_direct_match_produces_validated_certificate():
+    """Direct coordinate match produces a validated certificate."""
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.0, 0.0, 0.0]),
+        table=_table_p3(),
+        standard_match={
+            "number": 143, "international_short": "P3",
+            "hall_number": 143, "hall_symbol": "P 3",
+            "operation_ids": [0, 1, 2],
+        },
+    )
+    assert label == "GM"
+    cert = prov.get("standard_setting_certificate")
+    assert cert is not None
+    assert cert["validation_status"] == "validated"
+    assert cert["subspace_sg_number"] == 143
+    assert cert["subspace_sg_symbol"] == "P3"
+    assert cert["hall_number"] == 143
+    assert cert["resolved_hsp_label"] == "GM"
+
+
+def test_unresolved_blocker_produces_certificate():
+    """Unresolved setting produces a certificate with blocker reason."""
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.123, 0.456, 0.0]),
+        table=_table_c2(),
+        standard_match={
+            "number": 5, "international_short": "C2",
+            "hall_number": 9, "hall_symbol": "C 2y",
+            "operation_ids": [0, 4],
+        },
+    )
+    assert label is None
+    cert = prov.get("standard_setting_certificate")
+    assert cert is not None
+    assert cert["validation_status"] == "unresolved"
+    assert cert["unresolved_reason"] is not None
+    assert "standard_setting_hsp_mapping_unresolved" in cert["unresolved_reason"]
+    assert cert["subspace_sg_number"] == 5
+    assert cert["hall_number"] == 9
+
+
+def test_no_standard_match_certificate_still_produced():
+    """No standard_match still produces a certificate with unresolved status."""
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.123, 0.456, 0.0]),
+        table=_table_c2(),
+        standard_match=None,
+    )
+    cert = prov.get("standard_setting_certificate")
+    assert cert is not None
+    assert cert["validation_status"] == "unresolved"
+
+
+def test_centered_setting_certificate_has_blocker():
+    """Centered setting without explicit transform has certificate blocker."""
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.123, 0.456, 0.0]),
+        table=_table_c2(),
+        standard_match={
+            "number": 5, "international_short": "C2",
+            "hall_number": 9, "hall_symbol": "C 2y",
+            "operation_ids": [0, 4],
+        },
+    )
+    cert = prov.get("standard_setting_certificate")
+    assert cert["validation_status"] == "unresolved"
+    assert "standard_setting" in cert.get("unresolved_reason", "")
+    assert cert["centering_type"] == "C"
+
+
+def test_certificate_parent_basis_operation_ids():
+    """Certificate records parent-basis operation IDs."""
+    _, _, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.5, 0.0, 0.0]),
+        table=_table_p3(),
+        standard_match={
+            "number": 143, "international_short": "P3",
+            "hall_number": 143, "hall_symbol": "P 3",
+            "operation_ids": [0, 1, 2],
+        },
+    )
+    cert = prov["standard_setting_certificate"]
+    assert cert["parent_basis_operation_ids"] == [0, 1, 2]

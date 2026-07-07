@@ -5,14 +5,133 @@ centered setting that differs from the parent moire primitive reciprocal
 basis, the parent-setting k_frac may not directly match any
 irreptables standard-setting HSP coordinate.
 
-This module attempts to resolve the mapping using crystallographic
-setting data (Hall symbol/number, centering, unique-axis convention)
-from the spglib per-valley standard group match.
+This module builds a ``standard_setting_certificate`` that records the
+crystallographic equivalence between the parent moire basis and the
+Bilbao/irreptables standard setting.  HSP labels are trusted only when
+the certificate validates the coordinate convention.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field, asdict
+from typing import Any
+
 import numpy as np
+
+
+# ---------------------------------------------------------------------------
+# Standard-setting certificate data model
+# ---------------------------------------------------------------------------
+
+@dataclass
+class StandardSettingCertificate:
+    """Affine space-group equivalence certificate for conventional setting.
+
+    Records the evidence that links the parent moire reciprocal basis
+    to the irreptables standard-setting reciprocal basis.  HSP labels
+    may be trusted only when ``validation_status == "validated"``.
+    """
+
+    # --- Source identity ---
+    subspace_sg_number: int | None = None
+    subspace_sg_symbol: str | None = None
+    hall_number: int | None = None
+    hall_symbol: str | None = None
+    standard_setting_source: str = "spglib.get_spacegroup_type_from_symmetry"
+
+    # --- Validation ---
+    validation_status: str = "not_evaluated"
+    """One of ``"validated"``, ``"unresolved"``, ``"rejected"``."""
+
+    # --- Operation mapping ---
+    parent_basis_operation_ids: list[int] = field(default_factory=list)
+    standard_setting_operation_count: int | None = None
+    operation_mapping_status: str = "not_attempted"
+
+    # --- Basis transform ---
+    parent_to_standard_direct_transform: list[list[float]] | None = None
+    """3×3 matrix T: x_std = T · x_parent (direct space)."""
+    reciprocal_k_transform_rule: str = (
+        "k_std = T^(-T) · k_parent"
+    )
+    transform_provenance: str = "not_provided"
+
+    # --- Origin shift ---
+    origin_shift_fractional: list[float] | None = None
+    """Fractional origin shift when available; None if unresolved."""
+    origin_shift_status: str = "unavailable"
+
+    # --- Centering ---
+    centering_type: str | None = None
+    """P, C, I, F, R from Hall symbol first character."""
+    centering_status: str = "not_evaluated"
+
+    # --- Blockers ---
+    unresolved_reason: str | None = None
+    """Human-readable explanation when validation_status != "validated"."""
+
+    # --- k-point ---
+    parent_k_frac: list[float] | None = None
+    resolved_hsp_label: str | None = None
+    """Source HSP label, only when validated."""
+
+    def to_dict(self) -> dict[str, object]:
+        """Serialize to a JSON-compatible dict, omitting None defaults."""
+        d: dict[str, object] = {}
+        for key, value in asdict(self).items():
+            if value is not None and value != []:
+                d[key] = value
+        return d
+
+
+def build_standard_setting_certificate(
+    *,
+    standard_match: dict[str, object] | None = None,
+    validation_status: str = "not_evaluated",
+    unresolved_reason: str | None = None,
+    parent_basis_operation_ids: list[int] | None = None,
+    parent_to_standard_direct_transform: np.ndarray | None = None,
+    transform_provenance: str = "not_provided",
+    parent_k_frac: np.ndarray | None = None,
+    resolved_hsp_label: str | None = None,
+) -> StandardSettingCertificate:
+    """Build a standard-setting certificate from available evidence."""
+    cert = StandardSettingCertificate()
+
+    if isinstance(standard_match, dict):
+        v = standard_match.get("number")
+        if isinstance(v, int) and not isinstance(v, bool):
+            cert.subspace_sg_number = int(v)
+        v = standard_match.get("international_short")
+        if isinstance(v, str) and v:
+            cert.subspace_sg_symbol = str(v)
+        v = standard_match.get("hall_number")
+        if isinstance(v, int) and not isinstance(v, bool):
+            cert.hall_number = int(v)
+        v = standard_match.get("hall_symbol")
+        if isinstance(v, str) and v:
+            cert.hall_symbol = str(v)
+            cert.centering_type = str(v)[0] if v else None
+
+    if parent_basis_operation_ids is not None:
+        cert.parent_basis_operation_ids = list(parent_basis_operation_ids)
+
+    if parent_to_standard_direct_transform is not None:
+        T = np.asarray(parent_to_standard_direct_transform, dtype=float)
+        if T.shape == (3, 3) and np.all(np.isfinite(T)):
+            cert.parent_to_standard_direct_transform = T.tolist()
+            cert.transform_provenance = transform_provenance
+
+    cert.validation_status = validation_status
+    if unresolved_reason:
+        cert.unresolved_reason = str(unresolved_reason)
+
+    if parent_k_frac is not None:
+        cert.parent_k_frac = np.asarray(parent_k_frac, dtype=float).tolist()
+    if resolved_hsp_label is not None:
+        cert.resolved_hsp_label = str(resolved_hsp_label)
+
+    return cert
 
 
 def resolve_standard_setting_hsp_label(
@@ -74,6 +193,29 @@ def resolve_standard_setting_hsp_label(
         direct_label = table.match_kpoint_label(k_frac)
     if direct_label is not None:
         prov["direct_match_succeeded"] = True
+        cert = build_standard_setting_certificate(
+            standard_match=standard_match,
+            validation_status="validated",
+            parent_basis_operation_ids=(
+                _operation_ids_list(standard_match)
+                if isinstance(standard_match, dict) else None
+            ),
+            parent_k_frac=k_frac,
+            resolved_hsp_label=direct_label,
+        )
+        cert.operation_mapping_status = "not_attempted"
+        cert.centering_status = (
+            "primitive_direct_match"
+            if (isinstance(standard_match, dict) and
+                str(standard_match.get("hall_symbol", "")).startswith("P"))
+            else "not_evaluated"
+        )
+        cert.standard_setting_source = (
+            "spglib.per_valley_standard_matches"
+            if isinstance(standard_match, dict)
+            else "coordinate_match_only"
+        )
+        prov["standard_setting_certificate"] = cert.to_dict()
         return direct_label, None, prov
 
     prov["direct_match_succeeded"] = False
@@ -108,6 +250,20 @@ def resolve_standard_setting_hsp_label(
                 if label is not None:
                     prov["explicit_transformed_match_succeeded"] = True
                     prov["explicit_transformed_hsp_label"] = label
+                    cert = build_standard_setting_certificate(
+                        standard_match=standard_match,
+                        validation_status="validated",
+                        parent_basis_operation_ids=(
+                            _operation_ids_list(standard_match)
+                            if isinstance(standard_match, dict) else None
+                        ),
+                        parent_to_standard_direct_transform=T,
+                        transform_provenance="explicit_user_input",
+                        parent_k_frac=k_frac,
+                        resolved_hsp_label=label,
+                    )
+                    cert.standard_setting_source = "explicit_transform"
+                    prov["standard_setting_certificate"] = cert.to_dict()
                     return label, None, prov
             except np.linalg.LinAlgError:
                 tf_result["status"] = "rejected"
@@ -117,11 +273,18 @@ def resolve_standard_setting_hsp_label(
         # The rejection reason is recorded in prov["explicit_transform"].
 
     if standard_match is None or not isinstance(standard_match, dict):
-        return None, (
-            "standard_setting_hsp_mapping_unresolved: "
-            "no per-valley standard group match available "
-            "for setting-aware k-coordinate transformation"
-        ), prov
+        cert = build_standard_setting_certificate(
+            standard_match=None,
+            validation_status="unresolved",
+            unresolved_reason=(
+                "standard_setting_hsp_mapping_unresolved: "
+                "no per-valley standard group match available "
+                "for setting-aware k-coordinate transformation"
+            ),
+            parent_k_frac=k_frac,
+        )
+        prov["standard_setting_certificate"] = cert.to_dict()
+        return None, cert.unresolved_reason, prov
 
     sg_number = standard_match.get("number")
     hall_number = standard_match.get("hall_number")
@@ -167,6 +330,18 @@ def resolve_standard_setting_hsp_label(
             if transformed_label is not None:
                 prov["basis_transformed_match_succeeded"] = True
                 prov["transformed_hsp_label"] = transformed_label
+                cert = build_standard_setting_certificate(
+                    standard_match=standard_match,
+                    validation_status="validated",
+                    parent_basis_operation_ids=(
+                        _operation_ids_list(standard_match)
+                        if isinstance(standard_match, dict) else None
+                    ),
+                    parent_k_frac=k_frac,
+                    resolved_hsp_label=transformed_label,
+                )
+                cert.standard_setting_source = "operation_basis_reconstruction"
+                prov["standard_setting_certificate"] = cert.to_dict()
                 return transformed_label, None, prov
         except np.linalg.LinAlgError:
             prov["basis_transform_error"] = "singular transformation matrix"
@@ -210,7 +385,29 @@ def resolve_standard_setting_hsp_label(
     if transform_result.get("reason"):
         reason_parts.append(f"- {transform_result['reason']}")
 
-    return None, " ".join(reason_parts) + ".", prov
+    blocker = " ".join(reason_parts) + "."
+    cert = build_standard_setting_certificate(
+        standard_match=standard_match,
+        validation_status="unresolved",
+        unresolved_reason=blocker,
+        parent_basis_operation_ids=(
+            _operation_ids_list(standard_match)
+            if isinstance(standard_match, dict) else None
+        ),
+        parent_k_frac=k_frac,
+    )
+    cert.standard_setting_source = (
+        "spglib.get_spacegroup_type_from_symmetry"
+    )
+    prov["standard_setting_certificate"] = cert.to_dict()
+    return None, blocker, prov
+
+
+def _operation_ids_list(sm: dict[str, object]) -> list[int]:
+    v = sm.get("operation_ids", [])
+    if isinstance(v, (list, tuple)):
+        return [int(x) for x in v if isinstance(x, (int, float))]
+    return []
 
 
 def _validate_explicit_transform(
