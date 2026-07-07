@@ -386,9 +386,11 @@ def test_non_little_group_closure_rows_do_not_block_identity_only_subspace():
         valley_names=["M1"],
     )
     d = result["by_kpoint"]["MM"]["M1"]
-    assert d["workflow_path"] == PATH_BLOCKED
+    assert d["workflow_path"] == PATH_SYMMETRY_ADAPTED
+    assert d["readiness_level"] == READINESS_USABLE_WITH_CAUTION
     assert "closure blocked" not in d["reason"]
-    assert "not_evaluated" in d["reason"]
+    assert "identity operation" in d["reason"]
+    assert "spinor convention" in d["reason"]
 
 
 # -----------------------------------------------------------------------

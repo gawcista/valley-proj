@@ -1444,6 +1444,7 @@ def _build_valley_resolved_irreps(
     matched = 0
     blocked = 0
     diagnostic = 0
+    identity_only = 0
 
     for kp_name in sorted(generic_by_kp):
         valleys = generic_by_kp.get(kp_name, {})
@@ -1478,6 +1479,8 @@ def _build_valley_resolved_irreps(
             rows.append(row)
             if status == "matched":
                 matched += 1
+            elif status == "identity_only_not_irrep_distinguishing":
+                identity_only += 1
             elif status == "blocked":
                 blocked += 1
             else:
@@ -1489,6 +1492,7 @@ def _build_valley_resolved_irreps(
         "matched_count": matched,
         "blocked_count": blocked,
         "diagnostic_count": diagnostic,
+        "identity_only_count": identity_only,
         "rows": rows,
     }
 

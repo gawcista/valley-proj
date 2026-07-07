@@ -314,6 +314,71 @@ def build_irrep_workflow_decisions(
     for kp_name in sorted(set(list(seed_by_kp) + list(closure_by_kp) + list(qcut_ready) + list(sa_by_kp))):
         kp_decisions: dict[str, object] = {}
         for v in valley_names:
+            # --- Identity-only G_k^(a) detection ---
+            # If the only valley-preserving operation in the HSP little
+            # group is the identity, no non-identity eigenphase rows exist.
+            # The absence of non-identity rows is a physical property of
+            # the (kpoint, valley) pair, not a workflow blocker.
+            vp_ops = vp_ops_by_kp_valley.get(kp_name, {}).get(v, set())
+            is_identity_only_vp = bool(
+                vp_ops and len(vp_ops) == 1 and 0 in vp_ops
+            )
+            if is_identity_only_vp:
+                # Identity-only: the only operation is the identity.
+                # The local representation dimension may be extractable
+                # from character diagnostics even when the SA report
+                # marks local_irrep_ready=False (no non-identity ops).
+                sa = sa_by_kp.get(kp_name, {}).get(v, {})
+                has_char_diag = sa.get("local_irrep_ready", False) and not sa.get("diagnostic_only", True)
+                # Also check raw character diagnostics for identity eigenphases.
+                if not has_char_diag and isinstance(symmetry_adapted_valley_report, dict):
+                    vp_subspaces = (
+                        symmetry_adapted_valley_report.get("by_kpoint", {})
+                        .get(kp_name, {}).get("valley_preserving_subspaces", [])
+                    )
+                    for vs in vp_subspaces if isinstance(vp_subspaces, list) else []:
+                        char_diag = vs.get("valley_preserving_character_diagnostics", {})
+                        pv = char_diag.get("per_valley", {}).get(v, [])
+                        if isinstance(pv, list) and pv:
+                            has_char_diag = True
+                            break
+                if has_char_diag and spinor_convention_verified:
+                    kp_decisions[v] = _decision(
+                        workflow_path=PATH_SYMMETRY_ADAPTED,
+                        readiness=READINESS_TRUSTED,
+                        reason=(
+                            "G_k^(a) contains only the identity operation; "
+                            "local identity character available, spinor "
+                            "convention verified"
+                        ),
+                        uses_symmetry_adapted_projector=False,
+                        direct_qcut_allowed=False,
+                    )
+                elif has_char_diag:
+                    kp_decisions[v] = _decision(
+                        workflow_path=PATH_SYMMETRY_ADAPTED,
+                        readiness=READINESS_USABLE_WITH_CAUTION,
+                        reason=(
+                            "G_k^(a) contains only the identity operation; "
+                            "local identity character available, but "
+                            "spinor convention unverified"
+                        ),
+                        required_followup="verify spinor convention against benchmark",
+                        uses_symmetry_adapted_projector=False,
+                        direct_qcut_allowed=False,
+                    )
+                else:
+                    kp_decisions[v] = _decision(
+                        workflow_path=PATH_SYMMETRY_ADAPTED,
+                        readiness=READINESS_USABLE_WITH_CAUTION,
+                        reason=(
+                            "G_k^(a) contains only the identity operation; "
+                            "local representation dimension may not be available"
+                        ),
+                        uses_symmetry_adapted_projector=False,
+                        direct_qcut_allowed=False,
+                    )
+                continue
             # Seed projector symmetry
             seed_rows = seed_by_kp.get(kp_name, {}).get(v, [])
             seed_failed = sum(1 for r in seed_rows if r.get("status") in ("failed",))

@@ -511,8 +511,8 @@ def test_blocked_identity_only_pair_produces_record_without_eigenvalue_rows():
                     "K_valley": {"readiness_level": "trusted", "workflow_path": "direct_qcut"},
                 },
                 "MM": {
-                    "K_valley": {"readiness_level": "blocked", "workflow_path": "blocked"},
-                    "Kp_valley": {"readiness_level": "blocked", "workflow_path": "blocked"},
+                    "K_valley": {"readiness_level": "usable_with_caution", "workflow_path": "symmetry_adapted"},
+                    "Kp_valley": {"readiness_level": "usable_with_caution", "workflow_path": "symmetry_adapted"},
                 },
             },
         },
@@ -589,12 +589,16 @@ def test_blocked_identity_only_pair_produces_record_without_eigenvalue_rows():
     assert mm["parent_hsp_little_group_operation_ids"] == [0, 5]
     assert mm["valley_sewing_operation_ids"] == [5]
     assert mm["valley_preserving_operations"] == []
-    assert mm["workflow_path"] == "identity_only_valley_preserving_subgroup"
-    assert mm["readiness_level"] == "identity_only"
-    assert any("identity_only" in b for b in mm["blocking_reasons"])
+    # Identity-only: not blocked, workflow from decision layer.
+    assert mm["workflow_path"] == "symmetry_adapted"
+    assert mm["readiness_level"] == "usable_with_caution"
+    # Identity-only is NOT a blocker — the note is in irrep_matching.
+    assert "workflow_blocked" not in mm["blocking_reasons"]
+    assert not any("identity_only" in b for b in mm["blocking_reasons"])
     assert mm["irrep_matching"] is not None
     assert mm["irrep_matching"]["matching_status"] == "identity_only_not_irrep_distinguishing"
     assert mm["irrep_matching"]["matching_strategy"] == "identity_only_valley_preserving_subgroup"
+    assert "identity" in mm["irrep_matching"].get("reason", "")
 
     # GammaM record: public irrep group = [0,1,2], parent = [0,1,2,3,4,5].
     gm_records = [
@@ -732,8 +736,8 @@ def test_identity_only_gka_no_false_irrep_no_ebr_candidate():
             "by_kpoint": {
                 "MM": {
                     "K_valley": {
-                        "readiness_level": "blocked",
-                        "workflow_path": "blocked",
+                        "readiness_level": "usable_with_caution",
+                        "workflow_path": "symmetry_adapted",
                     },
                 },
             },
@@ -790,11 +794,12 @@ def test_identity_only_gka_no_false_irrep_no_ebr_candidate():
             f"identity-only must not have positive irrep multiplicities: {mults}"
         )
 
-    # Must have blocking status — not trusted, not ready.
+    # Identity-only is not a workflow blocker.
     assert rec["readiness_level"] != "trusted"
-    assert rec["readiness_level"] == "identity_only"
-    assert rec["workflow_path"] == "identity_only_valley_preserving_subgroup"
-    assert any("identity_only" in b for b in rec["blocking_reasons"])
+    assert rec["readiness_level"] == "usable_with_caution"
+    assert rec["workflow_path"] == "symmetry_adapted"
+    assert not any("identity_only" in b for b in rec["blocking_reasons"])
+    assert "identity" in rec.get("irrep_matching", {}).get("reason", "")
 
     # The physical subspace space group is still present.
     assert rec["subspace_space_group"]["candidate_space_group_symbol"] == "P3"
@@ -858,8 +863,8 @@ def test_target_kpoints_not_silently_dropped_from_records():
                     "Kp_valley": {"readiness_level": "trusted", "workflow_path": "direct_qcut"},
                 },
                 "MM": {
-                    "K_valley": {"readiness_level": "blocked", "workflow_path": "blocked"},
-                    "Kp_valley": {"readiness_level": "blocked", "workflow_path": "blocked"},
+                    "K_valley": {"readiness_level": "usable_with_caution", "workflow_path": "symmetry_adapted"},
+                    "Kp_valley": {"readiness_level": "usable_with_caution", "workflow_path": "symmetry_adapted"},
                 },
             },
         },
@@ -926,8 +931,8 @@ def test_target_kpoints_not_silently_dropped_from_records():
         assert mm["valley_preserving_operation_ids"] == [0]
         assert mm["parent_hsp_little_group_operation_ids"] == [0, 5]
         assert mm["valley_sewing_operation_ids"] == [5]
-        assert mm["workflow_path"] == "identity_only_valley_preserving_subgroup"
-        assert mm["readiness_level"] == "identity_only"
+        assert mm["workflow_path"] == "symmetry_adapted"
+        assert mm["readiness_level"] == "usable_with_caution"
         assert mm["valley_preserving_operations"] == []
 
     # GammaM/KM records: subspace HSP little group = [0,1,2].

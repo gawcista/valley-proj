@@ -1456,15 +1456,16 @@ def test_tmote2_representation_records_subspace_first():
                 f"{kp}/{rec['valley']}: sewing op {op} in subspace!"
             )
 
-    # MM records: blocked, identity-only
+    # MM records: identity-only, not blocked
     mm_recs = [r for r in rep["representation_records"] if r["kpoint"] == "MM"]
     assert len(mm_recs) == 2
     for mm in mm_recs:
         assert mm["subspace_hsp_little_group_operation_ids"] == [0]
         assert mm["parent_hsp_little_group_operation_ids"] == [0, 5]
         assert mm["valley_sewing_operation_ids"] == [5]
-        assert mm["workflow_path"] == "blocked"
+        assert mm["workflow_path"] != "blocked"
         assert mm["valley_preserving_operations"] == []
+        assert "workflow_blocked" not in mm.get("blocking_reasons", [])
 
     # GammaM/KM records: trusted, eigenvalue data
     for kp in ("GammaM", "KM"):

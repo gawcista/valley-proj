@@ -271,27 +271,16 @@ def build_valley_projected_representation_report(
             ]
             is_identity_only = not non_identity_vp and len(subspace_hsp_lg) >= 1
 
-            if is_identity_only:
-                # Identity-only G_k^(a) is a valid local valley-preserving
-                # representation.  It is not a workflow failure — the
-                # absence of non-identity VP operations is a physical
-                # property of the (kpoint, valley) pair, not a blocker.
-                readiness = "identity_only"
-                wf_path = "identity_only_valley_preserving_subgroup"
-            else:
-                readiness = wf_data.get("readiness_level", "not_evaluated")
-                wf_path = wf_data.get("workflow_path", "blocked")
+            readiness = wf_data.get("readiness_level", "not_evaluated")
+            wf_path = wf_data.get("workflow_path", "blocked")
 
-            # Blocking reasons — identity-only G_k^(a) is a valid physical
-            # local result, not a code defect.
+            # Blocking reasons — identity-only G_k^(a) is a valid
+            # physical local result, not a code defect.
             blockers: list[str] = []
             if is_identity_only:
-                blockers.append(
-                    "identity_only_not_irrep_distinguishing: "
-                    "G_k^(a) contains only the identity operation; "
-                    "no non-identity valley-preserving operation in the "
-                    "HSP little group"
-                )
+                # G_k^(a)={E} is a physical property, not a blocker.
+                # The note goes into irrep_matching.reason, not here.
+                pass
             else:
                 if readiness == "blocked" or wf_path == "blocked":
                     blockers.append("workflow_blocked")
@@ -316,6 +305,12 @@ def build_valley_projected_representation_report(
                         "local_representation_dimension"
                     ),
                 }
+                if is_identity_only:
+                    irrep_matching["reason"] = (
+                        "G_k^(a) contains only the identity operation; "
+                        "no non-identity valley-preserving operation in "
+                        "the HSP little group"
+                    )
 
             record: dict[str, Any] = {
                 "kpoint": kp_name,
