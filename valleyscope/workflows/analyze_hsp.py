@@ -611,12 +611,6 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 else:
                     vp_ids = list(full_vp_ids)
 
-                # --- Identity detection from operation content ---
-                identity_id = _detected_identity_operation_id(
-                    symmetry_payload, [str(v_name)],
-                )
-                non_identity_vp = [op for op in vp_ids if op != identity_id]
-
                 if not vp_ids:
                     # Empty G_k^(a): inconsistent input, blocked.
                     generic_source_blocked_rows.append({
@@ -2273,46 +2267,6 @@ def _empty_subspace_space_group(reason: str) -> dict[str, object]:
         "source": "full_space_group_valley_mapping",
         "reason": reason,
     }
-
-
-def _identity_representation_dimension(
-    *,
-    vs: dict[str, object],
-    v_name: str,
-    identity_id: object,
-) -> int | None:
-    """Extract local representation dimension from identity eigenphase count.
-
-    Reads the valley-preserving character diagnostics for the identity
-    operation and counts the eigenphases to obtain the representation
-    dimension.  For a representation D_a(e), the identity character
-    chi_a(e) = dim, which equals the number of eigenstates in the
-    valley-adapted subspace.
-
-    Returns the dimension (positive integer ≥ 1), or None when the
-    identity character diagnostics are unavailable or empty.
-    """
-    char_diag = vs.get("valley_preserving_character_diagnostics", {})
-    if not isinstance(char_diag, dict):
-        return None
-    per_valley = char_diag.get("per_valley", {})
-    if not isinstance(per_valley, dict):
-        return None
-    entries = per_valley.get(v_name, [])
-    if not isinstance(entries, list):
-        return None
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        if entry.get("operation_id") != identity_id:
-            continue
-        eigenphases = entry.get("eigenphases", [])
-        if not isinstance(eigenphases, list):
-            continue
-        dim = len(eigenphases)
-        if dim > 0:
-            return dim
-    return None
 
 
 def _resolved_subspace_group_context(
