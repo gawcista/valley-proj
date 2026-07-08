@@ -9,7 +9,10 @@ import numpy as np
 import yaml
 
 from valleyscope.io.wavecar import _choose_target, _target_candidates
-from valleyscope.workflows.extract_wavecar import extract_wavecar_to_h5
+from valleyscope.workflows.extract_wavecar import (
+    _parse_bands_vasp,
+    extract_wavecar_to_h5,
+)
 from valleyscope.cli import main
 
 
@@ -53,6 +56,18 @@ def write_synthetic_wavecar(path: Path, *, header_nplane: int = 1, coeffs=None, 
 # -----------------------------------------------------------------------
 # A. Default ecut_adjust_tol=0.0 — behavior unchanged
 # -----------------------------------------------------------------------
+
+def test_parse_bands_vasp_accepts_compact_ranges():
+    assert _parse_bands_vasp(
+        [1, "3-5", {"start": 5, "end": 7}, "9..10"],
+        path="extract.bands_vasp",
+    ) == [1, 3, 4, 5, 6, 7, 9, 10]
+
+
+def test_parse_bands_vasp_rejects_reversed_range():
+    with pytest.raises(ValueError, match="range end must be >= start"):
+        _parse_bands_vasp("7-3", path="extract.bands_vasp")
+
 
 def test_extract_wavecar_writes_v1_hdf5_schema(tmp_path):
     wavecar = tmp_path / "WAVECAR"

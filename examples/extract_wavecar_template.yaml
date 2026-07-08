@@ -10,6 +10,7 @@ extract:
       vasp_index: 2
 
   # VASP 1-based band indices to copy into selected_wavefunctions.h5.
+  # Also accepts {start: 101, end: 120}, "101-120", or mixed lists.
   bands_vasp: [101, 102]
 
   # For collinear ISPIN=2 WAVECAR files, extract one spin channel at a time.

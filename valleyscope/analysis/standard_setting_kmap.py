@@ -191,7 +191,7 @@ def _validate_affine_operation_equivalence(
         else None,
     )
     if not _hall_ok:
-        result["status"] = "rejected"
+        result["status"] = "failed"
         result["missing_ingredients"].append("hall_number")
         result["hall_sg_consistency"] = _hall_blocker
         return result
@@ -321,6 +321,12 @@ def _affine_failure_blocker(
     source: str,
 ) -> str:
     """Build a blocker for a failed affine operation equivalence check."""
+    hall_blocker = affine_result.get("hall_sg_consistency")
+    if hall_blocker:
+        return (
+            "standard_setting_hsp_mapping_unresolved: "
+            f"{source} rejected because {hall_blocker}."
+        )
     count = affine_result.get("mismatched_translation_count", "?")
     return (
         "standard_setting_hsp_mapping_unresolved: "

@@ -716,6 +716,30 @@ def test_hall_number_mismatch_with_sg_number_is_consistency_checked():
     assert "mismatch" in blocker
 
 
+def test_hall_number_mismatch_blocks_trusted_hsp_label():
+    """A Hall/SG mismatch cannot produce a trusted standard-setting HSP label."""
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.5, 0.0, 0.0]),
+        table=_fake_table_m(),
+        standard_match={
+            "number": 143, "international_short": "P3",
+            "hall_number": 143, "hall_symbol": "P 3",
+            "operation_ids": [0],
+        },
+        detected_operations=[{
+            "operation_id": 0,
+            "rotation_frac": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            "translation_frac": [0.0, 0.0, 0.0],
+        }],
+    )
+    assert label is None
+    assert blocker is not None
+    assert "standard_setting_hall_number_mismatch" in blocker
+    cert = prov.get("standard_setting_certificate", {})
+    assert cert.get("validation_status") == "rejected"
+    assert cert.get("translation_validation_status") == "failed"
+
+
 def test_valid_hall_sg_pair_passes_consistency_check():
     """Hall 430 <-> SG 143 (P3) is a valid pair."""
     from valleyscope.analysis.standard_setting_kmap import (

@@ -369,6 +369,8 @@ extract:
     - name: MM
       vasp_index: 3
 
+  # VASP 1-based band indices. Also accepts {start: 2195, end: 2210},
+  # "2195-2210", or mixed lists.
   bands_vasp: [2195, 2196]
 
   # For collinear ISPIN=2, extract one spin channel at a time.

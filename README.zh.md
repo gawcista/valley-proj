@@ -340,6 +340,8 @@ extract:
     - name: MM
       vasp_index: 3
 
+  # VASP 1-based band indices。也支持 {start: 2195, end: 2210}、
+  # "2195-2210" 或混合列表。
   bands_vasp: [2195, 2196]
 
   # 共线 ISPIN=2 时每次抽取一个自旋通道
