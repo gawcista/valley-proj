@@ -551,6 +551,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             symmetry_rows=symmetry_rows,
             valley_names=valley_names,
             spinor_convention_verified=config.spinor.convention_verified,
+            spinor_wavefunction=bool(symmetry_payload.get("spinor_wavefunction", False)),
         )
     # --- Canonical per-valley irrep matching preflight ---
     # Builds one source-payload context per (kpoint, valley) from the

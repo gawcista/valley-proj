@@ -1016,10 +1016,16 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
         "_build_hsp_star_derived_character_layer",
         lambda **_: (None, None),
     )
+    captured_decision_kwargs = {}
+
+    def _capturing_build_irrep_workflow_decisions(**kwargs):
+        captured_decision_kwargs.update(kwargs)
+        return workflow_decisions
+
     monkeypatch.setattr(
         workflow_mod,
         "build_irrep_workflow_decisions",
-        lambda **_: workflow_decisions,
+        _capturing_build_irrep_workflow_decisions,
     )
     monkeypatch.setattr(
         workflow_mod,
@@ -1117,6 +1123,7 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
 
     assert outputs["valley_summary_json"].exists()
     assert outputs["valley_reduced_ebr_mapping_json"].exists()
+    assert captured_decision_kwargs["spinor_wavefunction"] is False
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     # Standard summary uses compact valley_resolved_irreps, not raw matching.
     resolved = summary["valley_resolved_irreps"]

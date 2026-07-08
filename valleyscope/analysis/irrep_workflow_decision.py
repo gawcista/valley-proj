@@ -52,7 +52,7 @@ def decide_irrep_workflow(
     inspected independently; the most favourable feasible path is chosen.
     """
     # Scalar wavefunction: spinor convention gate does not apply.
-    effective_spinor_verified = (
+    spinor_gate_passed = (
         spinor_convention_verified or not spinor_wavefunction
     )
     reasons: list[str] = []
@@ -80,7 +80,7 @@ def decide_irrep_workflow(
     )
 
     if seed_usable and closure_ok and qcut_ok:
-        if seed_clean and closure_clean and effective_spinor_verified:
+        if seed_clean and closure_clean and spinor_gate_passed:
             return _decision(
                 workflow_path=PATH_DIRECT_QCUT,
                 readiness=READINESS_TRUSTED,
@@ -97,7 +97,7 @@ def decide_irrep_workflow(
             )
         if not closure_clean:
             caution_reasons.append(f"target-subspace closure quality={closure_quality}")
-        if not effective_spinor_verified:
+        if not spinor_gate_passed:
             caution_reasons.append("spinor convention unverified")
             followups.append("verify spinor convention against benchmark")
         return _decision(
@@ -138,7 +138,7 @@ def decide_irrep_workflow(
         )
 
     if sa_proj_usable and closure_usable:
-        if sa_ready and effective_spinor_verified:
+        if sa_ready and spinor_gate_passed:
             return _decision(
                 workflow_path=PATH_SYMMETRY_ADAPTED,
                 readiness=READINESS_TRUSTED,
@@ -348,14 +348,20 @@ def build_irrep_workflow_decisions(
                         if isinstance(pv, list) and pv:
                             has_char_diag = True
                             break
-                if has_char_diag and (spinor_convention_verified or not spinor_wavefunction):
+                if has_char_diag and (
+                    spinor_convention_verified or not spinor_wavefunction
+                ):
+                    spinor_reason = (
+                        "scalar wavefunction; spinor convention gate not applicable"
+                        if not spinor_wavefunction
+                        else "spinor convention verified"
+                    )
                     kp_decisions[v] = _decision(
                         workflow_path=PATH_SYMMETRY_ADAPTED,
                         readiness=READINESS_TRUSTED,
                         reason=(
                             "G_k^(a) contains only the identity operation; "
-                            "local identity character available, spinor "
-                            "convention verified"
+                            f"local identity character available, {spinor_reason}"
                         ),
                         uses_symmetry_adapted_projector=False,
                         direct_qcut_allowed=False,
