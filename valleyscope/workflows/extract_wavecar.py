@@ -7,6 +7,7 @@ import numpy as np
 import yaml
 
 from valleyscope.io import resolve_config_path
+from valleyscope.io.config import _expand_iband_item
 from valleyscope.io.wavecar import WavecarReader
 
 
@@ -28,7 +29,8 @@ def extract_wavecar_to_h5(config_path: str | Path) -> Path:
     if output_h5 is None:
         raise ValueError("output.wavefunction_h5 path resolution failed")
     kpoints = extract_raw.get("kpoints", [])
-    bands_vasp = [int(value) for value in extract_raw.get("bands_vasp", [])]
+    bands_raw = extract_raw.get("bands_vasp", [])
+    bands_vasp = _parse_bands_vasp(bands_raw, path="extract.bands_vasp")
     spin_index = int(extract_raw.get("spin_index", 1)) - 1
     ecut_adjust_tol = float(extract_raw.get("ecut_adjust_tol", 0.0))
     if ecut_adjust_tol < 0.0:
@@ -138,3 +140,21 @@ def _stack_coefficients(coefficients: list[np.ndarray]) -> np.ndarray:
     if len(nspinors) != 1:
         raise ValueError("Selected bands mix spinor and scalar coefficient records")
     return np.stack(coefficients, axis=0)
+
+
+def _parse_bands_vasp(raw: object, *, path: str) -> list[int]:
+    """Parse VASP band indices from the same compact syntax as analysis.iband.
+
+    Accepts a flat integer list, an inclusive range mapping
+    ``{start: N, end: M}``, a range string ``"N-M"`` or ``"N..M"``,
+    or a mixed list of these forms.  Duplicates are deduplicated
+    preserving order.
+    """
+    values = _expand_iband_item(raw, path=path)
+    out: list[int] = []
+    seen: set[int] = set()
+    for v in values:
+        if v not in seen:
+            out.append(v)
+            seen.add(v)
+    return out

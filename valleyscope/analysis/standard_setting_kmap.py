@@ -116,6 +116,7 @@ def _validate_affine_operation_equivalence(
     vp_operation_ids: list[int],
     standard_match: dict[str, object],
     parent_to_standard_direct_transform: np.ndarray | None = None,
+    origin_shift_fractional: np.ndarray | None = None,
     tolerance: float = 1e-6,
 ) -> dict[str, object]:
     """Validate affine (rotation + translation) operation equivalence.
@@ -124,6 +125,13 @@ def _validate_affine_operation_equivalence(
     each parent {R_p, τ_p} into the standard basis via
     {T·R_p·T⁻¹, T·τ_p} and compares against standard-setting
     {R_s, τ_s} from spglib, modulo lattice translations.
+
+    When an origin shift ``o`` is provided, the transformed
+    translation is computed as
+
+        τ_std = T·τ_parent + o - R_std·o   (modulo lattice)
+
+    where R_std = T·R_parent·T⁻¹.
 
     Returns a status dict with ``status`` (``"passed"``, ``"failed"``,
     or ``"unresolved"``), matched/unmatched counts, and a list of
@@ -172,9 +180,25 @@ def _validate_affine_operation_equivalence(
         result["missing_ingredients"].append("standard_setting_translations")
         return result
 
+    hall_number = int(hall_number)
+
+    # Hall-number / SG-number consistency guard.
+    sg_number = standard_match.get("number")
+    _hall_ok, _hall_blocker = _validate_hall_sg_consistency(
+        hall_number=hall_number,
+        sg_number=int(sg_number)
+        if isinstance(sg_number, int) and not isinstance(sg_number, bool)
+        else None,
+    )
+    if not _hall_ok:
+        result["status"] = "rejected"
+        result["missing_ingredients"].append("hall_number")
+        result["hall_sg_consistency"] = _hall_blocker
+        return result
+
     try:
         import spglib
-        std_sym = spglib.get_symmetry_from_database(int(hall_number))
+        std_sym = spglib.get_symmetry_from_database(hall_number)
     except Exception:
         std_sym = None
 
@@ -220,7 +244,12 @@ def _validate_affine_operation_equivalence(
         t_p = np.asarray(op["translation_frac"], dtype=float)
 
         r_transformed = np.rint(T @ r_p @ T_inv).astype(int)
+        r_transformed_float = T @ r_p @ T_inv
         t_transformed = T @ t_p
+        # Apply origin shift: tau_std = T·tau_parent + o - R_std·o
+        if origin_shift_fractional is not None:
+            o = np.asarray(origin_shift_fractional, dtype=float)
+            t_transformed = t_transformed + o - r_transformed_float @ o
 
         found = False
         for j, (r_s, t_s) in enumerate(zip(std_rotations, std_translations)):
@@ -753,6 +782,49 @@ def _operation_ids_list(sm: dict[str, object]) -> list[int]:
     if isinstance(v, (list, tuple)):
         return [int(x) for x in v if isinstance(x, (int, float))]
     return []
+
+
+def _validate_hall_sg_consistency(
+    *,
+    hall_number: int | None,
+    sg_number: int | None,
+) -> tuple[bool, str | None]:
+    """Check that Hall number and SG number are internally consistent.
+
+    spglib maps each Hall number to a unique space-group number.
+    The standard_match from spglib should carry both consistently.
+    A mismatch indicates an input convention error (e.g. passing the
+    SG number as the Hall number).
+
+    Returns (ok, blocker_reason).
+    """
+    if hall_number is None:
+        return False, "standard_setting_hall_number_missing: Hall number is None"
+    if sg_number is None:
+        # Cannot validate; do not block — Hall alone is sufficient
+        # for standard-setting operation lookup.
+        return True, None
+    try:
+        import spglib
+        sg_type = spglib.get_spacegroup_type(hall_number)
+    except Exception:
+        return False, (
+            f"standard_setting_hall_number_invalid: spglib could not "
+            f"resolve Hall number {hall_number}"
+        )
+    if sg_type is None:
+        return False, (
+            f"standard_setting_hall_number_invalid: Hall number "
+            f"{hall_number} returned None from spglib"
+        )
+    if int(sg_type.number) != int(sg_number):
+        return False, (
+            f"standard_setting_hall_number_mismatch: Hall number "
+            f"{hall_number} corresponds to SG {sg_type.number} "
+            f"({sg_type.international_short}), but standard_match "
+            f"declares SG {sg_number}"
+        )
+    return True, None
 
 
 def _validate_explicit_transform(

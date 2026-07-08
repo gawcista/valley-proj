@@ -95,7 +95,7 @@ def test_no_match_with_standard_match_returns_detailed_blocker():
         standard_match={
             "number": 5,
             "international_short": "C2",
-            "hall_number": 1,
+            "hall_number": 9,
             "hall_symbol": "C 2y",
             "operation_ids": [0, 4],
         },
@@ -105,7 +105,7 @@ def test_no_match_with_standard_match_returns_detailed_blocker():
     assert "standard_setting_hsp_mapping_unresolved" in blocker
     assert "C2" in blocker
     assert "No. 5" in blocker
-    assert prov["hall_number"] == 1
+    assert prov["hall_number"] == 9
     assert prov["hall_symbol"] == "C 2y"
     assert "setting_transform" in prov
 
@@ -119,7 +119,7 @@ def test_p3_m_direct_match_with_standard_match():
         standard_match={
             "number": 143,
             "international_short": "P3",
-            "hall_number": 143,
+            "hall_number": 430,
             "hall_symbol": "P 3",
             "operation_ids": [0, 1, 2],
         },
@@ -134,7 +134,7 @@ def test_p3_m_direct_match_with_standard_match():
 def test_centered_hall_symbol_documented_as_unavailable():
     result = _attempt_setting_transform(
         k_frac=np.array([0.5, 0.0, 0.0]),
-        hall_number=1,
+        hall_number=9,
         hall_symbol="C 2y",
         sg_number=5,
     )
@@ -146,7 +146,7 @@ def test_centered_hall_symbol_documented_as_unavailable():
 def test_centered_setting_documented():
     result = _attempt_setting_transform(
         k_frac=np.array([0.5, 0.0, 0.0]),
-        hall_number=1,
+        hall_number=9,
         hall_symbol="C 2y",
         sg_number=5,
     )
@@ -163,7 +163,7 @@ def test_p3_m_point_matches_direct():
         standard_match={
             "number": 143,
             "international_short": "P3",
-            "hall_number": 143,
+            "hall_number": 430,
             "hall_symbol": "P 3",
         },
     )
@@ -279,7 +279,7 @@ def test_explicit_transform_not_needed_when_direct_match_succeeds():
         table=_table_p3(),
         standard_match={
             "number": 143, "international_short": "P3",
-            "hall_number": 143, "hall_symbol": "P 3",
+            "hall_number": 430, "hall_symbol": "P 3",
             "operation_ids": [0, 1, 2],
         },
         parent_to_standard_direct_transform=T,
@@ -301,7 +301,7 @@ def test_explicit_transform_resolves_nonmatching_parent_kpoint():
         table=_table_p3(),
         standard_match={
             "number": 143, "international_short": "P3",
-            "hall_number": 143, "hall_symbol": "P 3",
+            "hall_number": 430, "hall_symbol": "P 3",
             "operation_ids": [0, 1, 2],
         },
         parent_to_standard_direct_transform=T,
@@ -411,7 +411,7 @@ def test_basis_transform_matrix_requires_operation_verification(monkeypatch):
         standard_match={
             "number": 143,
             "international_short": "P3",
-            "hall_number": 143,
+            "hall_number": 430,
             "hall_symbol": "P 3",
             "operation_ids": [0, 1],
         },
@@ -434,7 +434,7 @@ def test_direct_match_produces_validated_certificate():
         table=_table_p3(),
         standard_match={
             "number": 143, "international_short": "P3",
-            "hall_number": 143, "hall_symbol": "P 3",
+            "hall_number": 430, "hall_symbol": "P 3",
             "operation_ids": [0, 1, 2],
         },
     )
@@ -444,7 +444,7 @@ def test_direct_match_produces_validated_certificate():
     assert cert["validation_status"] == "validated"
     assert cert["subspace_sg_number"] == 143
     assert cert["subspace_sg_symbol"] == "P3"
-    assert cert["hall_number"] == 143
+    assert cert["hall_number"] == 430
     assert cert["resolved_hsp_label"] == "GM"
 
 
@@ -505,7 +505,7 @@ def test_certificate_parent_basis_operation_ids():
         table=_table_p3(),
         standard_match={
             "number": 143, "international_short": "P3",
-            "hall_number": 143, "hall_symbol": "P 3",
+            "hall_number": 430, "hall_symbol": "P 3",
             "operation_ids": [0, 1, 2],
         },
     )
@@ -524,7 +524,7 @@ def test_direct_match_certificate_has_affine_status():
         table=_table_p3(),
         standard_match={
             "number": 143, "international_short": "P3",
-            "hall_number": 143, "hall_symbol": "P 3",
+            "hall_number": 430, "hall_symbol": "P 3",
             "operation_ids": [0],
         },
         detected_operations=[
@@ -606,7 +606,7 @@ def test_explicit_transform_rejected_when_translations_inconsistent():
         table=_fake_table_m(),
         standard_match={
             "number": 143, "international_short": "P3",
-            "hall_number": 143, "hall_symbol": "P 3",
+            "hall_number": 430, "hall_symbol": "P 3",
             "operation_ids": [0],
         },
         parent_to_standard_direct_transform=T,
@@ -637,7 +637,7 @@ def test_direct_match_rejected_when_translations_inconsistent():
         table=_fake_table_m(),
         standard_match={
             "number": 143, "international_short": "P3",
-            "hall_number": 143, "hall_symbol": "P 3",
+            "hall_number": 430, "hall_symbol": "P 3",
             "operation_ids": [0],
         },
         detected_operations=[{
@@ -681,7 +681,7 @@ def test_basis_reconstruction_rejected_when_translations_inconsistent(monkeypatc
         table=_SecondCallTable(),
         standard_match={
             "number": 143, "international_short": "P3",
-            "hall_number": 143, "hall_symbol": "P 3",
+            "hall_number": 430, "hall_symbol": "P 3",
             "operation_ids": [0],
         },
         detected_operations=[{
@@ -697,3 +697,44 @@ def test_basis_reconstruction_rejected_when_translations_inconsistent(monkeypatc
     cert = prov.get("standard_setting_certificate", {})
     assert cert.get("validation_status") == "rejected"
     assert cert.get("translation_validation_status") == "failed"
+
+
+# ---------------------------------------------------------------------------
+# Hall-number convention guard tests
+# ---------------------------------------------------------------------------
+
+def test_hall_number_mismatch_with_sg_number_is_consistency_checked():
+    """Hall for SG 143 is Hall 430, not 143. Mismatch must be flagged."""
+    from valleyscope.analysis.standard_setting_kmap import (
+        _validate_hall_sg_consistency,
+    )
+    ok, blocker = _validate_hall_sg_consistency(
+        hall_number=143, sg_number=143,
+    )
+    assert not ok
+    assert blocker is not None
+    assert "mismatch" in blocker
+
+
+def test_valid_hall_sg_pair_passes_consistency_check():
+    """Hall 430 <-> SG 143 (P3) is a valid pair."""
+    from valleyscope.analysis.standard_setting_kmap import (
+        _validate_hall_sg_consistency,
+    )
+    ok, blocker = _validate_hall_sg_consistency(
+        hall_number=430, sg_number=143,
+    )
+    assert ok
+    assert blocker is None
+
+
+def test_hall_9_sg_5_passes_consistency():
+    """Hall 9 <-> SG 5 (C2) is a valid pair."""
+    from valleyscope.analysis.standard_setting_kmap import (
+        _validate_hall_sg_consistency,
+    )
+    ok, blocker = _validate_hall_sg_consistency(
+        hall_number=9, sg_number=5,
+    )
+    assert ok
+    assert blocker is None
