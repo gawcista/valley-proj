@@ -525,29 +525,17 @@ def test_direct_match_certificate_has_affine_status():
         standard_match={
             "number": 143, "international_short": "P3",
             "hall_number": 143, "hall_symbol": "P 3",
-            "operation_ids": [0, 1, 2],
+            "operation_ids": [0],
         },
         detected_operations=[
             {"operation_id": 0, "order": 1,
              "rotation_frac": [[1,0,0],[0,1,0],[0,0,1]],
              "translation_frac": [0.0, 0.0, 0.0]},
-            {"operation_id": 1, "order": 3,
-             "rotation_frac": [[0,-1,0],[1,-1,0],[0,0,1]],
-             "translation_frac": [0.0, 0.0, 0.0]},
         ],
     )
     cert = prov["standard_setting_certificate"]
     assert cert["validation_status"] == "validated"
-    assert cert["translation_validation_status"] in (
-        "passed", "unresolved", "failed", "not_attempted",
-    )
-    # Direct match: affine validation requires a transform for translation comparison,
-    # so missing_affine_ingredients may include "direct_lattice_transform".
-    missing = cert.get("missing_affine_ingredients", [])
-    for item in missing:
-        assert item in ("direct_lattice_transform",) or not item, (
-            f"unexpected missing ingredient: {item}"
-        )
+    assert cert["translation_validation_status"] == "passed"
 
 
 def test_unresolved_certificate_has_missing_ingredients():
@@ -637,4 +625,75 @@ def test_explicit_transform_rejected_when_translations_inconsistent():
     assert "affine operation" in tf.get("rejection_reason", "").lower()
     # Certificate must show the rejection reason.
     cert = prov.get("standard_setting_certificate", {})
-    assert cert.get("validation_status") in ("unresolved", "rejected")
+    assert cert.get("validation_status") == "rejected"
+    assert cert.get("translation_validation_status") == "failed"
+    assert cert.get("mismatched_translation_count") == 1
+
+
+def test_direct_match_rejected_when_translations_inconsistent():
+    """Direct coordinate match cannot bypass affine translation validation."""
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.5, 0.0, 0.0]),
+        table=_fake_table_m(),
+        standard_match={
+            "number": 143, "international_short": "P3",
+            "hall_number": 143, "hall_symbol": "P 3",
+            "operation_ids": [0],
+        },
+        detected_operations=[{
+            "operation_id": 0,
+            "rotation_frac": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            "translation_frac": [0.25, 0.0, 0.0],
+        }],
+    )
+    assert label is None
+    assert blocker is not None
+    assert "direct coordinate match rejected" in blocker
+    cert = prov.get("standard_setting_certificate", {})
+    assert cert.get("validation_status") == "rejected"
+    assert cert.get("translation_validation_status") == "failed"
+
+
+def test_basis_reconstruction_rejected_when_translations_inconsistent(monkeypatch):
+    """Operation-basis reconstruction cannot bypass affine translations."""
+    import valleyscope.analysis.standard_setting_kmap as kmap
+
+    class _SecondCallTable:
+        def __init__(self):
+            self.calls = 0
+
+        def match_kpoint_label(self, k_frac, *, tolerance=1e-6):
+            self.calls += 1
+            return "M" if self.calls > 1 else None
+
+    monkeypatch.setattr(
+        kmap,
+        "_compute_standard_setting_basis_transform",
+        lambda **kwargs: {
+            "status": "accepted",
+            "transform_matrix": np.eye(3).tolist(),
+            "operation_basis_verification": {"status": "passed"},
+        },
+    )
+
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.123, 0.456, 0.0]),
+        table=_SecondCallTable(),
+        standard_match={
+            "number": 143, "international_short": "P3",
+            "hall_number": 143, "hall_symbol": "P 3",
+            "operation_ids": [0],
+        },
+        detected_operations=[{
+            "operation_id": 0,
+            "rotation_frac": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            "translation_frac": [0.25, 0.0, 0.0],
+        }],
+    )
+
+    assert label is None
+    assert blocker is not None
+    assert "operation-basis reconstruction rejected" in blocker
+    cert = prov.get("standard_setting_certificate", {})
+    assert cert.get("validation_status") == "rejected"
+    assert cert.get("translation_validation_status") == "failed"

@@ -70,12 +70,16 @@ class StandardSettingCertificate:
 
     # --- Affine translation validation ---
     translation_validation_status: str = "not_attempted"
-    """One of ``"validated"``, ``"translation_data_unavailable"``,
-    ``"failed"``, ``"not_attempted"``."""
+    """One of ``"passed"``, ``"failed"``, ``"unresolved"``,
+    ``"not_attempted"``."""
     total_parent_operations: int | None = None
     """Number of parent VP operations with rotation+translation data."""
     matched_affine_operations: int | None = None
     """Number whose transformed affine content matches standard setting."""
+    mismatched_translation_count: int | None = None
+    """Number of parent VP operations with inconsistent affine translation."""
+    mismatched_translations: list[dict[str, object]] = field(default_factory=list)
+    """Short diagnostic sample for failed affine translation matches."""
 
     # --- Affine missing ingredients ---
     missing_affine_ingredients: list[str] = field(default_factory=list)
@@ -256,6 +260,47 @@ def _validate_affine_operation_equivalence(
     return result
 
 
+def _apply_affine_validation_to_certificate(
+    cert: StandardSettingCertificate,
+    affine_result: dict[str, object],
+) -> None:
+    """Copy affine validation diagnostics into a certificate."""
+    cert.translation_validation_status = str(
+        affine_result.get("status", "unresolved")
+    )
+    cert.total_parent_operations = affine_result.get("total_parent_operations")
+    cert.matched_affine_operations = affine_result.get(
+        "matched_affine_operations"
+    )
+    cert.standard_setting_operation_count = affine_result.get(
+        "standard_setting_operation_count"
+    )
+    cert.missing_affine_ingredients = affine_result.get(
+        "missing_ingredients", []
+    )
+    cert.mismatched_translation_count = affine_result.get(
+        "mismatched_translation_count"
+    )
+    cert.mismatched_translations = affine_result.get(
+        "mismatched_translations", []
+    )
+
+
+def _affine_failure_blocker(
+    affine_result: dict[str, object],
+    *,
+    source: str,
+) -> str:
+    """Build a blocker for a failed affine operation equivalence check."""
+    count = affine_result.get("mismatched_translation_count", "?")
+    return (
+        "standard_setting_hsp_mapping_unresolved: "
+        f"{source} rejected because affine operation validation failed: "
+        f"{count} parent valley-preserving translation(s) did not match "
+        "standard-setting translations after basis transformation."
+    )
+
+
 def build_standard_setting_certificate(
     *,
     standard_match: dict[str, object] | None = None,
@@ -386,14 +431,27 @@ def resolve_standard_setting_hsp_label(
         # Affine validation for direct match.
         if isinstance(standard_match, dict) and detected_operations:
             vp_ids = _operation_ids_list(standard_match)
+            # Direct primitive coordinate match means the parent fractional
+            # basis is already being treated as the standard basis.
+            hall_symbol = str(standard_match.get("hall_symbol", "") or "")
+            direct_transform = np.eye(3) if hall_symbol.startswith("P") else None
             aff = _validate_affine_operation_equivalence(
                 vp_operations=list(detected_operations),
                 vp_operation_ids=vp_ids,
                 standard_match=standard_match,
+                parent_to_standard_direct_transform=direct_transform,
             )
-            cert.translation_validation_status = aff["status"]
-            cert.total_parent_operations = aff.get("total_parent_operations")
-            cert.missing_affine_ingredients = aff.get("missing_ingredients", [])
+            _apply_affine_validation_to_certificate(cert, aff)
+            if aff.get("status") == "failed":
+                blocker = _affine_failure_blocker(
+                    aff, source="direct coordinate match"
+                )
+                cert.validation_status = "rejected"
+                cert.unresolved_reason = blocker
+                cert.resolved_hsp_label = None
+                prov["affine_validation"] = aff
+                prov["standard_setting_certificate"] = cert.to_dict()
+                return None, blocker, prov
         prov["standard_setting_certificate"] = cert.to_dict()
         return direct_label, None, prov
 
@@ -441,15 +499,34 @@ def resolve_standard_setting_hsp_label(
                     if aff is not None and aff.get("status") == "failed":
                         prov["affine_validation"] = aff
                         tf_result["status"] = "rejected"
-                        tf_result["rejection_reason"] = (
-                            "affine operation validation failed: "
-                            f"{aff.get('mismatched_translation_count', '?')} "
-                            "parent VP translations did not match "
-                            "standard-setting translations after "
-                            "basis transformation"
+                        tf_result["rejection_reason"] = _affine_failure_blocker(
+                            aff, source="explicit transform"
                         )
                         prov["explicit_transform"] = tf_result
-                        # Fall through so the blocker path produces a certificate.
+                        cert = build_standard_setting_certificate(
+                            standard_match=standard_match,
+                            validation_status="rejected",
+                            unresolved_reason=tf_result["rejection_reason"],
+                            parent_basis_operation_ids=(
+                                _operation_ids_list(standard_match)
+                                if isinstance(standard_match, dict) else None
+                            ),
+                            parent_to_standard_direct_transform=T,
+                            transform_provenance="explicit_user_input",
+                            parent_k_frac=k_frac,
+                        )
+                        cert.standard_setting_source = "explicit_transform"
+                        cert.operation_mapping_status = (
+                            "operation_basis_verification_passed"
+                            if isinstance(
+                                tf_result.get("operation_basis_verification"),
+                                dict,
+                            )
+                            else "not_attempted"
+                        )
+                        _apply_affine_validation_to_certificate(cert, aff)
+                        prov["standard_setting_certificate"] = cert.to_dict()
+                        return None, tf_result["rejection_reason"], prov
                     else:
                         prov["explicit_transformed_match_succeeded"] = True
                         prov["explicit_transformed_hsp_label"] = label
@@ -475,16 +552,7 @@ def resolve_standard_setting_hsp_label(
                             else "not_attempted"
                         )
                         if aff is not None:
-                            cert.translation_validation_status = aff["status"]
-                            cert.total_parent_operations = aff.get(
-                                "total_parent_operations"
-                            )
-                            cert.matched_affine_operations = aff.get(
-                                "matched_affine_operations"
-                            )
-                            cert.missing_affine_ingredients = aff.get(
-                                "missing_ingredients", []
-                            )
+                            _apply_affine_validation_to_certificate(cert, aff)
                         prov["standard_setting_certificate"] = cert.to_dict()
                         return label, None, prov
             except np.linalg.LinAlgError:
@@ -550,6 +618,41 @@ def resolve_standard_setting_hsp_label(
             except TypeError:
                 transformed_label = table.match_kpoint_label(transformed_k)
             if transformed_label is not None:
+                aff = None
+                if isinstance(standard_match, dict) and detected_operations:
+                    vp_ids = _operation_ids_list(standard_match)
+                    aff = _validate_affine_operation_equivalence(
+                        vp_operations=list(detected_operations),
+                        vp_operation_ids=vp_ids,
+                        standard_match=standard_match,
+                        parent_to_standard_direct_transform=T,
+                    )
+                    if aff.get("status") == "failed":
+                        prov["affine_validation"] = aff
+                        blocker = _affine_failure_blocker(
+                            aff, source="operation-basis reconstruction"
+                        )
+                        cert = build_standard_setting_certificate(
+                            standard_match=standard_match,
+                            validation_status="rejected",
+                            unresolved_reason=blocker,
+                            parent_basis_operation_ids=(
+                                _operation_ids_list(standard_match)
+                                if isinstance(standard_match, dict) else None
+                            ),
+                            parent_to_standard_direct_transform=T,
+                            transform_provenance="operation_basis_reconstruction",
+                            parent_k_frac=k_frac,
+                        )
+                        cert.standard_setting_source = (
+                            "operation_basis_reconstruction"
+                        )
+                        cert.operation_mapping_status = (
+                            "operation_basis_verification_passed"
+                        )
+                        _apply_affine_validation_to_certificate(cert, aff)
+                        prov["standard_setting_certificate"] = cert.to_dict()
+                        return None, blocker, prov
                 prov["basis_transformed_match_succeeded"] = True
                 prov["transformed_hsp_label"] = transformed_label
                 cert = build_standard_setting_certificate(
@@ -568,6 +671,8 @@ def resolve_standard_setting_hsp_label(
                 cert.operation_mapping_status = (
                     "operation_basis_verification_passed"
                 )
+                if aff is not None:
+                    _apply_affine_validation_to_certificate(cert, aff)
                 prov["standard_setting_certificate"] = cert.to_dict()
                 return transformed_label, None, prov
         except np.linalg.LinAlgError:
@@ -638,12 +743,7 @@ def resolve_standard_setting_hsp_label(
             vp_operation_ids=vp_ids,
             standard_match=standard_match,
         )
-        cert.translation_validation_status = aff["status"]
-        cert.total_parent_operations = aff.get("total_parent_operations")
-        cert.standard_setting_operation_count = aff.get(
-            "standard_setting_operation_count"
-        )
-        cert.missing_affine_ingredients = aff.get("missing_ingredients", [])
+        _apply_affine_validation_to_certificate(cert, aff)
     prov["standard_setting_certificate"] = cert.to_dict()
     return None, blocker, prov
 
