@@ -44,12 +44,17 @@ def decide_irrep_workflow(
     sym_adapted_diagnostic_only: bool = True,
     # --- common ---
     spinor_convention_verified: bool = False,
+    spinor_wavefunction: bool = True,
 ) -> dict[str, object]:
     """Determine workflow path and readiness level for a single valley subspace.
 
     Returns a compact decision record.  All three diagnostic streams are
     inspected independently; the most favourable feasible path is chosen.
     """
+    # Scalar wavefunction: spinor convention gate does not apply.
+    effective_spinor_verified = (
+        spinor_convention_verified or not spinor_wavefunction
+    )
     reasons: list[str] = []
 
     # --- Direct q-cut path ---
@@ -75,7 +80,7 @@ def decide_irrep_workflow(
     )
 
     if seed_usable and closure_ok and qcut_ok:
-        if seed_clean and closure_clean and spinor_convention_verified:
+        if seed_clean and closure_clean and effective_spinor_verified:
             return _decision(
                 workflow_path=PATH_DIRECT_QCUT,
                 readiness=READINESS_TRUSTED,
@@ -92,7 +97,7 @@ def decide_irrep_workflow(
             )
         if not closure_clean:
             caution_reasons.append(f"target-subspace closure quality={closure_quality}")
-        if not spinor_convention_verified:
+        if not effective_spinor_verified:
             caution_reasons.append("spinor convention unverified")
             followups.append("verify spinor convention against benchmark")
         return _decision(
@@ -133,7 +138,7 @@ def decide_irrep_workflow(
         )
 
     if sa_proj_usable and closure_usable:
-        if sa_ready and spinor_convention_verified:
+        if sa_ready and effective_spinor_verified:
             return _decision(
                 workflow_path=PATH_SYMMETRY_ADAPTED,
                 readiness=READINESS_TRUSTED,
@@ -209,6 +214,7 @@ def build_irrep_workflow_decisions(
     symmetry_rows: list[dict[str, object]],
     valley_names: list[str],
     spinor_convention_verified: bool = False,
+    spinor_wavefunction: bool = True,
 ) -> dict[str, object]:
     """Build per-(kpoint, valley) workflow decision records.
 
@@ -342,7 +348,7 @@ def build_irrep_workflow_decisions(
                         if isinstance(pv, list) and pv:
                             has_char_diag = True
                             break
-                if has_char_diag and spinor_convention_verified:
+                if has_char_diag and (spinor_convention_verified or not spinor_wavefunction):
                     kp_decisions[v] = _decision(
                         workflow_path=PATH_SYMMETRY_ADAPTED,
                         readiness=READINESS_TRUSTED,
@@ -436,6 +442,7 @@ def build_irrep_workflow_decisions(
                 sym_adapted_local_irrep_ready=sa.get("local_irrep_ready", False),
                 sym_adapted_diagnostic_only=sa.get("diagnostic_only", True),
                 spinor_convention_verified=spinor_convention_verified,
+                spinor_wavefunction=spinor_wavefunction,
             )
             kp_decisions[v] = decision
         if kp_decisions:
