@@ -111,13 +111,19 @@ def _validate_affine_operation_equivalence(
     vp_operations: list[dict[str, object]] | None,
     vp_operation_ids: list[int],
     standard_match: dict[str, object],
+    parent_to_standard_direct_transform: np.ndarray | None = None,
+    tolerance: float = 1e-6,
 ) -> dict[str, object]:
     """Validate affine (rotation + translation) operation equivalence.
 
-    Checks whether VP operations carry translation_frac data and whether
-    the spglib standard-setting database provides standard translations
-    for comparison.  Returns a status dict with affine ingredient counts
-    and a list of missing pieces.
+    When a candidate direct-basis transform T is provided, transforms
+    each parent {R_p, τ_p} into the standard basis via
+    {T·R_p·T⁻¹, T·τ_p} and compares against standard-setting
+    {R_s, τ_s} from spglib, modulo lattice translations.
+
+    Returns a status dict with ``status`` (``"passed"``, ``"failed"``,
+    or ``"unresolved"``), matched/unmatched counts, and a list of
+    missing affine ingredients.
     """
     result: dict[str, object] = {
         "status": "not_attempted",
@@ -125,7 +131,7 @@ def _validate_affine_operation_equivalence(
     }
 
     if not vp_operations:
-        result["status"] = "translation_data_unavailable"
+        result["status"] = "unresolved"
         result["missing_ingredients"].append("vp_operation_data")
         return result
 
@@ -151,14 +157,14 @@ def _validate_affine_operation_equivalence(
     result["total_parent_operations"] = len(ops_with_translations)
 
     if not ops_with_translations:
-        result["status"] = "translation_data_unavailable"
+        result["status"] = "unresolved"
         result["missing_ingredients"].append("parent_translation_frac")
         return result
 
-    # Check spglib standard-setting translations availability.
+    # Check spglib standard-setting translations.
     hall_number = standard_match.get("hall_number")
     if not isinstance(hall_number, int) or isinstance(hall_number, bool):
-        result["status"] = "translation_data_unavailable"
+        result["status"] = "unresolved"
         result["missing_ingredients"].append("standard_setting_translations")
         return result
 
@@ -169,21 +175,84 @@ def _validate_affine_operation_equivalence(
         std_sym = None
 
     if std_sym is None:
-        result["status"] = "translation_data_unavailable"
+        result["status"] = "unresolved"
         result["missing_ingredients"].append("spglib_database_access")
         return result
 
-    std_translations = [
-        np.asarray(t, dtype=float) for t in std_sym["translations"]
-    ]
+    std_rotations = [np.asarray(r, dtype=float) for r in std_sym["rotations"]]
+    std_translations = [np.asarray(t, dtype=float) for t in std_sym["translations"]]
     result["standard_setting_operation_count"] = len(std_translations)
 
-    # For full affine validation we also need centering vectors.
     hall_symbol = standard_match.get("hall_symbol", "")
     if hall_symbol and hall_symbol[0] in ("C", "I", "F", "R"):
         result["missing_ingredients"].append("conventional_centering_vectors")
+        result["status"] = "unresolved"
+        return result
 
-    result["status"] = "affine_data_available"
+    # If no candidate transform, we cannot compare — unresolved.
+    if parent_to_standard_direct_transform is None:
+        result["status"] = "unresolved"
+        result["missing_ingredients"].append("direct_lattice_transform")
+        return result
+
+    T = np.asarray(parent_to_standard_direct_transform, dtype=float)
+    if T.shape != (3, 3):
+        result["status"] = "unresolved"
+        result["missing_ingredients"].append("direct_lattice_transform")
+        return result
+
+    # Compare transformed parent affine ops against standard ops.
+    try:
+        T_inv = np.linalg.inv(T)
+    except np.linalg.LinAlgError:
+        result["status"] = "failed"
+        result["missing_ingredients"].append("singular_transform")
+        return result
+
+    matched_count = 0
+    mismatched_translations: list[dict[str, object]] = []
+    for op in ops_with_translations:
+        r_p = np.asarray(op["rotation_frac"], dtype=float)
+        t_p = np.asarray(op["translation_frac"], dtype=float)
+
+        r_transformed = np.rint(T @ r_p @ T_inv).astype(int)
+        t_transformed = T @ t_p
+
+        found = False
+        for j, (r_s, t_s) in enumerate(zip(std_rotations, std_translations)):
+            if not np.allclose(r_transformed, r_s, atol=tolerance):
+                continue
+            # Compare translation modulo lattice: the transformed translation
+            # should match the standard translation mod 1 (fractional).
+            t_diff = t_transformed - t_s
+            t_diff_mod = t_diff - np.rint(t_diff)
+            if np.linalg.norm(t_diff_mod) <= tolerance:
+                matched_count += 1
+                found = True
+                break
+
+        if not found:
+            mismatched_translations.append({
+                "parent_operation_id": op.get("operation_id"),
+                "parent_translation_frac": t_p.tolist(),
+                "transformed_translation": t_transformed.tolist(),
+            })
+
+    result["matched_affine_operations"] = matched_count
+    result["total_parent_operations"] = len(ops_with_translations)
+
+    if mismatched_translations:
+        result["status"] = "failed"
+        result["mismatched_translation_count"] = len(mismatched_translations)
+        result["mismatched_translations"] = mismatched_translations[:3]
+    elif matched_count > 0:
+        result["status"] = "passed"
+    else:
+        result["status"] = "unresolved"
+        result["missing_ingredients"].append(
+            "no_affine_operations_matched_after_transform"
+        )
+
     return result
 
 
@@ -358,31 +427,66 @@ def resolve_standard_setting_hsp_label(
                 except TypeError:
                     label = table.match_kpoint_label(transformed_k)
                 if label is not None:
-                    prov["explicit_transformed_match_succeeded"] = True
-                    prov["explicit_transformed_hsp_label"] = label
-                    cert = build_standard_setting_certificate(
-                        standard_match=standard_match,
-                        validation_status="validated",
-                        parent_basis_operation_ids=(
-                            _operation_ids_list(standard_match)
-                            if isinstance(standard_match, dict) else None
-                        ),
-                        parent_to_standard_direct_transform=T,
-                        transform_provenance="explicit_user_input",
-                        parent_k_frac=k_frac,
-                        resolved_hsp_label=label,
-                    )
-                    cert.standard_setting_source = "explicit_transform"
-                    cert.operation_mapping_status = (
-                        "operation_basis_verification_passed"
-                        if isinstance(
-                            tf_result.get("operation_basis_verification"),
-                            dict,
+                    # Affine gate: explicit transform must not bypass
+                    # translation validation when affine data is available.
+                    aff = None
+                    if isinstance(standard_match, dict) and detected_operations:
+                        vp_ids = _operation_ids_list(standard_match)
+                        aff = _validate_affine_operation_equivalence(
+                            vp_operations=list(detected_operations),
+                            vp_operation_ids=vp_ids,
+                            standard_match=standard_match,
+                            parent_to_standard_direct_transform=T,
                         )
-                        else "not_attempted"
-                    )
-                    prov["standard_setting_certificate"] = cert.to_dict()
-                    return label, None, prov
+                    if aff is not None and aff.get("status") == "failed":
+                        prov["affine_validation"] = aff
+                        tf_result["status"] = "rejected"
+                        tf_result["rejection_reason"] = (
+                            "affine operation validation failed: "
+                            f"{aff.get('mismatched_translation_count', '?')} "
+                            "parent VP translations did not match "
+                            "standard-setting translations after "
+                            "basis transformation"
+                        )
+                        prov["explicit_transform"] = tf_result
+                        # Fall through so the blocker path produces a certificate.
+                    else:
+                        prov["explicit_transformed_match_succeeded"] = True
+                        prov["explicit_transformed_hsp_label"] = label
+                        cert = build_standard_setting_certificate(
+                            standard_match=standard_match,
+                            validation_status="validated",
+                            parent_basis_operation_ids=(
+                                _operation_ids_list(standard_match)
+                                if isinstance(standard_match, dict) else None
+                            ),
+                            parent_to_standard_direct_transform=T,
+                            transform_provenance="explicit_user_input",
+                            parent_k_frac=k_frac,
+                            resolved_hsp_label=label,
+                        )
+                        cert.standard_setting_source = "explicit_transform"
+                        cert.operation_mapping_status = (
+                            "operation_basis_verification_passed"
+                            if isinstance(
+                                tf_result.get("operation_basis_verification"),
+                                dict,
+                            )
+                            else "not_attempted"
+                        )
+                        if aff is not None:
+                            cert.translation_validation_status = aff["status"]
+                            cert.total_parent_operations = aff.get(
+                                "total_parent_operations"
+                            )
+                            cert.matched_affine_operations = aff.get(
+                                "matched_affine_operations"
+                            )
+                            cert.missing_affine_ingredients = aff.get(
+                                "missing_ingredients", []
+                            )
+                        prov["standard_setting_certificate"] = cert.to_dict()
+                        return label, None, prov
             except np.linalg.LinAlgError:
                 tf_result["status"] = "rejected"
                 tf_result["rejection_reason"] = "singular transformation matrix"

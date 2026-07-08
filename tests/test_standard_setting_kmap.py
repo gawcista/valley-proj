@@ -539,11 +539,15 @@ def test_direct_match_certificate_has_affine_status():
     cert = prov["standard_setting_certificate"]
     assert cert["validation_status"] == "validated"
     assert cert["translation_validation_status"] in (
-        "affine_data_available", "translation_data_unavailable",
-        "validated", "failed",
+        "passed", "unresolved", "failed", "not_attempted",
     )
-    # missing_affine_ingredients may be omitted from serialization when empty.
-    assert cert.get("missing_affine_ingredients", []) == []
+    # Direct match: affine validation requires a transform for translation comparison,
+    # so missing_affine_ingredients may include "direct_lattice_transform".
+    missing = cert.get("missing_affine_ingredients", [])
+    for item in missing:
+        assert item in ("direct_lattice_transform",) or not item, (
+            f"unexpected missing ingredient: {item}"
+        )
 
 
 def test_unresolved_certificate_has_missing_ingredients():
@@ -595,3 +599,42 @@ def test_centered_setting_blocked_with_affine_reason():
     # Blocker must not name any real material.
     for mat in ("MoTe2", "ZrSe2", "tMoTe2", "tZrSe2"):
         assert mat.lower() not in str(blocker).lower()
+
+
+# ---------------------------------------------------------------------------
+# Affine inconsistency rejection tests
+# ---------------------------------------------------------------------------
+
+def _fake_table_m():
+    """Table that matches (0.5, 0, 0) as HSP 'M'."""
+    return _FakeTable(labels={"M": (0.5, 0.0, 0.0)})
+
+
+def test_explicit_transform_rejected_when_translations_inconsistent():
+    """Matching rotations but inconsistent translations → rejected, not validated."""
+    T = np.diag([0.5, 1.0, 1.0])
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.25, 0.0, 0.0]),
+        table=_fake_table_m(),
+        standard_match={
+            "number": 143, "international_short": "P3",
+            "hall_number": 143, "hall_symbol": "P 3",
+            "operation_ids": [0],
+        },
+        parent_to_standard_direct_transform=T,
+        detected_operations=[{
+            "operation_id": 0,
+            "rotation_frac": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            "translation_frac": [0.25, 0.0, 0.0],
+        }],
+    )
+    # Must be rejected — identity operation with non-zero translation
+    # is not affine-equivalent to the standard identity operation.
+    assert label is None
+    assert blocker is not None
+    tf = prov.get("explicit_transform", {})
+    assert tf.get("status") == "rejected"
+    assert "affine operation" in tf.get("rejection_reason", "").lower()
+    # Certificate must show the rejection reason.
+    cert = prov.get("standard_setting_certificate", {})
+    assert cert.get("validation_status") in ("unresolved", "rejected")
