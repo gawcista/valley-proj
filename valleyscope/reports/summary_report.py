@@ -565,6 +565,7 @@ def _projection_rows(subspace_payload: dict[str, Any]) -> list[dict[str, Any]]:
                 {
                     "kpoint": kpoint,
                     "band_vasp": weight.get("band_vasp"),
+                    "valley_weights": weight.get("valley_weights"),
                     "W_val": weight.get("W_val"),
                     "P_v": weight.get("P_v"),
                     "eta": weight.get("eta"),

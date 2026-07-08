@@ -713,6 +713,49 @@ def test_summary_status_keeps_not_derived_and_unreliable_distinct(tmp_path):
     assert summary["valley_subspace_analysis"][1]["status"] == "n/a"
 
 
+def test_valley_projection_summary_contains_per_valley_weights(tmp_path):
+    """valley_projection_summary rows include valley_weights dict."""
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    config = load_config(config_path)
+    from valleyscope.reports.summary_report import build_summary_payload
+
+    summary = build_summary_payload(
+        config=config,
+        qcut=0.5,
+        subspace_payload={
+            "kpoints": {
+                "GammaM": {
+                    "weights": [{
+                        "band_vasp": 1,
+                        "valley_weights": {"K_valley": 0.8, "Kp_valley": 0.1},
+                        "W_val": 0.9, "P_v": 0.89, "eta": 0.78,
+                        "W_overlap": 0.05, "W_res": 0.05,
+                        "valley_status": "clean",
+                    }],
+                    "warnings": [],
+                    "valley_adapted_subspace": {"status": "two_valley_adapted"},
+                },
+            },
+        },
+        symmetry_payload={
+            "status": "skipped", "reason": "no structure",
+            "detected_operations": [], "candidate_rotations": [],
+            "little_group_check": {"status": "not_run"},
+            "valley_preservation_check": {"status": "not_run"},
+        },
+        symmetry_rows=[],
+        output_paths={},
+    )
+    row = summary["valley_projection_summary"][0]
+    assert row["valley_weights"] == {"K_valley": 0.8, "Kp_valley": 0.1}
+    assert row["W_val"] == 0.9
+    assert row["P_v"] == 0.89
+
+
 def test_symmetry_analysis_distinguishes_computed_from_diagnostic_only(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "config.yaml"
