@@ -152,6 +152,27 @@ class GenericIrrepSourceConfig:
 
 
 @dataclass(frozen=True)
+class StandardSettingConfig:
+    """Explicit standard-setting crystallographic convention certificate.
+
+    These fields provide an explicit parent-to-standard direct-lattice
+    transform and optional origin shift for the valley-projected
+    subspace space group.  When supplied, the transform must pass
+    affine operation-basis verification before any HSP label is trusted.
+
+    This is an explicit convention-certificate path — it should not be
+    confused with automated spglib subgroup detection or with
+    material-specific settings.
+    """
+    parent_to_standard_direct_transform: list[list[float]] | None = None
+    """3×3 matrix T: x_std = T · x_parent (direct space)."""
+    origin_shift_fractional: list[float] | None = None
+    """Fractional origin shift vector (length 3)."""
+    transform_provenance: str | None = None
+    """Short provenance string, required when transform is supplied."""
+
+
+@dataclass(frozen=True)
 class SymmetryAdaptedValleyConfig:
     enabled: bool = True
     seed_overlap_warn_tol: float = 0.8
@@ -179,6 +200,7 @@ class AppConfig:
     symmetry_adapted_valley: SymmetryAdaptedValleyConfig = field(default_factory=SymmetryAdaptedValleyConfig)
     reduced_ebr: ReducedEbrConfig = field(default_factory=ReducedEbrConfig)
     generic_irrep_source: GenericIrrepSourceConfig = field(default_factory=GenericIrrepSourceConfig)
+    standard_setting: StandardSettingConfig = field(default_factory=StandardSettingConfig)
     monolayer_lattices: dict[str, np.ndarray] = field(default_factory=dict)
     layer_transforms: dict[str, dict[str, Any]] = field(default_factory=dict)
 
@@ -731,6 +753,52 @@ def _parse_generic_irrep_source_config(raw: dict[str, Any]) -> GenericIrrepSourc
         source_hsp_labels=source_hsp_labels,
     )
 
+def _parse_standard_setting_config(raw: dict[str, Any]) -> StandardSettingConfig:
+    if not isinstance(raw, dict) or not raw:
+        return StandardSettingConfig()
+    T = raw.get("parent_to_standard_direct_transform")
+    if T is not None:
+        if not isinstance(T, (list, tuple)) or len(T) != 3:
+            raise ValueError(
+                "analysis.standard_setting.parent_to_standard_direct_transform "
+                "must be a 3x3 list of floats"
+            )
+        for i, row in enumerate(T):
+            if not isinstance(row, (list, tuple)) or len(row) != 3:
+                raise ValueError(
+                    f"analysis.standard_setting.parent_to_standard_direct_transform"
+                    f"[{i}] must be a list of 3 floats"
+                )
+            for j, val in enumerate(row):
+                try:
+                    float(val)
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        f"analysis.standard_setting.parent_to_standard_direct_transform"
+                        f"[{i}][{j}] must be a float, got {val!r}"
+                    ) from None
+        T = [[float(v) for v in row] for row in T]
+    o = raw.get("origin_shift_fractional")
+    if o is not None:
+        if not isinstance(o, (list, tuple)) or len(o) != 3:
+            raise ValueError(
+                "analysis.standard_setting.origin_shift_fractional "
+                "must be a length-3 list of floats"
+            )
+        o = [float(v) for v in o]
+    provenance = raw.get("transform_provenance")
+    if T is not None and not provenance:
+        raise ValueError(
+            "analysis.standard_setting.transform_provenance is required "
+            "when parent_to_standard_direct_transform is supplied"
+        )
+    return StandardSettingConfig(
+        parent_to_standard_direct_transform=T,
+        origin_shift_fractional=o,
+        transform_provenance=str(provenance) if provenance else None,
+    )
+
+
 def _parse_symmetry_adapted_valley_config(raw: dict[str, Any]) -> SymmetryAdaptedValleyConfig:
     if not isinstance(raw, dict):
         return SymmetryAdaptedValleyConfig()
@@ -820,6 +888,9 @@ def load_config(path: str | Path) -> AppConfig:
         reduced_ebr=_parse_reduced_ebr_config(base, analysis_raw.get("reduced_ebr", {})),
         generic_irrep_source=_parse_generic_irrep_source_config(
             analysis_raw.get("generic_irrep_source", {}),
+        ),
+        standard_setting=_parse_standard_setting_config(
+            analysis_raw.get("standard_setting", {}),
         ),
         output=OutputConfig(
             directory=resolve_config_path(base, output_raw.get("directory", "valley_analysis")),

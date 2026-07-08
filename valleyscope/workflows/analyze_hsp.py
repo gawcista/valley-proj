@@ -187,6 +187,8 @@ def _resolve_generic_irrep_hsp_label_with_provenance(
     standard_match: dict[str, object] | None = None,
     lattice_direct_cart: np.ndarray | None = None,
     detected_operations: list[dict[str, object]] | None = None,
+    parent_to_standard_direct_transform: np.ndarray | None = None,
+    origin_shift_fractional: np.ndarray | None = None,
 ) -> tuple[str | None, str | None, dict[str, object]]:
     """Resolve a standard-setting Bilbao HSP label.
 
@@ -204,6 +206,10 @@ def _resolve_generic_irrep_hsp_label_with_provenance(
             standard_match=standard_match,
             lattice_direct_cart=lattice_direct_cart,
             detected_operations=detected_operations,
+            parent_to_standard_direct_transform=(
+                parent_to_standard_direct_transform
+            ),
+            origin_shift_fractional=origin_shift_fractional,
         )
     else:
         label, blocker, prov = None, (
@@ -673,6 +679,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     if override_hsp is not None
                     else None
                 )
+                ss_cfg = config.standard_setting
                 src_hsp, hsp_blocker, hsp_provenance = (
                     _resolve_generic_irrep_hsp_label_with_provenance(
                         table=table,
@@ -694,6 +701,16 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                         detected_operations=(
                             symmetry_payload.get("detected_operations")
                             if isinstance(symmetry_payload.get("detected_operations"), list)
+                            else None
+                        ),
+                        parent_to_standard_direct_transform=(
+                            np.asarray(ss_cfg.parent_to_standard_direct_transform, dtype=float)
+                            if ss_cfg.parent_to_standard_direct_transform is not None
+                            else None
+                        ),
+                        origin_shift_fractional=(
+                            np.asarray(ss_cfg.origin_shift_fractional, dtype=float)
+                            if ss_cfg.origin_shift_fractional is not None
                             else None
                         ),
                     )

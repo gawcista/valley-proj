@@ -343,6 +343,7 @@ def build_standard_setting_certificate(
     unresolved_reason: str | None = None,
     parent_basis_operation_ids: list[int] | None = None,
     parent_to_standard_direct_transform: np.ndarray | None = None,
+    origin_shift_fractional: np.ndarray | None = None,
     transform_provenance: str = "not_provided",
     parent_k_frac: np.ndarray | None = None,
     resolved_hsp_label: str | None = None,
@@ -383,6 +384,12 @@ def build_standard_setting_certificate(
     if resolved_hsp_label is not None:
         cert.resolved_hsp_label = str(resolved_hsp_label)
 
+    if origin_shift_fractional is not None:
+        o = np.asarray(origin_shift_fractional, dtype=float)
+        if o.shape == (3,) and np.all(np.isfinite(o)):
+            cert.origin_shift_fractional = o.tolist()
+            cert.origin_shift_status = "explicit"
+
     return cert
 
 
@@ -395,6 +402,7 @@ def resolve_standard_setting_hsp_label(
     lattice_direct_cart: np.ndarray | None = None,
     detected_operations: list[dict[str, object]] | None = None,
     parent_to_standard_direct_transform: np.ndarray | None = None,
+    origin_shift_fractional: np.ndarray | None = None,
 ) -> tuple[str | None, str | None, dict[str, object]]:
     """Resolve a standard-setting Bilbao HSP label for a sampled k-point.
 
@@ -475,6 +483,7 @@ def resolve_standard_setting_hsp_label(
                 vp_operation_ids=vp_ids,
                 standard_match=standard_match,
                 parent_to_standard_direct_transform=direct_transform,
+                origin_shift_fractional=origin_shift_fractional,
             )
             _apply_affine_validation_to_certificate(cert, aff)
             if aff.get("status") == "failed":
@@ -530,6 +539,7 @@ def resolve_standard_setting_hsp_label(
                             vp_operation_ids=vp_ids,
                             standard_match=standard_match,
                             parent_to_standard_direct_transform=T,
+                            origin_shift_fractional=origin_shift_fractional,
                         )
                     if aff is not None and aff.get("status") == "failed":
                         prov["affine_validation"] = aff
@@ -661,6 +671,7 @@ def resolve_standard_setting_hsp_label(
                         vp_operation_ids=vp_ids,
                         standard_match=standard_match,
                         parent_to_standard_direct_transform=T,
+                            origin_shift_fractional=origin_shift_fractional,
                     )
                     if aff.get("status") == "failed":
                         prov["affine_validation"] = aff
