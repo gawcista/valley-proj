@@ -20,6 +20,7 @@ layer_transforms:
 
 analysis:
   kpoints: [GammaM, KM, MM]
+  # VASP band indices. Also accepts {start: 101, end: 120} or "101-120".
   iband: [101, 102]
   subspace_energy_tol_meV: 1.0
 

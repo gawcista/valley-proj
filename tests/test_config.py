@@ -58,6 +58,44 @@ def test_config_loader_parses_core_schema(tmp_path):
     assert config.valley_subspaces[0].name == "K_valley"
 
 
+def test_config_loader_accepts_iband_range_forms(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+    raw["analysis"]["iband"] = {"start": 4255, "end": 4258}
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    config = load_config(config_path)
+    assert config.analysis.iband == [4255, 4256, 4257, 4258]
+
+    raw["analysis"]["iband"] = "4255-4258"
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    config = load_config(config_path)
+    assert config.analysis.iband == [4255, 4256, 4257, 4258]
+
+    raw["analysis"]["iband"] = [4255, "4257..4259", {"start": 4259, "end": 4260}]
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    config = load_config(config_path)
+    assert config.analysis.iband == [4255, 4257, 4258, 4259, 4260]
+
+
+def test_config_loader_rejects_reversed_iband_range(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["analysis"]["iband"] = {"start": 4260, "end": 4255}
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="range end"):
+        load_config(config_path)
+
+
 def test_config_loader_accepts_simplified_schema_defaults(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "simplified.yaml"
@@ -462,5 +500,4 @@ def test_config_loader_derives_layer_reciprocal_from_supercell_matrix(tmp_path):
         [[np.pi, 0.0, 0.0], [0.0, 2.0 * np.pi / 3.0, 0.0], [0.0, 0.0, 2.0 * np.pi / 5.0]],
     )
     assert center.cart == pytest.approx([0.5 * np.pi, 0.0, 0.0])
-
 

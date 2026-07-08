@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -443,7 +444,7 @@ def _parse_analysis_config(raw: dict[str, Any]) -> AnalysisConfig:
         raise ValueError("analysis.target_bands_vasp has been removed; use analysis.iband")
     if "iband" not in raw:
         raise ValueError("analysis.iband is required")
-    iband = raw["iband"]
+    iband = _parse_iband(raw["iband"])
 
     if "subspace_energy_tol_meV" in raw:
         if "degeneracy_tol_meV" in raw and float(raw["degeneracy_tol_meV"]) != float(raw["subspace_energy_tol_meV"]):
@@ -458,9 +459,71 @@ def _parse_analysis_config(raw: dict[str, Any]) -> AnalysisConfig:
 
     return AnalysisConfig(
         kpoints=list(raw.get("kpoints", [])),
-        iband=[int(value) for value in iband],
+        iband=iband,
         degeneracy_tol_meV=float(degeneracy_tol),
     )
+
+
+_IBAND_RANGE_RE = re.compile(r"^\s*(\d+)\s*(?:-|\.\.)\s*(\d+)\s*$")
+
+
+def _parse_iband(raw: Any) -> list[int]:
+    """Parse VASP band indices from explicit values and inclusive ranges."""
+    values = _expand_iband_item(raw, path="analysis.iband")
+    out: list[int] = []
+    seen: set[int] = set()
+    for value in values:
+        if value not in seen:
+            out.append(value)
+            seen.add(value)
+    return out
+
+
+def _expand_iband_item(raw: Any, *, path: str) -> list[int]:
+    if isinstance(raw, bool):
+        raise ValueError(f"{path} must contain VASP band indices, not booleans")
+    if isinstance(raw, int):
+        return [int(raw)]
+    if isinstance(raw, str):
+        text = raw.strip()
+        match = _IBAND_RANGE_RE.match(text)
+        if match:
+            return _inclusive_band_range(
+                int(match.group(1)),
+                int(match.group(2)),
+                path=path,
+            )
+        try:
+            return [int(text)]
+        except ValueError as exc:
+            raise ValueError(
+                f"{path} string entries must be integers or inclusive ranges "
+                "like '4255-4274'"
+            ) from exc
+    if isinstance(raw, dict):
+        start = raw.get("start", raw.get("from"))
+        end = raw.get("end", raw.get("stop", raw.get("to")))
+        if start is None or end is None:
+            raise ValueError(
+                f"{path} range mapping must define start/end, from/to, or "
+                "start/stop"
+            )
+        return _inclusive_band_range(int(start), int(end), path=path)
+    if isinstance(raw, (list, tuple)):
+        values: list[int] = []
+        for idx, item in enumerate(raw):
+            values.extend(_expand_iband_item(item, path=f"{path}[{idx}]"))
+        return values
+    raise ValueError(
+        f"{path} must be a list of VASP band indices, an inclusive range "
+        "mapping, or a range string"
+    )
+
+
+def _inclusive_band_range(start: int, end: int, *, path: str) -> list[int]:
+    if end < start:
+        raise ValueError(f"{path} range end must be >= start")
+    return list(range(start, end + 1))
 
 
 def _parse_valley_subspaces(raw: dict[str, Any]) -> list[ValleySector]:
