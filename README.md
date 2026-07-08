@@ -453,6 +453,16 @@ analysis:
   kpoints: [GammaM, KM, MM]
   iband: [2195, 2196]
   subspace_energy_tol_meV: 1.0
+  # Optional explicit convention certificate for nontrivial parent-to-standard
+  # HSP coordinate mapping.  Use only when you know the crystallographic
+  # parent-to-standard direct-lattice transform.
+  # standard_setting:
+  #   parent_to_standard_direct_transform:
+  #     - [1.0, 0.0, 0.0]
+  #     - [0.0, 1.0, 0.0]
+  #     - [0.0, 0.0, 1.0]
+  #   origin_shift_fractional: [0.0, 0.0, 0.0]
+  #   transform_provenance: "explicit standard-cell convention"
 
 valley_centers:
   coordinate_mode: layer_frac

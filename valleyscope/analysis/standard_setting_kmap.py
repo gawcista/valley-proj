@@ -403,6 +403,7 @@ def resolve_standard_setting_hsp_label(
     detected_operations: list[dict[str, object]] | None = None,
     parent_to_standard_direct_transform: np.ndarray | None = None,
     origin_shift_fractional: np.ndarray | None = None,
+    transform_provenance: str | None = None,
 ) -> tuple[str | None, str | None, dict[str, object]]:
     """Resolve a standard-setting Bilbao HSP label for a sampled k-point.
 
@@ -430,6 +431,10 @@ def resolve_standard_setting_hsp_label(
         coordinates from the parent basis to the standard setting:
         x_std = T * x_parent.  For k-points:
         k_std = T^(-T) * k_parent.
+    origin_shift_fractional : np.ndarray or None
+        Optional origin shift in standard fractional coordinates.
+    transform_provenance : str or None
+        Short provenance string for an explicit transform.
 
     Returns
     -------
@@ -451,7 +456,7 @@ def resolve_standard_setting_hsp_label(
     except TypeError:
         # Compatibility with test mocks that don't accept tolerance.
         direct_label = table.match_kpoint_label(k_frac)
-    if direct_label is not None:
+    if direct_label is not None and parent_to_standard_direct_transform is None:
         prov["direct_match_succeeded"] = True
         cert = build_standard_setting_certificate(
             standard_match=standard_match,
@@ -462,6 +467,7 @@ def resolve_standard_setting_hsp_label(
             ),
             parent_k_frac=k_frac,
             resolved_hsp_label=direct_label,
+            origin_shift_fractional=origin_shift_fractional,
         )
         cert.operation_mapping_status = "not_attempted"
         if isinstance(standard_match, dict) and str(standard_match.get("hall_symbol", "")).startswith("P"):
@@ -500,10 +506,16 @@ def resolve_standard_setting_hsp_label(
         return direct_label, None, prov
 
     prov["direct_match_succeeded"] = False
-    prov["direct_match_reason"] = (
-        "parent-setting k_frac does not match any standard-setting "
-        "Bilbao HSP coordinate in the irreptables table"
-    )
+    if direct_label is not None:
+        prov["direct_match_reason"] = (
+            "direct parent-coordinate match was skipped because an explicit "
+            "parent-to-standard transform was supplied"
+        )
+    else:
+        prov["direct_match_reason"] = (
+            "parent-setting k_frac does not match any standard-setting "
+            "Bilbao HSP coordinate in the irreptables table"
+        )
 
     # 2. Explicit parent-to-standard direct-lattice transform.
     #    When an explicit, validated transform matrix is provided, apply
@@ -521,6 +533,11 @@ def resolve_standard_setting_hsp_label(
         prov["explicit_transform"] = tf_result
         if tf_result.get("status") == "valid":
             try:
+                explicit_provenance = (
+                    str(transform_provenance)
+                    if transform_provenance
+                    else "explicit_user_input"
+                )
                 T_inv = np.linalg.inv(T)
                 transformed_k = k_frac @ T_inv.T
                 prov["transformed_k_frac"] = transformed_k.tolist()
@@ -557,7 +574,8 @@ def resolve_standard_setting_hsp_label(
                                 if isinstance(standard_match, dict) else None
                             ),
                             parent_to_standard_direct_transform=T,
-                            transform_provenance="explicit_user_input",
+                            origin_shift_fractional=origin_shift_fractional,
+                            transform_provenance=explicit_provenance,
                             parent_k_frac=k_frac,
                         )
                         cert.standard_setting_source = "explicit_transform"
@@ -583,7 +601,8 @@ def resolve_standard_setting_hsp_label(
                                 if isinstance(standard_match, dict) else None
                             ),
                             parent_to_standard_direct_transform=T,
-                            transform_provenance="explicit_user_input",
+                            origin_shift_fractional=origin_shift_fractional,
+                            transform_provenance=explicit_provenance,
                             parent_k_frac=k_frac,
                             resolved_hsp_label=label,
                         )
@@ -687,6 +706,7 @@ def resolve_standard_setting_hsp_label(
                                 if isinstance(standard_match, dict) else None
                             ),
                             parent_to_standard_direct_transform=T,
+                            origin_shift_fractional=origin_shift_fractional,
                             transform_provenance="operation_basis_reconstruction",
                             parent_k_frac=k_frac,
                         )
@@ -709,6 +729,7 @@ def resolve_standard_setting_hsp_label(
                         if isinstance(standard_match, dict) else None
                     ),
                     parent_to_standard_direct_transform=T,
+                    origin_shift_fractional=origin_shift_fractional,
                     transform_provenance="operation_basis_reconstruction",
                     parent_k_frac=k_frac,
                     resolved_hsp_label=transformed_label,

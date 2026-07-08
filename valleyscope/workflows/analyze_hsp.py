@@ -189,6 +189,7 @@ def _resolve_generic_irrep_hsp_label_with_provenance(
     detected_operations: list[dict[str, object]] | None = None,
     parent_to_standard_direct_transform: np.ndarray | None = None,
     origin_shift_fractional: np.ndarray | None = None,
+    transform_provenance: str | None = None,
 ) -> tuple[str | None, str | None, dict[str, object]]:
     """Resolve a standard-setting Bilbao HSP label.
 
@@ -210,6 +211,7 @@ def _resolve_generic_irrep_hsp_label_with_provenance(
                 parent_to_standard_direct_transform
             ),
             origin_shift_fractional=origin_shift_fractional,
+            transform_provenance=transform_provenance,
         )
     else:
         label, blocker, prov = None, (
@@ -713,6 +715,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                             if ss_cfg.origin_shift_fractional is not None
                             else None
                         ),
+                        transform_provenance=ss_cfg.transform_provenance,
                     )
                 )
                 if hsp_blocker is not None:

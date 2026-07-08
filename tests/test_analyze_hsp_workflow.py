@@ -1065,6 +1065,15 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
                     "spinor": False,
                     "source_hsp_labels": {"GammaM": {"K_valley": "GM"}},
                 },
+                "standard_setting": {
+                    "parent_to_standard_direct_transform": [
+                        [1.0, 0.0, 0.0],
+                        [0.0, 1.0, 0.0],
+                        [0.0, 0.0, 1.0],
+                    ],
+                    "origin_shift_fractional": [0.0, 0.0, 0.0],
+                    "transform_provenance": "unit-test identity standard setting",
+                },
                 "reduced_ebr": {
                     "enabled": True,
                     "table_file": str(reduced_table_path),
@@ -1123,6 +1132,14 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     kmap_prov = gm_prov["standard_setting_hsp_mapping"]
     assert kmap_prov["standard_setting_certificate"]["validation_status"] == "validated"
     assert kmap_prov["standard_setting_certificate"]["resolved_hsp_label"] == "GM"
+    assert (
+        kmap_prov["standard_setting_certificate"]["transform_provenance"]
+        == "unit-test identity standard setting"
+    )
+    assert (
+        kmap_prov["standard_setting_certificate"]["origin_shift_status"]
+        == "explicit"
+    )
     assert gm["subspace_space_group"] in ("P4", "P3")
     assert "C2_like" not in json.dumps(resolved)
     # Public output contract: representation_records use physical subspace-space-group.

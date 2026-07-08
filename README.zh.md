@@ -420,6 +420,16 @@ analysis:
   kpoints: [GammaM, KM, MM]
   iband: [2195, 2196]
   subspace_energy_tol_meV: 1.0
+  # 可选：显式 crystallographic convention certificate，用于非平凡
+  # parent-to-standard HSP 坐标映射。只有已知 parent-to-standard
+  # direct-lattice transform 时才应填写。
+  # standard_setting:
+  #   parent_to_standard_direct_transform:
+  #     - [1.0, 0.0, 0.0]
+  #     - [0.0, 1.0, 0.0]
+  #     - [0.0, 0.0, 1.0]
+  #   origin_shift_fractional: [0.0, 0.0, 0.0]
+  #   transform_provenance: "explicit standard-cell convention"
 
 valley_centers:
   coordinate_mode: layer_frac

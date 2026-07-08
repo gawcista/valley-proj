@@ -271,8 +271,8 @@ def test_operation_basis_verification_does_not_round_away_shear():
 # Explicit transform source interface tests
 # ---------------------------------------------------------------------------
 
-def test_explicit_transform_not_needed_when_direct_match_succeeds():
-    """Direct HSP coordinate match short-circuits before explicit transform use."""
+def test_explicit_transform_used_even_when_parent_coordinate_matches():
+    """Explicit standard-setting transform defines the trusted convention."""
     T = np.eye(3)
     label, blocker, prov = resolve_standard_setting_hsp_label(
         k_frac=np.array([0.5, 0.0, 0.0]),
@@ -286,8 +286,8 @@ def test_explicit_transform_not_needed_when_direct_match_succeeds():
     )
     assert label == "M"
     assert blocker is None
-    assert prov["direct_match_succeeded"] is True
-    assert "explicit_transform" not in prov
+    assert prov["direct_match_succeeded"] is False
+    assert "explicit_transform" in prov
 
 
 def test_explicit_transform_resolves_nonmatching_parent_kpoint():
@@ -315,6 +315,47 @@ def test_explicit_transform_resolves_nonmatching_parent_kpoint():
     cert = prov["standard_setting_certificate"]
     assert cert["validation_status"] == "validated"
     assert cert["transform_provenance"] == "explicit_user_input"
+    np.testing.assert_allclose(
+        cert["parent_to_standard_direct_transform"],
+        T,
+    )
+
+
+def test_explicit_transform_takes_precedence_over_direct_parent_match():
+    """Supplied standard-cell transform defines the trusted HSP coordinates."""
+    T = np.diag([2.0, 1.0, 1.0])
+    table = _FakeTable(labels={
+        "PARENT_M": (0.5, 0.0, 0.0),
+        "STD_X": (0.25, 0.0, 0.0),
+    })
+
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.5, 0.0, 0.0]),
+        table=table,
+        standard_match={
+            "number": 143, "international_short": "P3",
+            "hall_number": 430, "hall_symbol": "P 3",
+            "operation_ids": [0],
+        },
+        parent_to_standard_direct_transform=T,
+        transform_provenance="unit-test parent-to-standard transform",
+        origin_shift_fractional=np.array([0.25, 0.0, 0.0]),
+        detected_operations=[{
+            "operation_id": 0,
+            "rotation_frac": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            "translation_frac": [0.0, 0.0, 0.0],
+        }],
+    )
+
+    assert label == "STD_X"
+    assert blocker is None
+    assert prov["direct_match_succeeded"] is False
+    assert "skipped" in prov["direct_match_reason"]
+    cert = prov["standard_setting_certificate"]
+    assert cert["validation_status"] == "validated"
+    assert cert["transform_provenance"] == "unit-test parent-to-standard transform"
+    assert cert["origin_shift_status"] == "explicit"
+    assert cert["origin_shift_fractional"] == [0.25, 0.0, 0.0]
     np.testing.assert_allclose(
         cert["parent_to_standard_direct_transform"],
         T,
