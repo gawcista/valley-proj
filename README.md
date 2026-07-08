@@ -762,6 +762,12 @@ The valley columns are YAML labels. `W_val`, `P_v`, and `eta` store the target-v
 
 Use this file for a first scan. For near-degenerate target states, the raw band rows are gauge-dependent and should not be the final interpretation.
 
+The same raw per-band weight vector is also embedded in
+`valley_summary.json` under each `valley_projection_summary[]` row as
+`valley_weights`, keyed by the configured `valley_subspaces` labels.  These
+are raw-band q-cut weights; for valley-adapted target-subspace weights, use
+`valley_subspace.json` or `valley_basis_transform.h5`.
+
 ### `valley_subspace.json`
 
 This is the primary summary for near-degenerate states. It records the projected valley matrices $P_a^{\rm sub}$, the label operator $L$, the valley-adapted basis diagnostics, and S-matrix eigenvalues. For general multi-valley analysis, the key fields are:

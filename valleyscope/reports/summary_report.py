@@ -78,6 +78,7 @@ def build_summary_payload(
             "W_val": "valley-subspace weight",
             "P_v": "valley purity",
             "eta": "signed valley polarization for a two-valley diagnostic (legacy)",
+            "valley_weights": "raw q-cut weights keyed by configured valley-subspace label",
             "valley_weights_adapted": "valley weights in valley-adapted basis",
             "valley_concentration": "max weight fraction in assigned valley (general multi-valley)",
             "W_overlap": "projector-window overlap weight",

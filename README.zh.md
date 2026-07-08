@@ -721,6 +721,11 @@ kpoint, band_vasp, energy_eV, K_valley, Kp_valley, W_val, P_v, eta, W_overlap, W
 
 谷列名来自 YAML 标签。`W_val`、`P_v`、`eta` 分别为目标谷子空间权重、谷纯度、有符号谷极化。近简并目标态的逐条结果是规范依赖的。
 
+同一个原始逐能带权重向量也写入 `valley_summary.json` 的
+`valley_projection_summary[]` 行，字段名为 `valley_weights`，键为配置中的
+`valley_subspaces` 标签。这是 raw-band q-cut 权重；若要看谷适配目标子空间中的权重，
+应使用 `valley_subspace.json` 或 `valley_basis_transform.h5`。
+
 ### valley_subspace.json
 
 近简并态的主要摘要文件。记录投影谷算符、谷适配基诊断，以及目标子空间落在所选谷子空间中的程度。
