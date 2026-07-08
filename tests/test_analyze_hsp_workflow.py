@@ -2364,3 +2364,63 @@ def test_scalar_wavefunction_no_spinor_blockers():
     assert "spinor convention" not in d.get("reason", "")
     assert d["workflow_path"] != "blocked"
     assert d["readiness_level"] in ("trusted", "usable_with_caution")
+
+
+def test_spinful_unverified_spinor_convention_blocks_trusted_irrep():
+    """Spinor wavefunction with unverified convention must gate trusted readiness."""
+    from valleyscope.analysis.irrep_workflow_decision import (
+        build_irrep_workflow_decisions,
+    )
+    result = build_irrep_workflow_decisions(
+        projector_symmetry_report={
+            "by_kpoint": {
+                "GammaM": {
+                    "seed_projector_symmetry": [{
+                        "operation_id": 1, "status": "passed",
+                        "source_valley": "M1_valley",
+                        "mapped_valley": "M1_valley",
+                        "epsilon_seed": 0.001,
+                    }],
+                },
+            },
+        },
+        target_subspace_closure_report={
+            "by_kpoint": {
+                "GammaM": [{
+                    "operation_id": 1,
+                    "kpoint": "GammaM",
+                    "little_group_passed": True,
+                    "closure_quality": "ok",
+                }],
+            },
+        },
+        symmetry_adapted_valley_report={
+            "by_kpoint": {
+                "GammaM": {
+                    "valley_preserving_subspaces": [{
+                        "orbit": ["M1_valley"],
+                        "local_irrep_ready": True,
+                        "diagnostic_only": False,
+                        "hsp_preserving_operation_ids": [0, 1],
+                        "symmetry_adapted_projectors": {
+                            "status": "ok",
+                            "seed_overlap": {"M1_valley": 0.9},
+                        },
+                    }],
+                },
+            },
+        },
+        symmetry_rows=[{
+            "kpoint": "GammaM", "target_valley": "M1_valley",
+            "operation_id": 1, "order": 4,
+            "topology_input_ready": True,
+            "diagnostic_only": False,
+        }],
+        valley_names=["M1_valley"],
+        spinor_convention_verified=False,
+        spinor_wavefunction=True,
+    )
+    d = result["by_kpoint"]["GammaM"]["M1_valley"]
+    # Spinful + unverified: readiness must be gated.
+    assert "spinor convention" in d.get("reason", "")
+    assert d["readiness_level"] != "trusted"
