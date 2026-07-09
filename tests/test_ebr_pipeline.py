@@ -1571,3 +1571,108 @@ def test_blocked_diagnostic_no_candidate():
         irrep_workflow_decisions=workflow, valley_irrep_matching=matching)
     assert report["candidate_count"] == 0
     assert report["blocked_count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Public E2E record contract: full standard-output chain
+# ---------------------------------------------------------------------------
+
+def test_public_e2e_record_chain_with_certificate_provenance():
+    """Full public chain: summary→export→mapping→database, certificate preserved."""
+    from valleyscope.analysis.valley_irrep_matching import (
+        build_valley_irrep_matching_report,
+    )
+    from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
+    from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
+    from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
+    from valleyscope.analysis.reduced_ebr_mapping import (
+        build_reduced_ebr_mapping,
+    )
+    from valleyscope.analysis.database_ingestion_record import (
+        build_database_ingestion_record,
+    )
+
+    # --- 1. Synthetic matching with certificate provenance ---
+    workflow = {"by_kpoint": {"GammaM": {"K_valley": {
+        "readiness_level": "trusted", "workflow_path": "direct_qcut",
+    }}}}
+    sa_report = {"by_kpoint": {"GammaM": {"valley_preserving_subspaces": [{
+        "orbit": ["K_valley"],
+        "hsp_preserving_operation_ids": [0, 1],
+        "subspace_space_group": {
+            "status": "resolved",
+            "candidate_space_group_symbol": "P4",
+            "candidate_space_group_number": 75,
+            "valley_preserving_operation_ids": [0, 1],
+        },
+        "valley_preserving_character_diagnostics": {
+            "per_valley": {"K_valley": [
+                {"operation_id": 0, "eigenphases": [0.0, 0.0]},
+                {"operation_id": 1, "eigenphases": [0.5, -0.5]},
+            ]},
+        },
+    }]}}}
+    certificate = {
+        "validation_status": "validated",
+        "subspace_sg_number": 75,
+        "subspace_sg_symbol": "P4",
+        "hall_number": 81,
+        "hall_symbol": "P 4",
+        "resolved_hsp_label": "GM",
+        "centering_type": "P",
+        "centering_status": "primitive_direct_match",
+    }
+    kmap_prov = {"standard_setting_certificate": certificate}
+    i_ = 1j
+    matching = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=workflow,
+        symmetry_adapted_valley_report=sa_report,
+        source_irrep_characters_flattened={"GammaM": {"K_valley": {
+            "A": {1: 1.0 + 0j, 2: -1.0 + 0j},
+        }}},
+        source_operation_maps={"GammaM": {"K_valley": {0: 1, 1: 2}}},
+        source_payload_provenance={"GammaM": {"K_valley": {
+            "standard_setting_hsp_mapping": kmap_prov,
+        }}},
+    )
+    gm = matching["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
+    assert gm["matching_status"] == "matched"
+
+    # --- 2. EBR pipeline ---
+    candidates = build_ebr_input_candidates(
+        irrep_workflow_decisions=workflow,
+        valley_irrep_matching=matching,
+    )
+    assert candidates["candidate_count"] >= 1
+    c = candidates["candidates"][0]
+    assert c["irrep_source_provenance"] is not None
+    assert "standard_setting_hsp_mapping" in c["irrep_source_provenance"]
+    cert_in_cand = c["irrep_source_provenance"]["standard_setting_hsp_mapping"]
+    assert cert_in_cand["standard_setting_certificate"]["validation_status"] == "validated"
+
+    instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
+    assert instances["instance_count"] >= 1
+    bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
+    assert bundle["bundle_count"] >= 1
+
+    # --- 3. Reduced EBR (without table → missing_table) ---
+    mapping_result = build_reduced_ebr_mapping(
+        ebr_export_bundle=bundle, table=None,
+    )
+    assert mapping_result["mapping_status"] == "missing_table"
+
+    # --- 4. Database ingestion record ---
+    summary = {"target_kpoints": ["GammaM"], "iband": [1],
+               "input": {"spinor_convention_verified": True}}
+    record = build_database_ingestion_record(
+        valley_summary=summary,
+        valley_ebr_export_bundle=bundle,
+        valley_reduced_ebr_mapping=mapping_result,
+    )
+    assert record["record_status"] == "has_ready_ebr_bundles"
+    # Certificate provenance preserved in irrep records.
+    val_records = record.get("valley_irrep_records", [])
+    assert len(val_records) >= 1
+    prov = val_records[0].get("irrep_source_provenance")
+    assert prov is not None
+    assert "standard_setting_hsp_mapping" in prov
