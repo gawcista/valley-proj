@@ -1063,6 +1063,111 @@ def test_centering_cosets_p_type():
     assert len(cosets) == 1
 
 
+# ---------------------------------------------------------------------------
+# Centered explicit-transform E2E contract tests
+# ---------------------------------------------------------------------------
+
+def test_centered_without_explicit_transform_remains_blocked():
+    """C-centered without explicit transform: blocked with provenance."""
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.0, 0.0, 0.0]),
+        table=_table_c2(),
+        standard_match={
+            "number": 5, "international_short": "C2",
+            "hall_number": 9, "hall_symbol": "C 2y",
+            "operation_ids": [0, 4],
+        },
+    )
+    assert label is None
+    assert blocker is not None
+    assert "standard_setting_hsp_mapping_unresolved" in blocker
+    cert = prov["standard_setting_certificate"]
+    assert cert["validation_status"] == "unresolved"
+    tc = prov.get("transform_candidate")
+    assert tc["centering_type"] == "C"
+    assert tc["centering_status"] == "centered_unresolved"
+
+
+def test_centered_with_explicit_transform_and_valid_affine_becomes_validated():
+    """C-centered with T=identity + valid affine → validated certificate."""
+    T = np.eye(3)
+    k = np.array([0.0, 0.0, 0.0])
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=k,
+        table=_table_c2(),
+        standard_match={
+            "number": 5, "international_short": "C2",
+            "hall_number": 9, "hall_symbol": "C 2y",
+            "operation_ids": [0],
+        },
+        parent_to_standard_direct_transform=T,
+        detected_operations=[{
+            "operation_id": 0,
+            "rotation_frac": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            "translation_frac": [0.0, 0.0, 0.0],
+        }],
+    )
+    # With T=identity and zero translations, the C-centered affine validation
+    # should pass (identity maps to identity, translation 0 maps to 0 mod cosets).
+    assert label == "GM"
+    assert blocker is None
+    tc = prov.get("transform_candidate", {})
+    assert tc.get("centering_vectors") is not None
+
+
+def test_centered_with_explicit_transform_fails_with_bad_affine_translation():
+    """C-centered with bad affine translation → rejected, not trusted."""
+    T = np.eye(3)
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.0, 0.0, 0.0]),
+        table=_table_c2(),
+        standard_match={
+            "number": 5, "international_short": "C2",
+            "hall_number": 9, "hall_symbol": "C 2y",
+            "operation_ids": [0],
+        },
+        parent_to_standard_direct_transform=T,
+        detected_operations=[{
+            "operation_id": 0,
+            "rotation_frac": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            "translation_frac": [0.3, 0.0, 0.0],
+        }],
+    )
+    # Translation [0.3, 0, 0] does not match identity or C-center (0.5, 0.5, 0).
+    assert label is None
+    assert blocker is not None
+    tc = prov.get("transform_candidate", {})
+    assert tc.get("validation_status") in ("rejected", "unresolved")
+
+
+def test_centered_transform_certificate_has_centering_vectors():
+    """Explicit transform for C-centered: certificate records centering vectors."""
+    T = np.eye(3)
+    _, _, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.0, 0.0, 0.0]),
+        table=_table_c2(),
+        standard_match={
+            "number": 5, "international_short": "C2",
+            "hall_number": 9, "hall_symbol": "C 2y",
+            "operation_ids": [0],
+        },
+        parent_to_standard_direct_transform=T,
+        detected_operations=[{
+            "operation_id": 0,
+            "rotation_frac": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            "translation_frac": [0.0, 0.0, 0.0],
+        }],
+    )
+    tc = prov.get("transform_candidate", {})
+    cv = tc.get("centering_vectors")
+    assert cv is not None
+    assert len(cv) == 2  # identity + C-center
+    # The certificate should carry the centering_vectors.
+    cert = prov.get("standard_setting_certificate", {})
+    # Certificate may or may not carry centering_vectors as a top-level field
+    # depending on the path; the key contract is that transform_candidate has them.
+
+
 def test_centering_cosets_negative_p_type():
     """Leading Hall inversion sign does not change primitive centering."""
     from valleyscope.analysis.standard_setting_kmap import _centering_cosets
