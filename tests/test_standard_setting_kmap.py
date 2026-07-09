@@ -1204,8 +1204,8 @@ def test_centering_cosets_rhombohedral_requires_explicit_convention():
 # Affine transform derivation tests
 # ---------------------------------------------------------------------------
 
-def test_derive_transform_unique_for_c2_identity_pair():
-    """C2 parent with identity transform: derivation finds unique T."""
+def test_derive_transform_c2_identity_pair_is_ambiguous():
+    """C2 parent with identity transform remains basis-orientation ambiguous."""
     from valleyscope.analysis.standard_setting_kmap import (
         _derive_transform_candidate,
     )
@@ -1225,9 +1225,8 @@ def test_derive_transform_unique_for_c2_identity_pair():
             "operation_ids": [0, 4],
         },
     )
-    # With C2 parent + standard, multiple valid T can map the rotation,
-    # which is ambiguous — a single C2 does not uniquely define the basis.
-    assert result["status"] in ("unique_found", "ambiguous")
+    assert result["status"] == "ambiguous"
+    assert result["candidate_count"] > 1
 
 
 def test_derive_transform_no_vp_ops_returns_unresolved():
@@ -1257,3 +1256,26 @@ def test_derive_transform_no_hall_number_returns_unresolved():
     )
     assert result["status"] == "unresolved"
     assert "hall_number" in result.get("missing_ingredients", [])
+
+
+def test_derive_transform_r_centering_without_cosets_returns_unresolved():
+    """R-centered setting needs an explicit obverse/reverse centering convention."""
+    from valleyscope.analysis.standard_setting_kmap import (
+        _derive_transform_candidate,
+    )
+    result = _derive_transform_candidate(
+        vp_operations=[{
+            "operation_id": 0,
+            "rotation_frac": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            "translation_frac": [0.0, 0.0, 0.0],
+        }],
+        vp_operation_ids=[0],
+        standard_match={
+            "number": 146,
+            "hall_number": 433,
+            "hall_symbol": "R 3",
+            "operation_ids": [0],
+        },
+    )
+    assert result["status"] == "unresolved"
+    assert "conventional_centering_vectors" in result.get("missing_ingredients", [])

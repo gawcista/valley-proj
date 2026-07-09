@@ -1926,8 +1926,16 @@ def _derive_transform_candidate(
 
     std_rotations = [np.asarray(r, dtype=float) for r in std_sym["rotations"]]
     std_translations = [np.asarray(t, dtype=float) for t in std_sym["translations"]]
-    hall_symbol = standard_match.get("hall_symbol", "")
-    centering_vectors = _centering_cosets(str(hall_symbol) if hall_symbol else "")
+    hall_symbol = str(standard_match.get("hall_symbol", "") or "")
+    centering_vectors = _centering_cosets(hall_symbol)
+    if centering_vectors is None:
+        if _hall_centering_symbol(hall_symbol) in ("A", "B", "C", "I", "F", "R"):
+            result["status"] = "unresolved"
+            result["missing_ingredients"].append("conventional_centering_vectors")
+            return result
+        centering_vectors = [np.array([0.0, 0.0, 0.0])]
+    elif not centering_vectors:
+        centering_vectors = [np.array([0.0, 0.0, 0.0])]
 
     # Build trial transform matrices: entries in {-1, 0, 1}, det = ±1
     trial_matrices: list[np.ndarray] = []
