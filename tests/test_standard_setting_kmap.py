@@ -912,3 +912,45 @@ def test_centered_setting_certificate_relation_is_centered_unresolved():
     assert cert["primitive_conventional_relation"] == "centered_unresolved"
     assert cert["centering_status"] == "centered_unresolved"
     assert cert["centering_type"] == "C"
+
+
+# ---------------------------------------------------------------------------
+# Transform candidate tests
+# ---------------------------------------------------------------------------
+
+def test_transform_candidate_in_provenance_for_unresolved_centered():
+    """Unresolved centered setting produces transform_candidate in provenance."""
+    _, _, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.123, 0.456, 0.0]),
+        table=_table_c2(),
+        standard_match={
+            "number": 5, "international_short": "C2",
+            "hall_number": 9, "hall_symbol": "C 2y",
+            "operation_ids": [0, 4],
+        },
+    )
+    tc = prov.get("transform_candidate")
+    assert tc is not None
+    assert tc["validation_status"] == "unresolved"
+    assert tc["centering_type"] == "C"
+    assert tc["centering_status"] == "centered_unresolved"
+    assert "conventional_centering_vectors" in tc.get("missing_ingredients", [])
+
+
+def test_centered_unresolved_transform_candidate_has_centering_missing():
+    """Unresolved centered: transform_candidate lists missing centering ingredients."""
+    _, _, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.123, 0.456, 0.0]),
+        table=_table_c2(),
+        standard_match={
+            "number": 5, "international_short": "C2",
+            "hall_number": 9, "hall_symbol": "C 2y",
+            "operation_ids": [0, 4],
+        },
+    )
+    tc = prov.get("transform_candidate")
+    assert tc is not None
+    assert tc["validation_status"] == "unresolved"
+    assert "conventional_centering_vectors" in tc.get("missing_ingredients", [])
+    assert tc["centering_type"] == "C"
+    assert tc["centering_status"] == "centered_unresolved"

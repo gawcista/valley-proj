@@ -77,6 +77,8 @@ class StandardSettingCertificate:
     centering_status: str = "not_evaluated"
     """One of ``"primitive_direct_match"``, ``"centered_unresolved"``,
     ``"not_evaluated"``."""
+    centering_vectors: list[list[float]] | None = None
+    """Conventional centering cosets when known; None if unavailable."""
 
     # --- Affine translation validation ---
     translation_validation_status: str = "not_attempted"
@@ -118,6 +120,130 @@ class StandardSettingCertificate:
             if value is not None and value != []:
                 d[key] = value
         return d
+
+
+@dataclass
+class StandardSettingTransformCandidate:
+    """Standard-setting transform candidate for validation.
+
+    Records a candidate parent-to-standard direct-lattice transform
+    plus the centering/affine evidence needed to validate it.  The
+    transform is accepted only when all field-level gates pass.
+    """
+
+    # --- Transform ---
+    direct_transform: np.ndarray | None = None
+    """3×3 matrix T: x_std = T · x_parent (direct space)."""
+    reciprocal_k_rule: str = "k_std = T^(-T) · k_parent"
+    transform_provenance: str = "not_provided"
+
+    # --- Centering ---
+    centering_type: str | None = None
+    """P, C, I, F, R from Hall symbol."""
+    centering_vectors: list[list[float]] | None = None
+    """Centering vectors/cosets when known."""
+    centering_status: str = "not_evaluated"
+
+    # --- Origin shift ---
+    origin_shift_fractional: list[float] | None = None
+
+    # --- Validation ---
+    validation_status: str = "not_evaluated"
+    """One of ``"validated"``, ``"unresolved"``, ``"rejected"``."""
+
+    # --- Operation mapping ---
+    operation_mapping_status: str = "not_attempted"
+    affine_validation_status: str = "not_attempted"
+    matched_affine_operations: int | None = None
+    total_affine_operations: int | None = None
+
+    # --- Blockers ---
+    unresolved_reason: str | None = None
+    missing_ingredients: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, object]:
+        d: dict[str, object] = {}
+        for key, value in asdict(self).items():
+            if key == "direct_transform":
+                if value is not None:
+                    d[key] = np.asarray(value, dtype=float).tolist()
+            elif value is not None and value != []:
+                d[key] = value
+        return d
+
+
+def _build_transform_candidate(
+    *,
+    standard_match: dict[str, object] | None,
+    parent_to_standard_direct_transform: np.ndarray | None = None,
+    origin_shift_fractional: np.ndarray | None = None,
+    transform_provenance: str = "not_provided",
+    operation_mapping_status: str = "not_attempted",
+    affine_result: dict[str, object] | None = None,
+    unresolved_reason: str | None = None,
+) -> StandardSettingTransformCandidate:
+    """Build a standard-setting transform candidate from available evidence.
+
+    The candidate records the transform matrix, centering data, origin
+    shift, and validation provenance.  It is accepted only when all
+    validation gates (operation mapping, affine translation) pass.
+    """
+    c = StandardSettingTransformCandidate()
+
+    if isinstance(standard_match, dict):
+        v = standard_match.get("hall_symbol")
+        if isinstance(v, str) and v:
+            c.centering_type = str(v)[0] if v else None
+
+    if parent_to_standard_direct_transform is not None:
+        T = np.asarray(parent_to_standard_direct_transform, dtype=float)
+        if T.shape == (3, 3) and np.all(np.isfinite(T)):
+            c.direct_transform = T
+            c.transform_provenance = transform_provenance
+
+    if origin_shift_fractional is not None:
+        o = np.asarray(origin_shift_fractional, dtype=float)
+        if o.shape == (3,):
+            c.origin_shift_fractional = o.tolist()
+
+    c.operation_mapping_status = operation_mapping_status
+
+    if affine_result is not None:
+        c.affine_validation_status = str(affine_result.get("status", ""))
+        v = affine_result.get("matched_affine_operations")
+        if isinstance(v, int):
+            c.matched_affine_operations = int(v)
+        v = affine_result.get("total_parent_operations")
+        if isinstance(v, int):
+            c.total_affine_operations = int(v)
+        missing = affine_result.get("missing_ingredients")
+        if isinstance(missing, list):
+            c.missing_ingredients = list(missing)
+
+    if unresolved_reason:
+        c.validation_status = "unresolved"
+        c.unresolved_reason = str(unresolved_reason)
+    elif (
+        c.direct_transform is not None
+        and c.operation_mapping_status == "operation_basis_verification_passed"
+        and c.affine_validation_status in ("passed",)
+    ):
+        c.validation_status = "validated"
+    elif c.direct_transform is not None:
+        c.validation_status = "rejected"
+        c.unresolved_reason = (
+            "transform candidate rejected: operation mapping or affine "
+            "validation did not pass"
+        )
+    else:
+        c.validation_status = "unresolved"
+
+    if c.centering_type in ("C", "I", "F", "R"):
+        c.centering_status = "centered_unresolved"
+        if "conventional_centering_vectors" not in c.missing_ingredients:
+            c.missing_ingredients.append("conventional_centering_vectors")
+
+    return c
 
 
 def _validate_affine_operation_equivalence(
@@ -357,6 +483,7 @@ def build_standard_setting_certificate(
     transform_provenance: str = "not_provided",
     parent_k_frac: np.ndarray | None = None,
     resolved_hsp_label: str | None = None,
+    transform_candidate: StandardSettingTransformCandidate | None = None,
 ) -> StandardSettingCertificate:
     """Build a standard-setting certificate from available evidence."""
     cert = StandardSettingCertificate()
@@ -393,6 +520,19 @@ def build_standard_setting_certificate(
         cert.parent_k_frac = np.asarray(parent_k_frac, dtype=float).tolist()
     if resolved_hsp_label is not None:
         cert.resolved_hsp_label = str(resolved_hsp_label)
+
+    if transform_candidate is not None:
+        cert_data = cert.to_dict()
+        cand_data = transform_candidate.to_dict()
+        # Merge non-empty candidate fields into certificate.
+        for key in (
+            "centering_vectors", "centering_status",
+        ):
+            if cand_data.get(key):
+                cert_data[key] = cand_data[key]
+        # Rebuild cert from merged data by setting fields.
+        if "centering_vectors" in cand_data:
+            cert.centering_vectors = cand_data["centering_vectors"]
 
     if origin_shift_fractional is not None:
         o = np.asarray(origin_shift_fractional, dtype=float)
@@ -864,6 +1004,21 @@ def resolve_standard_setting_hsp_label(
             standard_match=standard_match,
         )
         _apply_affine_validation_to_certificate(cert, aff)
+    # Build transform candidate with centering/affine evidence.
+    candidate = _build_transform_candidate(
+        standard_match=standard_match,
+        parent_to_standard_direct_transform=parent_to_standard_direct_transform,
+        origin_shift_fractional=origin_shift_fractional,
+        transform_provenance=(
+            "explicit_config"
+            if parent_to_standard_direct_transform is not None
+            else "not_provided"
+        ),
+        affine_result=aff if isinstance(standard_match, dict) and detected_operations else None,
+        unresolved_reason=blocker if cert.validation_status != "validated" else None,
+    )
+    cert.centering_vectors = candidate.centering_vectors
+    prov["transform_candidate"] = candidate.to_dict()
     prov["standard_setting_certificate"] = cert.to_dict()
     return None, blocker, prov
 
