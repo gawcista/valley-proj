@@ -1125,6 +1125,21 @@ def _operation_ids_list(sm: dict[str, object]) -> list[int]:
     return []
 
 
+def _std_rotations_from_match(standard_match: dict[str, object]) -> list[np.ndarray]:
+    """Get standard-setting rotation matrices from spglib database."""
+    hall_number = standard_match.get("hall_number")
+    if not isinstance(hall_number, int) or isinstance(hall_number, bool):
+        return []
+    try:
+        import spglib
+        std_sym = spglib.get_symmetry_from_database(int(hall_number))
+        if std_sym is not None:
+            return [np.asarray(r, dtype=float) for r in std_sym["rotations"]]
+    except Exception:
+        pass
+    return []
+
+
 def _hall_centering_symbol(hall_symbol: str) -> str:
     """Return the lattice centering symbol from a Hall symbol.
 
@@ -1737,6 +1752,43 @@ def _compute_standard_setting_basis_transform(
         )
         return result
 
+    # 0. Attempt affine transform derivation from parent VP operations.
+    #    Search small-integer trial matrices T with det=±1 that map
+    #    parent {R_p, τ_p} to standard {R_s, τ_s}.
+    derivation = _derive_transform_candidate(
+        vp_operations=list(vp_operations),
+        vp_operation_ids=list(vp_op_ids),
+        standard_match=dict(standard_match),
+    )
+    if derivation.get("status") == "unique_found" and derivation.get("transform_matrix") is not None:
+        T_derived = np.asarray(derivation["transform_matrix"], dtype=float)
+        # Verify affine operations under the derived transform.
+        vp_ids_list = [int(op) for op in vp_op_ids if isinstance(op, (int, float))]
+        aff_check = _validate_affine_operation_equivalence(
+            vp_operations=list(vp_operations),
+            vp_operation_ids=vp_ids_list,
+            standard_match=standard_match,
+            parent_to_standard_direct_transform=T_derived,
+        )
+        vf = _verify_operation_basis(
+            parent_rotations=[r_arr for _, r_arr in vp_rotations],
+            std_rotations=_std_rotations_from_match(standard_match),
+            transform_matrix=T_derived,
+        )
+        result["operation_basis_verification"] = vf
+        if aff_check.get("status") == "passed" and vf.get("status") == "passed":
+            result["status"] = "accepted"
+            result["transform_matrix"] = derivation["transform_matrix"]
+            result["transform_provenance"] = "affine_operation_derivation"
+            result["derivation_provenance"] = derivation.get("derivation_provenance", "")
+            return result
+        # Derivation failed affine validation — fall through.
+        result["derivation_attempt"] = {
+            "status": "rejected",
+            "affine_status": aff_check.get("status"),
+            "operation_basis_status": vf.get("status"),
+        }
+
     # Attempt subgroup standard-cell reconstruction using VP operation
     # matrices and spglib's standard-setting symmetry database.
     recon = _reconstruct_subgroup_standard_cell(
@@ -1804,5 +1856,182 @@ def _attempt_setting_transform(
 
     if sg_number is not None:
         result["sg_number"] = int(sg_number)
+
+    return result
+
+
+def _derive_transform_candidate(
+    *,
+    vp_operations: list[dict[str, object]],
+    vp_operation_ids: list[int],
+    standard_match: dict[str, object],
+    tolerance: float = 1e-6,
+) -> dict[str, object]:
+    """Derive a standard-setting transform candidate from affine operation data.
+
+    Searches small-integer trial transform matrices T (entries in {-1,0,1},
+    determinant ±1) and checks whether each T maps parent VP rotations to
+    standard-setting rotations and parent translations to standard-setting
+    translations modulo lattice + centering cosets.
+
+    Returns a dict with ``status`` (``"unique_found"``, ``"ambiguous"``,
+    or ``"unresolved"``) and optional ``transform_matrix`` and
+    ``affine_validation`` provenance.
+    """
+    result: dict[str, object] = {
+        "status": "not_attempted",
+        "missing_ingredients": [],
+    }
+
+    vp_id_set = set(vp_operation_ids)
+    parent_ops: list[dict[str, object]] = []
+    for op in vp_operations:
+        if not isinstance(op, dict):
+            continue
+        oid_raw = op.get("operation_id")
+        if oid_raw is None:
+            continue
+        try:
+            oid = int(oid_raw)
+        except (TypeError, ValueError):
+            continue
+        if oid not in vp_id_set:
+            continue
+        rot = op.get("rotation_frac")
+        if rot is None:
+            continue
+        parent_ops.append(op)
+
+    if len(parent_ops) < 1:
+        result["status"] = "unresolved"
+        result["missing_ingredients"].append("vp_operation_rotation_data")
+        return result
+
+    hall_number = standard_match.get("hall_number")
+    if not isinstance(hall_number, int) or isinstance(hall_number, bool):
+        result["status"] = "unresolved"
+        result["missing_ingredients"].append("hall_number")
+        return result
+
+    try:
+        import spglib
+        std_sym = spglib.get_symmetry_from_database(int(hall_number))
+    except Exception:
+        std_sym = None
+
+    if std_sym is None:
+        result["status"] = "unresolved"
+        result["missing_ingredients"].append("spglib_database_access")
+        return result
+
+    std_rotations = [np.asarray(r, dtype=float) for r in std_sym["rotations"]]
+    std_translations = [np.asarray(t, dtype=float) for t in std_sym["translations"]]
+    hall_symbol = standard_match.get("hall_symbol", "")
+    centering_vectors = _centering_cosets(str(hall_symbol) if hall_symbol else "")
+
+    # Build trial transform matrices: entries in {-1, 0, 1}, det = ±1
+    trial_matrices: list[np.ndarray] = []
+    entries = [-1, 0, 1]
+    for a00 in entries:
+        for a01 in entries:
+            for a02 in entries:
+                for a10 in entries:
+                    for a11 in entries:
+                        for a12 in entries:
+                            for a20 in entries:
+                                for a21 in entries:
+                                    for a22 in entries:
+                                        T = np.array(
+                                            [[a00, a01, a02],
+                                             [a10, a11, a12],
+                                             [a20, a21, a22]],
+                                            dtype=float,
+                                        )
+                                        det = np.linalg.det(T)
+                                        if abs(abs(det) - 1.0) <= 1e-10:
+                                            trial_matrices.append(T)
+
+    valid_transforms: list[dict[str, object]] = []
+    for T in trial_matrices:
+        try:
+            T_inv = np.linalg.inv(T)
+        except np.linalg.LinAlgError:
+            continue
+
+        # Check rotation mapping: each parent rotation must map to a standard one
+        all_rot_match = True
+        for op in parent_ops:
+            r_p = np.asarray(op["rotation_frac"], dtype=float)
+            r_trans = np.rint(T @ r_p @ T_inv).astype(int)
+            if not any(np.allclose(r_trans, r_s, atol=tolerance) for r_s in std_rotations):
+                all_rot_match = False
+                break
+
+        if not all_rot_match:
+            continue
+
+        # Check translation mapping (if parent ops carry translations)
+        all_trans_match = True
+        has_translations = False
+        for op in parent_ops:
+            t_p = op.get("translation_frac")
+            if t_p is None:
+                continue
+            has_translations = True
+            t_p_arr = np.asarray(t_p, dtype=float)
+            t_trans = T @ t_p_arr
+            r_p = np.asarray(op["rotation_frac"], dtype=float)
+            r_trans = T @ r_p @ T_inv  # float version, not rounded
+
+            # Find standard op with matching rotation, compare translation
+            found_trans = False
+            for r_s, t_s in zip(std_rotations, std_translations):
+                if not np.allclose(np.rint(r_trans).astype(int), r_s, atol=tolerance):
+                    continue
+                t_diff = t_trans - t_s
+                for cv in centering_vectors:
+                    t_diff_cv = t_diff - cv
+                    t_diff_mod = t_diff_cv - np.rint(t_diff_cv)
+                    if np.linalg.norm(t_diff_mod) <= tolerance:
+                        found_trans = True
+                        break
+                if found_trans:
+                    break
+            if not found_trans:
+                all_trans_match = False
+                break
+
+        if not all_trans_match:
+            continue
+
+        valid_transforms.append({
+            "transform_matrix": T,
+            "has_translation_validation": has_translations,
+        })
+
+    if len(valid_transforms) == 1:
+        v = valid_transforms[0]
+        result["status"] = "unique_found"
+        result["transform_matrix"] = v["transform_matrix"].tolist()
+        result["affine_validation"] = {
+            "status": "passed" if v["has_translation_validation"] else "rotation_only",
+            "derived": True,
+        }
+        result["derivation_provenance"] = (
+            "small_integer_search over parent->standard rotation mapping; "
+            f"{len(trial_matrices)} trial matrices, 1 valid"
+        )
+    elif len(valid_transforms) > 1:
+        result["status"] = "ambiguous"
+        result["candidate_count"] = len(valid_transforms)
+        result["missing_ingredients"].append(
+            "ambiguous_transform: multiple parent->standard transforms found"
+        )
+    else:
+        result["status"] = "unresolved"
+        result["missing_ingredients"].append(
+            "no_valid_transform: no small-integer T maps parent rotations "
+            "to standard rotations"
+        )
 
     return result

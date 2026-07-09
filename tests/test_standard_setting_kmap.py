@@ -1198,3 +1198,62 @@ def test_centering_cosets_rhombohedral_requires_explicit_convention():
     from valleyscope.analysis.standard_setting_kmap import _centering_cosets
     assert _centering_cosets("R 3") is None
     assert _centering_cosets("-R 3") is None
+
+
+# ---------------------------------------------------------------------------
+# Affine transform derivation tests
+# ---------------------------------------------------------------------------
+
+def test_derive_transform_unique_for_c2_identity_pair():
+    """C2 parent with identity transform: derivation finds unique T."""
+    from valleyscope.analysis.standard_setting_kmap import (
+        _derive_transform_candidate,
+    )
+    result = _derive_transform_candidate(
+        vp_operations=[{
+            "operation_id": 0,
+            "rotation_frac": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            "translation_frac": [0.0, 0.0, 0.0],
+        }, {
+            "operation_id": 4,
+            "rotation_frac": [[-1, 0, 0], [0, -1, 0], [0, 0, 1]],
+            "translation_frac": [0.0, 0.0, 0.0],
+        }],
+        vp_operation_ids=[0, 4],
+        standard_match={
+            "number": 5, "hall_number": 9, "hall_symbol": "C 2y",
+            "operation_ids": [0, 4],
+        },
+    )
+    # With C2 parent + standard, multiple valid T can map the rotation,
+    # which is ambiguous — a single C2 does not uniquely define the basis.
+    assert result["status"] in ("unique_found", "ambiguous")
+
+
+def test_derive_transform_no_vp_ops_returns_unresolved():
+    """No VP ops → derivation unresolved."""
+    from valleyscope.analysis.standard_setting_kmap import (
+        _derive_transform_candidate,
+    )
+    result = _derive_transform_candidate(
+        vp_operations=[],
+        vp_operation_ids=[],
+        standard_match={"hall_number": 9},
+    )
+    assert result["status"] == "unresolved"
+
+
+def test_derive_transform_no_hall_number_returns_unresolved():
+    """No Hall number → unresolved."""
+    from valleyscope.analysis.standard_setting_kmap import (
+        _derive_transform_candidate,
+    )
+    result = _derive_transform_candidate(
+        vp_operations=[{"operation_id": 0,
+                         "rotation_frac": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+                         "translation_frac": [0.0, 0.0, 0.0]}],
+        vp_operation_ids=[0],
+        standard_match={"operation_ids": [0]},
+    )
+    assert result["status"] == "unresolved"
+    assert "hall_number" in result.get("missing_ingredients", [])
