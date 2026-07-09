@@ -803,3 +803,41 @@ def test_hall_9_sg_5_passes_consistency():
     )
     assert ok
     assert blocker is None
+
+
+# ---------------------------------------------------------------------------
+# Primitive-conventional relation tests
+# ---------------------------------------------------------------------------
+
+def test_direct_match_certificate_has_primitive_conventional_relation():
+    """Direct coordinate match records primitive_conventional_relation."""
+    _, _, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.5, 0.0, 0.0]),
+        table=_table_p3(),
+        standard_match={
+            "number": 143, "international_short": "P3",
+            "hall_number": 430, "hall_symbol": "P 3",
+            "operation_ids": [0, 1, 2],
+        },
+    )
+    cert = prov["standard_setting_certificate"]
+    assert cert["primitive_conventional_relation"] == "direct_coordinate_match"
+    assert cert["centering_status"] == "primitive_direct_match"
+    assert cert["centering_type"] == "P"
+
+
+def test_centered_setting_certificate_relation_is_centered_unresolved():
+    """Centered setting records primitive_conventional_relation=centered_unresolved."""
+    _, _, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.123, 0.456, 0.0]),
+        table=_table_c2(),
+        standard_match={
+            "number": 5, "international_short": "C2",
+            "hall_number": 9, "hall_symbol": "C 2y",
+            "operation_ids": [0, 4],
+        },
+    )
+    cert = prov["standard_setting_certificate"]
+    assert cert["primitive_conventional_relation"] == "centered_unresolved"
+    assert cert["centering_status"] == "centered_unresolved"
+    assert cert["centering_type"] == "C"

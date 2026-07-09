@@ -61,6 +61,14 @@ class StandardSettingCertificate:
     """Fractional origin shift when available; None if unresolved."""
     origin_shift_status: str = "unavailable"
 
+    # --- Primitive-conventional relation ---
+    primitive_conventional_relation: str | None = None
+    """Describes how the parent primitive cell relates to the standard
+    conventional cell: ``"direct_coordinate_match"`` when parent k_frac
+    directly matches irreptables HSP coordinates, ``"explicit_transform"``
+    when an explicit T matrix is used, ``"centered_unresolved"`` when
+    centering vectors are unavailable, ``"not_applicable"``."""
+
     # --- Centering ---
     centering_type: str | None = None
     """P, C, I, F, R from Hall symbol first character."""
@@ -472,6 +480,7 @@ def resolve_standard_setting_hsp_label(
         cert.operation_mapping_status = "not_attempted"
         if isinstance(standard_match, dict) and str(standard_match.get("hall_symbol", "")).startswith("P"):
             cert.centering_status = "primitive_direct_match"
+            cert.primitive_conventional_relation = "direct_coordinate_match"
         cert.standard_setting_source = (
             "spglib.per_valley_standard_matches"
             if isinstance(standard_match, dict)
@@ -579,6 +588,7 @@ def resolve_standard_setting_hsp_label(
                             parent_k_frac=k_frac,
                         )
                         cert.standard_setting_source = "explicit_transform"
+                        cert.primitive_conventional_relation = "explicit_transform"
                         cert.operation_mapping_status = (
                             "operation_basis_verification_passed"
                             if isinstance(
@@ -607,6 +617,7 @@ def resolve_standard_setting_hsp_label(
                             resolved_hsp_label=label,
                         )
                         cert.standard_setting_source = "explicit_transform"
+                        cert.primitive_conventional_relation = "explicit_transform"
                         cert.operation_mapping_status = (
                             "operation_basis_verification_passed"
                             if isinstance(
@@ -802,6 +813,11 @@ def resolve_standard_setting_hsp_label(
         isinstance(standard_match, dict)
         and str(standard_match.get("hall_symbol", "")[:1]) in ("C", "I", "F", "R")
     ) else "not_evaluated"
+    cert.primitive_conventional_relation = (
+        "centered_unresolved"
+        if cert.centering_status == "centered_unresolved"
+        else "not_applicable"
+    )
     # Affine validation for unresolved path.
     if isinstance(standard_match, dict) and detected_operations:
         vp_ids = _operation_ids_list(standard_match)
