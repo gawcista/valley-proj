@@ -66,8 +66,10 @@ class StandardSettingCertificate:
     """Describes how the parent primitive cell relates to the standard
     conventional cell: ``"direct_coordinate_match"`` when parent k_frac
     directly matches irreptables HSP coordinates, ``"explicit_transform"``
-    when an explicit T matrix is used, ``"centered_unresolved"`` when
-    centering vectors are unavailable, ``"not_applicable"``."""
+    when an explicit T matrix is used, ``"operation_basis_reconstruction"``
+    when a transform is derived from operation content,
+    ``"centered_unresolved"`` when centering vectors are unavailable,
+    ``"not_applicable"``."""
 
     # --- Centering ---
     centering_type: str | None = None
@@ -464,7 +466,29 @@ def resolve_standard_setting_hsp_label(
     except TypeError:
         # Compatibility with test mocks that don't accept tolerance.
         direct_label = table.match_kpoint_label(k_frac)
-    if direct_label is not None and parent_to_standard_direct_transform is None:
+    direct_hall_symbol = (
+        str(standard_match.get("hall_symbol", "") or "")
+        if isinstance(standard_match, dict)
+        else ""
+    )
+    direct_sg_symbol = (
+        str(standard_match.get("international_short", "") or "")
+        if isinstance(standard_match, dict)
+        else ""
+    )
+    direct_match_is_primitive = (
+        direct_hall_symbol.startswith("P")
+        or (not direct_hall_symbol and direct_sg_symbol.startswith("P"))
+    )
+    direct_match_trusted = (
+        not isinstance(standard_match, dict)
+        or direct_match_is_primitive
+    )
+    if (
+        direct_label is not None
+        and parent_to_standard_direct_transform is None
+        and direct_match_trusted
+    ):
         prov["direct_match_succeeded"] = True
         cert = build_standard_setting_certificate(
             standard_match=standard_match,
@@ -478,7 +502,7 @@ def resolve_standard_setting_hsp_label(
             origin_shift_fractional=origin_shift_fractional,
         )
         cert.operation_mapping_status = "not_attempted"
-        if isinstance(standard_match, dict) and str(standard_match.get("hall_symbol", "")).startswith("P"):
+        if isinstance(standard_match, dict) and direct_match_is_primitive:
             cert.centering_status = "primitive_direct_match"
             cert.primitive_conventional_relation = "direct_coordinate_match"
         cert.standard_setting_source = (
@@ -516,10 +540,17 @@ def resolve_standard_setting_hsp_label(
 
     prov["direct_match_succeeded"] = False
     if direct_label is not None:
-        prov["direct_match_reason"] = (
-            "direct parent-coordinate match was skipped because an explicit "
-            "parent-to-standard transform was supplied"
-        )
+        if parent_to_standard_direct_transform is not None:
+            prov["direct_match_reason"] = (
+                "direct parent-coordinate match was skipped because an explicit "
+                "parent-to-standard transform was supplied"
+            )
+        else:
+            prov["direct_match_reason"] = (
+                "direct parent-coordinate match was not trusted because the "
+                "standard setting is not primitive; a validated "
+                "parent-to-standard transform is required"
+            )
     else:
         prov["direct_match_reason"] = (
             "parent-setting k_frac does not match any standard-setting "
@@ -724,6 +755,9 @@ def resolve_standard_setting_hsp_label(
                         cert.standard_setting_source = (
                             "operation_basis_reconstruction"
                         )
+                        cert.primitive_conventional_relation = (
+                            "operation_basis_reconstruction"
+                        )
                         cert.operation_mapping_status = (
                             "operation_basis_verification_passed"
                         )
@@ -746,6 +780,9 @@ def resolve_standard_setting_hsp_label(
                     resolved_hsp_label=transformed_label,
                 )
                 cert.standard_setting_source = "operation_basis_reconstruction"
+                cert.primitive_conventional_relation = (
+                    "operation_basis_reconstruction"
+                )
                 cert.operation_mapping_status = (
                     "operation_basis_verification_passed"
                 )

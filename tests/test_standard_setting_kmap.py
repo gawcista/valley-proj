@@ -408,6 +408,26 @@ def test_centered_setting_without_explicit_transform_remains_blocked():
     assert "standard_setting_hsp_mapping_unresolved" in blocker
 
 
+def test_centered_direct_coordinate_match_is_not_trusted():
+    """Centered HSP coordinate coincidences need a validated standard transform."""
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.5, 0.5, 0.0]),
+        table=_table_c2(),
+        standard_match={
+            "number": 5, "international_short": "C2",
+            "hall_number": 9, "hall_symbol": "C 2y",
+            "operation_ids": [0, 4],
+        },
+    )
+    assert label is None
+    assert blocker is not None
+    assert prov["direct_match_succeeded"] is False
+    assert "not trusted" in prov["direct_match_reason"]
+    cert = prov["standard_setting_certificate"]
+    assert cert["validation_status"] == "unresolved"
+    assert cert["primitive_conventional_relation"] == "centered_unresolved"
+
+
 def test_override_still_blocked_when_kmap_unresolved():
     """Manual HSP override cannot bypass unresolved standard-setting mapping."""
     from valleyscope.workflows.analyze_hsp import _resolve_generic_irrep_hsp_label
@@ -738,6 +758,57 @@ def test_basis_reconstruction_rejected_when_translations_inconsistent(monkeypatc
     cert = prov.get("standard_setting_certificate", {})
     assert cert.get("validation_status") == "rejected"
     assert cert.get("translation_validation_status") == "failed"
+    assert (
+        cert.get("primitive_conventional_relation")
+        == "operation_basis_reconstruction"
+    )
+
+
+def test_basis_reconstruction_certificate_records_relation(monkeypatch):
+    """Accepted operation-basis reconstruction records primitive relation provenance."""
+    import valleyscope.analysis.standard_setting_kmap as kmap
+
+    class _SecondCallTable:
+        def __init__(self):
+            self.calls = 0
+
+        def match_kpoint_label(self, k_frac, *, tolerance=1e-6):
+            self.calls += 1
+            return "M" if self.calls > 1 else None
+
+    monkeypatch.setattr(
+        kmap,
+        "_compute_standard_setting_basis_transform",
+        lambda **kwargs: {
+            "status": "accepted",
+            "transform_matrix": np.eye(3).tolist(),
+            "operation_basis_verification": {"status": "passed"},
+        },
+    )
+
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.123, 0.456, 0.0]),
+        table=_SecondCallTable(),
+        standard_match={
+            "number": 143, "international_short": "P3",
+            "hall_number": 430, "hall_symbol": "P 3",
+            "operation_ids": [0],
+        },
+        detected_operations=[{
+            "operation_id": 0,
+            "rotation_frac": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            "translation_frac": [0.0, 0.0, 0.0],
+        }],
+    )
+
+    assert label == "M"
+    assert blocker is None
+    cert = prov["standard_setting_certificate"]
+    assert cert["validation_status"] == "validated"
+    assert (
+        cert["primitive_conventional_relation"]
+        == "operation_basis_reconstruction"
+    )
 
 
 # ---------------------------------------------------------------------------
