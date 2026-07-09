@@ -423,6 +423,7 @@ def _build_per_kpoint_provenance(bundle: dict) -> dict[str, object] | None:
                 "valley_preserving_operation_ids",
                 "source_table_operation_indices",
                 "operation_mapping_provenance",
+                "standard_setting_hsp_mapping",
             ):
                 if key in prov:
                     entry[key] = prov[key]

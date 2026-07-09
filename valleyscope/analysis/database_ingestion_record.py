@@ -153,6 +153,10 @@ def build_database_ingestion_record(
                     rec["integer_solution"] = s["integer_solution"]
                 if "search_status" in s:
                     rec["search_status"] = s["search_status"]
+                if "irrep_source_provenance_by_kpoint" in s:
+                    rec["irrep_source_provenance_by_kpoint"] = (
+                        s["irrep_source_provenance_by_kpoint"]
+                    )
                 # --- Compact table provenance (when present) ---
                 tp = s.get("table_provenance")
                 if isinstance(tp, dict) and tp:

@@ -1623,7 +1623,6 @@ def test_public_e2e_record_chain_with_certificate_provenance():
         "centering_status": "primitive_direct_match",
     }
     kmap_prov = {"standard_setting_certificate": certificate}
-    i_ = 1j
     matching = build_valley_irrep_matching_report(
         irrep_workflow_decisions=workflow,
         symmetry_adapted_valley_report=sa_report,
@@ -1655,11 +1654,30 @@ def test_public_e2e_record_chain_with_certificate_provenance():
     bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
     assert bundle["bundle_count"] >= 1
 
-    # --- 3. Reduced EBR (without table → missing_table) ---
+    # --- 3. Reduced EBR with reviewed reduced table ---
+    table = {
+        "schema_version": "1.0.0",
+        "subspace_group_candidate": "P4",
+        "expected_hsps": ["GammaM"],
+        "irreps": ["GammaM:A"],
+        "ebrs": [{"label": "EBR_P4_A", "vector": [2]}],
+    }
     mapping_result = build_reduced_ebr_mapping(
-        ebr_export_bundle=bundle, table=None,
+        ebr_export_bundle=bundle, table=table,
     )
-    assert mapping_result["mapping_status"] == "missing_table"
+    assert mapping_result["mapping_status"] == "solved_exact"
+    solution = mapping_result["solutions"][0]
+    assert solution["classification"] == "atomic-compatible-candidate"
+    assert solution["ebr_decomposition"] == [
+        {"label": "EBR_P4_A", "coefficient": 1}
+    ]
+    solution_prov = solution["irrep_source_provenance_by_kpoint"]["GammaM"][0]
+    solution_cert = (
+        solution_prov["standard_setting_hsp_mapping"]
+        ["standard_setting_certificate"]
+    )
+    assert solution_cert["validation_status"] == "validated"
+    assert solution_cert["subspace_sg_number"] == 75
 
     # --- 4. Database ingestion record ---
     summary = {"target_kpoints": ["GammaM"], "iband": [1],
@@ -1676,3 +1694,14 @@ def test_public_e2e_record_chain_with_certificate_provenance():
     prov = val_records[0].get("irrep_source_provenance")
     assert prov is not None
     assert "standard_setting_hsp_mapping" in prov
+    reduced_records = record.get("reduced_ebr_records", [])
+    assert len(reduced_records) == 1
+    reduced_record = reduced_records[0]
+    assert reduced_record["classification"] == "atomic-compatible-candidate"
+    reduced_cert = (
+        reduced_record["irrep_source_provenance_by_kpoint"]
+        ["GammaM"][0]
+        ["standard_setting_hsp_mapping"]
+        ["standard_setting_certificate"]
+    )
+    assert reduced_cert["resolved_hsp_label"] == "GM"
