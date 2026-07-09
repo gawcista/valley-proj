@@ -1397,6 +1397,88 @@ def test_candidate_carries_irrep_source_provenance():
     assert cert["resolved_hsp_label"] == "GM"
 
 
+def test_centered_validated_certificate_reaches_ebr_candidate_provenance():
+    """Centered standard-setting certificate is preserved in EBR candidates."""
+    from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
+
+    centered_kmap = {
+        "standard_setting_certificate": {
+            "validation_status": "validated",
+            "subspace_sg_number": 5,
+            "subspace_sg_symbol": "C2",
+            "hall_number": 9,
+            "hall_symbol": "C 2y",
+            "standard_setting_source": "explicit_transform",
+            "primitive_conventional_relation": "explicit_transform",
+            "resolved_hsp_label": "GM",
+            "centering_type": "C",
+            "centering_vectors": [
+                [0.0, 0.0, 0.0],
+                [0.5, 0.5, 0.0],
+            ],
+            "translation_validation_status": "passed",
+            "matched_affine_operations": 1,
+            "total_parent_operations": 1,
+        },
+        "transform_candidate": {
+            "validation_status": "validated",
+            "operation_mapping_status": "operation_basis_verification_passed",
+            "affine_validation_status": "passed",
+            "centering_type": "C",
+            "centering_vectors": [
+                [0.0, 0.0, 0.0],
+                [0.5, 0.5, 0.0],
+            ],
+        },
+    }
+    workflow = {"by_kpoint": {"GammaM": {"K_valley": {
+        "readiness_level": "trusted",
+        "workflow_path": "direct_qcut",
+    }}}}
+    matching = {
+        "matching_mode": "generic",
+        "generic_matches_by_kpoint": {"GammaM": {"K_valley": {
+            "matching_status": "matched",
+            "matching_strategy": "bilbao_restricted_character",
+            "irrep_multiplicities": {"GM1": 1},
+            "subspace_space_group": {
+                "status": "resolved",
+                "candidate_space_group_number": 5,
+                "candidate_space_group_symbol": "C2",
+            },
+            "valley_preserving_operation_ids": [0],
+            "source_payload_provenance": {
+                "table_sg_number": 5,
+                "table_name": "C2",
+                "table_spinor": False,
+                "source_hsp_label": "GM",
+                "source_table_operation_indices": [1],
+                "standard_setting_hsp_mapping": centered_kmap,
+            },
+            "operation_mapping_provenance": "exact_spatial",
+        }}},
+    }
+
+    report = build_ebr_input_candidates(
+        irrep_workflow_decisions=workflow,
+        valley_irrep_matching=matching,
+    )
+
+    assert report["candidate_count"] == 1
+    provenance = report["candidates"][0]["irrep_source_provenance"]
+    assert provenance["subspace_space_group_number"] == 5
+    assert provenance["source_hsp_label"] == "GM"
+    kmap = provenance["standard_setting_hsp_mapping"]
+    cert = kmap["standard_setting_certificate"]
+    assert cert["validation_status"] == "validated"
+    assert cert["centering_type"] == "C"
+    assert cert["centering_vectors"] == [[0.0, 0.0, 0.0], [0.5, 0.5, 0.0]]
+    assert cert["translation_validation_status"] == "passed"
+    tc = kmap["transform_candidate"]
+    assert tc["validation_status"] == "validated"
+    assert tc["affine_validation_status"] == "passed"
+
+
 def test_problem_instance_preserves_multi_hsp_provenance():
     """Problem instance irrep_records carry provenance for multiple HSPs."""
     from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances

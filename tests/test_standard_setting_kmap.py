@@ -1111,8 +1111,20 @@ def test_centered_with_explicit_transform_and_valid_affine_becomes_validated():
     # should pass (identity maps to identity, translation 0 maps to 0 mod cosets).
     assert label == "GM"
     assert blocker is None
+    cert = prov["standard_setting_certificate"]
+    assert cert["validation_status"] == "validated"
+    assert cert["standard_setting_source"] == "explicit_transform"
+    assert cert["primitive_conventional_relation"] == "explicit_transform"
+    assert cert["translation_validation_status"] == "passed"
+    assert cert["matched_affine_operations"] == 1
+    assert cert["total_parent_operations"] == 1
+    assert cert["centering_type"] == "C"
+    assert cert["centering_vectors"] == [[0.0, 0.0, 0.0], [0.5, 0.5, 0.0]]
     tc = prov.get("transform_candidate", {})
-    assert tc.get("centering_vectors") is not None
+    assert tc["validation_status"] == "validated"
+    assert tc["affine_validation_status"] == "passed"
+    assert tc["operation_mapping_status"] == "operation_basis_verification_passed"
+    assert tc["centering_vectors"] == [[0.0, 0.0, 0.0], [0.5, 0.5, 0.0]]
 
 
 def test_centered_with_explicit_transform_fails_with_bad_affine_translation():
@@ -1136,8 +1148,14 @@ def test_centered_with_explicit_transform_fails_with_bad_affine_translation():
     # Translation [0.3, 0, 0] does not match identity or C-center (0.5, 0.5, 0).
     assert label is None
     assert blocker is not None
+    cert = prov["standard_setting_certificate"]
+    assert cert["validation_status"] == "rejected"
+    assert cert["translation_validation_status"] == "failed"
+    assert cert["matched_affine_operations"] == 0
+    assert cert["mismatched_translation_count"] == 1
     tc = prov.get("transform_candidate", {})
-    assert tc.get("validation_status") in ("rejected", "unresolved")
+    assert tc["validation_status"] == "rejected"
+    assert tc["affine_validation_status"] == "failed"
 
 
 def test_centered_transform_certificate_has_centering_vectors():
@@ -1162,10 +1180,10 @@ def test_centered_transform_certificate_has_centering_vectors():
     cv = tc.get("centering_vectors")
     assert cv is not None
     assert len(cv) == 2  # identity + C-center
-    # The certificate should carry the centering_vectors.
     cert = prov.get("standard_setting_certificate", {})
-    # Certificate may or may not carry centering_vectors as a top-level field
-    # depending on the path; the key contract is that transform_candidate has them.
+    assert cert["centering_vectors"] == cv
+    assert cert["centering_type"] == "C"
+    assert cert["validation_status"] == "validated"
 
 
 def test_centering_cosets_negative_p_type():
