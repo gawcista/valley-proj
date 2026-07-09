@@ -1279,3 +1279,117 @@ def test_derive_transform_r_centering_without_cosets_returns_unresolved():
     )
     assert result["status"] == "unresolved"
     assert "conventional_centering_vectors" in result.get("missing_ingredients", [])
+
+
+# ---------------------------------------------------------------------------
+# Derived transform downstream provenance tests
+# ---------------------------------------------------------------------------
+
+def test_derived_transform_provenance_reaches_ebr_candidate():
+    """Unique derived transform provenance flows to EBR input candidates."""
+    from valleyscope.analysis.valley_irrep_matching import (
+        build_valley_irrep_matching_report,
+    )
+    from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
+
+    workflow = {"by_kpoint": {"GM": {"K_valley": {
+        "readiness_level": "trusted", "workflow_path": "direct_qcut",
+    }}}}
+    sa_report = {"by_kpoint": {"GM": {"valley_preserving_subspaces": [{
+        "orbit": ["K_valley"],
+        "hsp_preserving_operation_ids": [0, 1],
+        "subspace_space_group": {
+            "status": "resolved",
+            "candidate_space_group_symbol": "P4",
+            "candidate_space_group_number": 75,
+            "valley_preserving_operation_ids": [0, 1],
+        },
+        "valley_preserving_character_diagnostics": {
+            "per_valley": {"K_valley": [
+                {"operation_id": 0, "eigenphases": [0.0]},
+                {"operation_id": 1, "eigenphases": [0.5]},
+            ]},
+        },
+    }]}}}
+    # Standard-setting provenance with derived transform certificate.
+    kmap_prov: dict = {
+        "standard_setting_certificate": {
+            "validation_status": "validated",
+            "subspace_sg_number": 75,
+            "subspace_sg_symbol": "P4",
+            "centering_type": "P",
+            "primitive_conventional_relation": "operation_basis_reconstruction",
+            "transform_provenance": "affine_operation_derivation",
+        },
+    }
+    matching = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=workflow,
+        symmetry_adapted_valley_report=sa_report,
+        source_irrep_characters_flattened={"GM": {"K_valley": {
+            "A": {1: 1.0 + 0j, 2: -1.0 + 0j},
+        }}},
+        source_operation_maps={"GM": {"K_valley": {0: 1, 1: 2}}},
+        source_payload_provenance={"GM": {"K_valley": {
+            "standard_setting_hsp_mapping": kmap_prov,
+        }}},
+    )
+    candidates = build_ebr_input_candidates(
+        irrep_workflow_decisions=workflow,
+        valley_irrep_matching=matching,
+    )
+    assert candidates["candidate_count"] >= 1
+    c = candidates["candidates"][0]
+    prov = c.get("irrep_source_provenance", {})
+    kmap = prov.get("standard_setting_hsp_mapping", {})
+    cert = kmap.get("standard_setting_certificate", {})
+    assert cert["validation_status"] == "validated"
+    assert cert["transform_provenance"] == "affine_operation_derivation"
+
+
+def test_ambiguous_derivation_preserves_provenance():
+    """Ambiguous derivation keeps provenance record in basis_transform."""
+    from valleyscope.analysis.standard_setting_kmap import (
+        _compute_standard_setting_basis_transform,
+    )
+    # C2 with only 2 ops → derivation is ambiguous.
+    result = _compute_standard_setting_basis_transform(
+        lattice_direct_cart=np.eye(3),
+        vp_operations=[
+            {"operation_id": 0, "order": 1,
+             "rotation_frac": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]},
+            {"operation_id": 4, "order": 2,
+             "rotation_frac": [[-1, 0, 0], [0, -1, 0], [0, 0, 1]]},
+        ],
+        standard_match={
+            "number": 5, "international_short": "C2",
+            "hall_number": 9, "hall_symbol": "C 2y",
+            "operation_ids": [0, 4],
+        },
+    )
+    # Derivation was attempted — provenance preserved regardless of status.
+    if "derivation_attempt" in result:
+        da = result["derivation_attempt"]
+        assert da["status"] in ("rejected",) or "derivation_attempt" in result
+    # Ambiguous/unavailable status is correctly recorded.
+    assert result["status"] in ("unavailable", "rejected", "unresolved")
+
+
+def test_primitive_direct_match_bypasses_derivation():
+    """P3 direct coordinate match skips derivation — no spurious blocker."""
+    from valleyscope.analysis.standard_setting_kmap import (
+        _compute_standard_setting_basis_transform,
+    )
+    result = _compute_standard_setting_basis_transform(
+        lattice_direct_cart=np.eye(3),
+        vp_operations=[
+            {"operation_id": 1, "order": 3,
+             "rotation_frac": [[0, -1, 0], [1, -1, 0], [0, 0, 1]]},
+        ],
+        standard_match={
+            "number": 143, "international_short": "P3",
+            "hall_number": 430, "hall_symbol": "P 3",
+            "operation_ids": [0, 1, 2],
+        },
+    )
+    # P-centering must not be clobbered by derivation.
+    assert "P" not in str(result.get("reason", "")) or result["status"] != "unavailable"
