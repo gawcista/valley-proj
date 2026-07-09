@@ -193,7 +193,7 @@ def _build_transform_candidate(
     if isinstance(standard_match, dict):
         v = standard_match.get("hall_symbol")
         if isinstance(v, str) and v:
-            c.centering_type = str(v)[0] if v else None
+            c.centering_type = _hall_centering_symbol(str(v)) or None
             cv = _centering_cosets(str(v))
             if cv and len(cv) > 1:
                 c.centering_vectors = [vec.tolist() for vec in cv]
@@ -244,7 +244,7 @@ def _build_transform_candidate(
     else:
         c.validation_status = "unresolved"
 
-    if c.centering_type in ("C", "I", "F", "R"):
+    if c.centering_type in ("A", "B", "C", "I", "F", "R"):
         c.centering_status = "centered_unresolved"
         if c.centering_vectors is None:
             if "conventional_centering_vectors" not in c.missing_ingredients:
@@ -366,13 +366,13 @@ def _validate_affine_operation_equivalence(
     std_translations = [np.asarray(t, dtype=float) for t in std_sym["translations"]]
     result["standard_setting_operation_count"] = len(std_translations)
 
-    hall_symbol = standard_match.get("hall_symbol", "")
+    hall_symbol = str(standard_match.get("hall_symbol", "") or "")
     centering_vectors = _centering_cosets(hall_symbol)
     if centering_vectors and len(centering_vectors) > 1:
         # Non-primitive: centering cosets are available.
         # Affine comparison below will use them for translation matching.
         result["centering_cosets_count"] = len(centering_vectors)
-    elif hall_symbol and hall_symbol[0] in ("C", "I", "F", "R"):
+    elif _hall_centering_symbol(hall_symbol) in ("A", "B", "C", "I", "F", "R"):
         # Centering type recognised but no explicit cosets derived.
         # Keep unresolved until explicit centering data is available.
         result["missing_ingredients"].append("conventional_centering_vectors")
@@ -400,8 +400,8 @@ def _validate_affine_operation_equivalence(
         return result
 
     # Centering cosets for non-primitive conventional cells.
-    hall_symbol = standard_match.get("hall_symbol", "")
-    centering_vectors = _centering_cosets(hall_symbol)
+    hall_symbol = str(standard_match.get("hall_symbol", "") or "")
+    centering_vectors = _centering_cosets(hall_symbol) or [np.array([0.0, 0.0, 0.0])]
 
     matched_count = 0
     mismatched_translations: list[dict[str, object]] = []
@@ -537,7 +537,7 @@ def build_standard_setting_certificate(
         v = standard_match.get("hall_symbol")
         if isinstance(v, str) and v:
             cert.hall_symbol = str(v)
-            cert.centering_type = str(v)[0] if v else None
+            cert.centering_type = _hall_centering_symbol(str(v)) or None
 
     if parent_basis_operation_ids is not None:
         cert.parent_basis_operation_ids = list(parent_basis_operation_ids)
@@ -653,7 +653,7 @@ def resolve_standard_setting_hsp_label(
         else ""
     )
     direct_match_is_primitive = (
-        direct_hall_symbol.startswith("P")
+        _hall_centering_symbol(direct_hall_symbol) == "P"
         or (not direct_hall_symbol and direct_sg_symbol.startswith("P"))
     )
     direct_match_trusted = (
@@ -692,7 +692,11 @@ def resolve_standard_setting_hsp_label(
             # Direct primitive coordinate match means the parent fractional
             # basis is already being treated as the standard basis.
             hall_symbol = str(standard_match.get("hall_symbol", "") or "")
-            direct_transform = np.eye(3) if hall_symbol.startswith("P") else None
+            direct_transform = (
+                np.eye(3)
+                if _hall_centering_symbol(hall_symbol) == "P"
+                else None
+            )
             aff = _validate_affine_operation_equivalence(
                 vp_operations=list(detected_operations),
                 vp_operation_ids=vp_ids,
@@ -1078,7 +1082,8 @@ def resolve_standard_setting_hsp_label(
     )
     cert.centering_status = "centered_unresolved" if (
         isinstance(standard_match, dict)
-        and str(standard_match.get("hall_symbol", "")[:1]) in ("C", "I", "F", "R")
+        and _hall_centering_symbol(str(standard_match.get("hall_symbol", "") or ""))
+        in ("A", "B", "C", "I", "F", "R")
     ) else "not_evaluated"
     cert.primitive_conventional_relation = (
         "centered_unresolved"
@@ -1120,21 +1125,36 @@ def _operation_ids_list(sm: dict[str, object]) -> list[int]:
     return []
 
 
-def _centering_cosets(hall_symbol: str) -> list[np.ndarray]:
+def _hall_centering_symbol(hall_symbol: str) -> str:
+    """Return the lattice centering symbol from a Hall symbol.
+
+    Hall symbols may begin with ``-`` for centrosymmetric groups, e.g.
+    ``-P 1`` or ``-R 3``.  The lattice centering symbol follows that
+    sign and must be parsed before primitive/centered decisions.
+    """
+    token = str(hall_symbol or "").strip()
+    if token.startswith("-"):
+        token = token[1:].lstrip()
+    return token[:1].upper()
+
+
+def _centering_cosets(hall_symbol: str) -> list[np.ndarray] | None:
     """Return conventional centering cosets from Hall symbol.
 
     Returns fractional translation vectors that define the centering.
     For primitive settings (P), returns [ (0,0,0) ] only.
-    For centered settings (C, I, F) and rhombohedral (R), returns
-    the standard coset representatives from ITA Tables 2.1.1.1.
+    For A/B/C/I/F centered settings, returns the standard coset
+    representatives from ITA Tables 2.1.1.1.  Rhombohedral settings
+    stay unresolved here because obverse/reverse convention must be
+    explicit.
 
-    Returns [(0,0,0)] when the Hall symbol is unavailable, ambiguous,
-    or the centering type is unrecognised.
+    Returns None when the centering convention is unavailable,
+    ambiguous, or unrecognised.
     """
     identity = np.array([0.0, 0.0, 0.0])
     if not hall_symbol:
         return [identity]
-    centering = hall_symbol[0].upper()
+    centering = _hall_centering_symbol(hall_symbol)
     if centering == "P":
         return [identity]
     if centering == "A":
@@ -1153,13 +1173,10 @@ def _centering_cosets(hall_symbol: str) -> list[np.ndarray]:
             np.array([0.5, 0.5, 0.0]),
         ]
     if centering == "R":
-        # Rhombohedral obverse setting.
-        return [
-            identity,
-            np.array([2.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0]),
-            np.array([1.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0]),
-        ]
-    return [identity]
+        # Rhombohedral settings require an explicit obverse/reverse
+        # convention.  Do not guess from the Hall symbol prefix alone.
+        return None
+    return None
 
 
 def _validate_hall_sg_consistency(
@@ -1352,7 +1369,7 @@ def _reconstruct_subgroup_standard_cell(
         return result
     hall_number = int(hall_number)
     hall_symbol = str(standard_match.get("hall_symbol") or "").strip()
-    centering = hall_symbol[0] if hall_symbol else ""
+    centering = _hall_centering_symbol(hall_symbol)
     if centering in {"A", "B", "C", "F", "I", "R"}:
         result["status"] = "unavailable"
         result["operation_basis_verification"] = {
@@ -1759,7 +1776,7 @@ def _attempt_setting_transform(
         )
         return result
 
-    centering = hall_symbol[0] if hall_symbol else ""
+    centering = _hall_centering_symbol(hall_symbol)
     if centering == "P":
         result["reason"] = (
             f"primitive setting (Hall {hall_symbol}); "

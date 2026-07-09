@@ -929,6 +929,24 @@ def test_direct_match_certificate_has_primitive_conventional_relation():
     assert cert["centering_type"] == "P"
 
 
+def test_negative_hall_prefix_primitive_direct_match_is_trusted():
+    """Hall symbols like -P 1 are primitive despite the leading inversion sign."""
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.0, 0.0, 0.0]),
+        table=_table_p3(),
+        standard_match={
+            "number": 2, "international_short": "P-1",
+            "hall_number": 2, "hall_symbol": "-P 1",
+            "operation_ids": [0],
+        },
+    )
+    assert label == "GM"
+    assert blocker is None
+    cert = prov["standard_setting_certificate"]
+    assert cert["centering_type"] == "P"
+    assert cert["centering_status"] == "primitive_direct_match"
+
+
 def test_centered_setting_certificate_relation_is_centered_unresolved():
     """Centered setting records primitive_conventional_relation=centered_unresolved."""
     _, _, prov = resolve_standard_setting_hsp_label(
@@ -996,11 +1014,12 @@ def test_centering_affine_validation_with_explicit_cosets_passes_toy():
         _validate_affine_operation_equivalence,
     )
     T_id = np.eye(3)
-    # C-centered identity operation: translation parities match modulo centering.
+    # C-centered identity operation: the parent translation differs from the
+    # standard identity by the C-centering coset.
     result = _validate_affine_operation_equivalence(
         vp_operations=[{
             "operation_id": 0, "rotation_frac": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
-            "translation_frac": [0.0, 0.0, 0.0],
+            "translation_frac": [0.5, 0.5, 0.0],
         }],
         vp_operation_ids=[0],
         standard_match={
@@ -1009,7 +1028,9 @@ def test_centering_affine_validation_with_explicit_cosets_passes_toy():
         parent_to_standard_direct_transform=T_id,
     )
     # Centering cosets allow comparison modulo C-centered lattice.
-    assert result["status"] in ("passed", "unresolved", "failed")
+    assert result["status"] == "passed"
+    assert result["centering_cosets_count"] == 2
+    assert result["matched_affine_operations"] == 1
 
 
 def test_centering_cosets_c_type():
@@ -1040,3 +1061,17 @@ def test_centering_cosets_p_type():
     from valleyscope.analysis.standard_setting_kmap import _centering_cosets
     cosets = _centering_cosets("P 3")
     assert len(cosets) == 1
+
+
+def test_centering_cosets_negative_p_type():
+    """Leading Hall inversion sign does not change primitive centering."""
+    from valleyscope.analysis.standard_setting_kmap import _centering_cosets
+    cosets = _centering_cosets("-P 1")
+    assert len(cosets) == 1
+
+
+def test_centering_cosets_rhombohedral_requires_explicit_convention():
+    """R centering stays unresolved until obverse/reverse convention is explicit."""
+    from valleyscope.analysis.standard_setting_kmap import _centering_cosets
+    assert _centering_cosets("R 3") is None
+    assert _centering_cosets("-R 3") is None
