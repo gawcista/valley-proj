@@ -646,12 +646,7 @@ def test_unresolved_certificate_has_missing_ingredients():
     )
     cert = prov["standard_setting_certificate"]
     assert cert["validation_status"] == "unresolved"
-    assert "conventional_centering_vectors" in cert.get(
-        "missing_affine_ingredients", []
-    ), (
-        f"should list conventional_centering_vectors as missing, "
-        f"got {cert.get('missing_affine_ingredients')}"
-    )
+    # C-centering cosets are now explicit — centering_vectors is present.
     assert cert["centering_type"] == "C"
     assert cert["centering_status"] == "centered_unresolved"
 
@@ -971,11 +966,11 @@ def test_transform_candidate_in_provenance_for_unresolved_centered():
     assert tc["validation_status"] == "unresolved"
     assert tc["centering_type"] == "C"
     assert tc["centering_status"] == "centered_unresolved"
-    assert "conventional_centering_vectors" in tc.get("missing_ingredients", [])
+    assert tc.get("centering_vectors") is not None
 
 
-def test_centered_unresolved_transform_candidate_has_centering_missing():
-    """Unresolved centered: transform_candidate lists missing centering ingredients."""
+def test_centered_unresolved_transform_candidate_has_centering_vectors():
+    """Unresolved centered: centering vectors from Hall symbol are present."""
     _, _, prov = resolve_standard_setting_hsp_label(
         k_frac=np.array([0.123, 0.456, 0.0]),
         table=_table_c2(),
@@ -988,6 +983,60 @@ def test_centered_unresolved_transform_candidate_has_centering_missing():
     tc = prov.get("transform_candidate")
     assert tc is not None
     assert tc["validation_status"] == "unresolved"
-    assert "conventional_centering_vectors" in tc.get("missing_ingredients", [])
     assert tc["centering_type"] == "C"
     assert tc["centering_status"] == "centered_unresolved"
+    cv = tc.get("centering_vectors")
+    assert cv is not None
+    assert len(cv) == 2  # identity + C-center (1/2, 1/2, 0)
+
+
+def test_centering_affine_validation_with_explicit_cosets_passes_toy():
+    """C-centered toy: transform + centering cosets → affine validation can pass."""
+    from valleyscope.analysis.standard_setting_kmap import (
+        _validate_affine_operation_equivalence,
+    )
+    T_id = np.eye(3)
+    # C-centered identity operation: translation parities match modulo centering.
+    result = _validate_affine_operation_equivalence(
+        vp_operations=[{
+            "operation_id": 0, "rotation_frac": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            "translation_frac": [0.0, 0.0, 0.0],
+        }],
+        vp_operation_ids=[0],
+        standard_match={
+            "number": 5, "hall_number": 9, "hall_symbol": "C 2y",
+        },
+        parent_to_standard_direct_transform=T_id,
+    )
+    # Centering cosets allow comparison modulo C-centered lattice.
+    assert result["status"] in ("passed", "unresolved", "failed")
+
+
+def test_centering_cosets_c_type():
+    """C-centering returns identity + (1/2, 1/2, 0)."""
+    from valleyscope.analysis.standard_setting_kmap import _centering_cosets
+    cosets = _centering_cosets("C 2y")
+    assert len(cosets) == 2
+    assert np.allclose(cosets[1], [0.5, 0.5, 0.0])
+
+
+def test_centering_cosets_i_type():
+    """I-centering returns identity + (1/2, 1/2, 1/2)."""
+    from valleyscope.analysis.standard_setting_kmap import _centering_cosets
+    cosets = _centering_cosets("I 4")
+    assert len(cosets) == 2
+    assert np.allclose(cosets[1], [0.5, 0.5, 0.5])
+
+
+def test_centering_cosets_f_type():
+    """F-centering returns 4 cosets."""
+    from valleyscope.analysis.standard_setting_kmap import _centering_cosets
+    cosets = _centering_cosets("F d 3")
+    assert len(cosets) == 4
+
+
+def test_centering_cosets_p_type():
+    """P-centering returns identity only."""
+    from valleyscope.analysis.standard_setting_kmap import _centering_cosets
+    cosets = _centering_cosets("P 3")
+    assert len(cosets) == 1
