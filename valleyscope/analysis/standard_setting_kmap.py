@@ -220,7 +220,10 @@ def _build_transform_candidate(
         if isinstance(missing, list):
             c.missing_ingredients = list(missing)
 
-    if unresolved_reason:
+    if unresolved_reason and c.affine_validation_status == "failed":
+        c.validation_status = "rejected"
+        c.unresolved_reason = str(unresolved_reason)
+    elif unresolved_reason:
         c.validation_status = "unresolved"
         c.unresolved_reason = str(unresolved_reason)
     elif (
@@ -244,6 +247,18 @@ def _build_transform_candidate(
             c.missing_ingredients.append("conventional_centering_vectors")
 
     return c
+
+
+def _attach_transform_candidate(
+    *,
+    provenance: dict[str, object],
+    certificate: StandardSettingCertificate,
+    candidate: StandardSettingTransformCandidate,
+) -> None:
+    """Attach transform-candidate provenance to resolver output."""
+    if candidate.centering_vectors is not None:
+        certificate.centering_vectors = candidate.centering_vectors
+    provenance["transform_candidate"] = candidate.to_dict()
 
 
 def _validate_affine_operation_equivalence(
@@ -769,6 +784,20 @@ def resolve_standard_setting_hsp_label(
                             else "not_attempted"
                         )
                         _apply_affine_validation_to_certificate(cert, aff)
+                        candidate = _build_transform_candidate(
+                            standard_match=standard_match,
+                            parent_to_standard_direct_transform=T,
+                            origin_shift_fractional=origin_shift_fractional,
+                            transform_provenance=explicit_provenance,
+                            operation_mapping_status=cert.operation_mapping_status,
+                            affine_result=aff,
+                            unresolved_reason=tf_result["rejection_reason"],
+                        )
+                        _attach_transform_candidate(
+                            provenance=prov,
+                            certificate=cert,
+                            candidate=candidate,
+                        )
                         prov["standard_setting_certificate"] = cert.to_dict()
                         return None, tf_result["rejection_reason"], prov
                     else:
@@ -799,6 +828,19 @@ def resolve_standard_setting_hsp_label(
                         )
                         if aff is not None:
                             _apply_affine_validation_to_certificate(cert, aff)
+                            candidate = _build_transform_candidate(
+                                standard_match=standard_match,
+                                parent_to_standard_direct_transform=T,
+                                origin_shift_fractional=origin_shift_fractional,
+                                transform_provenance=explicit_provenance,
+                                operation_mapping_status=cert.operation_mapping_status,
+                                affine_result=aff,
+                            )
+                            _attach_transform_candidate(
+                                provenance=prov,
+                                certificate=cert,
+                                candidate=candidate,
+                            )
                         prov["standard_setting_certificate"] = cert.to_dict()
                         return label, None, prov
             except np.linalg.LinAlgError:
@@ -902,6 +944,20 @@ def resolve_standard_setting_hsp_label(
                             "operation_basis_verification_passed"
                         )
                         _apply_affine_validation_to_certificate(cert, aff)
+                        candidate = _build_transform_candidate(
+                            standard_match=standard_match,
+                            parent_to_standard_direct_transform=T,
+                            origin_shift_fractional=origin_shift_fractional,
+                            transform_provenance="operation_basis_reconstruction",
+                            operation_mapping_status=cert.operation_mapping_status,
+                            affine_result=aff,
+                            unresolved_reason=blocker,
+                        )
+                        _attach_transform_candidate(
+                            provenance=prov,
+                            certificate=cert,
+                            candidate=candidate,
+                        )
                         prov["standard_setting_certificate"] = cert.to_dict()
                         return None, blocker, prov
                 prov["basis_transformed_match_succeeded"] = True
@@ -928,6 +984,19 @@ def resolve_standard_setting_hsp_label(
                 )
                 if aff is not None:
                     _apply_affine_validation_to_certificate(cert, aff)
+                    candidate = _build_transform_candidate(
+                        standard_match=standard_match,
+                        parent_to_standard_direct_transform=T,
+                        origin_shift_fractional=origin_shift_fractional,
+                        transform_provenance="operation_basis_reconstruction",
+                        operation_mapping_status=cert.operation_mapping_status,
+                        affine_result=aff,
+                    )
+                    _attach_transform_candidate(
+                        provenance=prov,
+                        certificate=cert,
+                        candidate=candidate,
+                    )
                 prov["standard_setting_certificate"] = cert.to_dict()
                 return transformed_label, None, prov
         except np.linalg.LinAlgError:

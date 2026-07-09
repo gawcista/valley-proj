@@ -321,6 +321,32 @@ def test_explicit_transform_resolves_nonmatching_parent_kpoint():
     )
 
 
+def test_explicit_transform_success_records_transform_candidate():
+    """Accepted explicit transform carries transform_candidate provenance."""
+    T = np.diag([0.5, 1.0, 1.0])
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.25, 0.0, 0.0]),
+        table=_table_p3(),
+        standard_match={
+            "number": 143, "international_short": "P3",
+            "hall_number": 430, "hall_symbol": "P 3",
+            "operation_ids": [0],
+        },
+        parent_to_standard_direct_transform=T,
+        detected_operations=[{
+            "operation_id": 0,
+            "rotation_frac": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            "translation_frac": [0.0, 0.0, 0.0],
+        }],
+    )
+    assert label == "M"
+    assert blocker is None
+    tc = prov["transform_candidate"]
+    assert tc["validation_status"] == "validated"
+    assert tc["transform_provenance"] == "explicit_user_input"
+    assert tc["affine_validation_status"] == "passed"
+
+
 def test_explicit_transform_takes_precedence_over_direct_parent_match():
     """Supplied standard-cell transform defines the trusted HSP coordinates."""
     T = np.diag([2.0, 1.0, 1.0])
@@ -689,6 +715,9 @@ def test_explicit_transform_rejected_when_translations_inconsistent():
     assert cert.get("validation_status") == "rejected"
     assert cert.get("translation_validation_status") == "failed"
     assert cert.get("mismatched_translation_count") == 1
+    tc = prov["transform_candidate"]
+    assert tc["validation_status"] == "rejected"
+    assert tc["affine_validation_status"] == "failed"
 
 
 def test_direct_match_rejected_when_translations_inconsistent():
@@ -762,6 +791,10 @@ def test_basis_reconstruction_rejected_when_translations_inconsistent(monkeypatc
         cert.get("primitive_conventional_relation")
         == "operation_basis_reconstruction"
     )
+    tc = prov["transform_candidate"]
+    assert tc["validation_status"] == "rejected"
+    assert tc["transform_provenance"] == "operation_basis_reconstruction"
+    assert tc["affine_validation_status"] == "failed"
 
 
 def test_basis_reconstruction_certificate_records_relation(monkeypatch):
@@ -809,6 +842,10 @@ def test_basis_reconstruction_certificate_records_relation(monkeypatch):
         cert["primitive_conventional_relation"]
         == "operation_basis_reconstruction"
     )
+    tc = prov["transform_candidate"]
+    assert tc["validation_status"] == "validated"
+    assert tc["transform_provenance"] == "operation_basis_reconstruction"
+    assert tc["affine_validation_status"] == "passed"
 
 
 # ---------------------------------------------------------------------------
