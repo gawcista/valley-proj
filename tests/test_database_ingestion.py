@@ -574,6 +574,18 @@ def test_irrep_records_preserve_generic_fields():
                     "legacy_subspace_group_candidate": "C3_like",
                     "valley_preserving_operation_ids": [0, 2, 3],
                     "source_operation_map": {0: 1, 2: 2, 3: 3},
+                    "irrep_source_provenance": {
+                        "source_hsp_label": "GM",
+                        "source_table_sg_number": 143,
+                        "standard_setting_hsp_mapping": {
+                            "standard_setting_certificate": {
+                                "validation_status": "validated",
+                                "subspace_sg_number": 143,
+                                "resolved_hsp_label": "GM",
+                                "centering_status": "primitive_direct_match",
+                            },
+                        },
+                    },
                 }],
             },
         }],
@@ -589,6 +601,14 @@ def test_irrep_records_preserve_generic_fields():
     assert r["subspace_space_group"] == {"candidate_space_group_symbol": "P3"}
     assert r["valley_preserving_operation_ids"] == [0, 2, 3]
     assert r["source_operation_map"] == {0: 1, 2: 2, 3: 3}
+    cert = (
+        r["irrep_source_provenance"]
+        ["standard_setting_hsp_mapping"]
+        ["standard_setting_certificate"]
+    )
+    assert cert["validation_status"] == "validated"
+    assert cert["subspace_sg_number"] == 143
+    assert cert["resolved_hsp_label"] == "GM"
 
 
 def test_legacy_records_still_ingest_without_generic_fields():

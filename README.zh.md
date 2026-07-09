@@ -282,6 +282,9 @@ valleyscope analyze-hsp analyze.yaml
 valleyscope collect-database-record ./valley_analysis --output record.json
 ```
 
+该记录中的 generic irrep 行会保留 `irrep_source_provenance`，包括可用时的
+`standard_setting_hsp_mapping.standard_setting_certificate`。
+
 从多个采集记录生成多运行数据库索引：
 
 ```bash

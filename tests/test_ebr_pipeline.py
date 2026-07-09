@@ -1366,7 +1366,16 @@ def test_candidate_carries_irrep_source_provenance():
             "source_payload_provenance": {
                 "table_sg_number": 75, "table_name": "P4",
                 "table_spinor": True, "source_hsp_label": "GM",
-                "source_table_operation_indices": [1, 2]},
+                "source_table_operation_indices": [1, 2],
+                "standard_setting_hsp_mapping": {
+                    "standard_setting_certificate": {
+                        "validation_status": "validated",
+                        "subspace_sg_number": 75,
+                        "resolved_hsp_label": "GM",
+                        "centering_status": "primitive_direct_match",
+                    },
+                },
+            },
             "operation_mapping_provenance": "exact_spatial",
         }},
     }}
@@ -1382,6 +1391,10 @@ def test_candidate_carries_irrep_source_provenance():
     assert prov["source_hsp_label"] == "GM"
     assert prov["operation_mapping_provenance"] == "exact_spatial"
     assert prov["valley_preserving_operation_ids"] == [0, 1]
+    cert = prov["standard_setting_hsp_mapping"]["standard_setting_certificate"]
+    assert cert["validation_status"] == "validated"
+    assert cert["subspace_sg_number"] == 75
+    assert cert["resolved_hsp_label"] == "GM"
 
 
 def test_problem_instance_preserves_multi_hsp_provenance():

@@ -312,6 +312,9 @@ outputs (an offline collector, not a default `analyze-hsp` output):
 valleyscope collect-database-record ./valley_analysis --output record.json
 ```
 
+Generic irrep rows in this record preserve `irrep_source_provenance`, including
+`standard_setting_hsp_mapping.standard_setting_certificate` when available.
+
 Build a multi-run database index:
 
 ```bash

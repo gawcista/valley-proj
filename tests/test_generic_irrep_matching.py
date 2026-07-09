@@ -161,6 +161,7 @@ def test_missing_source_chars_diagnostic():
         source_operation_map={1: 1, 2: 2, 3: 3},
     )
     assert result["matching_status"] == "diagnostic"
+    assert "no_matched" in result["reason"]
 
 
 # ---------------------------------------------------------------------------
@@ -222,7 +223,6 @@ def test_standard_setting_certificate_in_source_payload_provenance():
     assert cert["subspace_sg_number"] == 143
     assert cert["resolved_hsp_label"] == "GM"
     assert cert["centering_status"] == "primitive_direct_match"
-    assert "no_matched" in result["reason"]
 
 
 # -----------------------------------------------------------------------
@@ -242,67 +242,6 @@ def test_negative_multiplicity_diagnostic():
         source_operation_map={1: 1, 2: 2},
     )
     assert result["matching_status"] == "diagnostic"
-
-
-# ---------------------------------------------------------------------------
-# Certificate contract: standard_setting_certificate in provenance
-# ---------------------------------------------------------------------------
-
-def test_standard_setting_certificate_in_source_payload_provenance():
-    """Matched rows carry standard_setting_certificate via provenance."""
-    from valleyscope.analysis.valley_irrep_matching import (
-        build_valley_irrep_matching_report,
-    )
-    decisions = {"by_kpoint": {"GammaM": {"K_valley": {
-        "readiness_level": "trusted", "workflow_path": "direct_qcut",
-    }}}}
-    sa_report = {"by_kpoint": {"GammaM": {"valley_preserving_subspaces": [{
-        "orbit": ["K_valley"],
-        "hsp_preserving_operation_ids": [0, 1],
-        "subspace_space_group": {
-            "valley_preserving_operation_ids": [0, 1],
-            "candidate_space_group_symbol": "P3",
-            "candidate_space_group_number": 143,
-        },
-        "valley_preserving_character_diagnostics": {
-            "per_valley": {"K_valley": [
-                {"operation_id": 0, "eigenphases": [0.0]},
-                {"operation_id": 1, "eigenphases": [0.5]},
-            ]},
-        },
-    }]}}}
-    source_chars = {"A": {1: 1.0 + 0j, 2: -1.0 + 0j}}
-    kmap_prov: dict = {
-        "standard_setting_certificate": {
-            "validation_status": "validated",
-            "subspace_sg_number": 143,
-            "subspace_sg_symbol": "P3",
-            "hall_number": 430,
-            "hall_symbol": "P 3",
-            "resolved_hsp_label": "GM",
-            "centering_type": "P",
-            "centering_status": "primitive_direct_match",
-        },
-        "direct_match_succeeded": True,
-    }
-    report = build_valley_irrep_matching_report(
-        irrep_workflow_decisions=decisions,
-        symmetry_adapted_valley_report=sa_report,
-        source_irrep_characters_flattened={"GammaM": {"K_valley": source_chars}},
-        source_operation_maps={"GammaM": {"K_valley": {0: 1, 1: 2}}},
-        source_payload_provenance={"GammaM": {"K_valley": {
-            "standard_setting_hsp_mapping": kmap_prov,
-        }}},
-    )
-    gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
-    assert gm["matching_status"] == "matched"
-    prov = gm.get("source_payload_provenance", {})
-    kmap = prov.get("standard_setting_hsp_mapping", {})
-    cert = kmap.get("standard_setting_certificate", {})
-    assert cert["validation_status"] == "validated"
-    assert cert["subspace_sg_number"] == 143
-    assert cert["resolved_hsp_label"] == "GM"
-    assert cert["centering_status"] == "primitive_direct_match"
     per = result["per_irrep_results"]["X"]
     assert "negative" in per["reason"].lower()
 
@@ -321,67 +260,6 @@ def test_all_zero_multiplicities_not_matched():
     assert result["matching_status"] == "diagnostic"
 
 
-# ---------------------------------------------------------------------------
-# Certificate contract: standard_setting_certificate in provenance
-# ---------------------------------------------------------------------------
-
-def test_standard_setting_certificate_in_source_payload_provenance():
-    """Matched rows carry standard_setting_certificate via provenance."""
-    from valleyscope.analysis.valley_irrep_matching import (
-        build_valley_irrep_matching_report,
-    )
-    decisions = {"by_kpoint": {"GammaM": {"K_valley": {
-        "readiness_level": "trusted", "workflow_path": "direct_qcut",
-    }}}}
-    sa_report = {"by_kpoint": {"GammaM": {"valley_preserving_subspaces": [{
-        "orbit": ["K_valley"],
-        "hsp_preserving_operation_ids": [0, 1],
-        "subspace_space_group": {
-            "valley_preserving_operation_ids": [0, 1],
-            "candidate_space_group_symbol": "P3",
-            "candidate_space_group_number": 143,
-        },
-        "valley_preserving_character_diagnostics": {
-            "per_valley": {"K_valley": [
-                {"operation_id": 0, "eigenphases": [0.0]},
-                {"operation_id": 1, "eigenphases": [0.5]},
-            ]},
-        },
-    }]}}}
-    source_chars = {"A": {1: 1.0 + 0j, 2: -1.0 + 0j}}
-    kmap_prov: dict = {
-        "standard_setting_certificate": {
-            "validation_status": "validated",
-            "subspace_sg_number": 143,
-            "subspace_sg_symbol": "P3",
-            "hall_number": 430,
-            "hall_symbol": "P 3",
-            "resolved_hsp_label": "GM",
-            "centering_type": "P",
-            "centering_status": "primitive_direct_match",
-        },
-        "direct_match_succeeded": True,
-    }
-    report = build_valley_irrep_matching_report(
-        irrep_workflow_decisions=decisions,
-        symmetry_adapted_valley_report=sa_report,
-        source_irrep_characters_flattened={"GammaM": {"K_valley": source_chars}},
-        source_operation_maps={"GammaM": {"K_valley": {0: 1, 1: 2}}},
-        source_payload_provenance={"GammaM": {"K_valley": {
-            "standard_setting_hsp_mapping": kmap_prov,
-        }}},
-    )
-    gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
-    assert gm["matching_status"] == "matched"
-    prov = gm.get("source_payload_provenance", {})
-    kmap = prov.get("standard_setting_hsp_mapping", {})
-    cert = kmap.get("standard_setting_certificate", {})
-    assert cert["validation_status"] == "validated"
-    assert cert["subspace_sg_number"] == 143
-    assert cert["resolved_hsp_label"] == "GM"
-    assert cert["centering_status"] == "primitive_direct_match"
-
-
 def test_non_integer_multiplicity_diagnostic():
     """Non-integer inner product is diagnostic-only."""
     computed = {1: 1.0 + 0j, 2: 0.3 + 0j, 3: 0.3 + 0j}
@@ -393,67 +271,6 @@ def test_non_integer_multiplicity_diagnostic():
         source_operation_map={1: 1, 2: 2, 3: 3},
     )
     assert result["matching_status"] == "diagnostic"
-
-
-# ---------------------------------------------------------------------------
-# Certificate contract: standard_setting_certificate in provenance
-# ---------------------------------------------------------------------------
-
-def test_standard_setting_certificate_in_source_payload_provenance():
-    """Matched rows carry standard_setting_certificate via provenance."""
-    from valleyscope.analysis.valley_irrep_matching import (
-        build_valley_irrep_matching_report,
-    )
-    decisions = {"by_kpoint": {"GammaM": {"K_valley": {
-        "readiness_level": "trusted", "workflow_path": "direct_qcut",
-    }}}}
-    sa_report = {"by_kpoint": {"GammaM": {"valley_preserving_subspaces": [{
-        "orbit": ["K_valley"],
-        "hsp_preserving_operation_ids": [0, 1],
-        "subspace_space_group": {
-            "valley_preserving_operation_ids": [0, 1],
-            "candidate_space_group_symbol": "P3",
-            "candidate_space_group_number": 143,
-        },
-        "valley_preserving_character_diagnostics": {
-            "per_valley": {"K_valley": [
-                {"operation_id": 0, "eigenphases": [0.0]},
-                {"operation_id": 1, "eigenphases": [0.5]},
-            ]},
-        },
-    }]}}}
-    source_chars = {"A": {1: 1.0 + 0j, 2: -1.0 + 0j}}
-    kmap_prov: dict = {
-        "standard_setting_certificate": {
-            "validation_status": "validated",
-            "subspace_sg_number": 143,
-            "subspace_sg_symbol": "P3",
-            "hall_number": 430,
-            "hall_symbol": "P 3",
-            "resolved_hsp_label": "GM",
-            "centering_type": "P",
-            "centering_status": "primitive_direct_match",
-        },
-        "direct_match_succeeded": True,
-    }
-    report = build_valley_irrep_matching_report(
-        irrep_workflow_decisions=decisions,
-        symmetry_adapted_valley_report=sa_report,
-        source_irrep_characters_flattened={"GammaM": {"K_valley": source_chars}},
-        source_operation_maps={"GammaM": {"K_valley": {0: 1, 1: 2}}},
-        source_payload_provenance={"GammaM": {"K_valley": {
-            "standard_setting_hsp_mapping": kmap_prov,
-        }}},
-    )
-    gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
-    assert gm["matching_status"] == "matched"
-    prov = gm.get("source_payload_provenance", {})
-    kmap = prov.get("standard_setting_hsp_mapping", {})
-    cert = kmap.get("standard_setting_certificate", {})
-    assert cert["validation_status"] == "validated"
-    assert cert["subspace_sg_number"] == 143
-    assert cert["resolved_hsp_label"] == "GM"
-    assert cert["centering_status"] == "primitive_direct_match"
 
 
 # -----------------------------------------------------------------------
@@ -1311,67 +1128,6 @@ def test_nonunique_restricted_decomposition_blocked():
         source_operation_map={0: 1, 4: 2, 5: 3},
     )
     assert result["matching_status"] == "diagnostic"
-
-
-# ---------------------------------------------------------------------------
-# Certificate contract: standard_setting_certificate in provenance
-# ---------------------------------------------------------------------------
-
-def test_standard_setting_certificate_in_source_payload_provenance():
-    """Matched rows carry standard_setting_certificate via provenance."""
-    from valleyscope.analysis.valley_irrep_matching import (
-        build_valley_irrep_matching_report,
-    )
-    decisions = {"by_kpoint": {"GammaM": {"K_valley": {
-        "readiness_level": "trusted", "workflow_path": "direct_qcut",
-    }}}}
-    sa_report = {"by_kpoint": {"GammaM": {"valley_preserving_subspaces": [{
-        "orbit": ["K_valley"],
-        "hsp_preserving_operation_ids": [0, 1],
-        "subspace_space_group": {
-            "valley_preserving_operation_ids": [0, 1],
-            "candidate_space_group_symbol": "P3",
-            "candidate_space_group_number": 143,
-        },
-        "valley_preserving_character_diagnostics": {
-            "per_valley": {"K_valley": [
-                {"operation_id": 0, "eigenphases": [0.0]},
-                {"operation_id": 1, "eigenphases": [0.5]},
-            ]},
-        },
-    }]}}}
-    source_chars = {"A": {1: 1.0 + 0j, 2: -1.0 + 0j}}
-    kmap_prov: dict = {
-        "standard_setting_certificate": {
-            "validation_status": "validated",
-            "subspace_sg_number": 143,
-            "subspace_sg_symbol": "P3",
-            "hall_number": 430,
-            "hall_symbol": "P 3",
-            "resolved_hsp_label": "GM",
-            "centering_type": "P",
-            "centering_status": "primitive_direct_match",
-        },
-        "direct_match_succeeded": True,
-    }
-    report = build_valley_irrep_matching_report(
-        irrep_workflow_decisions=decisions,
-        symmetry_adapted_valley_report=sa_report,
-        source_irrep_characters_flattened={"GammaM": {"K_valley": source_chars}},
-        source_operation_maps={"GammaM": {"K_valley": {0: 1, 1: 2}}},
-        source_payload_provenance={"GammaM": {"K_valley": {
-            "standard_setting_hsp_mapping": kmap_prov,
-        }}},
-    )
-    gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
-    assert gm["matching_status"] == "matched"
-    prov = gm.get("source_payload_provenance", {})
-    kmap = prov.get("standard_setting_hsp_mapping", {})
-    cert = kmap.get("standard_setting_certificate", {})
-    assert cert["validation_status"] == "validated"
-    assert cert["subspace_sg_number"] == 143
-    assert cert["resolved_hsp_label"] == "GM"
-    assert cert["centering_status"] == "primitive_direct_match"
     assert "nonunique_restricted_irrep_decomposition" in result["reason"]
 
 
@@ -1416,67 +1172,6 @@ def test_identity_only_nonunique_blocked():
         source_operation_map={0: 1},
     )
     assert result["matching_status"] == "diagnostic"
-
-
-# ---------------------------------------------------------------------------
-# Certificate contract: standard_setting_certificate in provenance
-# ---------------------------------------------------------------------------
-
-def test_standard_setting_certificate_in_source_payload_provenance():
-    """Matched rows carry standard_setting_certificate via provenance."""
-    from valleyscope.analysis.valley_irrep_matching import (
-        build_valley_irrep_matching_report,
-    )
-    decisions = {"by_kpoint": {"GammaM": {"K_valley": {
-        "readiness_level": "trusted", "workflow_path": "direct_qcut",
-    }}}}
-    sa_report = {"by_kpoint": {"GammaM": {"valley_preserving_subspaces": [{
-        "orbit": ["K_valley"],
-        "hsp_preserving_operation_ids": [0, 1],
-        "subspace_space_group": {
-            "valley_preserving_operation_ids": [0, 1],
-            "candidate_space_group_symbol": "P3",
-            "candidate_space_group_number": 143,
-        },
-        "valley_preserving_character_diagnostics": {
-            "per_valley": {"K_valley": [
-                {"operation_id": 0, "eigenphases": [0.0]},
-                {"operation_id": 1, "eigenphases": [0.5]},
-            ]},
-        },
-    }]}}}
-    source_chars = {"A": {1: 1.0 + 0j, 2: -1.0 + 0j}}
-    kmap_prov: dict = {
-        "standard_setting_certificate": {
-            "validation_status": "validated",
-            "subspace_sg_number": 143,
-            "subspace_sg_symbol": "P3",
-            "hall_number": 430,
-            "hall_symbol": "P 3",
-            "resolved_hsp_label": "GM",
-            "centering_type": "P",
-            "centering_status": "primitive_direct_match",
-        },
-        "direct_match_succeeded": True,
-    }
-    report = build_valley_irrep_matching_report(
-        irrep_workflow_decisions=decisions,
-        symmetry_adapted_valley_report=sa_report,
-        source_irrep_characters_flattened={"GammaM": {"K_valley": source_chars}},
-        source_operation_maps={"GammaM": {"K_valley": {0: 1, 1: 2}}},
-        source_payload_provenance={"GammaM": {"K_valley": {
-            "standard_setting_hsp_mapping": kmap_prov,
-        }}},
-    )
-    gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
-    assert gm["matching_status"] == "matched"
-    prov = gm.get("source_payload_provenance", {})
-    kmap = prov.get("standard_setting_hsp_mapping", {})
-    cert = kmap.get("standard_setting_certificate", {})
-    assert cert["validation_status"] == "validated"
-    assert cert["subspace_sg_number"] == 143
-    assert cert["resolved_hsp_label"] == "GM"
-    assert cert["centering_status"] == "primitive_direct_match"
     # Dimension mismatch catches this (4 ≠ 2). Nonunique check is downstream.
     assert result["diagnostic_only"] is True
 
@@ -1498,67 +1193,6 @@ def test_dimension_mismatch_blocked():
         source_operation_map={0: 1, 4: 2},
     )
     assert result["matching_status"] == "diagnostic"
-
-
-# ---------------------------------------------------------------------------
-# Certificate contract: standard_setting_certificate in provenance
-# ---------------------------------------------------------------------------
-
-def test_standard_setting_certificate_in_source_payload_provenance():
-    """Matched rows carry standard_setting_certificate via provenance."""
-    from valleyscope.analysis.valley_irrep_matching import (
-        build_valley_irrep_matching_report,
-    )
-    decisions = {"by_kpoint": {"GammaM": {"K_valley": {
-        "readiness_level": "trusted", "workflow_path": "direct_qcut",
-    }}}}
-    sa_report = {"by_kpoint": {"GammaM": {"valley_preserving_subspaces": [{
-        "orbit": ["K_valley"],
-        "hsp_preserving_operation_ids": [0, 1],
-        "subspace_space_group": {
-            "valley_preserving_operation_ids": [0, 1],
-            "candidate_space_group_symbol": "P3",
-            "candidate_space_group_number": 143,
-        },
-        "valley_preserving_character_diagnostics": {
-            "per_valley": {"K_valley": [
-                {"operation_id": 0, "eigenphases": [0.0]},
-                {"operation_id": 1, "eigenphases": [0.5]},
-            ]},
-        },
-    }]}}}
-    source_chars = {"A": {1: 1.0 + 0j, 2: -1.0 + 0j}}
-    kmap_prov: dict = {
-        "standard_setting_certificate": {
-            "validation_status": "validated",
-            "subspace_sg_number": 143,
-            "subspace_sg_symbol": "P3",
-            "hall_number": 430,
-            "hall_symbol": "P 3",
-            "resolved_hsp_label": "GM",
-            "centering_type": "P",
-            "centering_status": "primitive_direct_match",
-        },
-        "direct_match_succeeded": True,
-    }
-    report = build_valley_irrep_matching_report(
-        irrep_workflow_decisions=decisions,
-        symmetry_adapted_valley_report=sa_report,
-        source_irrep_characters_flattened={"GammaM": {"K_valley": source_chars}},
-        source_operation_maps={"GammaM": {"K_valley": {0: 1, 1: 2}}},
-        source_payload_provenance={"GammaM": {"K_valley": {
-            "standard_setting_hsp_mapping": kmap_prov,
-        }}},
-    )
-    gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
-    assert gm["matching_status"] == "matched"
-    prov = gm.get("source_payload_provenance", {})
-    kmap = prov.get("standard_setting_hsp_mapping", {})
-    cert = kmap.get("standard_setting_certificate", {})
-    assert cert["validation_status"] == "validated"
-    assert cert["subspace_sg_number"] == 143
-    assert cert["resolved_hsp_label"] == "GM"
-    assert cert["centering_status"] == "primitive_direct_match"
     assert "dimension" in result["reason"].lower()
 
 
@@ -1584,64 +1218,3 @@ def test_character_reconstruction_mismatch_blocked():
         source_operation_map={0: 1, 4: 2},
     )
     assert result["matching_status"] == "diagnostic"
-
-
-# ---------------------------------------------------------------------------
-# Certificate contract: standard_setting_certificate in provenance
-# ---------------------------------------------------------------------------
-
-def test_standard_setting_certificate_in_source_payload_provenance():
-    """Matched rows carry standard_setting_certificate via provenance."""
-    from valleyscope.analysis.valley_irrep_matching import (
-        build_valley_irrep_matching_report,
-    )
-    decisions = {"by_kpoint": {"GammaM": {"K_valley": {
-        "readiness_level": "trusted", "workflow_path": "direct_qcut",
-    }}}}
-    sa_report = {"by_kpoint": {"GammaM": {"valley_preserving_subspaces": [{
-        "orbit": ["K_valley"],
-        "hsp_preserving_operation_ids": [0, 1],
-        "subspace_space_group": {
-            "valley_preserving_operation_ids": [0, 1],
-            "candidate_space_group_symbol": "P3",
-            "candidate_space_group_number": 143,
-        },
-        "valley_preserving_character_diagnostics": {
-            "per_valley": {"K_valley": [
-                {"operation_id": 0, "eigenphases": [0.0]},
-                {"operation_id": 1, "eigenphases": [0.5]},
-            ]},
-        },
-    }]}}}
-    source_chars = {"A": {1: 1.0 + 0j, 2: -1.0 + 0j}}
-    kmap_prov: dict = {
-        "standard_setting_certificate": {
-            "validation_status": "validated",
-            "subspace_sg_number": 143,
-            "subspace_sg_symbol": "P3",
-            "hall_number": 430,
-            "hall_symbol": "P 3",
-            "resolved_hsp_label": "GM",
-            "centering_type": "P",
-            "centering_status": "primitive_direct_match",
-        },
-        "direct_match_succeeded": True,
-    }
-    report = build_valley_irrep_matching_report(
-        irrep_workflow_decisions=decisions,
-        symmetry_adapted_valley_report=sa_report,
-        source_irrep_characters_flattened={"GammaM": {"K_valley": source_chars}},
-        source_operation_maps={"GammaM": {"K_valley": {0: 1, 1: 2}}},
-        source_payload_provenance={"GammaM": {"K_valley": {
-            "standard_setting_hsp_mapping": kmap_prov,
-        }}},
-    )
-    gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
-    assert gm["matching_status"] == "matched"
-    prov = gm.get("source_payload_provenance", {})
-    kmap = prov.get("standard_setting_hsp_mapping", {})
-    cert = kmap.get("standard_setting_certificate", {})
-    assert cert["validation_status"] == "validated"
-    assert cert["subspace_sg_number"] == 143
-    assert cert["resolved_hsp_label"] == "GM"
-    assert cert["centering_status"] == "primitive_direct_match"

@@ -288,6 +288,7 @@ def _extract_irrep_records(
                 "subspace_space_group",
                 "valley_preserving_operation_ids",
                 "source_operation_map",
+                "irrep_source_provenance",
             ):
                 if key in rec:
                     entry[key] = rec[key]

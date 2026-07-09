@@ -204,6 +204,9 @@ def _build_irrep_source_provenance(gm: dict[str, object]) -> dict[str, object]:
     op_mapping = gm.get("operation_mapping_provenance")
     if isinstance(op_mapping, str) and op_mapping:
         provenance["operation_mapping_provenance"] = op_mapping
+    standard_mapping = src_prov.get("standard_setting_hsp_mapping")
+    if isinstance(standard_mapping, dict) and standard_mapping:
+        provenance["standard_setting_hsp_mapping"] = dict(standard_mapping)
     return provenance
 
 
