@@ -1285,8 +1285,15 @@ def test_derive_transform_r_centering_without_cosets_returns_unresolved():
 # Derived transform downstream provenance tests
 # ---------------------------------------------------------------------------
 
-def test_derived_transform_provenance_reaches_ebr_candidate():
-    """Unique derived transform provenance flows to EBR input candidates."""
+def test_plumbing_derived_transform_provenance_reaches_ebr_candidate():
+    """Plumbing test: manually-injected derived transform provenance flows to EBR.
+
+    This is a plumbing-only test — it injects a certificate payload with
+    transform_provenance='affine_operation_derivation' and proves the
+    plumbing preserves it into EBR candidate irrep_source_provenance.
+    It does NOT claim that _derive_transform_candidate() produced this
+    certificate automatically.
+    """
     from valleyscope.analysis.valley_irrep_matching import (
         build_valley_irrep_matching_report,
     )
@@ -1347,11 +1354,11 @@ def test_derived_transform_provenance_reaches_ebr_candidate():
 
 
 def test_ambiguous_derivation_preserves_provenance():
-    """Ambiguous derivation keeps provenance record in basis_transform."""
+    """Ambiguous derivation always records derivation_attempt in result."""
     from valleyscope.analysis.standard_setting_kmap import (
         _compute_standard_setting_basis_transform,
     )
-    # C2 with only 2 ops → derivation is ambiguous.
+    # C2 with only 2 ops → derivation is ambiguous (multiple valid T).
     result = _compute_standard_setting_basis_transform(
         lattice_direct_cart=np.eye(3),
         vp_operations=[
@@ -1366,30 +1373,26 @@ def test_ambiguous_derivation_preserves_provenance():
             "operation_ids": [0, 4],
         },
     )
-    # Derivation was attempted — provenance preserved regardless of status.
-    if "derivation_attempt" in result:
-        da = result["derivation_attempt"]
-        assert da["status"] in ("rejected",) or "derivation_attempt" in result
-    # Ambiguous/unavailable status is correctly recorded.
-    assert result["status"] in ("unavailable", "rejected", "unresolved")
+    da = result.get("derivation_attempt")
+    assert da is not None
+    assert da["status"] == "ambiguous"
+    assert da.get("candidate_count", 0) > 1
 
 
-def test_primitive_direct_match_bypasses_derivation():
-    """P3 direct coordinate match skips derivation — no spurious blocker."""
-    from valleyscope.analysis.standard_setting_kmap import (
-        _compute_standard_setting_basis_transform,
-    )
-    result = _compute_standard_setting_basis_transform(
-        lattice_direct_cart=np.eye(3),
-        vp_operations=[
-            {"operation_id": 1, "order": 3,
-             "rotation_frac": [[0, -1, 0], [1, -1, 0], [0, 0, 1]]},
-        ],
+def test_primitive_direct_match_resolves_label_in_resolver():
+    """P3 resolver-level: direct match returns label, no spurious blocker."""
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.5, 0.0, 0.0]),
+        table=_table_p3(),
         standard_match={
             "number": 143, "international_short": "P3",
             "hall_number": 430, "hall_symbol": "P 3",
             "operation_ids": [0, 1, 2],
         },
     )
-    # P-centering must not be clobbered by derivation.
-    assert "P" not in str(result.get("reason", "")) or result["status"] != "unavailable"
+    assert label == "M"
+    assert blocker is None
+    cert = prov["standard_setting_certificate"]
+    assert cert["validation_status"] == "validated"
+    assert "standard_setting_hsp_mapping_unresolved" not in str(prov)
+    # Direct coordinate match bypasses derivation entirely — no basis_transform.

@@ -1743,51 +1743,40 @@ def _compute_standard_setting_basis_transform(
             continue
         vp_rotations.append((op_id, np.asarray(rot, dtype=float)))
 
-    if not vp_rotations:
-        result["status"] = "unavailable"
-        result["reason"] = (
-            "no non-identity valley-preserving operation with a "
-            "fractional rotation matrix found; cannot verify "
-            "basis orientation against operation content"
-        )
-        return result
-
-    # 0. Attempt affine transform derivation from parent VP operations.
-    #    Search small-integer trial matrices T with det=±1 that map
-    #    parent {R_p, τ_p} to standard {R_s, τ_s}.
+    # 0. Diagnostic affine transform derivation from parent VP operations.
+    #    Searches small-integer trial matrices T with det=±1 that map
+    #    parent {R_p, τ_p} to standard {R_s, τ_s}.  This is a provenance/
+    #    diagnostic step, not an accepted auto-derivation path —
+    #    the search space is limited and ambiguous results are common
+    #    for groups with few operations (e.g. C2).
     derivation = _derive_transform_candidate(
         vp_operations=list(vp_operations),
         vp_operation_ids=list(vp_op_ids),
         standard_match=dict(standard_match),
     )
-    if derivation.get("status") == "unique_found" and derivation.get("transform_matrix") is not None:
-        T_derived = np.asarray(derivation["transform_matrix"], dtype=float)
-        # Verify affine operations under the derived transform.
-        vp_ids_list = [int(op) for op in vp_op_ids if isinstance(op, (int, float))]
-        aff_check = _validate_affine_operation_equivalence(
-            vp_operations=list(vp_operations),
-            vp_operation_ids=vp_ids_list,
-            standard_match=standard_match,
-            parent_to_standard_direct_transform=T_derived,
-        )
-        vf = _verify_operation_basis(
-            parent_rotations=[r_arr for _, r_arr in vp_rotations],
-            std_rotations=_std_rotations_from_match(standard_match),
-            transform_matrix=T_derived,
-        )
-        result["operation_basis_verification"] = vf
-        if aff_check.get("status") == "passed" and vf.get("status") == "passed":
-            result["status"] = "accepted"
-            result["transform_matrix"] = derivation["transform_matrix"]
-            result["transform_provenance"] = "affine_operation_derivation"
-            result["derivation_provenance"] = derivation.get("derivation_provenance", "")
-            return result
-        # Derivation failed affine validation — fall through.
-        result["derivation_attempt"] = {
-            "status": "rejected",
-            "affine_status": aff_check.get("status"),
-            "operation_basis_status": vf.get("status"),
+    # Always record derivation attempt for provenance.
+    result["derivation_attempt"] = {
+        "status": derivation.get("status", "not_attempted"),
+        "candidate_count": derivation.get("candidate_count"),
+        "missing_ingredients": derivation.get("missing_ingredients", []),
+        "derivation_provenance": derivation.get("derivation_provenance", ""),
+    }
+
+    if not vp_rotations:
+        recon = {
+            "status": "unavailable",
+            "reason": (
+                "no non-identity valley-preserving operation with a "
+                "fractional rotation matrix found; cannot verify "
+                "basis orientation against operation content"
+            ),
+            "operation_basis_verification": {
+                "status": "not_attempted",
+                "reason": "no nontrivial VP rotation available",
+            },
         }
+        recon["derivation_attempt"] = result.get("derivation_attempt")
+        return recon
 
     # Attempt subgroup standard-cell reconstruction using VP operation
     # matrices and spglib's standard-setting symmetry database.
@@ -1796,6 +1785,7 @@ def _compute_standard_setting_basis_transform(
         vp_operations=list(vp_operations),
         standard_match=standard_match,
     )
+    recon["derivation_attempt"] = result.get("derivation_attempt")
     return recon
 
 
