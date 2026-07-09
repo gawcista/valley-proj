@@ -1125,21 +1125,6 @@ def _operation_ids_list(sm: dict[str, object]) -> list[int]:
     return []
 
 
-def _std_rotations_from_match(standard_match: dict[str, object]) -> list[np.ndarray]:
-    """Get standard-setting rotation matrices from spglib database."""
-    hall_number = standard_match.get("hall_number")
-    if not isinstance(hall_number, int) or isinstance(hall_number, bool):
-        return []
-    try:
-        import spglib
-        std_sym = spglib.get_symmetry_from_database(int(hall_number))
-        if std_sym is not None:
-            return [np.asarray(r, dtype=float) for r in std_sym["rotations"]]
-    except Exception:
-        pass
-    return []
-
-
 def _hall_centering_symbol(hall_symbol: str) -> str:
     """Return the lattice centering symbol from a Hall symbol.
 
