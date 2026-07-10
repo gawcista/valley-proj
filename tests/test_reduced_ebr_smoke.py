@@ -409,10 +409,12 @@ def test_provenance_survives_through_output_writer_to_export_bundle(tmp_path):
     instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
     assert instances["instance_count"] == 1
     inst = instances["instances"][0]
-    assert inst["ready_for_ebr_decomposition"] is True
+    assert inst["ready_for_reduced_table_validation"] is True
+    assert inst["ready_for_ebr_decomposition"] is False
 
     export_bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
     assert export_bundle["bundle_count"] == 1
+    assert export_bundle["bundles"][0]["ready_for_external_solver"] is False
 
     # Write through the output writer.
     h5_path = tmp_path / "wf.h5"

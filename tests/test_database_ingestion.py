@@ -294,7 +294,7 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
 
     record = load_database_ingestion_record_from_directory(run_dir)
 
-    assert record["schema_version"] == "1.2.0"
+    assert record["schema_version"] == "1.3.0"
     assert record["record_status"] == "has_ready_ebr_bundles"
     assert record["ready_bundle_count"] == 2
     assert len(record["valley_irrep_records"]) == 8
@@ -344,7 +344,7 @@ def test_reduced_ebr_records_empty_when_mapping_missing():
 
 def _make_ingestion_record(status="has_ready_ebr_bundles", run_id="run_0000"):
     return {
-        "schema_version": "1.2.0",
+        "schema_version": "1.3.0",
         "record_status": status,
         "space_group_international": "P321",
         "space_group_number": 150,
@@ -494,7 +494,7 @@ def test_database_index_excluded_ebr_records_aggregated():
     """Index aggregates excluded EBR records with run_id provenance."""
     from valleyscope.analysis.database_index import build_database_index
     rec = {
-        "schema_version": "1.2.0",
+        "schema_version": "1.3.0",
         "record_status": "has_ready_ebr_bundles",
         "ready_bundle_count": 1,
         "valley_irrep_records": [],
@@ -538,12 +538,12 @@ def test_database_index_excluded_ebr_records_have_source_record():
     assert er["source_record"] == "/tmp/rec.json"
 
 
-def test_ingestion_record_schema_version_is_1_2_0():
+def test_ingestion_record_schema_version_is_1_3_0():
     """Ingestion record schema_version is now 1.2.0."""
     from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
     summary = {"target_kpoints": [], "iband": [], "input": {}}
     record = build_database_ingestion_record(valley_summary=summary)
-    assert record["schema_version"] == "1.2.0"
+    assert record["schema_version"] == "1.3.0"
 
 
 # -----------------------------------------------------------------------
@@ -656,7 +656,7 @@ def test_database_index_preserves_generic_irrep_fields_with_run_provenance():
     from valleyscope.analysis.database_index import build_database_index
 
     record = {
-        "schema_version": "1.2.0",
+        "schema_version": "1.3.0",
         "record_status": "has_ready_ebr_bundles",
         "ready_bundle_count": 1,
         "valley_irrep_records": [{

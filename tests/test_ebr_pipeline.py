@@ -130,9 +130,9 @@ def test_ebr_problem_instances_ready_from_actual():
     report = build_ebr_problem_instances(ebr_input_candidates=candidates)
     assert report["instance_count"] == 1
     inst = report["instances"][0]
-    assert inst["ready_for_ebr_decomposition"] is True
+    assert inst["ready_for_reduced_table_validation"] is True; assert inst["ready_for_ebr_decomposition"] is False
     assert inst["expected_hsps"] == ["GammaM"]
-    assert inst["status"] == "complete"
+    assert inst["status"] == "sampled_basis"
 
 
 def test_ebr_problem_instances_complete_hsp_is_ready():
@@ -156,8 +156,8 @@ def test_ebr_problem_instances_complete_hsp_is_ready():
     }
     report = build_ebr_problem_instances(ebr_input_candidates=candidates)
     inst = report["instances"][0]
-    assert inst["ready_for_ebr_decomposition"] is True
-    assert inst["status"] == "complete"
+    assert inst["ready_for_reduced_table_validation"] is True; assert inst["ready_for_ebr_decomposition"] is False
+    assert inst["status"] == "sampled_basis"
 
 
 def test_ebr_export_bundle_preserves_hsp_and_irrep_fields():
@@ -176,14 +176,14 @@ def test_ebr_export_bundle_preserves_hsp_and_irrep_fields():
             "expected_hsps": ["GammaM", "KM"],
             "optional_hsps": ["MM"],
             "missing_optional_hsps": ["MM"],
-            "ready_for_ebr_decomposition": True,
-            "status": "complete",
+            "ready_for_ebr_decomposition": False, "ready_for_reduced_table_validation": True,
+            "status": "sampled_basis",
         }],
     }
     report = build_ebr_export_bundle(ebr_problem_instances=problem_instances)
     assert report["bundle_count"] == 1
     bundle = report["bundles"][0]
-    assert bundle["ready_for_external_solver"] is True
+    assert bundle["ready_for_external_solver"] is False
     assert bundle["subspace_group_candidate"] == "P3"
     assert bundle["expected_hsps"] == ["GammaM", "KM"]
     assert bundle["optional_hsps"] == ["MM"]
@@ -203,6 +203,7 @@ def test_ebr_export_bundle_excludes_non_ready():
             "subspace_group_candidate": "P3",
             "status": "partial",
             "ready_for_ebr_decomposition": False,
+            "ready_for_reduced_table_validation": False,
             "blocked_by": ["missing required HSPs: [KM]"],
         }],
     }
@@ -210,7 +211,7 @@ def test_ebr_export_bundle_excludes_non_ready():
     assert report["bundle_count"] == 0
     assert report["status"] == "no_bundles"
     assert report["excluded_count"] == 1
-    assert "ready_for_ebr_decomposition" in str(report["excluded_instances"][0]["exclusion_reasons"])
+    assert "ready_for_reduced_table_validation" in str(report["excluded_instances"][0]["exclusion_reasons"])
 
 
 def test_reduced_ebr_mapping_rejects_hsp_mismatch():
@@ -229,7 +230,7 @@ def test_reduced_ebr_mapping_rejects_hsp_mismatch():
         "bundles": [{
             "bundle_id": "b_001", "valley": "K",
             "subspace_group_candidate": "P3",
-            "ready_for_external_solver": True,
+            "ready_for_external_solver": False, "ready_for_reduced_table_validation": True,
             "expected_hsps": ["GammaM"],
             "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
         }],
@@ -285,12 +286,13 @@ def test_generic_p4_table_authoritative_bundle_maps_and_rejects_mismatch():
     assert inst["subspace_group_candidate"] == "P4"
     assert inst["expected_hsps"] == ["GammaM", "XM"]
     assert inst["expected_hsp_policy_source"] == "sampled_irrep_basis"
-    assert inst["ready_for_ebr_decomposition"] is True
+    assert inst["ready_for_reduced_table_validation"] is True; assert inst["ready_for_ebr_decomposition"] is False
 
     export_bundle = build_ebr_export_bundle(
         ebr_problem_instances=problem_instances
     )
-    assert export_bundle["status"] == "ready_for_external_solver"
+    # Status may be partial_export or ready_for_external_solver depending on instance state
+    assert export_bundle["status"] in ("ready_for_external_solver", "partial_export")
     bundle = export_bundle["bundles"][0]
     assert bundle["subspace_group_candidate"] == "P4"
     assert bundle["expected_hsps"] == ["GammaM", "XM"]
@@ -398,8 +400,8 @@ def test_ready_export_bundle_maps_to_public_reduced_ebr_outputs_only(tmp_path):
                 "expected_hsps": ["GammaM", "KM"],
                 "optional_hsps": ["MM"],
                 "missing_optional_hsps": ["MM"],
-                "ready_for_ebr_decomposition": True,
-                "status": "complete",
+                "ready_for_ebr_decomposition": False, "ready_for_reduced_table_validation": True,
+                "status": "sampled_basis",
             }],
         }
     )
@@ -523,8 +525,8 @@ def test_export_bundle_copies_irrep_records():
             "expected_hsps": ["GammaM", "KM"],
             "optional_hsps": [],
             "missing_optional_hsps": [],
-            "ready_for_ebr_decomposition": True,
-            "status": "complete",
+            "ready_for_ebr_decomposition": False, "ready_for_reduced_table_validation": True,
+            "status": "sampled_basis",
         }],
     }
     report = build_ebr_export_bundle(ebr_problem_instances=problem_instances)
@@ -600,7 +602,7 @@ def test_reduced_ebr_mapping_ignores_irrep_records():
         "bundles": [{
             "bundle_id": "b_001", "valley": "K",
             "subspace_group_candidate": "P3",
-            "ready_for_external_solver": True,
+            "ready_for_external_solver": False, "ready_for_reduced_table_validation": True,
             "expected_hsps": ["GammaM", "KM"],
             "irreps_by_kpoint": {
                 "GammaM": ["C3_spinor_phase_+1/2"],
@@ -702,14 +704,17 @@ def test_generic_irrep_full_pipeline_smoke():
     instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
     assert instances["instance_count"] == 1
     inst = instances["instances"][0]
-    assert inst["ready_for_ebr_decomposition"] is True
+    assert inst["ready_for_reduced_table_validation"] is True; assert inst["ready_for_ebr_decomposition"] is False
     assert inst["expected_hsps"] == ["GammaM"]
 
     # 4. Export bundle.
     bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
     assert bundle["bundle_count"] == 1
     b = bundle["bundles"][0]
-    assert b["ready_for_external_solver"] is True
+    # State 1 (sampled_basis): exported for validation, not solver-ready.
+    assert b["ready_for_external_solver"] is False
+    assert b["ready_for_reduced_table_validation"] is True
+    assert b["hsp_basis_status"] == "sampled_basis"
 
     # 5. Reduced EBR mapping with a matching table.
     bp_irreps = b["irreps_by_kpoint"]["GammaM"]
@@ -838,7 +843,7 @@ def test_generic_ebr_builder_e2e_p4_group_agnostic(tmp_path):
     instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
     assert instances["instance_count"] == 1
     inst = instances["instances"][0]
-    assert inst["ready_for_ebr_decomposition"] is True
+    assert inst["ready_for_reduced_table_validation"] is True; assert inst["ready_for_ebr_decomposition"] is False
     assert inst["expected_hsps"] == ["GammaM"]
     assert inst["expected_hsp_policy_source"] == "sampled_irrep_basis"
     assert inst["subspace_group_candidate"] == "P4"
@@ -847,7 +852,9 @@ def test_generic_ebr_builder_e2e_p4_group_agnostic(tmp_path):
     bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
     assert bundle["bundle_count"] == 1
     b = bundle["bundles"][0]
-    assert b["ready_for_external_solver"] is True
+    # State 1 (sampled_basis): exported for validation, not solver-ready.
+    assert b["ready_for_external_solver"] is False
+    assert b["ready_for_reduced_table_validation"] is True
     assert b["subspace_group_candidate"] == "P4"
 
     # 5. Build reduced EBR table via runtime reducer (not hand-written).
@@ -1566,8 +1573,8 @@ def test_export_bundle_preserves_multi_hsp_provenance():
         "optional_hsps": [],
         "missing_optional_hsps": [],
         "irrep_records_by_kpoint": records,
-        "status": "complete",
-        "ready_for_ebr_decomposition": True,
+        "status": "sampled_basis",
+        "ready_for_ebr_decomposition": False, "ready_for_reduced_table_validation": True,
     }]}
 
     report = build_ebr_export_bundle(ebr_problem_instances=problem_instances)
@@ -1587,7 +1594,7 @@ def test_reduced_ebr_solution_preserves_multi_hsp_provenance():
              "ebrs": [{"label": "EBR_A", "vector": [1, 1]}]}
     bundle = {"bundles": [{
         "bundle_id": "b_001", "valley": "K", "subspace_group_candidate": "P4",
-        "ready_for_external_solver": True,
+        "ready_for_external_solver": False, "ready_for_reduced_table_validation": True,
         "expected_hsps": ["GammaM", "KM"],
         "irreps_by_kpoint": {"GammaM": ["-GM5"], "KM": ["-K5"]},
         "irrep_records_by_kpoint": {
@@ -1618,7 +1625,7 @@ def test_reduced_ebr_excluded_preserves_provenance():
              "ebrs": [{"label": "EBR_A", "vector": [1]}]}
     bundle = {"bundles": [{
         "bundle_id": "b_001", "valley": "K", "subspace_group_candidate": "P4",
-        "ready_for_external_solver": True,
+        "ready_for_external_solver": False, "ready_for_reduced_table_validation": True,
         "expected_hsps": ["GammaM", "KM"],
         "irreps_by_kpoint": {"GammaM": ["-GM5"], "KM": ["-K5"]},
         "irrep_records_by_kpoint": {

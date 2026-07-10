@@ -1164,12 +1164,12 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     assert summary["valley_ebr_input_candidates"]["candidate_count"] == 2
     assert summary["valley_ebr_problem_instances"]["instance_count"] == 1
     inst = summary["valley_ebr_problem_instances"]["instances"][0]
-    assert inst["ready_for_ebr_decomposition"] is True
+    assert inst["ready_for_reduced_table_validation"] is True; assert inst["ready_for_ebr_decomposition"] is False
     assert inst["subspace_group_candidate"] in ("P4", "P3")
     assert inst["expected_hsps"] == ["GammaM"]
     assert summary["valley_ebr_export_bundle"]["bundle_count"] == 1
     b = summary["valley_ebr_export_bundle"]["bundles"][0]
-    assert b["ready_for_external_solver"] is True
+    assert b["ready_for_external_solver"] is False  # sampled_basis
     result = summary["valley_reduced_ebr_mapping"]
     assert result["mapping_status"] == "solved_exact"
     assert result["solutions"][0]["ebr_decomposition"] == [
@@ -1982,7 +1982,7 @@ def test_unmock_generic_source_adapter_positive_full_pipeline():
     instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
     assert instances["instance_count"] == 1
     inst = instances["instances"][0]
-    assert inst["ready_for_ebr_decomposition"] is True
+    assert inst["ready_for_reduced_table_validation"] is True; assert inst["ready_for_ebr_decomposition"] is False
     assert inst["subspace_group_candidate"] == "P3"
     # removed
 
@@ -1990,7 +1990,7 @@ def test_unmock_generic_source_adapter_positive_full_pipeline():
     ebr_bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
     assert ebr_bundle["bundle_count"] == 1
     b = ebr_bundle["bundles"][0]
-    assert b["ready_for_external_solver"] is True
+    assert b["ready_for_external_solver"] is False  # sampled_basis
 
     # 5. Reduced EBR mapping.
     bp_irreps = b["irreps_by_kpoint"]["GammaM"]

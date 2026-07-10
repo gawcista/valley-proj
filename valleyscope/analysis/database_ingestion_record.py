@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-_SCHEMA_VERSION = "1.2.0"
+_SCHEMA_VERSION = "1.3.0"
 
 
 def build_database_ingestion_record(
@@ -83,7 +83,10 @@ def build_database_ingestion_record(
             for bundle in bundles:
                 if not isinstance(bundle, dict):
                     continue
-                if bundle.get("ready_for_external_solver") is True:
+                if (
+                    bundle.get("ready_for_external_solver") is True
+                    or bundle.get("ready_for_reduced_table_validation") is True
+                ):
                     ready_count += 1
                     _extract_irrep_records(bundle, valley_irrep_records)
                 else:

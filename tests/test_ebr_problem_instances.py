@@ -61,10 +61,12 @@ def _make_c3_preserving_candidates():
 
 
 # -----------------------------------------------------------------------
-# 1. C3 valley-preserving candidates group into instances
+# 1. State-1 (sampled_basis): status + gate assertions
 # -----------------------------------------------------------------------
 
-def test_candidates_group_into_instances():
+def test_candidates_group_into_sampled_basis_instance():
+    """State 1: sampled_basis, ready_for_reduced_table_validation=true,
+    ready_for_ebr_decomposition=false."""
     r = build_ebr_problem_instances(
         ebr_input_candidates=_make_c3_preserving_candidates(),
     )
@@ -74,23 +76,26 @@ def test_candidates_group_into_instances():
     assert inst["subspace_group_candidate"] == "P3"
     assert inst["subspace_space_group"]["candidate_space_group_symbol"] == "P3"
     assert inst["valley"] == "K_valley"
-    assert inst["status"] == "complete"
-    assert inst["ready_for_ebr_decomposition"] is True
+    # State 1: sampled basis, not ready for decomposition.
+    assert inst["status"] == "sampled_basis"
+    assert inst["hsp_basis_status"] == "sampled_basis"
+    assert inst["ready_for_reduced_table_validation"] is True
+    assert inst["ready_for_ebr_decomposition"] is False
     assert "GammaM" in inst["irreps_by_kpoint"]
     assert "KM" in inst["irreps_by_kpoint"]
-    # Table-authoritative: expected_hsps from sampled irrep basis.
     assert inst["expected_hsps"] == ["GammaM", "KM"]
     assert inst["expected_hsp_policy_source"] == "sampled_irrep_basis"
     assert inst["optional_hsps"] == []
     assert inst["missing_optional_hsps"] == []
+    assert "certificate_identity" in inst
 
 
 # -----------------------------------------------------------------------
 # 2. Partial HSP data
 # -----------------------------------------------------------------------
 
-def test_partial_hsp_still_complete_table_authoritative():
-    """Table-authoritative: expected HSPs = actual HSPs; no hard-coded policy blocks."""
+def test_partial_hsp_sampled_basis_state():
+    """Single-HSP instance is state 1 (sampled_basis), not complete."""
     cands = {
         "candidates": [
             {
@@ -111,8 +116,9 @@ def test_partial_hsp_still_complete_table_authoritative():
     r = build_ebr_problem_instances(ebr_input_candidates=cands)
     assert r["instance_count"] == 1
     inst = r["instances"][0]
-    assert inst["status"] == "complete"
-    assert inst["ready_for_ebr_decomposition"] is True
+    assert inst["status"] == "sampled_basis"
+    assert inst["ready_for_ebr_decomposition"] is False
+    assert inst["ready_for_reduced_table_validation"] is True
     assert inst["expected_hsps"] == ["GammaM"]
     assert inst["expected_hsp_policy_source"] == "sampled_irrep_basis"
     assert inst["hsp_basis_status"] == "sampled_basis"
@@ -147,11 +153,11 @@ def test_blocked_rows_excluded():
 
 
 # -----------------------------------------------------------------------
-# 4. P2 valley-preserving: table-authoritative, no legacy policy needed
+# 4. P2 sampled-basis
 # -----------------------------------------------------------------------
 
-def test_p2_valley_preserving_table_authoritative():
-    """Table-authoritative: P2 valley-preserving data is not blocked by legacy policy."""
+def test_p2_valley_preserving_sampled_basis():
+    """P2 valley-preserving data is state 1 (sampled_basis)."""
     cands = {
         "candidates": [
             {
@@ -173,8 +179,9 @@ def test_p2_valley_preserving_table_authoritative():
     r = build_ebr_problem_instances(ebr_input_candidates=cands)
     assert r["instance_count"] == 1
     inst = r["instances"][0]
-    assert inst["status"] == "complete"
-    assert inst["ready_for_ebr_decomposition"] is True
+    assert inst["status"] == "sampled_basis"
+    assert inst["ready_for_ebr_decomposition"] is False
+    assert inst["ready_for_reduced_table_validation"] is True
     assert inst["expected_hsps"] == ["GammaM"]
     assert inst["hsp_basis_status"] == "sampled_basis"
 
@@ -224,7 +231,10 @@ def test_schema_fields():
                 "readiness_level", "readiness_evidence",
                 "irreps_by_kpoint", "operations_by_kpoint",
                 "candidate_count", "status",
-                "ready_for_ebr_decomposition", "blocked_by",
+                "ready_for_ebr_decomposition",
+                "ready_for_reduced_table_validation",
+                "certificate_identity",
+                "blocked_by",
                 "expected_hsps", "optional_hsps", "actual_hsps",
                 "missing_optional_hsps", "hsp_basis_status"]:
         assert key in inst, f"missing key: {key}"
@@ -321,10 +331,8 @@ def test_same_valley_different_provenance_merged_into_one_instance():
     r = build_ebr_problem_instances(ebr_input_candidates=cands)
     assert r["instance_count"] == 1
     inst = r["instances"][0]
-    # Aggregate provenance: both workflow paths recorded.
     assert set(inst["workflow_paths"]) == {"direct_qcut", "symmetry_adapted"}
     assert inst["workflow_path"] in ("direct_qcut", "symmetry_adapted")
-    # Per-row provenance: each record carries its own workflow_path.
     gamma_records = inst["irrep_records_by_kpoint"]["GammaM"]
     row_paths = {rec["workflow_path"] for rec in gamma_records}
     assert row_paths == {"direct_qcut", "symmetry_adapted"}
@@ -375,8 +383,9 @@ def test_generic_multiplicity_records_expand_irrep_counts():
     r = build_ebr_problem_instances(ebr_input_candidates=cands)
     assert r["instance_count"] == 1
     inst = r["instances"][0]
-    assert inst["status"] == "complete"
-    assert inst["ready_for_ebr_decomposition"] is True
+    assert inst["status"] == "sampled_basis"
+    assert inst["ready_for_reduced_table_validation"] is True
+    assert inst["ready_for_ebr_decomposition"] is False
     assert inst["irreps_by_kpoint"]["GammaM"] == ["-GM6_a", "-GM6_a"]
     assert inst["irreps_by_kpoint"]["KM"] == ["-K5"]
     rec = inst["irrep_records_by_kpoint"]["GammaM"][0]
@@ -386,7 +395,7 @@ def test_generic_multiplicity_records_expand_irrep_counts():
 
 
 # -----------------------------------------------------------------------
-# Commit 2 new tests: identity-only HSP, sampled-basis, provenance
+# Identity-only HSP, sampled-basis, provenance
 # -----------------------------------------------------------------------
 
 def test_identity_only_hsp_preserved_not_dropped():
@@ -411,8 +420,7 @@ def test_identity_only_hsp_preserved_not_dropped():
     r = build_ebr_problem_instances(ebr_input_candidates=cands)
     assert r["instance_count"] == 1
     inst = r["instances"][0]
-    assert inst["status"] == "complete"
-    # Identity-only HSP is valid — must appear in HSP lists.
+    assert inst["status"] == "sampled_basis"
     assert "MM" in inst["actual_hsps"]
     assert "MM" in inst["expected_hsps"]
     assert inst["hsp_basis_status"] == "sampled_basis"
@@ -437,13 +445,126 @@ def test_aggregate_workflow_provenance():
     assert isinstance(inst["workflow_paths"], list)
     assert len(inst["workflow_paths"]) >= 1
     assert isinstance(inst["readiness_evidence"], list)
-    # Backward compat: single fields still present.
     assert isinstance(inst["workflow_path"], str)
     assert isinstance(inst["readiness_level"], str)
 
 
-def test_inequivalent_settings_not_merged():
-    """Same symbol but different SG numbers → separate instances."""
+# -----------------------------------------------------------------------
+# Certificate-aware identity key tests
+# -----------------------------------------------------------------------
+
+def test_same_sg_different_certificate_not_merged():
+    """Same SG number, same symbol, same valley, but different Hall numbers
+    (from different certificates) → separate instances."""
+    cands = {
+        "candidates": [
+            {
+                "kpoint": "GM", "valley": "V1",
+                "workflow_path": "direct_qcut", "readiness_level": "trusted",
+                "subspace_group_candidate": "C2",
+                "subspace_space_group": {
+                    "candidate_space_group_symbol": "C2",
+                    "candidate_space_group_number": 5,
+                    "valley_preserving_operation_ids": [0],
+                },
+                "operation_id": 0, "operation_order": 1,
+                "matched_irrep": "GM1",
+                "ready_for_ebr_input": True,
+                "irrep_source_provenance": {
+                    "standard_setting_hsp_mapping": {
+                        "standard_setting_certificate": {
+                            "hall_number": 9,
+                            "validation_status": "validated",
+                        },
+                    },
+                },
+            },
+            {
+                "kpoint": "GM", "valley": "V1",
+                "workflow_path": "direct_qcut", "readiness_level": "trusted",
+                "subspace_group_candidate": "C2",
+                "subspace_space_group": {
+                    "candidate_space_group_symbol": "C2",
+                    "candidate_space_group_number": 5,
+                    "valley_preserving_operation_ids": [0],
+                },
+                "operation_id": 0, "operation_order": 1,
+                "matched_irrep": "GM1",
+                "ready_for_ebr_input": True,
+                "irrep_source_provenance": {
+                    "standard_setting_hsp_mapping": {
+                        "standard_setting_certificate": {
+                            "hall_number": 12,  # different Hall setting
+                            "validation_status": "validated",
+                        },
+                    },
+                },
+            },
+        ],
+    }
+    r = build_ebr_problem_instances(ebr_input_candidates=cands)
+    # Different Hall numbers → two separate instances.
+    assert r["instance_count"] == 2
+
+
+def test_same_sg_same_certificate_merged():
+    """Same SG number, symbol, valley, Hall number, certificate status → merged."""
+    cands = {
+        "candidates": [
+            {
+                "kpoint": "GM", "valley": "V1",
+                "workflow_path": "direct_qcut", "readiness_level": "trusted",
+                "subspace_group_candidate": "C2",
+                "subspace_space_group": {
+                    "candidate_space_group_symbol": "C2",
+                    "candidate_space_group_number": 5,
+                    "valley_preserving_operation_ids": [0],
+                },
+                "operation_id": 0, "operation_order": 1,
+                "matched_irrep": "GM1",
+                "ready_for_ebr_input": True,
+                "irrep_source_provenance": {
+                    "standard_setting_hsp_mapping": {
+                        "standard_setting_certificate": {
+                            "hall_number": 9,
+                            "validation_status": "validated",
+                        },
+                    },
+                },
+            },
+            {
+                "kpoint": "GM", "valley": "V1",
+                "workflow_path": "symmetry_adapted", "readiness_level": "trusted",
+                "subspace_group_candidate": "C2",
+                "subspace_space_group": {
+                    "candidate_space_group_symbol": "C2",
+                    "candidate_space_group_number": 5,
+                    "valley_preserving_operation_ids": [0],
+                },
+                "operation_id": 0, "operation_order": 1,
+                "matched_irrep": "GM1",
+                "ready_for_ebr_input": True,
+                "irrep_source_provenance": {
+                    "standard_setting_hsp_mapping": {
+                        "standard_setting_certificate": {
+                            "hall_number": 9,
+                            "validation_status": "validated",
+                        },
+                    },
+                },
+            },
+        ],
+    }
+    r = build_ebr_problem_instances(ebr_input_candidates=cands)
+    assert r["instance_count"] == 1
+    inst = r["instances"][0]
+    ci = inst["certificate_identity"]
+    assert ci["hall_numbers"] == [9]
+    assert "validated" in ci["certificate_validation_statuses"]
+
+
+def test_no_certificate_defaults_to_zero_hall():
+    """Candidates without certificate data get hall_number=0, status=not_evaluated."""
     cands = {
         "candidates": [
             {
@@ -459,24 +580,14 @@ def test_inequivalent_settings_not_merged():
                 "matched_irrep": "GM1",
                 "ready_for_ebr_input": True,
             },
-            {
-                "kpoint": "GM", "valley": "V1",
-                "workflow_path": "direct_qcut", "readiness_level": "trusted",
-                "subspace_group_candidate": "P2",
-                "subspace_space_group": {
-                    "candidate_space_group_symbol": "P2",
-                    "candidate_space_group_number": 5,  # different SG number
-                    "valley_preserving_operation_ids": [0],
-                },
-                "operation_id": 0, "operation_order": 1,
-                "matched_irrep": "GM1",
-                "ready_for_ebr_input": True,
-            },
         ],
     }
     r = build_ebr_problem_instances(ebr_input_candidates=cands)
-    # Different SG numbers → two separate instances.
-    assert r["instance_count"] == 2
+    assert r["instance_count"] == 1
+    ci = r["instances"][0]["certificate_identity"]
+    assert ci["hall_numbers"] == []
+    assert "not_evaluated" in ci["certificate_validation_statuses"]
+    assert ci["any_unresolved"] is True
 
 
 def test_per_row_provenance_preserved():
@@ -491,20 +602,3 @@ def test_per_row_provenance_preserved():
             assert "readiness_level" in rec
             assert isinstance(rec["workflow_path"], str)
             assert isinstance(rec["readiness_level"], str)
-
-
-def test_candidates_group_into_instances_exact_count():
-    """C3-preserving candidates: exactly 1 instance, 2 HSPs."""
-    r = build_ebr_problem_instances(
-        ebr_input_candidates=_make_c3_preserving_candidates(),
-    )
-    assert r["instance_count"] == 1
-    inst = r["instances"][0]
-    assert inst["candidate_count"] == 4  # 4 specific candidate rows
-    assert inst["status"] == "complete"
-    assert inst["ready_for_ebr_decomposition"] is True
-    assert "GammaM" in inst["irreps_by_kpoint"]
-    assert "KM" in inst["irreps_by_kpoint"]
-    assert inst["expected_hsps"] == ["GammaM", "KM"]
-    assert inst["actual_hsps"] == ["GammaM", "KM"]
-    assert inst["hsp_basis_status"] == "sampled_basis"
