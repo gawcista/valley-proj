@@ -2,6 +2,7 @@ from scripts.check_agent_protocol import (
     check_branch_policy,
     check_handoff_text,
     check_remote_branches,
+    check_tracked_markdown,
 )
 
 
@@ -44,3 +45,27 @@ def test_cc_branch_must_not_track_remote_upstream():
 def test_remote_cc_branches_are_rejected():
     errors = check_remote_branches(["origin/main", "origin/cc/example"])
     assert errors == ["remote cc branch exists: origin/cc/example"]
+
+
+def test_tracked_markdown_allows_only_readme():
+    assert check_tracked_markdown(["README.md", "README.zh.md"]) == []
+    assert check_tracked_markdown(["README.md", "src/main.py"]) == []
+
+
+def test_tracked_markdown_rejects_handoff_and_docs():
+    errors = check_tracked_markdown([
+        "README.md", ".codex_cc_handoff.md", "docs/schema.md", "src/main.py",
+    ])
+    assert len(errors) == 2
+    assert any(".codex_cc_handoff.md" in e for e in errors)
+    assert any("docs/schema.md" in e for e in errors)
+
+
+def test_tracked_markdown_rejects_claude_md():
+    errors = check_tracked_markdown(["CLAUDE.md", "README.md"])
+    assert len(errors) == 1
+    assert "CLAUDE.md" in errors[0]
+
+
+def test_tracked_markdown_empty_list_is_clean():
+    assert check_tracked_markdown([]) == []

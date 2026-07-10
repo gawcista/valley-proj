@@ -41,6 +41,26 @@ def check_remote_branches(remote_branches: list[str]) -> list[str]:
     ]
 
 
+_TRACKED_MD_ALLOWED = {"README.md", "README.zh.md"}
+
+
+def check_tracked_markdown(tracked_files: list[str]) -> list[str]:
+    """Only README.md and README.zh.md are allowed as tracked Markdown.
+
+    The handoff (.codex_cc_handoff.md), planning docs (CLAUDE.md,
+    AGENTS.md, PLAN.md), and docs/*.md must remain local and untracked.
+    """
+    tracked_md = {f for f in tracked_files if f.endswith(".md")}
+    unexpected = tracked_md - _TRACKED_MD_ALLOWED
+    if unexpected:
+        return [
+            f"tracked Markdown file '{f}' is not allowed; "
+            f"only {sorted(_TRACKED_MD_ALLOWED)} may be tracked"
+            for f in sorted(unexpected)
+        ]
+    return []
+
+
 def _git(args: list[str]) -> str:
     result = subprocess.run(
         ["git", *args],
@@ -75,6 +95,13 @@ def _remote_branches() -> list[str]:
     return [line.strip() for line in output.splitlines() if line.strip()]
 
 
+def _tracked_files() -> list[str]:
+    output = _git(["ls-tree", "-r", "--name-only", "HEAD"])
+    if not output:
+        return []
+    return [line.strip() for line in output.splitlines() if line.strip()]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Check ValleyScope agent handoff and branch protocol."
@@ -96,6 +123,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         errors.extend(check_branch_policy(_current_branch(), _current_upstream()))
         errors.extend(check_remote_branches(_remote_branches()))
+        errors.extend(check_tracked_markdown(_tracked_files()))
     except subprocess.CalledProcessError as exc:
         errors.append(exc.stderr.strip() or str(exc))
 
