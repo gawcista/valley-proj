@@ -459,6 +459,36 @@ def _table_centering_from_name(table) -> str:
     return "P"
 
 
+def _centering_translations(centering: str) -> list[np.ndarray] | None:
+    """Direct-lattice centering translations for reciprocal-lattice membership.
+
+    Returns the fractional translation vectors (including identity) that
+    define the centering.  For R-centering the obverse/reverse convention
+    is not available from the centering letter alone, so it returns None
+    (blocked).  Unknown centering also returns None.
+    """
+    identity = np.array([0.0, 0.0, 0.0])
+    if centering == "P":
+        return [identity]
+    if centering == "A":
+        return [identity, np.array([0.0, 0.5, 0.5])]
+    if centering == "B":
+        return [identity, np.array([0.5, 0.0, 0.5])]
+    if centering == "C":
+        return [identity, np.array([0.5, 0.5, 0.0])]
+    if centering == "I":
+        return [identity, np.array([0.5, 0.5, 0.5])]
+    if centering == "F":
+        return [
+            identity,
+            np.array([0.0, 0.5, 0.5]),
+            np.array([0.5, 0.0, 0.5]),
+            np.array([0.5, 0.5, 0.0]),
+        ]
+    # R-centering and unrecognized centering: blocked.
+    return None
+
+
 def _kpoint_matches_centered(
     left: np.ndarray,
     right: np.ndarray,
@@ -467,36 +497,30 @@ def _kpoint_matches_centered(
 ) -> bool:
     """Centering-aware k-point equivalence modulo conventional reciprocal lattice.
 
-    For primitive settings (P): component-wise modulo 1.
-    For C-centered settings: additionally checks that the difference
-    vector corresponds to an allowed reciprocal-lattice vector
-    (h + k must be even for C-centering).
+    Uses the generic reciprocal-lattice membership condition: for two
+    k-points in the conventional reciprocal basis, they are equivalent
+    iff their integer difference n satisfies n·t_c ∈ Z for every
+    direct-lattice centering translation t_c.
+
+    For primitive settings (t_c = {(0,0,0)} only) this reduces to
+    component-wise modulo-1 comparison.
+
+    Returns False when the centering convention is unavailable
+    (R-centering without obverse/reverse choice, or unrecognized
+    centering type).
     """
     delta = np.asarray(left, dtype=float) - np.asarray(right, dtype=float)
     delta_mod = delta - np.rint(delta)
-    if np.linalg.norm(delta_mod) <= tolerance:
-        # For primitive, this is sufficient.
-        if centering == "P":
-            return True
-        # For centered, the difference vector must also respect
-        # the centering condition on the reciprocal lattice.
-        delta_int = np.rint(delta).astype(int)
-        h, k, _ = delta_int
-        if centering == "C":
-            # C-centered: h + k must be even.
-            if (h + k) % 2 == 0:
-                return True
+    if np.linalg.norm(delta_mod) > tolerance:
+        return False
+
+    translations = _centering_translations(centering)
+    if translations is None:
+        return False  # blocked: centering convention unavailable
+
+    delta_float = np.rint(delta)
+    for t_c in translations:
+        dot = np.dot(delta_float, t_c)
+        if abs(dot - np.rint(dot)) > tolerance:
             return False
-        if centering == "I":
-            # I-centered: h + k + l must be even.
-            if (h + k + int(delta_int[2])) % 2 == 0:
-                return True
-            return False
-        if centering == "F":
-            # F-centered: h,k,l all same parity.
-            p0 = h % 2
-            if k % 2 == p0 and int(delta_int[2]) % 2 == p0:
-                return True
-            return False
-        # Unknown centering — fall through to primitive comparison.
-    return bool(np.linalg.norm(delta_mod) <= tolerance)
+    return True

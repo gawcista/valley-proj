@@ -605,5 +605,121 @@ def test_no_hardcoded_sg_branches_in_centering():
     # No hard-coded SG numbers or per-Cn dispatch.
     assert "sg_number" not in source
     assert "space_group" not in source
+
+
+# ---------------------------------------------------------------------------
+# Generic centering-translation membership tests
+# ---------------------------------------------------------------------------
+
+from valleyscope.irreps.tables import (
+    _centering_translations,
+    _kpoint_matches_centered,
+)
+
+
+def test_centering_translations_known_types():
+    """A/B/C/I/F have correct non-identity centering translations."""
+    import numpy as np
+    # P: identity only
+    assert len(_centering_translations("P")) == 1
+    # A: identity + (0, 1/2, 1/2)
+    a_t = _centering_translations("A")
+    assert len(a_t) == 2
+    assert any(np.allclose(t, [0.0, 0.5, 0.5]) for t in a_t)
+    # B: identity + (1/2, 0, 1/2)
+    b_t = _centering_translations("B")
+    assert len(b_t) == 2
+    assert any(np.allclose(t, [0.5, 0.0, 0.5]) for t in b_t)
+    # C: identity + (1/2, 1/2, 0)
+    c_t = _centering_translations("C")
+    assert len(c_t) == 2
+    assert any(np.allclose(t, [0.5, 0.5, 0.0]) for t in c_t)
+    # I: identity + (1/2, 1/2, 1/2)
+    i_t = _centering_translations("I")
+    assert len(i_t) == 2
+    assert any(np.allclose(t, [0.5, 0.5, 0.5]) for t in i_t)
+    # F: identity + 3 face centers
+    assert len(_centering_translations("F")) == 4
+
+
+def test_centering_translations_r_blocked():
+    """R-centering returns None (blocked: obverse/reverse convention needed)."""
+    assert _centering_translations("R") is None
+
+
+def test_centering_translations_unknown_blocked():
+    """Unrecognized centering returns None (blocked, not primitive fallback)."""
+    assert _centering_translations("X") is None
+    assert _centering_translations("") is None
+
+
+def test_kpoint_matches_a_centered_condition():
+    """A-centered: k + l must be even (n·(0,0.5,0.5) ∈ Z)."""
+    # n=(1,0,0): 1*0 + 0*0.5 + 0*0.5 = 0 ∈ Z → match
+    assert _kpoint_matches_centered(
+        np.array([1.0, 0.0, 0.0]), np.array([0.0, 0.0, 0.0]), "A", 1e-6,
+    )
+    # n=(0,1,0): 0*0 + 1*0.5 + 0*0.5 = 0.5 ∉ Z → no match
+    assert not _kpoint_matches_centered(
+        np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 0.0]), "A", 1e-6,
+    )
+
+
+def test_kpoint_matches_b_centered_condition():
+    """B-centered: h + l must be even (n·(0.5,0,0.5) ∈ Z)."""
+    # n=(0,1,0): 0*0.5 + 1*0 + 0*0.5 = 0 ∈ Z → match
+    assert _kpoint_matches_centered(
+        np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 0.0]), "B", 1e-6,
+    )
+    # n=(1,0,0): 1*0.5 + 0*0 + 0*0.5 = 0.5 ∉ Z → no match
+    assert not _kpoint_matches_centered(
+        np.array([1.0, 0.0, 0.0]), np.array([0.0, 0.0, 0.0]), "B", 1e-6,
+    )
+
+
+def test_kpoint_matches_r_centering_blocked():
+    """R-centering always returns False (blocked, not primitive fallback)."""
+    # Even the identity diff is blocked.
+    assert not _kpoint_matches_centered(
+        np.array([0.0, 0.0, 0.0]), np.array([0.0, 0.0, 0.0]), "R", 1e-6,
+    )
+    assert not _kpoint_matches_centered(
+        np.array([1.0, 0.0, 0.0]), np.array([0.0, 0.0, 0.0]), "R", 1e-6,
+    )
+
+
+def test_kpoint_matches_unknown_centering_blocked():
+    """Unknown centering returns False (blocked, never falls back to P)."""
+    assert not _kpoint_matches_centered(
+        np.array([0.0, 0.0, 0.0]), np.array([0.0, 0.0, 0.0]), "X", 1e-6,
+    )
+
+
+def test_kpoint_matches_centered_f_all_same_parity():
+    """F-centered: h, k, l must all have the same parity (via generic condition)."""
+    # (2,0,0): all even → match
+    assert _kpoint_matches_centered(
+        np.array([2.0, 0.0, 0.0]), np.array([0.0, 0.0, 0.0]), "F", 1e-6,
+    )
+    # (1,0,0): h=1 odd, k=0 even → no match
+    assert not _kpoint_matches_centered(
+        np.array([1.0, 0.0, 0.0]), np.array([0.0, 0.0, 0.0]), "F", 1e-6,
+    )
+    # (1,1,1): all odd → match
+    assert _kpoint_matches_centered(
+        np.array([1.0, 1.0, 1.0]), np.array([0.0, 0.0, 0.0]), "F", 1e-6,
+    )
+
+
+def test_no_per_case_parity_control_flow():
+    """The membership check must use the generic n·t_c condition, not per-letter
+    parity branches."""
+    import valleyscope.irreps.tables as tables_mod
+    import inspect
+    source = inspect.getsource(tables_mod._kpoint_matches_centered)
+    # Must use _centering_translations, not C/I/F-specific branches.
+    assert "_centering_translations" in source
+    assert "h + k" not in source
+    assert "h + k + l" not in source
     assert "if number" not in source
     assert "irrep.k_frac" not in source  # No coordinate-content heuristic
