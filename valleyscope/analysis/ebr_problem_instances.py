@@ -35,48 +35,61 @@ def build_ebr_problem_instances(
         return _empty_report("no trusted EBR input candidates")
 
     # Group by physical subspace-space-group identity and valley label.
+    # Use SG number and symbol together so inequivalent settings with the same
+    # symbol (e.g. different Hall settings) do not merge accidentally.
     # workflow_path and readiness_level are computational provenance,
     # not quantum numbers — they must not split one physical band
     # representation into multiple partial EBR instances.
-    groups: dict[tuple[str, str], list[dict[str, object]]] = {}
+    groups: dict[tuple[int, str, str], list[dict[str, object]]] = {}
     for c in candidates:
         ssg = c.get("subspace_space_group", {})
         sg_symbol = (
             ssg.get("candidate_space_group_symbol")
             if isinstance(ssg, dict) else None
         )
+        sg_number = _int_or_zero(ssg.get("candidate_space_group_number") if isinstance(ssg, dict) else None)
         sg = str(sg_symbol) if sg_symbol else str(c.get("subspace_group_candidate", ""))
         valley = str(c.get("valley", ""))
         groups.setdefault(
-            (sg, valley),
+            (sg_number, sg, valley),
             [],
         ).append(c)
 
     instances: list[dict[str, object]] = []
     instance_counter = 0
 
-    for (sg, valley), cands in groups.items():
+    for (_sg_num, sg, valley), cands in groups.items():
         instance_counter += 1
         instance_id = f"ebr_instance_{instance_counter:03d}"
 
         # --- Canonical subgroup identity ---
-        # Record workflow provenance from candidates but do not use
-        # it as a grouping key.
-        workflow_path = str(cands[0].get("workflow_path", ""))
-        readiness_level = str(cands[0].get("readiness_level", ""))
-        # subspace_space_group is the primary physical object; flat
-        # subspace_group_candidate is the derived scalar key for compact
-        # exports, external-table matching, and database indexing.
         first_candidate_ssg = _first_subspace_space_group(cands)
         subspace_space_group: dict[str, object] = (
             dict(first_candidate_ssg) if isinstance(first_candidate_ssg, dict) else {}
         )
-        # Derive flat key from canonical source when available; fall back to
-        # subgroup_candidate for backward-compatible ingestion.
         canonical_sg = (
             subspace_space_group.get("candidate_space_group_symbol")
             or sg
         )
+        canonical_sg_number = (
+            subspace_space_group.get("candidate_space_group_number")
+            or _sg_num
+        )
+
+        # --- Aggregate provenance ---
+        # Collect unique workflow paths and readiness levels from all
+        # candidates; preserve per-row provenance in irrep_records.
+        workflow_paths = sorted({
+            str(c.get("workflow_path", ""))
+            for c in cands if c.get("workflow_path")
+        })
+        readiness_levels = sorted({
+            str(c.get("readiness_level", ""))
+            for c in cands if c.get("readiness_level")
+        })
+        # Primary fields (backward compat): first candidate's values.
+        workflow_path = str(cands[0].get("workflow_path", ""))
+        readiness_level = str(cands[0].get("readiness_level", ""))
 
         irreps_by_kpoint: dict[str, list[str]] = {}
         operations_by_kpoint: dict[str, list[object]] = {}
@@ -92,6 +105,8 @@ def build_ebr_problem_instances(
                 )
             if op_id is not None:
                 operations_by_kpoint.setdefault(kp, []).append(op_id)
+            # Per-row provenance: each record carries its own workflow path
+            # and readiness level, not the aggregate.
             record: dict[str, object] = {
                 "valley": valley,
                 "operation_id": c.get("operation_id"),
@@ -102,8 +117,8 @@ def build_ebr_problem_instances(
                 ),
                 "character": c.get("character"),
                 "eigenphases": c.get("eigenphases", []),
-                "workflow_path": workflow_path,
-                "readiness_level": readiness_level,
+                "workflow_path": str(c.get("workflow_path", "")),
+                "readiness_level": str(c.get("readiness_level", "")),
                 "source": c.get("source", ""),
             }
             for key in (
@@ -117,13 +132,15 @@ def build_ebr_problem_instances(
                     record[key] = c[key]
             irrep_records_by_kpoint.setdefault(kp, []).append(record)
 
-        # Table-authoritative HSP basis: derive expected HSPs from actual
-        # candidate irreps.  Reduced EBR table is the final authority.
+        # Sampled HSP basis: derived from actual candidate irreps.
+        # This is the sampled basis only — not yet validated against a
+        # reviewed irreptables-derived reduced table.
         actual_hsps = sorted(irreps_by_kpoint.keys())
         expected_hsps = list(actual_hsps)
         optional_hsps: list[str] = []
         blocked_by: list[str] = []
 
+        hsp_basis_status = "sampled_basis" if actual_hsps else "no_data"
         status = "complete" if actual_hsps else "no_data"
         ready = bool(actual_hsps)
 
@@ -131,9 +148,12 @@ def build_ebr_problem_instances(
             "instance_id": instance_id,
             "valley": valley,
             "subspace_group_candidate": canonical_sg,
+            "subspace_sg_number": canonical_sg_number,
             "subspace_space_group": subspace_space_group,
             "workflow_path": workflow_path,
+            "workflow_paths": workflow_paths,
             "readiness_level": readiness_level,
+            "readiness_evidence": readiness_levels,
             "irreps_by_kpoint": {k: v for k, v in sorted(irreps_by_kpoint.items())},
             "operations_by_kpoint": {
                 k: sorted(v, key=_sort_key)
@@ -149,6 +169,7 @@ def build_ebr_problem_instances(
             "blocked_by": blocked_by,
             "expected_hsps": expected_hsps,
             "expected_hsp_policy_source": "sampled_irrep_basis",
+            "hsp_basis_status": hsp_basis_status,
             "optional_hsps": optional_hsps,
             "actual_hsps": actual_hsps,
             "missing_optional_hsps": [],
@@ -161,9 +182,13 @@ def build_ebr_problem_instances(
         "reduced_ebr_decomposition_status": "not_implemented",
         "interpretation": (
             "Per-valley/per-subspace-group EBR problem instances grouped from "
-            "trusted input candidates. Expected HSPs are derived from the "
-            "sampled irrep basis; the reduced EBR table is the final authority "
-            "on HSP completeness."
+            "trusted input candidates by canonical (SG number, SG symbol, valley) "
+            "identity.  expected_hsps records the sampled irrep basis; "
+            "hsp_basis_status distinguishes sampled-basis readiness from "
+            "validated reduced-EBR-table completeness.  A solved reduced EBR "
+            "decomposition on a sampled basis must state that scope; promotion "
+            "to final valley-resolved reduced EBR output requires a reviewed "
+            "irreptables-derived reduced table."
         ),
         "instances": instances,
     }
@@ -195,6 +220,12 @@ def _positive_multiplicity(value: object) -> int:
     if isinstance(value, int) and not isinstance(value, bool) and value > 0:
         return value
     return 1
+
+
+def _int_or_zero(value: object) -> int:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    return 0
 
 
 def _empty_report(reason: str) -> dict[str, object]:
