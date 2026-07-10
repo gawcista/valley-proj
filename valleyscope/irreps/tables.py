@@ -459,12 +459,6 @@ def _table_centering_from_name(table) -> str:
     return "P"
 
 
-def _kpoint_matches(left: np.ndarray, right: np.ndarray, tolerance: float) -> bool:
-    delta = np.asarray(left, dtype=float) - np.asarray(right, dtype=float)
-    delta_mod_lattice = delta - np.rint(delta)
-    return bool(np.linalg.norm(delta_mod_lattice) <= tolerance)
-
-
 def _kpoint_matches_centered(
     left: np.ndarray,
     right: np.ndarray,
