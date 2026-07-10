@@ -56,8 +56,9 @@ class StandardIrrepTable:
         labels_by_coordinate: dict[str, np.ndarray] = {}
         for irrep in self.irreps:
             labels_by_coordinate.setdefault(irrep.kpoint_label, irrep.k_frac)
-        # Centering-aware k-point equivalence.
-        centering = _table_centering(self)
+        # Centering-aware k-point equivalence derived from the table's
+        # space-group name (e.g. "P3", "C2/c"), not from HSP coordinates.
+        centering = _table_centering_from_name(self)
         for label, table_k_frac in labels_by_coordinate.items():
             if _kpoint_matches_centered(k_frac, table_k_frac, centering, tolerance):
                 return label
@@ -442,14 +443,19 @@ def _translation_matches(left: np.ndarray, right: np.ndarray, tolerance: float) 
     return bool(np.linalg.norm(delta_mod_lattice) <= tolerance)
 
 
-def _table_centering(table) -> str:
-    """Derive centering type from the irrep table's HSP k-point coordinates."""
-    # Check if any HSP has half-integer-only coordinates suggesting centering.
-    for irrep in table.irreps:
-        for coord in irrep.k_frac:
-            _, frac = divmod(coord, 1)
-            if abs(frac - 0.5) < 1e-10:
-                return "C"  # C-centered conventional cell
+def _table_centering_from_name(table) -> str:
+    """Derive centering type from the irrep table's space-group name.
+
+    The first character of the irreptables space-group name
+    (e.g. ``"P3"``, ``"C2/c"``, ``"Fm-3m"``, ``"R-3c"``) is the
+    Bravais-lattice centering symbol.  This is the convention used
+    by irreptables / Bilbao Crystallographic Server tables.
+
+    Returns ``"P"`` when the name is missing or unrecognised.
+    """
+    name = str(getattr(table, "name", "")).strip()
+    if name and name[0] in "ABCFIPR":
+        return name[0]
     return "P"
 
 

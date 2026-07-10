@@ -466,3 +466,144 @@ def test_empty_gk_a_blocked_not_identity_only():
     )
     assert payload["status"] == "blocked"
     assert "empty_valley_preserving_operation_ids" in payload["blocker_reasons"][0]
+
+
+# ---------------------------------------------------------------------------
+# Centering-from-name and reciprocal equivalence tests
+# ---------------------------------------------------------------------------
+
+from valleyscope.irreps.tables import _table_centering_from_name
+
+
+def test_centering_from_name_primitive():
+    """Primitive space groups are classified as P."""
+    class T:
+        name = "P3"
+    assert _table_centering_from_name(T) == "P"
+    T.name = "P-1"
+    assert _table_centering_from_name(T) == "P"
+    T.name = "P4/mmm"
+    assert _table_centering_from_name(T) == "P"
+    T.name = "P222"
+    assert _table_centering_from_name(T) == "P"
+
+
+def test_centering_from_name_centered_types():
+    """A/B/C/I/F/R centering symbols are recognised from SG name."""
+    class T:
+        name = "C2"
+    assert _table_centering_from_name(T) == "C"
+    T.name = "Fm-3m"
+    assert _table_centering_from_name(T) == "F"
+    T.name = "I4"
+    assert _table_centering_from_name(T) == "I"
+    T.name = "R-3c"
+    assert _table_centering_from_name(T) == "R"
+
+
+def test_centering_from_name_fallback():
+    """Missing or unrecognised name falls back to P."""
+    class T:
+        pass
+    assert _table_centering_from_name(T) == "P"
+    T.name = ""
+    assert _table_centering_from_name(T) == "P"
+
+
+def test_match_kpoint_label_primitive_k_plus_n_equivalent():
+    """Primitive P3: k=(1,0,0) ≡ GM, k=(1.5,0,0) ≡ M (mod-1 equivalence)."""
+    table = load_standard_irrep_table(143, spinor=True)
+    # (1,0,0) mod 1 → (0,0,0) = GM
+    assert table.match_kpoint_label(np.array([1.0, 0.0, 0.0])) == "GM"
+    # (1.5, 0, 0) mod 1 → (0.5, 0, 0) = M
+    assert table.match_kpoint_label(np.array([1.5, 0.0, 0.0])) == "M"
+
+
+def test_match_kpoint_label_primitive_distinct_hsp_remain_distinct():
+    """Primitive P3: GM and M remain distinct (difference not integer vector)."""
+    table = load_standard_irrep_table(143, spinor=True)
+    gm_label = table.match_kpoint_label(np.array([0.0, 0.0, 0.0]))
+    m_label = table.match_kpoint_label(np.array([0.5, 0.0, 0.0]))
+    assert gm_label == "GM"
+    assert m_label == "M"
+    assert gm_label != m_label
+
+
+def test_match_kpoint_label_centered_conventional_reciprocal_equivalence():
+    """C-centered SG 5: (2,0,0) ≡ GM (h+k=2 even); (1,0,0) ≠ GM (h+k=1 odd).
+
+    Irreptables Y = (0,1,0) in conventional coords, so (1,0,0) ≡ Y
+    because diff (1,-1,0) has h+k=0 even — a valid C-centered reciprocal
+    lattice vector.
+    """
+    table = load_standard_irrep_table(5, spinor=True)
+    # (0,0,0) = GM
+    assert table.match_kpoint_label(np.array([0.0, 0.0, 0.0])) == "GM"
+    # (2,0,0) ≡ GM: h+k = 2 even
+    assert table.match_kpoint_label(np.array([2.0, 0.0, 0.0])) == "GM"
+    # (1,0,0) ≡ Y (not GM): diff (1,-1,0) has h+k=0 even → matches Y
+    assert table.match_kpoint_label(np.array([1.0, 0.0, 0.0])) == "Y"
+    # Y itself: (0,1,0) in irreptables
+    assert table.match_kpoint_label(np.array([0.0, 1.0, 0.0])) == "Y"
+    # V = (0.5, 0.5, 0) is distinct from GM and Y.
+    assert table.match_kpoint_label(np.array([0.5, 0.5, 0.0])) == "V"
+
+
+def test_match_kpoint_label_centered_conventional_hsp_preserved():
+    """C-centered: key HSPs A=(0,0,0.5), V=(0.5,0.5,0), M=(0,1,0.5) distinct."""
+    table = load_standard_irrep_table(5, spinor=True)
+    assert table.match_kpoint_label(np.array([0.0, 0.0, 0.5])) == "A"
+    assert table.match_kpoint_label(np.array([0.5, 0.5, 0.0])) == "V"
+    assert table.match_kpoint_label(np.array([0.0, 1.0, 0.5])) == "M"
+
+
+def test_match_kpoint_label_p1_primitive_half_integer_not_misclassified():
+    """P1 has half-integer HSP X=(0.5,0,0) — must NOT be misclassified as centered."""
+    table = load_standard_irrep_table(1, spinor=False)
+    # P1 X = (0.5, 0, 0) should match.
+    assert table.match_kpoint_label(np.array([0.5, 0.0, 0.0])) == "X"
+    # (0, 0, 0) should match GM.
+    assert table.match_kpoint_label(np.array([0.0, 0.0, 0.0])) == "GM"
+    # k + n equivalence for primitive P1.
+    assert table.match_kpoint_label(np.array([1.5, 0.0, 0.0])) == "X"
+    assert table.match_kpoint_label(np.array([1.0, 0.0, 0.0])) == "GM"
+
+
+def test_match_kpoint_label_p2_primitive_half_integer_not_misclassified():
+    """P2 has half-integer HSP — must NOT be misclassified as centered."""
+    table = load_standard_irrep_table(3, spinor=False)
+    assert table.match_kpoint_label(np.array([0.0, 0.0, 0.0])) == "GM"
+    assert table.match_kpoint_label(np.array([1.0, 0.0, 0.0])) == "GM"
+    assert table.match_kpoint_label(np.array([0.5, 0.0, 0.0])) == "Y"
+
+
+def test_match_kpoint_label_p4_primitive_half_integer_not_misclassified():
+    """P4 (SG 75) M=(0.5,0.5,0): GM and M are distinct (primitive, diff not integer)."""
+    table = load_standard_irrep_table(75, spinor=False)
+    assert table.match_kpoint_label(np.array([0.0, 0.0, 0.0])) == "GM"
+    assert table.match_kpoint_label(np.array([1.0, 0.0, 0.0])) == "GM"
+    gm = table.match_kpoint_label(np.array([0.0, 0.0, 0.0]))
+    m_label = table.match_kpoint_label(np.array([0.5, 0.5, 0.0]))
+    assert m_label is not None
+    assert gm != m_label
+
+
+def test_no_material_names_in_tables_module():
+    """Production tables module must not contain material-specific strings."""
+    import valleyscope.irreps.tables as tables_mod
+    import inspect
+    source = inspect.getsource(tables_mod)
+    for mat in ("MoTe2", "ZrSe2", "tMoTe2", "tZrSe2"):
+        assert mat not in source, f"material name {mat} found in tables.py"
+
+
+def test_no_hardcoded_sg_branches_in_centering():
+    """Centering logic must not hard-code specific space-group numbers or Cn logic."""
+    import valleyscope.irreps.tables as tables_mod
+    import inspect
+    source = inspect.getsource(tables_mod._table_centering_from_name)
+    # No hard-coded SG numbers or per-Cn dispatch.
+    assert "sg_number" not in source
+    assert "space_group" not in source
+    assert "if number" not in source
+    assert "irrep.k_frac" not in source  # No coordinate-content heuristic
