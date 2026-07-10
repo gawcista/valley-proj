@@ -56,8 +56,10 @@ class StandardIrrepTable:
         labels_by_coordinate: dict[str, np.ndarray] = {}
         for irrep in self.irreps:
             labels_by_coordinate.setdefault(irrep.kpoint_label, irrep.k_frac)
+        # Centering-aware k-point equivalence.
+        centering = _table_centering(self)
         for label, table_k_frac in labels_by_coordinate.items():
-            if _kpoint_matches(k_frac, table_k_frac, tolerance):
+            if _kpoint_matches_centered(k_frac, table_k_frac, centering, tolerance):
                 return label
         return None
 
@@ -440,7 +442,61 @@ def _translation_matches(left: np.ndarray, right: np.ndarray, tolerance: float) 
     return bool(np.linalg.norm(delta_mod_lattice) <= tolerance)
 
 
+def _table_centering(table) -> str:
+    """Derive centering type from the irrep table's HSP k-point coordinates."""
+    # Check if any HSP has half-integer-only coordinates suggesting centering.
+    for irrep in table.irreps:
+        for coord in irrep.k_frac:
+            _, frac = divmod(coord, 1)
+            if abs(frac - 0.5) < 1e-10:
+                return "C"  # C-centered conventional cell
+    return "P"
+
+
 def _kpoint_matches(left: np.ndarray, right: np.ndarray, tolerance: float) -> bool:
     delta = np.asarray(left, dtype=float) - np.asarray(right, dtype=float)
     delta_mod_lattice = delta - np.rint(delta)
     return bool(np.linalg.norm(delta_mod_lattice) <= tolerance)
+
+
+def _kpoint_matches_centered(
+    left: np.ndarray,
+    right: np.ndarray,
+    centering: str,
+    tolerance: float,
+) -> bool:
+    """Centering-aware k-point equivalence modulo conventional reciprocal lattice.
+
+    For primitive settings (P): component-wise modulo 1.
+    For C-centered settings: additionally checks that the difference
+    vector corresponds to an allowed reciprocal-lattice vector
+    (h + k must be even for C-centering).
+    """
+    delta = np.asarray(left, dtype=float) - np.asarray(right, dtype=float)
+    delta_mod = delta - np.rint(delta)
+    if np.linalg.norm(delta_mod) <= tolerance:
+        # For primitive, this is sufficient.
+        if centering == "P":
+            return True
+        # For centered, the difference vector must also respect
+        # the centering condition on the reciprocal lattice.
+        delta_int = np.rint(delta).astype(int)
+        h, k, _ = delta_int
+        if centering == "C":
+            # C-centered: h + k must be even.
+            if (h + k) % 2 == 0:
+                return True
+            return False
+        if centering == "I":
+            # I-centered: h + k + l must be even.
+            if (h + k + int(delta_int[2])) % 2 == 0:
+                return True
+            return False
+        if centering == "F":
+            # F-centered: h,k,l all same parity.
+            p0 = h % 2
+            if k % 2 == p0 and int(delta_int[2]) % 2 == p0:
+                return True
+            return False
+        # Unknown centering — fall through to primitive comparison.
+    return bool(np.linalg.norm(delta_mod) <= tolerance)

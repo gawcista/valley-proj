@@ -220,9 +220,9 @@ def classify_bundle(
 
     Classification and uniqueness contract:
 
-    - Outside integer span → ``stable-topology-candidate``, no uniqueness.
+    - Outside integer span → ``outside_integer_span``, no uniqueness.
     - Inside span, no nonnegative solution after complete search →
-      ``fragile-topology-candidate``, no uniqueness.
+      ``in_integer_span_no_nonnegative_witness``, no uniqueness.
     - Inside span, search truncated, no witness →
       ``indeterminate_truncated``, no uniqueness.
     - Inside span, one nonnegative witness exists →
@@ -230,6 +230,9 @@ def classify_bundle(
       * ``unique`` — complete search found exactly one.
       * ``non_unique`` — at least two witnesses found.
       * ``unknown_truncated`` — one witness but search incomplete.
+
+    No topology labels (stable/fragile topology) are reported — these
+    require a complete compatibility/topology theorem not yet validated.
     """
     max_coefficient = int(max_coefficient)
     if max_coefficient < 0:
@@ -241,7 +244,7 @@ def classify_bundle(
     if not in_span:
         return {
             "status": "no_exact_solution",
-            "classification": "stable-topology-candidate",
+            "classification": "outside_integer_span",
             "integer_span_status": "outside_integer_span",
             "nonnegative_solution_status": "no_nonnegative_solution",
         }
@@ -272,7 +275,7 @@ def classify_bundle(
         else:
             result = {
                 "status": "no_exact_solution",
-                "classification": "fragile-topology-candidate",
+                "classification": "in_integer_span_no_nonnegative_witness",
                 "integer_span_status": "in_integer_span",
                 "nonnegative_solution_status": "no_nonnegative_solution",
             }

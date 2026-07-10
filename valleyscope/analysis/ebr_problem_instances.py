@@ -34,8 +34,11 @@ def build_ebr_problem_instances(
     if not candidates:
         return _empty_report("no trusted EBR input candidates")
 
-    # Group by physical subspace-space-group symbol.
-    groups: dict[tuple[str, str, str, str], list[dict[str, object]]] = {}
+    # Group by physical subspace-space-group identity and valley label.
+    # workflow_path and readiness_level are computational provenance,
+    # not quantum numbers — they must not split one physical band
+    # representation into multiple partial EBR instances.
+    groups: dict[tuple[str, str], list[dict[str, object]]] = {}
     for c in candidates:
         ssg = c.get("subspace_space_group", {})
         sg_symbol = (
@@ -44,21 +47,23 @@ def build_ebr_problem_instances(
         )
         sg = str(sg_symbol) if sg_symbol else str(c.get("subspace_group_candidate", ""))
         valley = str(c.get("valley", ""))
-        workflow_path = str(c.get("workflow_path", ""))
-        readiness_level = str(c.get("readiness_level", ""))
         groups.setdefault(
-            (sg, valley, workflow_path, readiness_level),
+            (sg, valley),
             [],
         ).append(c)
 
     instances: list[dict[str, object]] = []
     instance_counter = 0
 
-    for (sg, valley, workflow_path, readiness_level), cands in groups.items():
+    for (sg, valley), cands in groups.items():
         instance_counter += 1
         instance_id = f"ebr_instance_{instance_counter:03d}"
 
         # --- Canonical subgroup identity ---
+        # Record workflow provenance from candidates but do not use
+        # it as a grouping key.
+        workflow_path = str(cands[0].get("workflow_path", ""))
+        readiness_level = str(cands[0].get("readiness_level", ""))
         # subspace_space_group is the primary physical object; flat
         # subspace_group_candidate is the derived scalar key for compact
         # exports, external-table matching, and database indexing.

@@ -121,14 +121,14 @@ def build_database_ingestion_record(
         if isinstance(solutions, list):
             atomic = sum(1 for s in solutions if isinstance(s, dict)
                          and s.get("classification") == "atomic-compatible-candidate")
-            fragile = sum(1 for s in solutions if isinstance(s, dict)
-                          and s.get("classification") == "fragile-topology-candidate")
-            stable = sum(1 for s in solutions if isinstance(s, dict)
-                         and s.get("classification") == "stable-topology-candidate")
+            no_witness = sum(1 for s in solutions if isinstance(s, dict)
+                             and s.get("classification") == "in_integer_span_no_nonnegative_witness")
+            outside = sum(1 for s in solutions if isinstance(s, dict)
+                          and s.get("classification") == "outside_integer_span")
             record["reduced_ebr_classification_counts"] = {
                 "atomic_compatible": atomic,
-                "fragile_topology": fragile,
-                "stable_topology": stable,
+                "in_integer_span_no_nonnegative_witness": no_witness,
+                "outside_integer_span": outside,
             }
         # --- per-bundle reduced EBR records (compact public fields) ---
         if isinstance(solutions, list):
@@ -322,6 +322,6 @@ def _compact_excluded_records(
 def _empty_classification_counts() -> dict[str, int]:
     return {
         "atomic_compatible": 0,
-        "fragile_topology": 0,
-        "stable_topology": 0,
+        "in_integer_span_no_nonnegative_witness": 0,
+        "outside_integer_span": 0,
     }

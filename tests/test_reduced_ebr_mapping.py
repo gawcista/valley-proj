@@ -937,7 +937,7 @@ def test_atomic_compatible_classification():
     assert len(s["ebr_decomposition"]) > 0
 
 def test_fragile_topology_classification():
-    """Target in integer span but needs negative coefficient -> fragile-topology."""
+    """Target in integer span but needs negative coefficient -> in integer span, no nonnegative witness."""
     # EBR columns: [1,0] (A), [1,1] (B)
     # Target: [0,1] = 1*B - 1*A -> needs negative coeff for A
     table = {
@@ -957,7 +957,7 @@ def test_fragile_topology_classification():
     r = build_reduced_ebr_mapping(ebr_export_bundle=b, table=table)
     assert r["status"] == "no_exact_solution"
     s = r["solutions"][0]
-    assert s["classification"] == "fragile-topology-candidate"
+    assert s["classification"] == "in_integer_span_no_nonnegative_witness"
     assert s["integer_span_status"] == "in_integer_span"
     assert s["nonnegative_solution_status"] == "no_nonnegative_solution"
     assert "integer_solution" in s  # signed witness
@@ -967,7 +967,7 @@ def test_fragile_topology_classification():
     assert coeffs.get("EBR_B") == 1
 
 def test_stable_topology_classification():
-    """Target outside integer span -> stable-topology-candidate."""
+    """Target outside integer span -> outside_integer_span."""
     # EBR columns: [2,0] (A), [0,2] (B)
     # Target: [1,0] — requires 0.5*A, not in integer span
     table = {
@@ -987,7 +987,7 @@ def test_stable_topology_classification():
     r = build_reduced_ebr_mapping(ebr_export_bundle=b, table=table)
     assert r["status"] == "no_exact_solution"
     s = r["solutions"][0]
-    assert s["classification"] == "stable-topology-candidate"
+    assert s["classification"] == "outside_integer_span"
     assert s["integer_span_status"] == "outside_integer_span"
     assert s["nonnegative_solution_status"] == "no_nonnegative_solution"
 
@@ -1061,8 +1061,8 @@ def test_classification_fields_on_existing_tests():
     for s in r["solutions"]:
         assert s["classification"] in {
             "atomic-compatible-candidate",
-            "fragile-topology-candidate",
-            "stable-topology-candidate",
+            "in_integer_span_no_nonnegative_witness",
+            "outside_integer_span",
         }
         assert s["integer_span_status"] in {"in_integer_span", "outside_integer_span"}
         assert s["nonnegative_solution_status"] in {"solved_exact", "no_nonnegative_solution"}
@@ -1142,7 +1142,7 @@ def test_summary_renders_atomic_classification():
     assert "EBR_B x 2" in text
 
 def test_summary_renders_fragile_classification():
-    """Summary text shows fragile-topology with signed witness."""
+    """Summary text shows in integer span, no nonnegative witness."""
     report = {
         "status": "no_exact_solution", "mapping_status": "no_exact_solution",
         "reduced_ebr_decomposition_status": "no_exact_solution",
@@ -1150,7 +1150,7 @@ def test_summary_renders_fragile_classification():
         "solutions": [{
             "bundle_id": "b_001", "valley": "K",
             "status": "no_exact_solution",
-            "classification": "fragile-topology-candidate",
+            "classification": "in_integer_span_no_nonnegative_witness",
             "integer_span_status": "in_integer_span",
             "nonnegative_solution_status": "no_nonnegative_solution",
             "integer_solution": [
@@ -1160,13 +1160,13 @@ def test_summary_renders_fragile_classification():
         }],
     }
     text = _render_reduced_ebr_text(report)
-    assert "fragile-topology" in text
+    assert "in integer span, no nonnegative witness" in text
     assert "signed witness" in text
     assert "EBR_A: -1" in text
     assert "EBR_B: 1" in text
 
 def test_summary_renders_stable_classification():
-    """Summary text shows stable-topology with outside integer span."""
+    """Summary text shows outside integer span."""
     report = {
         "status": "no_exact_solution", "mapping_status": "no_exact_solution",
         "reduced_ebr_decomposition_status": "no_exact_solution",
@@ -1174,13 +1174,13 @@ def test_summary_renders_stable_classification():
         "solutions": [{
             "bundle_id": "b_001", "valley": "K",
             "status": "no_exact_solution",
-            "classification": "stable-topology-candidate",
+            "classification": "outside_integer_span",
             "integer_span_status": "outside_integer_span",
             "nonnegative_solution_status": "no_nonnegative_solution",
         }],
     }
     text = _render_reduced_ebr_text(report)
-    assert "stable-topology" in text
+    assert "outside integer span" in text
     assert "outside integer span" in text
 
 def test_summary_renders_truncated_search_status():
@@ -1192,7 +1192,7 @@ def test_summary_renders_truncated_search_status():
         "solutions": [{
             "bundle_id": "b_001", "valley": "K",
             "status": "no_exact_solution",
-            "classification": "fragile-topology-candidate",
+            "classification": "in_integer_span_no_nonnegative_witness",
             "integer_span_status": "in_integer_span",
             "nonnegative_solution_status": "no_nonnegative_solution",
             "search_status": "truncated_by_max_coefficient",
@@ -1218,19 +1218,19 @@ def test_summary_renders_classification_counts():
              "nonnegative_solution_status": "solved_exact",
              "ebr_decomposition": [{"label": "X", "coefficient": 1}]},
             {"bundle_id": "b_f", "valley": "F", "status": "no_exact_solution",
-             "classification": "fragile-topology-candidate",
+             "classification": "in_integer_span_no_nonnegative_witness",
              "integer_span_status": "in_integer_span",
              "nonnegative_solution_status": "no_nonnegative_solution"},
             {"bundle_id": "b_s", "valley": "S", "status": "no_exact_solution",
-             "classification": "stable-topology-candidate",
+             "classification": "outside_integer_span",
              "integer_span_status": "outside_integer_span",
              "nonnegative_solution_status": "no_nonnegative_solution"},
         ],
     }
     text = _render_reduced_ebr_text(report)
     assert "atomic-compatible=1" in text
-    assert "fragile-topology=1" in text
-    assert "stable-topology=1" in text
+    assert "in integer span, no nonnegative witness=1" in text
+    assert "outside integer span=1" in text
 
 def test_summary_excluded_bundles_unchanged():
     """Excluded bundles rendering is unchanged."""

@@ -98,7 +98,7 @@ def test_ingestion_record_with_reduced_ebr_mapping():
                 "subspace_space_group": {"candidate_space_group_symbol": "P3"},
             },
             {"classification": "atomic-compatible-candidate"},
-            {"classification": "fragile-topology-candidate"},
+            {"classification": "in_integer_span_no_nonnegative_witness"},
         ],
     }
     record = build_database_ingestion_record(
@@ -106,8 +106,8 @@ def test_ingestion_record_with_reduced_ebr_mapping():
     assert record["reduced_ebr_mapping_status"] == "solved_exact"
     counts = record["reduced_ebr_classification_counts"]
     assert counts["atomic_compatible"] == 2
-    assert counts["fragile_topology"] == 1
-    assert counts["stable_topology"] == 0
+    assert counts["in_integer_span_no_nonnegative_witness"] == 1
+    assert counts["outside_integer_span"] == 0
 
 
 def test_ingestion_record_missing_reduced_ebr_is_not_an_error():
@@ -120,8 +120,8 @@ def test_ingestion_record_missing_reduced_ebr_is_not_an_error():
     assert record["reduced_ebr_mapping_status"] == "not_available"
     assert record["reduced_ebr_classification_counts"] == {
         "atomic_compatible": 0,
-        "fragile_topology": 0,
-        "stable_topology": 0,
+        "in_integer_span_no_nonnegative_witness": 0,
+        "outside_integer_span": 0,
     }
     assert len(record["validation_errors"]) == 0
 
@@ -305,8 +305,8 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
     assert record["reduced_ebr_table_status"] == "loaded"
     counts = record["reduced_ebr_classification_counts"]
     assert counts["atomic_compatible"] == 2
-    assert counts["fragile_topology"] == 0
-    assert counts["stable_topology"] == 0
+    assert counts["in_integer_span_no_nonnegative_witness"] == 0
+    assert counts["outside_integer_span"] == 0
     assert set(record["source_files"]) == {
         "valley_summary",
         "valley_ebr_export_bundle",
@@ -362,7 +362,7 @@ def _make_ingestion_record(status="has_ready_ebr_bundles", run_id="run_0000"):
              "ebr_decomposition": [{"label": "-E↑G(2)", "coefficient": 1}]},
         ],
         "reduced_ebr_classification_counts": {
-            "atomic_compatible": 1, "fragile_topology": 0, "stable_topology": 0,
+            "atomic_compatible": 1, "in_integer_span_no_nonnegative_witness": 0, "outside_integer_span": 0,
         },
         "reduced_ebr_mapping_status": "solved_exact",
         "reduced_ebr_table_status": "loaded",
@@ -674,8 +674,8 @@ def test_database_index_preserves_generic_irrep_fields_with_run_provenance():
         "reduced_ebr_records": [],
         "reduced_ebr_classification_counts": {
             "atomic_compatible": 0,
-            "fragile_topology": 0,
-            "stable_topology": 0,
+            "in_integer_span_no_nonnegative_witness": 0,
+            "outside_integer_span": 0,
         },
         "reduced_ebr_mapping_status": "not_available",
         "reduced_ebr_table_status": "not_available",

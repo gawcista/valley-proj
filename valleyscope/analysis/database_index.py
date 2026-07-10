@@ -47,8 +47,8 @@ def build_database_index(
     total_reduced_ebr: int = 0
     total_classification: dict[str, int] = {
         "atomic_compatible": 0,
-        "fragile_topology": 0,
-        "stable_topology": 0,
+        "in_integer_span_no_nonnegative_witness": 0,
+        "outside_integer_span": 0,
     }
 
     runs: list[dict[str, Any]] = []
@@ -98,8 +98,8 @@ def build_database_index(
         counts = record.get("reduced_ebr_classification_counts", {})
         if isinstance(counts, dict):
             total_classification["atomic_compatible"] += counts.get("atomic_compatible", 0)
-            total_classification["fragile_topology"] += counts.get("fragile_topology", 0)
-            total_classification["stable_topology"] += counts.get("stable_topology", 0)
+            total_classification["in_integer_span_no_nonnegative_witness"] += counts.get("in_integer_span_no_nonnegative_witness", 0)
+            total_classification["outside_integer_span"] += counts.get("outside_integer_span", 0)
 
         # Flatten valley irrep records with run provenance.
         for ir in record.get("valley_irrep_records", []):

@@ -98,7 +98,7 @@ def test_reduced_ebr_enabled_without_input_marks_not_provided(tmp_path):
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     assert summary["valley_reduced_ebr_mapping"] == mapping
 
-def test_summary_text_surfaces_atomic_fragile_stable_classification():
+def test_summary_text_surfaces_atomic_nonnegative_outside_classification():
     """E2E: summary text surfaces atomic, fragile, stable classifications."""
     from valleyscope.reports.summary_report import build_summary_payload, render_summary_text
     from valleyscope.io.config import load_config
@@ -118,7 +118,7 @@ def test_summary_text_surfaces_atomic_fragile_stable_classification():
                  {"label": "EBR_B", "coefficient": 2},
              ]},
             {"bundle_id": "b_frag", "valley": "K", "status": "no_exact_solution",
-             "classification": "fragile-topology-candidate",
+             "classification": "in_integer_span_no_nonnegative_witness",
              "integer_span_status": "in_integer_span",
              "nonnegative_solution_status": "no_nonnegative_solution",
              "integer_solution": [
@@ -126,7 +126,7 @@ def test_summary_text_surfaces_atomic_fragile_stable_classification():
                  {"label": "EBR_B", "coefficient": 1},
              ]},
             {"bundle_id": "b_stab", "valley": "K", "status": "no_exact_solution",
-             "classification": "stable-topology-candidate",
+             "classification": "outside_integer_span",
              "integer_span_status": "outside_integer_span",
              "nonnegative_solution_status": "no_nonnegative_solution"},
         ],
@@ -156,8 +156,8 @@ def test_summary_text_surfaces_atomic_fragile_stable_classification():
         text = render_summary_text(payload)
 
     assert "atomic-compatible=1" in text
-    assert "fragile-topology=1" in text
-    assert "stable-topology=1" in text
+    assert "in integer span, no nonnegative witness=1" in text
+    assert "outside integer span=1" in text
     assert "EBR_A x 1" in text
     assert "EBR_B x 2" in text
     assert "signed witness" in text
@@ -177,7 +177,7 @@ def test_summary_text_truncated_search_surfaced():
         "table_status": "loaded",
         "solutions": [{
             "bundle_id": "b_001", "valley": "K", "status": "no_exact_solution",
-            "classification": "fragile-topology-candidate",
+            "classification": "in_integer_span_no_nonnegative_witness",
             "integer_span_status": "in_integer_span",
             "nonnegative_solution_status": "no_nonnegative_solution",
             "search_status": "truncated_by_max_coefficient",
@@ -277,8 +277,8 @@ def test_reduced_ebr_classifier_payload_written_consistently_to_public_outputs(t
     )
     assert [s["classification"] for s in mapping["solutions"]] == [
         "atomic-compatible-candidate",
-        "fragile-topology-candidate",
-        "stable-topology-candidate",
+        "in_integer_span_no_nonnegative_witness",
+        "outside_integer_span",
     ]
 
     config = load_config(config_path)
@@ -305,10 +305,10 @@ def test_reduced_ebr_classifier_payload_written_consistently_to_public_outputs(t
     summary_text = outputs["valley_summary_txt"].read_text(encoding="utf-8")
     assert mapping_json == mapping
     assert summary_json["valley_reduced_ebr_mapping"] == mapping
-    assert "classifications: atomic-compatible=1, fragile-topology=1, stable-topology=1" in summary_text
+    assert "classifications: atomic-compatible=1, in integer span, no nonnegative witness=1, outside integer span=1" in summary_text
     assert "b_atom K: atomic-compatible" in summary_text
-    assert "b_frag K: fragile-topology" in summary_text
-    assert "b_stab K: stable-topology (outside integer span)" in summary_text
+    assert "b_frag K: in integer span, no nonnegative witness" in summary_text
+    assert "b_stab K: outside integer span (outside integer span)" in summary_text
 
 def test_e2e_smoke_fixture_table_is_material_agnostic():
     """E2E smoke fixture data must not name real validation materials."""

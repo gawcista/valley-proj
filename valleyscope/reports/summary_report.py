@@ -1778,14 +1778,14 @@ def _render_reduced_ebr_mapping(
         atomic = sum(1 for s in solutions if isinstance(s, dict)
                      and s.get("classification") == "atomic-compatible-candidate")
         fragile = sum(1 for s in solutions if isinstance(s, dict)
-                      and s.get("classification") == "fragile-topology-candidate")
+                      and s.get("classification") == "in_integer_span_no_nonnegative_witness")
         stable = sum(1 for s in solutions if isinstance(s, dict)
-                     and s.get("classification") == "stable-topology-candidate")
+                     and s.get("classification") == "outside_integer_span")
         truncated = sum(1 for s in solutions if isinstance(s, dict)
                         and s.get("search_status") == "truncated_by_max_coefficient")
         lines.append(f"classifications: atomic-compatible={atomic}, "
-                     f"fragile-topology={fragile}, "
-                     f"stable-topology={stable}"
+                     f"in integer span, no nonnegative witness={fragile}, "
+                     f"outside integer span={stable}"
                      + (f", search_truncated={truncated}" if truncated else ""))
 
         for sol in solutions:
@@ -1806,18 +1806,18 @@ def _render_reduced_ebr_mapping(
                     lines.append(f"{label}: atomic-compatible [{', '.join(terms)}]")
                 else:
                     lines.append(f"{label}: atomic-compatible (no decomposition)")
-            elif classification == "fragile-topology-candidate":
+            elif classification == "in_integer_span_no_nonnegative_witness":
                 witness = sol.get("integer_solution")
                 if isinstance(witness, list) and witness:
                     terms = [
                         f"{e.get('label', '')}: {e.get('coefficient', '')}"
                         for e in witness if isinstance(e, dict)
                     ]
-                    lines.append(f"{label}: fragile-topology [signed witness: {', '.join(terms)}]")
+                    lines.append(f"{label}: in integer span, no nonnegative witness [signed witness: {', '.join(terms)}]")
                 else:
-                    lines.append(f"{label}: fragile-topology (in integer span)")
-            elif classification == "stable-topology-candidate":
-                lines.append(f"{label}: stable-topology (outside integer span)")
+                    lines.append(f"{label}: in integer span, no nonnegative witness (in integer span)")
+            elif classification == "outside_integer_span":
+                lines.append(f"{label}: outside integer span (outside integer span)")
             else:
                 # Legacy rows without classification.
                 decomp = sol.get("ebr_decomposition")
