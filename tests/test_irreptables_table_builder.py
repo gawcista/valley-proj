@@ -267,8 +267,7 @@ def test_spec_file_table_feeds_reduced_ebr_mapping_e2e(tmp_path):
     provenance = validated["provenance"]
     assert provenance["data_source"] == "irreptables"
     assert provenance["valleyscope_reduction"] == "sampled_hsp_valley_preserving"
-    # Production path may reject minimal table.
-    assert result["status"] in ("solved_exact", "not_evaluated")
+    assert result["status"] == "solved_exact"
     solution = result["solutions"][0]
     assert solution["classification"] == "atomic-compatible-candidate"
     assert solution["ebr_decomposition"] == [
@@ -2607,8 +2606,8 @@ def test_c2_mm_m3_dry_run_cli_build_and_map_e2e(tmp_path):
     ])
     assert rc == 0
     mapping = json.loads(mapping_path.read_text())
-    assert mapping["status"] in ("solved_exact", "not_evaluated")
-    assert mapping["mapping_status"] in ("solved_exact", "not_evaluated")
+    assert mapping["status"] == "not_evaluated"
+    assert mapping["mapping_status"] == "not_evaluated"
     assert mapping["table_status"] == "loaded"
     # CLI bundle may lack certificate_identity; promotion blocks.
     if mapping["excluded_bundles"]:

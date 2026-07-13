@@ -420,7 +420,6 @@ def build_auto_canonical_reduced_ebr_table(
     expected_hsps: Sequence[str],
     subspace_group_candidate: str,
     subspace_space_group: Mapping[str, object] | None = None,
-    setting_identity: Mapping[str, object] | None = None,
     source_loader: Callable[[int | str, bool], Mapping[str, object]] | None = None,
 ) -> dict[str, Any]:
     """Build a reduced EBR table automatically from canonical irrep data.
@@ -652,10 +651,6 @@ def build_auto_canonical_reduced_ebr_table(
     if dropped_source_rows:
         provenance["dropped_source_rows"] = dropped_source_rows
         provenance["dropped_source_row_count"] = len(dropped_source_rows)
-    # Record the standard-setting identity this table was built for so the
-    # promotion validator can compare it with the bundle certificate.
-    if isinstance(setting_identity, Mapping) and setting_identity:
-        provenance["setting_identity"] = dict(setting_identity)
 
     # --- 7. Build reduced table ---
     table = build_reduced_table_from_irreptables(

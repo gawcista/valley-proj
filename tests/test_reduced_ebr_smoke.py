@@ -233,7 +233,7 @@ def test_reduced_ebr_classifier_payload_written_consistently_to_public_outputs(t
 
     table = {
         "schema_version": "1.0.0",
-        "subspace_group_candidate": "C1",
+        "subspace_group_candidate": "P3",
         "expected_hsps": ["GammaM"],
         "irreps": ["GammaM:irrep_A", "GammaM:irrep_B", "GammaM:irrep_C"],
         "ebrs": [
@@ -249,7 +249,7 @@ def test_reduced_ebr_classifier_payload_written_consistently_to_public_outputs(t
             {
                 "bundle_id": "b_atom",
                 "valley": "K",
-                "subspace_group_candidate": "C1",
+                "subspace_group_candidate": "P3",
                 "ready_for_external_solver": True,
                 "expected_hsps": ["GammaM"],
                 "irreps_by_kpoint": {"GammaM": ["irrep_A", "irrep_A", "irrep_B"]},
@@ -257,7 +257,7 @@ def test_reduced_ebr_classifier_payload_written_consistently_to_public_outputs(t
             {
                 "bundle_id": "b_frag",
                 "valley": "K",
-                "subspace_group_candidate": "C1",
+                "subspace_group_candidate": "P3",
                 "ready_for_external_solver": True,
                 "expected_hsps": ["GammaM"],
                 "irreps_by_kpoint": {"GammaM": ["irrep_B"]},
@@ -265,7 +265,7 @@ def test_reduced_ebr_classifier_payload_written_consistently_to_public_outputs(t
             {
                 "bundle_id": "b_stab",
                 "valley": "K",
-                "subspace_group_candidate": "C1",
+                "subspace_group_candidate": "P3",
                 "ready_for_external_solver": True,
                 "expected_hsps": ["GammaM"],
                 "irreps_by_kpoint": {"GammaM": ["irrep_C"]},

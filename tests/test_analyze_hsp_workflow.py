@@ -9,7 +9,6 @@ from pathlib import Path
 import h5py
 import numpy as np
 import pytest
-from tests.reduced_ebr_promo_helpers import attach_promotion
 import yaml
 
 from valleyscope.cli import main as cli_main
@@ -1172,17 +1171,13 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     b = summary["valley_ebr_export_bundle"]["bundles"][0]
     assert b["ready_for_external_solver"] is False  # sampled_basis
     result = summary["valley_reduced_ebr_mapping"]
-    # Promotion requires subspace_sg_number + certificate_identity.
-    assert result["mapping_status"] in ("solved_exact", "not_evaluated")
-    if result["mapping_status"] == "solved_exact":
-        assert len(result["solutions"]) == 1
-        assert result["solutions"][0]["ebr_decomposition"] == [
-            {"label": "EBR_A", "coefficient": 1},
-            {"label": "EBR_B", "coefficient": 1},
-        ]
+    # Workflow bundles carry an unresolved standard-setting certificate
+    # (Phase E incomplete), so promotion is fail-closed: not_evaluated.
+    assert result["mapping_status"] == "not_evaluated"
+    assert result["solutions"] == []
     record = load_database_ingestion_record_from_directory(str(out_dir))
-    assert record["record_status"] in ("has_ready_ebr_bundles", "no_ready_ebr_bundles")
-    assert record["reduced_ebr_mapping_status"] in ("solved_exact", "not_evaluated")
+    assert record["record_status"] == "no_ready_ebr_bundles"
+    assert record["reduced_ebr_mapping_status"] == "not_evaluated"
 
     bad_out_dir = tmp_path / "bad_out"
     bad_config_path = tmp_path / "bad_cfg.yaml"
@@ -1469,8 +1464,8 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
     # --- Equivalence assertions ---
     # Both paths use auto-canonical first; external-table fallback may differ
     # if one path's table lacks provenance.
-    assert mapping_spec["mapping_status"] in ("solved_exact", "not_evaluated")
-    assert mapping_table["mapping_status"] in ("solved_exact", "not_evaluated")
+    assert mapping_spec["mapping_status"] == "not_evaluated"
+    assert mapping_table["mapping_status"] == "not_evaluated"
     # Solutions and excluded must agree when statuses agree.
     if mapping_spec["mapping_status"] == mapping_table["mapping_status"]:
         assert mapping_spec["solutions"] == mapping_table["solutions"]
@@ -1496,22 +1491,22 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
     del mapping_spec_stripped["reduced_ebr_input"]
     # Both stripped dicts must be valid states.
     for ms in (mapping_spec_stripped, mapping_table_stripped):
-        assert ms["mapping_status"] in ("solved_exact", "not_evaluated")
+        assert ms["mapping_status"] == "not_evaluated"
 
     # Ingestion records also equivalent modulo reduced_ebr_input.
     rec_table = load_database_ingestion_record_from_directory(str(out_table))
     rec_spec = load_database_ingestion_record_from_directory(str(out_spec))
     # Both records have valid status; auto-canonical may differ from external.
-    assert rec_table["record_status"] in ("has_ready_ebr_bundles", "no_ready_ebr_bundles")
-    assert rec_spec["record_status"] in ("has_ready_ebr_bundles", "no_ready_ebr_bundles")
+    assert rec_table["record_status"] == "no_ready_ebr_bundles"
+    assert rec_spec["record_status"] == "no_ready_ebr_bundles"
     assert rec_table["reduced_ebr_input"]["source"] == "table_file"
     assert rec_spec["reduced_ebr_input"]["source"] == "spec_file"
 
     # Summary embeddings agree on status and key fields.
     summary_emb_table = dict(summary_table["valley_reduced_ebr_mapping"])
     summary_emb_spec = dict(summary_spec["valley_reduced_ebr_mapping"])
-    assert summary_emb_spec["mapping_status"] in ("solved_exact", "not_evaluated")
-    assert summary_emb_table["mapping_status"] in ("solved_exact", "not_evaluated")
+    assert summary_emb_spec["mapping_status"] == "not_evaluated"
+    assert summary_emb_table["mapping_status"] == "not_evaluated"
 
 
 # -----------------------------------------------------------------------
@@ -2019,13 +2014,15 @@ def test_unmock_generic_source_adapter_positive_full_pipeline():
         "irreps": [f"GammaM:{irr}" for irr in bp_irreps],
         "ebrs": [{"label": "EBR_X", "vector": [1, 1]}],
     }
-    # Promotion via promote_bundle_for_solve → solved_exact.
-    attach_promotion(ebr_bundle, table_def)
+    # The real pipeline produces an UNRESOLVED standard-setting certificate
+    # (Phase E incomplete), so fail-closed promotion blocks.  No fictitious
+    # certificate is injected; this documents the exact remaining blocker.
     result = build_reduced_ebr_mapping(ebr_export_bundle=ebr_bundle, table=table_def)
-    assert result["mapping_status"] == "solved_exact"
-    assert result["solutions"][0]["ebr_decomposition"] == [
-        {"label": "EBR_X", "coefficient": 1},
-    ]
+    assert result["mapping_status"] == "not_evaluated"
+    assert result["solutions"] == []
+    excl_codes = {c["code"]
+                  for c in result["excluded_bundles"][0]["blocker_reasons"]}
+    assert "certificate_unresolved" in excl_codes
 
     # 6. Database ingestion.
     summary_in = {"target_kpoints": ["GammaM"], "iband": [101], "input": {}}
@@ -2034,9 +2031,9 @@ def test_unmock_generic_source_adapter_positive_full_pipeline():
         valley_ebr_export_bundle=ebr_bundle,
         valley_reduced_ebr_mapping=result,
     )
-    assert record["record_status"] == "has_ready_ebr_bundles"
-    assert record["ready_bundle_count"] == 1
-    assert record["reduced_ebr_mapping_status"] == "solved_exact"
+    assert record["record_status"] == "no_ready_ebr_bundles"
+    assert record["ready_bundle_count"] == 0
+    assert record["reduced_ebr_mapping_status"] == "not_evaluated"
 
 
 def test_spinful_p3_analyze_hsp_unmocked_feasibility(tmp_path):

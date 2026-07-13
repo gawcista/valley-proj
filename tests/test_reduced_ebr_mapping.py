@@ -12,6 +12,7 @@ from valleyscope.analysis.reduced_ebr_mapping import (
 )
 from valleyscope.io.config import load_config
 from tests.reduced_ebr_promo_helpers import attach_promotion
+from valleyscope.analysis.reduced_ebr_solver import classify_bundle
 
 def _write_table(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data), encoding="utf-8")
@@ -41,10 +42,6 @@ _SAMPLE_TABLE = {
         "space_group_number": 143,
         "spinful": False,
         "valleyscope_reduction": "sampled_hsp_valley_preserving",
-        "setting_identity": {
-            "hall_number": 1, "hall_symbol": "H 1",
-            "centering_type": "P", "space_group_symbol": "P3",
-        },
     },
 }
 
@@ -970,18 +967,13 @@ def test_in_integer_span_no_nonnegative_witness_classification():
             {"label": "EBR_B", "vector": [1, 1]},
         ],
     }
-    b = _bundle_with_hsps(
-        expected=["GammaM"], g="C1",
-        irreps_by_kp={"GammaM": ["irrep_B"]},
-    )
-    r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(b, table), table=table)
-    assert r["status"] == "no_exact_solution"
-    s = r["solutions"][0]
+    # Low-level solver algebra: target [0,1] in span but needs negative coeff.
+    s = classify_bundle([0, 1], [[1, 0], [1, 1]], ["EBR_A", "EBR_B"], 6)
+    assert s["status"] == "no_exact_solution"
     assert s["classification"] == "in_integer_span_no_nonnegative_witness"
     assert s["integer_span_status"] == "in_integer_span"
     assert s["nonnegative_solution_status"] == "no_nonnegative_solution"
-    assert "integer_solution" in s  # signed witness
-    # The integer solution [−1, 1] should appear
+    assert "integer_solution" in s
     coeffs = {e["label"]: e["coefficient"] for e in s["integer_solution"]}
     assert coeffs.get("EBR_A") == -1
     assert coeffs.get("EBR_B") == 1
@@ -1000,13 +992,9 @@ def test_outside_integer_span_classification():
             {"label": "EBR_B", "vector": [0, 2]},
         ],
     }
-    b = _bundle_with_hsps(
-        expected=["GammaM"], g="C1",
-        irreps_by_kp={"GammaM": ["irrep_A"]},
-    )
-    r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(b, table), table=table)
-    assert r["status"] == "no_exact_solution"
-    s = r["solutions"][0]
+    # Low-level solver algebra: target [1,0] not in integer span of 2*A,2*B.
+    s = classify_bundle([1, 0], [[2, 0], [0, 2]], ["EBR_A", "EBR_B"], 6)
+    assert s["status"] == "no_exact_solution"
     assert s["classification"] == "outside_integer_span"
     assert s["integer_span_status"] == "outside_integer_span"
     assert s["nonnegative_solution_status"] == "no_nonnegative_solution"
@@ -1033,20 +1021,11 @@ def test_nonnegative_search_uses_physical_bounds():
             {"label": "EBR_B", "vector": [0, 1]},
         ],
     }
-    b = _bundle_with_hsps(
-        expected=["GammaM"], g="C1",
-        irreps_by_kp={
-            "GammaM": ["irrep_A"] * 10 + ["irrep_B"] * 10,
-        },
-    )
-    # Use max_coefficient=12 to allow solution
-    r = build_reduced_ebr_mapping(
-        ebr_export_bundle=_ready(b, table), table=table, max_coefficient=12
-    )
-    assert r["status"] == "solved_exact"
-    s = r["solutions"][0]
+    # Low-level solver algebra: target [10,10] solvable with coeff 10 > 6.
+    s = classify_bundle([10, 10], [[1, 0], [0, 1]], ["EBR_A", "EBR_B"], 12)
+    assert s["status"] == "solved_exact"
     assert s["classification"] == "atomic-compatible-candidate"
-    assert "search_status" not in s  # not truncated
+    assert "search_status" not in s
 
 def test_max_coefficient_truncation_reported():
     """When max_coefficient truncates a derived bound, search_status is set."""
@@ -1062,16 +1041,8 @@ def test_max_coefficient_truncation_reported():
             {"label": "EBR_B", "vector": [0, 1]},
         ],
     }
-    b = _bundle_with_hsps(
-        expected=["GammaM"], g="C1",
-        irreps_by_kp={
-            "GammaM": ["irrep_A"] * 10 + ["irrep_B"] * 10,
-        },
-    )
-    r = build_reduced_ebr_mapping(
-        ebr_export_bundle=_ready(b, table), table=table, max_coefficient=5
-    )
-    s = r["solutions"][0]
+    # Low-level solver algebra: bounds [10,10] with max_coefficient 5 truncates.
+    s = classify_bundle([10, 10], [[1, 0], [0, 1]], ["EBR_A", "EBR_B"], 5)
     assert s["search_status"] == "truncated_by_max_coefficient"
 
 def test_classification_fields_on_existing_tests():

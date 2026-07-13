@@ -15,25 +15,91 @@ _REQUIRED_TABLE_KEYS = {"schema_version", "subspace_group_candidate",
                          "expected_hsps", "irreps", "ebrs"}
 _SOLVER_NAME = "smith_normal_form_plus_bounded_nonnegative_search"
 
-# Standard-setting certificate convention constants.
+# Standard-setting certificate convention — REAL producer vocabulary.
+# These values are emitted by StandardSettingCertificate (standard_setting_kmap)
+# and serialized by ebr_problem_instances._certificate_identity().  The
+# validator consumes them verbatim; it must not invent a parallel vocabulary.
 _TRUSTED_DATA_SOURCE = "irreptables"
 _TRUSTED_PACKAGE = "irreptables"
 _TRUSTED_REDUCTION = "sampled_hsp_valley_preserving"
-# A primitive setting passes only when the validated certificate explicitly
-# declares the primitive direct-coordinate relation.  Missing/unknown is not
-# primitive.
-_PRIMITIVE_DIRECT_RELATIONS = frozenset({
-    "identity",
-    "primitive",
-    "primitive_direct",
-    "primitive_direct_match",
-    "primitive_conventional_identity",
+_PRIMITIVE_DIRECT_RELATION = "direct_coordinate_match"
+_CENTERED_RELATIONS = frozenset({
+    "explicit_transform", "operation_basis_reconstruction",
 })
+_OP_MAPPING_PASSED = "operation_basis_verification_passed"
+_AFFINE_PASSED = "passed"
 _CENTERED_TYPES = frozenset({"A", "B", "C", "I", "F", "R"})
 
 
 def _blocker(code: str, detail: str) -> dict[str, str]:
     return {"code": code, "detail": detail}
+
+
+# ---------------------------------------------------------------------------
+# Independent crystallographic evidence (spglib database only, never derived
+# from the bundle being validated).  No SG-specific lookup tables.
+# ---------------------------------------------------------------------------
+import functools
+
+
+@functools.lru_cache(maxsize=None)
+def _spglib_type(hall_number: int):
+    try:
+        import spglib
+        return spglib.get_spacegroup_type(int(hall_number))
+    except Exception:
+        return None
+
+
+def _hall_belongs_to_sg(hall_number: object, sg_number: object) -> bool:
+    if not _is_positive_int(hall_number) or not _is_positive_int(sg_number):
+        return False
+    t = _spglib_type(int(hall_number))
+    if t is None:
+        return False
+    try:
+        return int(t.number) == int(sg_number)
+    except Exception:
+        return False
+
+
+def _centering_from_hall_symbol(hall_symbol: object) -> str:
+    token = str(hall_symbol or "").strip()
+    if token.startswith("-"):
+        token = token[1:].lstrip()
+    return token[:1].upper()
+
+
+@functools.lru_cache(maxsize=None)
+def _derive_table_standard_setting(sg_number: int) -> dict | None:
+    """Canonical standard setting for an international SG number via spglib.
+
+    Independent of any bundle: reads only spglib's crystallographic database.
+    Returns hall_number/hall_symbol/centering_type/space_group_symbol when the
+    international number maps to a UNIQUE Hall setting.  Returns None when
+    several settings (origin/axis/cell choices) exist and irreptables does not
+    expose which one its data uses — the caller must then block with
+    ``table_standard_setting_unresolved`` rather than synthesize one.
+    """
+    try:
+        import spglib
+    except Exception:
+        return None
+    matches = []
+    for h in range(1, 531):
+        t = spglib.get_spacegroup_type(h)
+        if t is not None and int(t.number) == int(sg_number):
+            matches.append((h, t))
+    if len(matches) != 1:
+        return None
+    h, t = matches[0]
+    return {
+        "hall_number": int(h),
+        "hall_symbol": str(t.hall_symbol),
+        "centering_type": _centering_from_hall_symbol(t.hall_symbol),
+        "space_group_number": int(t.number),
+        "space_group_symbol": str(t.international_short),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -43,51 +109,34 @@ def _blocker(code: str, detail: str) -> dict[str, str]:
 def promote_bundle_for_solve(*, bundle: dict, table: dict) -> dict:
     """Validate a bundle against a reduced EBR table and promote if compatible.
 
-    Fail-closed.  Every bundle — regardless of any pre-existing readiness
-    Boolean — must pass every physical validation gate.  A pre-marked
-    ``ready_for_external_solver`` flag is never trusted evidence.  Missing,
-    unresolved, rejected, malformed, or mutually inconsistent evidence is a
-    blocker.  There is no bypass parameter.
+    Fail-closed convention trust chain.  Promotion requires that the bundle's
+    standard-setting certificate (produced by the real
+    ``StandardSettingCertificate`` serializer) is validated AND internally
+    consistent, and that it agrees with an *independently derived* table
+    standard setting (spglib), the table provenance, and the spin convention.
+    There is no bypass and no injected fictitious evidence: the table setting
+    is never copied from the bundle.
 
-    Validated gates (all must pass to promote to ``validated_basis``):
-
-    - table provenance: ``data_source == 'irreptables'``, ``package ==
-      'irreptables'`` with non-empty version, positive ``space_group_number``,
-      boolean ``spinful``, ``valleyscope_reduction`` exact, and a recorded
-      setting identity (Hall number/symbol + centering);
-    - space group number and symbol both match;
-    - certificate present, ``validation_status == 'validated'``, not
-      unresolved/rejected/ambiguous;
-    - centering present (missing centering is *unknown*, never primitive);
-    - primitive setting: certificate explicitly declares the primitive
-      direct-coordinate relation; centered/nontrivial setting: validated
-      normalized transform + centering vectors + passed operation/affine
-      validation;
-    - Hall/setting identity matches the table;
-    - bundle spinor equals table ``spinful``;
-    - sampled HSP basis matches the table;
-    - every bundle irrep key resolves exactly and unambiguously.
-
-    Returns a dict with ``promoted``, ``promoted_bundle``,
-    ``blocker_reasons`` (structured ``{code, detail}`` dicts),
-    ``validation_report``, ``canonical_state``, ``table_provenance`` and
-    ``certificate_identity``.
+    Every disagreement or absence blocks with a structured ``{code, detail}``
+    reason.  Only an all-passed report promotes to ``validated_basis``.
     """
     blockers: list[dict[str, str]] = []
     report: dict[str, object] = {
         "table_provenance_check": "not_attempted",
+        "table_setting_check": "not_attempted",
         "sg_symbol_check": "not_attempted",
         "sg_number_check": "not_attempted",
         "certificate_check": "not_attempted",
-        "centering_check": "not_attempted",
+        "certificate_consistency_check": "not_attempted",
+        "cert_sg_consistency_check": "not_attempted",
         "affine_setting_check": "not_attempted",
-        "setting_identity_check": "not_attempted",
+        "hall_setting_check": "not_attempted",
         "spin_convention_check": "not_attempted",
         "hsp_basis_check": "not_attempted",
         "irrep_basis_check": "not_attempted",
     }
 
-    # ---- A. Table provenance (fail-closed) ----
+    # ---- A. Table provenance basics ----
     prov = table.get("provenance", {})
     if not isinstance(prov, dict):
         prov = {}
@@ -97,188 +146,135 @@ def promote_bundle_for_solve(*, bundle: dict, table: dict) -> dict:
     table_spinful = prov.get("spinful")
     table_sg_num = prov.get("space_group_number")
     valleyscope_reduction = str(prov.get("valleyscope_reduction", ""))
-    table_setting = prov.get("setting_identity")
-    if not isinstance(table_setting, dict):
-        table_setting = {}
 
     prov_ok = True
     if data_source != _TRUSTED_DATA_SOURCE:
-        blockers.append(_blocker(
-            "table_data_source_invalid",
-            f"table data_source must be '{_TRUSTED_DATA_SOURCE}', "
-            f"got {data_source!r}"))
+        blockers.append(_blocker("table_data_source_invalid",
+            f"table data_source must be '{_TRUSTED_DATA_SOURCE}', got "
+            f"{data_source!r}"))
         prov_ok = False
     if package != _TRUSTED_PACKAGE or not package_version:
-        blockers.append(_blocker(
-            "table_package_invalid",
-            f"table package must be '{_TRUSTED_PACKAGE}' with a non-empty "
-            f"package_version, got package={package!r} "
-            f"version={package_version!r}"))
+        blockers.append(_blocker("table_package_invalid",
+            f"table package must be '{_TRUSTED_PACKAGE}' with non-empty "
+            f"version, got package={package!r} version={package_version!r}"))
         prov_ok = False
     if not _is_positive_int(table_sg_num):
-        blockers.append(_blocker(
-            "table_sg_number_missing",
+        blockers.append(_blocker("table_sg_number_missing",
             "table provenance missing positive space_group_number"))
         prov_ok = False
     if not isinstance(table_spinful, bool):
-        blockers.append(_blocker(
-            "table_spinful_missing",
+        blockers.append(_blocker("table_spinful_missing",
             "table provenance missing boolean spinful"))
         prov_ok = False
     if valleyscope_reduction != _TRUSTED_REDUCTION:
-        blockers.append(_blocker(
-            "table_reduction_provenance_invalid",
-            f"table valleyscope_reduction must be '{_TRUSTED_REDUCTION}', "
-            f"got {valleyscope_reduction!r}"))
-        prov_ok = False
-    table_hall = table_setting.get("hall_number")
-    table_hall_symbol = str(table_setting.get("hall_symbol", ""))
-    table_centering = str(table_setting.get("centering_type", ""))
-    if not _is_positive_int(table_hall) or not table_hall_symbol \
-            or not table_centering:
-        blockers.append(_blocker(
-            "table_setting_identity_missing",
-            "table provenance missing setting_identity "
-            "(hall_number, hall_symbol, centering_type)"))
+        blockers.append(_blocker("table_reduction_provenance_invalid",
+            f"table valleyscope_reduction must be '{_TRUSTED_REDUCTION}', got "
+            f"{valleyscope_reduction!r}"))
         prov_ok = False
     report["table_provenance_check"] = "passed" if prov_ok else "failed"
 
-    # ---- B. SG number + symbol ----
+    # ---- A2. Independent table standard-setting evidence (spglib) ----
+    table_setting = (
+        _derive_table_standard_setting(int(table_sg_num))
+        if _is_positive_int(table_sg_num) else None
+    )
+    if table_setting is None:
+        blockers.append(_blocker("table_standard_setting_unresolved",
+            "could not independently derive a unique Bilbao/irreptables "
+            f"standard setting for SG {table_sg_num!r}; irreptables does not "
+            "expose a unique Hall/centering choice"))
+        report["table_setting_check"] = "blocked"
+        table_hall = None
+        table_hall_symbol = ""
+        table_centering = ""
+    else:
+        report["table_setting_check"] = "passed"
+        table_hall = table_setting["hall_number"]
+        table_hall_symbol = table_setting["hall_symbol"]
+        table_centering = table_setting["centering_type"]
+
+    # ---- B. SG number + symbol: bundle vs table ----
     bundle_sg = str(bundle.get("subspace_group_candidate", ""))
     table_sg = str(table.get("subspace_group_candidate", ""))
     if bundle_sg and bundle_sg == table_sg:
         report["sg_symbol_check"] = "passed"
     else:
-        blockers.append(_blocker(
-            "sg_symbol_mismatch",
+        blockers.append(_blocker("sg_symbol_mismatch",
             f"SG symbol mismatch: bundle {bundle_sg!r} != table {table_sg!r}"))
         report["sg_symbol_check"] = "failed"
 
     bundle_sg_num = bundle.get("subspace_sg_number")
     if not _is_positive_int(bundle_sg_num):
-        blockers.append(_blocker(
-            "sg_number_missing",
+        blockers.append(_blocker("sg_number_missing",
             "bundle missing positive subspace_sg_number"))
         report["sg_number_check"] = "failed"
     elif not _is_positive_int(table_sg_num):
-        report["sg_number_check"] = "failed"  # already blocked in provenance
+        report["sg_number_check"] = "failed"
     elif int(bundle_sg_num) != int(table_sg_num):
-        blockers.append(_blocker(
-            "sg_number_mismatch",
+        blockers.append(_blocker("sg_number_mismatch",
             f"SG number mismatch: bundle {bundle_sg_num} != table "
             f"{table_sg_num}"))
         report["sg_number_check"] = "failed"
     else:
         report["sg_number_check"] = "passed"
 
-    # ---- C. Certificate presence + validation status ----
+    # ---- C. Certificate presence, status, internal consistency ----
     cert_id = bundle.get("certificate_identity", {})
     if not isinstance(cert_id, dict) or not cert_id:
-        blockers.append(_blocker(
-            "certificate_missing",
+        blockers.append(_blocker("certificate_missing",
             "bundle has no certificate_identity"))
-        report["certificate_check"] = "blocked"
-        report["centering_check"] = "blocked"
-        report["affine_setting_check"] = "blocked"
-        report["setting_identity_check"] = "blocked"
+        for k in ("certificate_check", "certificate_consistency_check",
+                  "cert_sg_consistency_check", "affine_setting_check",
+                  "hall_setting_check"):
+            report[k] = "blocked"
         cert_id = {}
     else:
-        val_statuses = cert_id.get("certificate_validation_statuses", [])
-        if not isinstance(val_statuses, list):
-            val_statuses = []
-        validation_status = str(cert_id.get("validation_status", ""))
-        distinct = cert_id.get("distinct_setting_identities")
-        cert_ok = True
-        if "rejected" in val_statuses:
-            blockers.append(_blocker(
-                "certificate_rejected",
-                "certificate_identity contains a rejected validation status"))
-            cert_ok = False
-        # Fail-closed: only an explicit ``any_unresolved is False`` (fully
-        # resolved) passes.  Missing, null, or truthy blocks.
-        if cert_id.get("any_unresolved", True) is not False:
-            blockers.append(_blocker(
-                "certificate_unresolved",
-                "certificate_identity is unresolved/not_evaluated"))
-            cert_ok = False
-        if validation_status != "validated":
-            blockers.append(_blocker(
-                "certificate_not_validated",
-                f"certificate validation_status must be 'validated', got "
-                f"{validation_status!r}"))
-            cert_ok = False
-        if isinstance(distinct, int) and not isinstance(distinct, bool) \
-                and distinct > 1:
-            blockers.append(_blocker(
-                "certificate_ambiguous_setting",
-                f"{distinct} distinct setting identities in one instance"))
-            cert_ok = False
-        report["certificate_check"] = "passed" if cert_ok else "failed"
-
-        # ---- D. Centering + affine setting ----
+        _validate_certificate_status(cert_id, blockers, report)
+        _validate_identity_internal_consistency(cert_id, blockers, report)
+        _validate_cert_sg_consistency(
+            cert_id, bundle_sg_num, table_sg_num, blockers, report)
         _validate_setting(cert_id, blockers, report)
-
-        # ---- E. Setting identity match with table ----
-        _validate_setting_identity_match(
+        _validate_hall_consistency(
             cert_id, table_hall, table_hall_symbol, table_centering,
-            blockers, report)
+            table_setting is not None, blockers, report)
 
-    # ---- F. Spin convention (bundle spinor vs table spinful) ----
-    bundle_spin = _bundle_spin_convention(bundle, cert_id)
-    if not isinstance(table_spinful, bool):
-        report["spin_convention_check"] = "failed"  # already blocked above
-    elif bundle_spin is None:
-        blockers.append(_blocker(
-            "spin_convention_missing",
-            "bundle spin convention (spinor) not recorded"))
-        report["spin_convention_check"] = "blocked"
-    elif bundle_spin != table_spinful:
-        blockers.append(_blocker(
-            "spin_convention_mismatch",
-            f"bundle spinor={bundle_spin} != table spinful={table_spinful}"))
-        report["spin_convention_check"] = "failed"
-    else:
-        report["spin_convention_check"] = "passed"
+    # ---- D. Spin convention: all evidence must agree and equal table ----
+    _validate_spin_convention(bundle, cert_id, table_spinful, blockers, report)
 
-    # ---- G. HSP basis ----
+    # ---- E. HSP basis ----
     table_hsps = _normalized_hsp_set(table.get("expected_hsps"))
     irreps_by_kp = bundle.get("irreps_by_kpoint", {})
     actual_hsps = set(irreps_by_kp) if isinstance(irreps_by_kp, dict) else set()
     bundle_expected_raw = bundle.get("expected_hsps")
     if bundle_expected_raw is None:
-        # Legacy bundle without a declared basis: derive from irrep keys.
         bundle_hsps: set[str] | None = actual_hsps
     else:
         bundle_hsps = _normalized_hsp_set(bundle_expected_raw)
     if bundle_hsps is None:
-        blockers.append(_blocker(
-            "hsp_basis_malformed",
+        blockers.append(_blocker("hsp_basis_malformed",
             "bundle expected_hsps is not a unique list of non-empty labels"))
         report["hsp_basis_check"] = "failed"
     elif bundle_hsps != table_hsps or actual_hsps != table_hsps:
-        blockers.append(_blocker(
-            "hsp_basis_mismatch",
+        blockers.append(_blocker("hsp_basis_mismatch",
             f"expected_hsps mismatch: table {sorted(table_hsps)}, bundle "
             f"expected {sorted(bundle_hsps)}, actual {sorted(actual_hsps)}"))
         report["hsp_basis_check"] = "failed"
     else:
         report["hsp_basis_check"] = "passed"
 
-    # ---- H. Irrep keys resolve exactly and unambiguously ----
+    # ---- F. Irrep keys resolve exactly and unambiguously ----
     table_irreps = table.get("irreps", [])
     if isinstance(irreps_by_kp, dict) and isinstance(table_irreps, list):
         counts = _count_irreps(irreps_by_kp, table_irreps)
         if counts is None:
-            blockers.append(_blocker(
-                "irrep_key_unresolved",
+            blockers.append(_blocker("irrep_key_unresolved",
                 "could not resolve irrep keys: bundle irrep keys do not "
                 "resolve exactly/unambiguously to table irreps"))
             report["irrep_basis_check"] = "failed"
         else:
             report["irrep_basis_check"] = "passed"
     else:
-        blockers.append(_blocker(
-            "irrep_basis_malformed",
+        blockers.append(_blocker("irrep_basis_malformed",
             "bundle irreps_by_kpoint or table irreps malformed"))
         report["irrep_basis_check"] = "failed"
 
@@ -289,7 +285,8 @@ def promote_bundle_for_solve(*, bundle: dict, table: dict) -> dict:
         "space_group_number": table_sg_num,
         "spinful": table_spinful,
         "valleyscope_reduction": valleyscope_reduction,
-        "setting_identity": dict(table_setting),
+        "independent_setting_identity": dict(table_setting) if table_setting else None,
+        "setting_source": "spglib.get_spacegroup_type",
     }
 
     promoted = not blockers
@@ -322,7 +319,6 @@ def _is_positive_int(value: object) -> bool:
 
 
 def _normalized_hsp_set(value: object) -> set[str] | None:
-    """Return the HSP label set, or None if malformed."""
     if not isinstance(value, list):
         return set() if value is None else None
     if not all(isinstance(h, str) and h for h in value):
@@ -333,57 +329,115 @@ def _normalized_hsp_set(value: object) -> set[str] | None:
     return set(labels)
 
 
-def _validate_setting(
-    cert_id: dict,
-    blockers: list[dict[str, str]],
-    report: dict[str, object],
-) -> None:
-    """Validate centering presence and primitive/centered affine evidence."""
+def _validate_certificate_status(cert_id, blockers, report):
+    """Certificate must be present, validated, not unresolved/rejected/ambiguous."""
+    val_statuses = cert_id.get("certificate_validation_statuses", [])
+    if not isinstance(val_statuses, list):
+        val_statuses = []
+    validation_status = str(cert_id.get("validation_status", ""))
+    distinct = cert_id.get("distinct_setting_identities")
+    ok = True
+    if "rejected" in val_statuses:
+        blockers.append(_blocker("certificate_rejected",
+            "certificate_identity contains a rejected validation status"))
+        ok = False
+    if cert_id.get("any_unresolved", True) is not False:
+        blockers.append(_blocker("certificate_unresolved",
+            "certificate_identity is unresolved/not_evaluated"))
+        ok = False
+    if validation_status != "validated":
+        blockers.append(_blocker("certificate_not_validated",
+            f"certificate validation_status must be 'validated', got "
+            f"{validation_status!r}"))
+        ok = False
+    if isinstance(distinct, int) and not isinstance(distinct, bool) and distinct > 1:
+        blockers.append(_blocker("certificate_ambiguous_setting",
+            f"{distinct} distinct setting identities in one instance"))
+        ok = False
+    report["certificate_check"] = "passed" if ok else "failed"
+
+
+def _validate_identity_internal_consistency(cert_id, blockers, report):
+    """Singular fields must be consistent with their plural collections."""
+    ok = True
+    hall_number = cert_id.get("hall_number")
+    hall_numbers = cert_id.get("hall_numbers")
+    if isinstance(hall_numbers, list) and hall_numbers \
+            and hall_number not in hall_numbers:
+        blockers.append(_blocker("certificate_field_inconsistent",
+            f"hall_number {hall_number!r} not in hall_numbers {hall_numbers!r}"))
+        ok = False
+    centering_type = cert_id.get("centering_type")
+    centering_types = cert_id.get("centering_types")
+    if isinstance(centering_types, list) and centering_types \
+            and centering_type not in centering_types:
+        blockers.append(_blocker("certificate_field_inconsistent",
+            f"centering_type {centering_type!r} not in centering_types "
+            f"{centering_types!r}"))
+        ok = False
+    validation_status = cert_id.get("validation_status")
+    val_statuses = cert_id.get("certificate_validation_statuses")
+    if isinstance(val_statuses, list) and val_statuses \
+            and validation_status is not None \
+            and validation_status not in val_statuses:
+        blockers.append(_blocker("certificate_field_inconsistent",
+            f"validation_status {validation_status!r} not in "
+            f"certificate_validation_statuses {val_statuses!r}"))
+        ok = False
+    report["certificate_consistency_check"] = "passed" if ok else "failed"
+
+
+def _validate_cert_sg_consistency(cert_id, bundle_sg_num, table_sg_num,
+                                  blockers, report):
+    """Certificate SG number/symbol must agree with bundle and table SG."""
+    cert_sg = cert_id.get("sg_number")
+    ok = True
+    if _is_positive_int(cert_sg):
+        for name, other in (("bundle", bundle_sg_num), ("table", table_sg_num)):
+            if _is_positive_int(other) and int(cert_sg) != int(other):
+                blockers.append(_blocker("certificate_sg_conflict",
+                    f"certificate sg_number {cert_sg} conflicts with {name} "
+                    f"SG {other}"))
+                ok = False
+    report["cert_sg_consistency_check"] = "passed" if ok else "failed"
+
+
+def _validate_setting(cert_id, blockers, report):
+    """Validate centering + primitive/centered affine evidence (real vocab)."""
     raw_centering = cert_id.get("centering_type")
-    # Missing centering evidence is unknown, not primitive.  ``None`` and an
-    # empty string are both treated as missing, never as "P".
     centering = "" if raw_centering is None else str(raw_centering)
     centering_types = cert_id.get("centering_types", [])
     if not isinstance(centering_types, list):
         centering_types = []
-    # Missing centering evidence is unknown, not primitive.
     if not centering:
-        blockers.append(_blocker(
-            "centering_missing",
+        blockers.append(_blocker("centering_missing",
             "certificate has no centering_type; missing centering is unknown, "
             "not primitive"))
-        report["centering_check"] = "blocked"
         report["affine_setting_check"] = "blocked"
         return
     if len(centering_types) > 1:
-        blockers.append(_blocker(
-            "centering_ambiguous",
+        blockers.append(_blocker("centering_ambiguous",
             f"multiple centering types in one instance: {centering_types}"))
-        report["centering_check"] = "failed"
         report["affine_setting_check"] = "failed"
         return
-    report["centering_check"] = "passed"
 
     validation_status = str(cert_id.get("validation_status", ""))
+    relation = str(cert_id.get("primitive_conventional_relation", ""))
     if centering == "P":
-        relation = str(cert_id.get("primitive_conventional_relation", ""))
         if validation_status == "validated" \
-                and relation in _PRIMITIVE_DIRECT_RELATIONS:
+                and relation == _PRIMITIVE_DIRECT_RELATION:
             report["affine_setting_check"] = "passed"
         else:
-            blockers.append(_blocker(
-                "primitive_relation_not_declared",
-                "primitive setting requires a validated certificate that "
-                "explicitly declares the primitive direct-coordinate relation; "
+            blockers.append(_blocker("primitive_relation_not_declared",
+                "primitive setting requires validated certificate with "
+                f"primitive_conventional_relation=='{_PRIMITIVE_DIRECT_RELATION}'; "
                 f"got validation_status={validation_status!r} "
                 f"relation={relation!r}"))
             report["affine_setting_check"] = "failed"
         return
 
-    # Centered / nontrivial setting.
     if centering not in _CENTERED_TYPES:
-        blockers.append(_blocker(
-            "centering_unrecognized",
+        blockers.append(_blocker("centering_unrecognized",
             f"unrecognized centering_type {centering!r}"))
         report["affine_setting_check"] = "failed"
         return
@@ -395,74 +449,78 @@ def _validate_setting(
         isinstance(row, list) and len(row) == 3 for row in transform)
     vectors_ok = isinstance(centering_vectors, list) and bool(centering_vectors)
     if transform_ok and vectors_ok and validation_status == "validated" \
-            and op_status == "validated" and affine_status == "validated":
+            and relation in _CENTERED_RELATIONS \
+            and op_status == _OP_MAPPING_PASSED \
+            and affine_status == _AFFINE_PASSED:
         report["affine_setting_check"] = "passed"
     else:
-        blockers.append(_blocker(
-            "centered_affine_evidence_invalid",
-            "centered setting requires a validated normalized transform, "
-            "centering vectors, and passed operation/affine validation; got "
-            f"transform_ok={transform_ok} vectors_ok={vectors_ok} "
-            f"validation_status={validation_status!r} "
-            f"operation_mapping_status={op_status!r} "
+        blockers.append(_blocker("centered_affine_evidence_invalid",
+            "centered setting requires a validated transform + centering "
+            "vectors + passed operation/affine validation with producer "
+            f"vocabulary; got transform_ok={transform_ok} "
+            f"vectors_ok={vectors_ok} validation_status={validation_status!r} "
+            f"relation={relation!r} operation_mapping_status={op_status!r} "
             f"affine_validation_status={affine_status!r}"))
         report["affine_setting_check"] = "failed"
 
 
-def _validate_setting_identity_match(
-    cert_id: dict,
-    table_hall: object,
-    table_hall_symbol: str,
-    table_centering: str,
-    blockers: list[dict[str, str]],
-    report: dict[str, object],
-) -> None:
-    """Compare the bundle certificate setting identity with the table."""
+def _validate_hall_consistency(cert_id, table_hall, table_hall_symbol,
+                               table_centering, table_resolved,
+                               blockers, report):
+    """Cert Hall must belong to its SG, match its centering, and equal the
+    independently derived table Hall/centering."""
     bundle_hall = cert_id.get("hall_number")
     bundle_hall_symbol = str(cert_id.get("hall_symbol", ""))
-    bundle_centering = str(cert_id.get("centering_type", ""))
+    bundle_centering = "" if cert_id.get("centering_type") is None \
+        else str(cert_id.get("centering_type"))
+    cert_sg = cert_id.get("sg_number")
+    ok = True
     if not _is_positive_int(bundle_hall) or not bundle_hall_symbol:
-        blockers.append(_blocker(
-            "setting_identity_missing",
+        blockers.append(_blocker("setting_identity_missing",
             "bundle certificate missing Hall setting identity"))
-        report["setting_identity_check"] = "blocked"
+        report["hall_setting_check"] = "blocked"
         return
-    if not _is_positive_int(table_hall) or not table_hall_symbol \
-            or not table_centering:
-        report["setting_identity_check"] = "failed"  # table already blocked
+    # Hall must belong to the certificate's own SG number (spglib).
+    if _is_positive_int(cert_sg) and not _hall_belongs_to_sg(bundle_hall, cert_sg):
+        blockers.append(_blocker("hall_sg_inconsistent",
+            f"Hall number {bundle_hall} does not belong to SG {cert_sg} "
+            "(spglib)"))
+        ok = False
+    # Centering must match the Hall symbol.
+    hall_centering = _centering_from_hall_symbol(bundle_hall_symbol)
+    if bundle_centering and hall_centering and bundle_centering != hall_centering:
+        blockers.append(_blocker("centering_hall_inconsistent",
+            f"centering_type {bundle_centering!r} inconsistent with Hall "
+            f"symbol {bundle_hall_symbol!r} (spglib centering {hall_centering!r})"))
+        ok = False
+    # Must equal the independently derived table standard setting.
+    if not table_resolved:
+        report["hall_setting_check"] = "failed"
         return
     if int(bundle_hall) != int(table_hall) \
             or bundle_hall_symbol != table_hall_symbol \
             or bundle_centering != table_centering:
-        blockers.append(_blocker(
-            "setting_identity_mismatch",
-            "Hall/setting identity mismatch: bundle "
-            f"(hall={bundle_hall}, symbol={bundle_hall_symbol!r}, "
-            f"centering={bundle_centering!r}) != table "
-            f"(hall={table_hall}, symbol={table_hall_symbol!r}, "
-            f"centering={table_centering!r})"))
-        report["setting_identity_check"] = "failed"
-    else:
-        report["setting_identity_check"] = "passed"
+        blockers.append(_blocker("setting_identity_mismatch",
+            "certificate setting does not match independently derived table "
+            f"setting: cert (hall={bundle_hall}, symbol={bundle_hall_symbol!r}, "
+            f"centering={bundle_centering!r}) != table (hall={table_hall}, "
+            f"symbol={table_hall_symbol!r}, centering={table_centering!r})"))
+        ok = False
+    report["hall_setting_check"] = "passed" if ok else "failed"
 
 
-def _bundle_spin_convention(bundle: dict, cert_id: dict) -> bool | None:
-    """Resolve the bundle spin convention from certificate/records.
-
-    Priority: explicit ``spinor``/``spinful`` on the bundle or the certificate
-    identity, then a consistent ``source_table_spinor`` across all irrep source
-    provenance records.  Returns None when absent or inconsistent.
-    """
-    for holder in (bundle, cert_id):
+def _collect_spin_evidence(bundle, cert_id):
+    """Gather every spin-convention datum available on the bundle/cert."""
+    evidence: list[tuple[str, bool]] = []
+    for holder, name in ((bundle, "bundle"), (cert_id, "certificate")):
         if isinstance(holder, dict):
             for key in ("spinor", "spinful", "source_table_spinor"):
                 v = holder.get(key)
                 if isinstance(v, bool):
-                    return v
-    seen: set[bool] = set()
+                    evidence.append((f"{name}.{key}", v))
     records = bundle.get("irrep_records_by_kpoint", {})
     if isinstance(records, dict):
-        for kp_records in records.values():
+        for kp, kp_records in records.items():
             if not isinstance(kp_records, list):
                 continue
             for rec in kp_records:
@@ -471,10 +529,36 @@ def _bundle_spin_convention(bundle: dict, cert_id: dict) -> bool | None:
                 p = rec.get("irrep_source_provenance")
                 if isinstance(p, dict) and isinstance(
                         p.get("source_table_spinor"), bool):
-                    seen.add(p["source_table_spinor"])
-    if len(seen) == 1:
-        return next(iter(seen))
-    return None
+                    evidence.append(
+                        (f"record.{kp}.source_table_spinor",
+                         p["source_table_spinor"]))
+    return evidence
+
+
+def _validate_spin_convention(bundle, cert_id, table_spinful, blockers, report):
+    """All spin evidence must agree and equal the table spinful flag."""
+    evidence = _collect_spin_evidence(bundle, cert_id)
+    if not isinstance(table_spinful, bool):
+        report["spin_convention_check"] = "failed"
+        return
+    if not evidence:
+        blockers.append(_blocker("spin_convention_missing",
+            "bundle spin convention (spinor) not recorded anywhere"))
+        report["spin_convention_check"] = "blocked"
+        return
+    values = {v for _, v in evidence}
+    if len(values) > 1:
+        blockers.append(_blocker("spin_evidence_conflict",
+            f"mutually inconsistent spin evidence: {evidence}"))
+        report["spin_convention_check"] = "failed"
+        return
+    bundle_spin = next(iter(values))
+    if bundle_spin != table_spinful:
+        blockers.append(_blocker("spin_convention_mismatch",
+            f"bundle spinor={bundle_spin} != table spinful={table_spinful}"))
+        report["spin_convention_check"] = "failed"
+    else:
+        report["spin_convention_check"] = "passed"
 
 
 def load_reduced_ebr_table(path: str | Path) -> dict:

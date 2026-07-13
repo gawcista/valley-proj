@@ -15,7 +15,9 @@ from valleyscope.analysis.reduced_ebr_mapping import (
 )
 from valleyscope.analysis.reduced_ebr_solver import classify_bundle
 from tests.helpers_io_workflow import write_fixture, write_config
-from tests.reduced_ebr_promo_helpers import attach_promotion
+from tests.reduced_ebr_promo_helpers import (
+    attach_promotion, real_certificate_identity,
+)
 
 # ---------------------------------------------------------------------------
 # Shared compact factories
@@ -36,23 +38,16 @@ def _p4_loader(gm=None, x=None):
         ]}
     return _f
 
-_SETTING = {"hall_number": 1, "hall_symbol": "H 1", "centering_type": "P"}
-
-def _validated_cert(sg_num, symbol):
-    return {
-        "hall_numbers": [1], "hall_symbols": ["H 1"], "centering_types": ["P"],
-        "certificate_validation_statuses": ["validated"],
-        "any_unresolved": False, "distinct_setting_identities": 1,
-        "sg_number": sg_num, "sg_symbol": symbol,
-        "hall_number": 1, "hall_symbol": "H 1", "centering_type": "P",
-        "primitive_conventional_relation": "identity",
-        "transform_provenance": "derived_affine_equivalence",
-        "validation_status": "validated",
-        "operation_mapping_status": "validated",
-        "affine_validation_status": "validated",
-    }
+def _spin_records(irreps, spinful=True):
+    return {kp: [{"matched_irrep": (labs[0] if labs else ""),
+                  "irrep_multiplicity": 1,
+                  "irrep_source_provenance": {"source_table_spinor": spinful}}]
+            for kp, labs in irreps.items()}
 
 def _mk_bundle(bid, sg_num, symbol, hsps, irreps, ready=True):
+    # Real producer-built primitive certificate for a spglib-unique SG; None
+    # for unresolved/invalid SGs so the validator blocks.
+    cert = real_certificate_identity(sg_num, symbol)
     return {"bundle_id": bid, "valley": "K_valley",
             "subspace_group_candidate": symbol,
             "subspace_sg_number": sg_num,
@@ -62,8 +57,8 @@ def _mk_bundle(bid, sg_num, symbol, hsps, irreps, ready=True):
             "ready_for_external_solver": ready,
             "ready_for_reduced_table_validation": ready,
             "expected_hsps": hsps, "irreps_by_kpoint": irreps,
-            "spinor": True,
-            "certificate_identity": _validated_cert(sg_num, symbol)}
+            "irrep_records_by_kpoint": _spin_records(irreps, spinful=True),
+            "certificate_identity": cert if cert is not None else {}}
 
 def _bm(*bundles): return _build_auto_canonical_mapping(
     ebr_export_bundle={"bundles": list(bundles)}, spinor_wf=True)
@@ -72,7 +67,6 @@ def _auto_table(sg, hsps, irreps, loader=None):
     return build_auto_canonical_reduced_ebr_table(
         subspace_sg_number=sg, spinor=True, bundle_irreps_by_kpoint=irreps,
         expected_hsps=hsps, subspace_group_candidate=symbol_for(sg),
-        setting_identity={**_SETTING, "space_group_symbol": symbol_for(sg)},
         source_loader=loader or _p4_loader())
 
 def symbol_for(sg): return {75: "P4", 143: "P3"}.get(sg, f"SG{sg}")
