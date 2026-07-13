@@ -124,7 +124,17 @@ def _classify_status(
 ) -> str:
     if not bundles:
         return "no_bundles"
-    if not excluded:
+    solver_ready = any(
+        b.get("ready_for_external_solver") is True for b in bundles
+    )
+    validation_only = all(
+        b.get("ready_for_external_solver") is not True for b in bundles
+    )
+    if excluded:
+        return "partial_export"
+    if validation_only:
+        return "ready_for_reduced_table_validation"
+    if solver_ready:
         return "ready_for_external_solver"
     return "partial_export"
 

@@ -24,6 +24,11 @@ def check_handoff_text(text: str) -> list[str]:
         errors.append("handoff must include exact test result output")
     if "git diff --check HEAD" not in text:
         errors.append("handoff must include git diff --check HEAD")
+    if "completed" in lower and "not yet wired" in lower:
+        errors.append(
+            "handoff marked COMPLETED but states a required path is "
+            "'not yet wired'; task is incomplete"
+        )
     return errors
 
 

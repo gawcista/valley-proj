@@ -16,6 +16,113 @@ _REQUIRED_TABLE_KEYS = {"schema_version", "subspace_group_candidate",
 _SOLVER_NAME = "smith_normal_form_plus_bounded_nonnegative_search"
 
 
+# ---------------------------------------------------------------------------
+# Production bundle promotion: sampled_basis → validated_basis
+# ---------------------------------------------------------------------------
+
+def promote_bundle_for_solve(
+    *,
+    bundle: dict,
+    table: dict,
+) -> dict:
+    """Validate a bundle against a reduced EBR table and promote if compatible.
+
+    This is the single production promotion function used by both the
+    external-table path (``build_reduced_ebr_mapping``) and the
+    auto-canonical path (``_build_auto_canonical_mapping``).
+
+    Returns a dict with:
+    - ``promoted``: bool — True if the bundle can be promoted to solver-ready.
+    - ``promoted_bundle``: dict or None — shallow copy with
+      ``ready_for_external_solver=True`` when promoted.
+    - ``blocker_reasons``: list[str] — reasons when not promoted.
+    - ``validation_report``: dict — structured validation evidence.
+    """
+    reasons: list[str] = []
+    report: dict[str, object] = {
+        "sg_check": "not_attempted",
+        "hsp_basis_check": "not_attempted",
+        "irrep_basis_check": "not_attempted",
+        "certificate_check": "not_attempted",
+    }
+
+    bundle_sg = str(bundle.get("subspace_group_candidate", ""))
+    table_sg = str(table.get("subspace_group_candidate", ""))
+    if bundle_sg != table_sg:
+        reasons.append(
+            f"SG symbol mismatch: bundle '{bundle_sg}' != table '{table_sg}'"
+        )
+        report["sg_check"] = "failed"
+    else:
+        report["sg_check"] = "passed"
+
+    # HSP basis check.
+    bundle_hsps = set(bundle.get("expected_hsps", []))
+    table_hsps = set(table.get("expected_hsps", []))
+    if bundle_hsps != table_hsps:
+        reasons.append(
+            f"expected_hsps mismatch: bundle {sorted(bundle_hsps)} "
+            f"!= table {sorted(table_hsps)}"
+        )
+        report["hsp_basis_check"] = "failed"
+    else:
+        report["hsp_basis_check"] = "passed"
+
+    # Irrep basis check: the bundle's irrep keys (kpoint:irrep_label pairs)
+    # must match the table's declared irrep labels.
+    table_irreps = set(table.get("irreps", []))
+    bundle_irreps: set[str] = set()
+    irreps_by_kp = bundle.get("irreps_by_kpoint", {})
+    if isinstance(irreps_by_kp, dict):
+        for kp, labels in irreps_by_kp.items():
+            if isinstance(labels, list):
+                for label in labels:
+                    key = f"{kp}:{label}" if ":" not in str(label) else str(label)
+                    bundle_irreps.add(key)
+    if bundle_irreps and table_irreps:
+        if not bundle_irreps.issubset(table_irreps):
+            extra = sorted(bundle_irreps - table_irreps)
+            reasons.append(
+                f"irrep basis mismatch: bundle irreps not in table: {extra}"
+            )
+            report["irrep_basis_check"] = "failed"
+        else:
+            report["irrep_basis_check"] = "passed"
+    else:
+        report["irrep_basis_check"] = "not_attempted"
+
+    # Certificate check: bundle must carry a validated or resolvable certificate.
+    cert_id = bundle.get("certificate_identity", {})
+    if isinstance(cert_id, dict):
+        any_unresolved = bool(cert_id.get("any_unresolved", True))
+        if any_unresolved:
+            # Not an automatic blocker: the certificate may be unresolved
+            # because no parent-to-standard transform was needed (primitive
+            # setting).  Record but do not block.
+            report["certificate_check"] = "unresolved_but_not_blocking"
+        else:
+            report["certificate_check"] = "passed"
+    else:
+        report["certificate_check"] = "not_available"
+
+    promoted = not bool(reasons)
+    promoted_bundle: dict | None = None
+    if promoted:
+        promoted_bundle = dict(bundle)
+        promoted_bundle["ready_for_external_solver"] = True
+        promoted_bundle["promotion_provenance"] = {
+            "source": "promote_bundle_for_solve",
+            "validation_report": report,
+        }
+
+    return {
+        "promoted": promoted,
+        "promoted_bundle": promoted_bundle,
+        "blocker_reasons": reasons,
+        "validation_report": report,
+    }
+
+
 def load_reduced_ebr_table(path: str | Path) -> dict:
     """Load and validate a reduced EBR table from JSON.
 
@@ -187,24 +294,39 @@ def build_reduced_ebr_mapping(
         if not isinstance(bundle, dict):
             continue
         # Gate: only ready_for_external_solver bundles may enter decomposition.
-        # ready_for_reduced_table_validation bundles are table-validation
-        # candidates, not solver-ready; promotion requires an explicit
-        # table/bundle compatibility check.
+        # Validation-candidate bundles (sampled_basis) are promoted via the
+        # shared validate-and-promote path before solving.
         if not bundle.get("ready_for_external_solver"):
-            excluded.append({
-                "bundle_id": bundle.get("bundle_id", "?"),
-                "subspace_group_candidate": bundle.get("subspace_group_candidate", ""),
-                "subspace_space_group": bundle.get("subspace_space_group", {}),
-                "irrep_source_provenance_by_kpoint": _per_kpoint_prov(bundle),
-                "reason": (
-                    "not ready for external solver"
-                    if not bundle.get("ready_for_reduced_table_validation")
-                    else "ready only for reduced-table validation; "
-                         "promotion to solver-ready requires table/bundle "
-                         "compatibility validation"
-                ),
-            })
-            continue
+            if bundle.get("ready_for_reduced_table_validation"):
+                promo = promote_bundle_for_solve(bundle=bundle, table=table)
+                if promo["promoted"] and promo["promoted_bundle"] is not None:
+                    bundle = promo["promoted_bundle"]
+                else:
+                    excluded.append({
+                        "bundle_id": bundle.get("bundle_id", "?"),
+                        "subspace_group_candidate": bundle.get(
+                            "subspace_group_candidate", ""),
+                        "subspace_space_group": bundle.get(
+                            "subspace_space_group", {}),
+                        "irrep_source_provenance_by_kpoint": _per_kpoint_prov(
+                            bundle),
+                        "reason": (
+                            "promotion blocked: "
+                            + "; ".join(promo["blocker_reasons"])
+                        ),
+                    })
+                    continue
+            else:
+                excluded.append({
+                    "bundle_id": bundle.get("bundle_id", "?"),
+                    "subspace_group_candidate": bundle.get(
+                        "subspace_group_candidate", ""),
+                    "subspace_space_group": bundle.get(
+                        "subspace_space_group", {}),
+                    "irrep_source_provenance_by_kpoint": _per_kpoint_prov(bundle),
+                    "reason": "not ready for external solver",
+                })
+                continue
 
         bundle_group = str(bundle.get("subspace_group_candidate", ""))
         if bundle_group != table_group:

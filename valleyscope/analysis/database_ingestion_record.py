@@ -93,6 +93,9 @@ def build_database_ingestion_record(
                     _extract_irrep_records(bundle, valley_irrep_records)
                 elif is_validation_candidate:
                     validation_candidate_count += 1
+                    # Validation candidates contain trusted valley-preserving
+                    # irreps; preserve them independently of EBR readiness.
+                    _extract_irrep_records(bundle, valley_irrep_records)
                 else:
                     excluded_count += 1
         excluded_count += int(valley_ebr_export_bundle.get("excluded_count", 0) or 0)
@@ -193,8 +196,18 @@ def build_database_ingestion_record(
         record["reduced_ebr_records"] = []
 
     # --- Status ---
-    if decomposition_ready_count > 0:
+    # A bundle is "ready" if it was decomposition-ready in the export
+    # OR if it was promoted and solved by the auto-canonical/external path.
+    solved_count = len(
+        valley_reduced_ebr_mapping.get("solutions", [])
+    ) if isinstance(valley_reduced_ebr_mapping, dict) else 0
+    if decomposition_ready_count > 0 or solved_count > 0:
         record["record_status"] = "has_ready_ebr_bundles"
+        # Update counts to reflect promoted-and-solved bundles.
+        record["ready_bundle_count"] = max(record["ready_bundle_count"], solved_count)
+        record["decomposition_ready_count"] = max(
+            record["decomposition_ready_count"], solved_count,
+        )
     else:
         record["record_status"] = "no_ready_ebr_bundles"
 

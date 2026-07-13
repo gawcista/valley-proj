@@ -69,3 +69,37 @@ def test_tracked_markdown_rejects_claude_md():
 
 def test_tracked_markdown_empty_list_is_clean():
     assert check_tracked_markdown([]) == []
+
+
+def test_completed_handoff_rejects_not_yet_wired():
+    """A handoff marked COMPLETED must not claim a required path is not yet wired."""
+    text = """
+Branch: cc/example
+Commit: 123abcd Fix example
+Remote feature branch: No
+pytest -q
+# 100 passed in 1.00s
+git diff --check HEAD
+# clean
+COMPLETED - Phase A1
+Remaining Risks:
+- State 2 (table_validation_passed) is not yet wired.
+"""
+    errors = check_handoff_text(text)
+    assert any("not yet wired" in e for e in errors)
+
+
+def test_completed_without_not_yet_wired_is_clean():
+    text = """
+Branch: cc/example
+Commit: 123abcd Fix example
+Remote feature branch: No
+pytest -q
+# 100 passed in 1.00s
+git diff --check HEAD
+# clean
+COMPLETED - Phase A1
+Remaining Risks:
+- Centered settings without explicit transform remain unresolved.
+"""
+    assert check_handoff_text(text) == []

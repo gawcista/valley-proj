@@ -2763,8 +2763,11 @@ def _build_auto_canonical_mapping(
 
         bundle_id = str(b.get("bundle_id", "?"))
         is_ready = bool(b.get("ready_for_external_solver"))
+        is_validation_candidate = bool(
+            b.get("ready_for_reduced_table_validation")
+        )
 
-        if not is_ready:
+        if not is_ready and not is_validation_candidate:
             all_excluded.append({
                 "bundle_id": bundle_id,
                 "subspace_group_candidate": b.get("subspace_group_candidate", ""),

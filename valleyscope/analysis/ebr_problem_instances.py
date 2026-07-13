@@ -48,38 +48,24 @@ def build_ebr_problem_instances(
         return _empty_report("no trusted EBR input candidates")
 
     # Group by certificate-aware physical identity.
-    # Candidates with inconsistent or unresolved setting certificates
-    # must not be silently merged into one final-ready EBR problem.
-    # The key encodes the full normalized setting identity, not just
-    # Hall number + status.
-    groups: dict[tuple[int, str, int, str, object, object, str, object, str, str], list[dict[str, object]]] = {}
+    # Use the complete immutable _SettingIdentity as the key so that
+    # any affine-evidence difference (transform, origin, centering,
+    # provenance, operation-mapping, affine-validation status) produces
+    # a distinct group.
+    groups: dict[tuple[_SettingIdentity, str], list[dict[str, object]]] = {}
     for c in candidates:
-        ssg = c.get("subspace_space_group", {})
-        sg_symbol = (
-            ssg.get("candidate_space_group_symbol")
-            if isinstance(ssg, dict) else None
-        )
-        sg_number = _int_or_zero(
-            ssg.get("candidate_space_group_number") if isinstance(ssg, dict) else None,
-        )
-        sg = str(sg_symbol) if sg_symbol else str(c.get("subspace_group_candidate", ""))
         valley = str(c.get("valley", ""))
         fp = _certificate_fingerprint(c)
-        key = (
-            sg_number, sg,
-            fp.hall_number, fp.hall_symbol,
-            fp.transform_key, fp.origin_shift_key,
-            fp.centering_type, fp.centering_vectors_key,
-            fp.validation_status,
-            valley,
-        )
-        groups.setdefault(key, []).append(c)
+        groups.setdefault((fp, valley), []).append(c)
 
     instances: list[dict[str, object]] = []
     instance_counter = 0
 
-    for (_sg_num, sg, _hall, _hall_sym, _tf, _os, _ct, _cv, _cert_st, valley), cands in groups.items():
+    for (fp, valley), cands in groups.items():
         instance_counter += 1
+        # Setting identity for the flat keys.
+        sg = fp.sg_symbol or str(cands[0].get("subspace_group_candidate", ""))
+        _sg_num = fp.sg_number
         instance_id = f"ebr_instance_{instance_counter:03d}"
 
         # --- Canonical subgroup identity ---
@@ -372,7 +358,10 @@ def _normalize_transform(
             return None
         r: list[float] = []
         for v in row:
-            f = float(v)
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                return None
             if not np.isfinite(f):
                 return None
             f = round(f / _CERT_TOL) * _CERT_TOL
@@ -391,7 +380,10 @@ def _normalize_origin_shift(
         return None
     comps: list[float] = []
     for v in vector:
-        f = float(v)
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return None
         if not np.isfinite(f):
             return None
         # Modulo lattice: shift into [0, 1).
