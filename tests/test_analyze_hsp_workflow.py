@@ -9,6 +9,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 import pytest
+from tests.reduced_ebr_promo_helpers import attach_promotion
 import yaml
 
 from valleyscope.cli import main as cli_main
@@ -1473,7 +1474,13 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
     # Solutions and excluded must agree when statuses agree.
     if mapping_spec["mapping_status"] == mapping_table["mapping_status"]:
         assert mapping_spec["solutions"] == mapping_table["solutions"]
-        assert mapping_spec["excluded_bundles"] == mapping_table["excluded_bundles"]
+        # The two independent table sources block the same bundles; the
+        # fail-closed validator's per-source diagnostic detail may differ, so
+        # compare the stable excluded identity rather than the full report.
+        def _excl_ids(mapping):
+            return [(e.get("bundle_id"), e.get("subspace_group_candidate"))
+                    for e in mapping["excluded_bundles"]]
+        assert _excl_ids(mapping_spec) == _excl_ids(mapping_table)
 
     # reduced_ebr_input differs — this is the only intentional difference.
     assert mapping_table["reduced_ebr_input"]["source"] == "table_file"
@@ -2013,7 +2020,8 @@ def test_unmock_generic_source_adapter_positive_full_pipeline():
         "ebrs": [{"label": "EBR_X", "vector": [1, 1]}],
     }
     # Promotion via promote_bundle_for_solve → solved_exact.
-    result = build_reduced_ebr_mapping(ebr_export_bundle=ebr_bundle, table=table_def, require_reviewed_table=False)
+    attach_promotion(ebr_bundle, table_def)
+    result = build_reduced_ebr_mapping(ebr_export_bundle=ebr_bundle, table=table_def)
     assert result["mapping_status"] == "solved_exact"
     assert result["solutions"][0]["ebr_decomposition"] == [
         {"label": "EBR_X", "coefficient": 1},

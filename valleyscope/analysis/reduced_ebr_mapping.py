@@ -15,55 +15,79 @@ _REQUIRED_TABLE_KEYS = {"schema_version", "subspace_group_candidate",
                          "expected_hsps", "irreps", "ebrs"}
 _SOLVER_NAME = "smith_normal_form_plus_bounded_nonnegative_search"
 
+# Standard-setting certificate convention constants.
+_TRUSTED_DATA_SOURCE = "irreptables"
+_TRUSTED_PACKAGE = "irreptables"
+_TRUSTED_REDUCTION = "sampled_hsp_valley_preserving"
+# A primitive setting passes only when the validated certificate explicitly
+# declares the primitive direct-coordinate relation.  Missing/unknown is not
+# primitive.
+_PRIMITIVE_DIRECT_RELATIONS = frozenset({
+    "identity",
+    "primitive",
+    "primitive_direct",
+    "primitive_direct_match",
+    "primitive_conventional_identity",
+})
+_CENTERED_TYPES = frozenset({"A", "B", "C", "I", "F", "R"})
+
+
+def _blocker(code: str, detail: str) -> dict[str, str]:
+    return {"code": code, "detail": detail}
+
 
 # ---------------------------------------------------------------------------
 # Production bundle promotion: sampled_basis → validated_basis
 # ---------------------------------------------------------------------------
 
-def promote_bundle_for_solve(
-    *,
-    bundle: dict,
-    table: dict,
-    require_reviewed_table: bool = True,
-) -> dict:
+def promote_bundle_for_solve(*, bundle: dict, table: dict) -> dict:
     """Validate a bundle against a reduced EBR table and promote if compatible.
 
-    This is the single production promotion function — fail-closed.  Every
-    bundle, regardless of its pre-existing readiness flags, must pass all
-    physical validation gates.  The input Boolean is never trusted evidence.
+    Fail-closed.  Every bundle — regardless of any pre-existing readiness
+    Boolean — must pass every physical validation gate.  A pre-marked
+    ``ready_for_external_solver`` flag is never trusted evidence.  Missing,
+    unresolved, rejected, malformed, or mutually inconsistent evidence is a
+    blocker.  There is no bypass parameter.
 
-    When ``require_reviewed_table`` is False, the table provenance check is
-    skipped.  This is intended for low-level solver unit tests that use
-    minimal hand-written tables; it must never be False in production
-    mapping or auto-canonical paths.
+    Validated gates (all must pass to promote to ``validated_basis``):
 
-    Required table provenance (fail if ``require_reviewed_table`` is True):
-    - ``data_source``, ``package``, ``package_version``
-    - ``space_group_number``, ``spinful``
-    - ``valleyscope_reduction``
-
-    Required bundle evidence (fail if absent/unresolved/rejected/malformed):
-    - SG number + symbol agreement
-    - Hall/affine setting and certificate validation status
-    - HSP basis and irrep convention match
-    - For centered/nontrivial settings: validated affine transform + centering
+    - table provenance: ``data_source == 'irreptables'``, ``package ==
+      'irreptables'`` with non-empty version, positive ``space_group_number``,
+      boolean ``spinful``, ``valleyscope_reduction`` exact, and a recorded
+      setting identity (Hall number/symbol + centering);
+    - space group number and symbol both match;
+    - certificate present, ``validation_status == 'validated'``, not
+      unresolved/rejected/ambiguous;
+    - centering present (missing centering is *unknown*, never primitive);
+    - primitive setting: certificate explicitly declares the primitive
+      direct-coordinate relation; centered/nontrivial setting: validated
+      normalized transform + centering vectors + passed operation/affine
+      validation;
+    - Hall/setting identity matches the table;
+    - bundle spinor equals table ``spinful``;
+    - sampled HSP basis matches the table;
+    - every bundle irrep key resolves exactly and unambiguously.
 
     Returns a dict with ``promoted``, ``promoted_bundle``,
-    ``blocker_reasons``, ``validation_report``, ``canonical_state``.
+    ``blocker_reasons`` (structured ``{code, detail}`` dicts),
+    ``validation_report``, ``canonical_state``, ``table_provenance`` and
+    ``certificate_identity``.
     """
-    reasons: list[str] = []
+    blockers: list[dict[str, str]] = []
     report: dict[str, object] = {
-        "sg_check": "not_attempted",
-        "sg_number_check": "not_attempted",
         "table_provenance_check": "not_attempted",
+        "sg_symbol_check": "not_attempted",
+        "sg_number_check": "not_attempted",
+        "certificate_check": "not_attempted",
+        "centering_check": "not_attempted",
+        "affine_setting_check": "not_attempted",
+        "setting_identity_check": "not_attempted",
+        "spin_convention_check": "not_attempted",
         "hsp_basis_check": "not_attempted",
         "irrep_basis_check": "not_attempted",
-        "certificate_check": "not_attempted",
-        "setting_check": "not_attempted",
-        "spin_convention_check": "not_attempted",
     }
 
-    # ---- A. Table provenance ----
+    # ---- A. Table provenance (fail-closed) ----
     prov = table.get("provenance", {})
     if not isinstance(prov, dict):
         prov = {}
@@ -73,191 +97,202 @@ def promote_bundle_for_solve(
     table_spinful = prov.get("spinful")
     table_sg_num = prov.get("space_group_number")
     valleyscope_reduction = str(prov.get("valleyscope_reduction", ""))
+    table_setting = prov.get("setting_identity")
+    if not isinstance(table_setting, dict):
+        table_setting = {}
 
-    if require_reviewed_table:
-        if data_source != "irreptables" or not package or not package_version:
-            reasons.append(
-                "table provenance insufficient: data_source must be "
-                "'irreptables' with non-empty package and package_version"
-            )
-            report["table_provenance_check"] = "failed"
-        elif not isinstance(table_sg_num, int) or isinstance(table_sg_num, bool) \
-             or table_sg_num <= 0:
-            reasons.append(
-                "table provenance insufficient: missing or invalid "
-                "space_group_number"
-            )
-            report["table_provenance_check"] = "failed"
-        if valleyscope_reduction and \
-           valleyscope_reduction != "sampled_hsp_valley_preserving":
-            reasons.append(
-                f"unrecognised valleyscope_reduction: {valleyscope_reduction}"
-            )
-            report["table_provenance_check"] = "failed"
-        if report["table_provenance_check"] != "failed":
-            report["table_provenance_check"] = "passed"
-    else:
-        report["table_provenance_check"] = "skipped_low_level_test"
+    prov_ok = True
+    if data_source != _TRUSTED_DATA_SOURCE:
+        blockers.append(_blocker(
+            "table_data_source_invalid",
+            f"table data_source must be '{_TRUSTED_DATA_SOURCE}', "
+            f"got {data_source!r}"))
+        prov_ok = False
+    if package != _TRUSTED_PACKAGE or not package_version:
+        blockers.append(_blocker(
+            "table_package_invalid",
+            f"table package must be '{_TRUSTED_PACKAGE}' with a non-empty "
+            f"package_version, got package={package!r} "
+            f"version={package_version!r}"))
+        prov_ok = False
+    if not _is_positive_int(table_sg_num):
+        blockers.append(_blocker(
+            "table_sg_number_missing",
+            "table provenance missing positive space_group_number"))
+        prov_ok = False
+    if not isinstance(table_spinful, bool):
+        blockers.append(_blocker(
+            "table_spinful_missing",
+            "table provenance missing boolean spinful"))
+        prov_ok = False
+    if valleyscope_reduction != _TRUSTED_REDUCTION:
+        blockers.append(_blocker(
+            "table_reduction_provenance_invalid",
+            f"table valleyscope_reduction must be '{_TRUSTED_REDUCTION}', "
+            f"got {valleyscope_reduction!r}"))
+        prov_ok = False
+    table_hall = table_setting.get("hall_number")
+    table_hall_symbol = str(table_setting.get("hall_symbol", ""))
+    table_centering = str(table_setting.get("centering_type", ""))
+    if not _is_positive_int(table_hall) or not table_hall_symbol \
+            or not table_centering:
+        blockers.append(_blocker(
+            "table_setting_identity_missing",
+            "table provenance missing setting_identity "
+            "(hall_number, hall_symbol, centering_type)"))
+        prov_ok = False
+    report["table_provenance_check"] = "passed" if prov_ok else "failed"
 
     # ---- B. SG number + symbol ----
     bundle_sg = str(bundle.get("subspace_group_candidate", ""))
     table_sg = str(table.get("subspace_group_candidate", ""))
-    if bundle_sg != table_sg:
-        reasons.append(
-            f"SG symbol mismatch: bundle '{bundle_sg}' != table '{table_sg}'"
-        )
-        report["sg_check"] = "failed"
+    if bundle_sg and bundle_sg == table_sg:
+        report["sg_symbol_check"] = "passed"
     else:
-        report["sg_check"] = "passed"
+        blockers.append(_blocker(
+            "sg_symbol_mismatch",
+            f"SG symbol mismatch: bundle {bundle_sg!r} != table {table_sg!r}"))
+        report["sg_symbol_check"] = "failed"
 
     bundle_sg_num = bundle.get("subspace_sg_number")
-    if not require_reviewed_table:
-        report["sg_number_check"] = "skipped_low_level_test"
-    elif isinstance(bundle_sg_num, int) and not isinstance(bundle_sg_num, bool) \
-         and bundle_sg_num > 0 \
-         and isinstance(table_sg_num, int) and not isinstance(table_sg_num, bool) \
-         and table_sg_num > 0:
-        if int(bundle_sg_num) != int(table_sg_num):
-            reasons.append(
-                f"SG number mismatch: bundle {bundle_sg_num} "
-                f"!= table {table_sg_num}"
-            )
-            report["sg_number_check"] = "failed"
-        else:
-            report["sg_number_check"] = "passed"
-    elif isinstance(table_sg_num, int) and not isinstance(table_sg_num, bool) \
-         and table_sg_num > 0:
-        # Table declares SG number but bundle does not — block.
-        reasons.append(
-            "SG number mismatch: table declares "
-            f"space_group_number={table_sg_num} but bundle has none"
-        )
+    if not _is_positive_int(bundle_sg_num):
+        blockers.append(_blocker(
+            "sg_number_missing",
+            "bundle missing positive subspace_sg_number"))
+        report["sg_number_check"] = "failed"
+    elif not _is_positive_int(table_sg_num):
+        report["sg_number_check"] = "failed"  # already blocked in provenance
+    elif int(bundle_sg_num) != int(table_sg_num):
+        blockers.append(_blocker(
+            "sg_number_mismatch",
+            f"SG number mismatch: bundle {bundle_sg_num} != table "
+            f"{table_sg_num}"))
         report["sg_number_check"] = "failed"
     else:
-        report["sg_number_check"] = "not_attempted"
+        report["sg_number_check"] = "passed"
 
-    # ---- C. HSP basis ----
-    if require_reviewed_table:
-        bundle_hsps = set(bundle.get("expected_hsps", []))
-        table_hsps = set(table.get("expected_hsps", []))
-        if bundle_hsps != table_hsps:
-            reasons.append(
-                f"expected_hsps mismatch: bundle {sorted(bundle_hsps)} "
-                f"!= table {sorted(table_hsps)}"
-            )
-            report["hsp_basis_check"] = "failed"
-        else:
-            report["hsp_basis_check"] = "passed"
+    # ---- C. Certificate presence + validation status ----
+    cert_id = bundle.get("certificate_identity", {})
+    if not isinstance(cert_id, dict) or not cert_id:
+        blockers.append(_blocker(
+            "certificate_missing",
+            "bundle has no certificate_identity"))
+        report["certificate_check"] = "blocked"
+        report["centering_check"] = "blocked"
+        report["affine_setting_check"] = "blocked"
+        report["setting_identity_check"] = "blocked"
+        cert_id = {}
     else:
-        report["hsp_basis_check"] = "skipped_low_level_test"
+        val_statuses = cert_id.get("certificate_validation_statuses", [])
+        if not isinstance(val_statuses, list):
+            val_statuses = []
+        validation_status = str(cert_id.get("validation_status", ""))
+        distinct = cert_id.get("distinct_setting_identities")
+        cert_ok = True
+        if "rejected" in val_statuses:
+            blockers.append(_blocker(
+                "certificate_rejected",
+                "certificate_identity contains a rejected validation status"))
+            cert_ok = False
+        # Fail-closed: only an explicit ``any_unresolved is False`` (fully
+        # resolved) passes.  Missing, null, or truthy blocks.
+        if cert_id.get("any_unresolved", True) is not False:
+            blockers.append(_blocker(
+                "certificate_unresolved",
+                "certificate_identity is unresolved/not_evaluated"))
+            cert_ok = False
+        if validation_status != "validated":
+            blockers.append(_blocker(
+                "certificate_not_validated",
+                f"certificate validation_status must be 'validated', got "
+                f"{validation_status!r}"))
+            cert_ok = False
+        if isinstance(distinct, int) and not isinstance(distinct, bool) \
+                and distinct > 1:
+            blockers.append(_blocker(
+                "certificate_ambiguous_setting",
+                f"{distinct} distinct setting identities in one instance"))
+            cert_ok = False
+        report["certificate_check"] = "passed" if cert_ok else "failed"
 
-    # ---- D. Irrep basis ----
-    if require_reviewed_table:
-        table_irreps = set(table.get("irreps", []))
-        bundle_irreps: set[str] = set()
-        irreps_by_kp = bundle.get("irreps_by_kpoint", {})
-        if isinstance(irreps_by_kp, dict):
-            for kp, labels in irreps_by_kp.items():
-                if isinstance(labels, list):
-                    for label in labels:
-                        key = f"{kp}:{label}" if ":" not in str(label) \
-                              else str(label)
-                        bundle_irreps.add(key)
-        if bundle_irreps and table_irreps:
-            if not bundle_irreps.issubset(table_irreps):
-                extra = sorted(bundle_irreps - table_irreps)
-                reasons.append(
-                    f"irrep basis mismatch: bundle irreps not in table: "
-                    f"{extra}"
-                )
-                report["irrep_basis_check"] = "failed"
-            else:
-                report["irrep_basis_check"] = "passed"
-        else:
-            report["irrep_basis_check"] = "not_attempted"
+        # ---- D. Centering + affine setting ----
+        _validate_setting(cert_id, blockers, report)
+
+        # ---- E. Setting identity match with table ----
+        _validate_setting_identity_match(
+            cert_id, table_hall, table_hall_symbol, table_centering,
+            blockers, report)
+
+    # ---- F. Spin convention (bundle spinor vs table spinful) ----
+    bundle_spin = _bundle_spin_convention(bundle, cert_id)
+    if not isinstance(table_spinful, bool):
+        report["spin_convention_check"] = "failed"  # already blocked above
+    elif bundle_spin is None:
+        blockers.append(_blocker(
+            "spin_convention_missing",
+            "bundle spin convention (spinor) not recorded"))
+        report["spin_convention_check"] = "blocked"
+    elif bundle_spin != table_spinful:
+        blockers.append(_blocker(
+            "spin_convention_mismatch",
+            f"bundle spinor={bundle_spin} != table spinful={table_spinful}"))
+        report["spin_convention_check"] = "failed"
     else:
-        report["irrep_basis_check"] = "skipped_low_level_test"
-
-    # ---- E. Spin convention ----
-    if not require_reviewed_table:
-        report["spin_convention_check"] = "skipped_low_level_test"
-    elif isinstance(table_spinful, bool):
         report["spin_convention_check"] = "passed"
-    else:
-        report["spin_convention_check"] = "not_attempted"
 
-    # ---- F. Certificate and setting validation (fail-closed) ----
-    # Low-level solver tests with require_reviewed_table=False skip
-    # certificate validation; they test integer algebra, not physical
-    # convention compatibility.
-    if not require_reviewed_table:
-        report["certificate_check"] = "skipped_low_level_test"
-        report["setting_check"] = "skipped_low_level_test"
+    # ---- G. HSP basis ----
+    table_hsps = _normalized_hsp_set(table.get("expected_hsps"))
+    irreps_by_kp = bundle.get("irreps_by_kpoint", {})
+    actual_hsps = set(irreps_by_kp) if isinstance(irreps_by_kp, dict) else set()
+    bundle_expected_raw = bundle.get("expected_hsps")
+    if bundle_expected_raw is None:
+        # Legacy bundle without a declared basis: derive from irrep keys.
+        bundle_hsps: set[str] | None = actual_hsps
     else:
-        cert_id = bundle.get("certificate_identity", {})
-        if not isinstance(cert_id, dict) or not cert_id:
-            reasons.append(
-                "certificate validation failed: bundle has no "
-                "certificate_identity"
-            )
-            report["certificate_check"] = "failed"
-            report["setting_check"] = "failed"
+        bundle_hsps = _normalized_hsp_set(bundle_expected_raw)
+    if bundle_hsps is None:
+        blockers.append(_blocker(
+            "hsp_basis_malformed",
+            "bundle expected_hsps is not a unique list of non-empty labels"))
+        report["hsp_basis_check"] = "failed"
+    elif bundle_hsps != table_hsps or actual_hsps != table_hsps:
+        blockers.append(_blocker(
+            "hsp_basis_mismatch",
+            f"expected_hsps mismatch: table {sorted(table_hsps)}, bundle "
+            f"expected {sorted(bundle_hsps)}, actual {sorted(actual_hsps)}"))
+        report["hsp_basis_check"] = "failed"
+    else:
+        report["hsp_basis_check"] = "passed"
+
+    # ---- H. Irrep keys resolve exactly and unambiguously ----
+    table_irreps = table.get("irreps", [])
+    if isinstance(irreps_by_kp, dict) and isinstance(table_irreps, list):
+        counts = _count_irreps(irreps_by_kp, table_irreps)
+        if counts is None:
+            blockers.append(_blocker(
+                "irrep_key_unresolved",
+                "could not resolve irrep keys: bundle irrep keys do not "
+                "resolve exactly/unambiguously to table irreps"))
+            report["irrep_basis_check"] = "failed"
         else:
-            any_unresolved = bool(cert_id.get("any_unresolved", True))
-            val_statuses = cert_id.get("certificate_validation_statuses", [])
-            has_rejected = "rejected" in val_statuses if isinstance(val_statuses, list) else False
-            centering_types = cert_id.get("centering_types", [])
-            if not isinstance(centering_types, list) or not centering_types:
-                # No centering data available: treat as primitive
-                # (no evidence of non-primitive centering).
-                is_primitive = True
-            else:
-                is_primitive = (
-                    len(centering_types) == 1
-                    and centering_types[0] == "P"
-                )
+            report["irrep_basis_check"] = "passed"
+    else:
+        blockers.append(_blocker(
+            "irrep_basis_malformed",
+            "bundle irreps_by_kpoint or table irreps malformed"))
+        report["irrep_basis_check"] = "failed"
 
-            if has_rejected:
-                reasons.append(
-                    "certificate validation failed: certificate_identity "
-                    "contains rejected status"
-                )
-                report["certificate_check"] = "failed"
-                report["setting_check"] = "failed"
-            elif any_unresolved:
-                # For primitive direct-coordinate matches, an unresolved
-                # certificate with centering_type='P' may be acceptable when
-                # no explicit parent-to-standard transform is needed.
-                # For centered/nontrivial settings, unresolved is a blocker.
-                if is_primitive:
-                    # Accept primitive direct-match when the certificate
-                    # specifically declares it.
-                    report["certificate_check"] = (
-                        "passed_primitive_direct_match_unresolved"
-                    )
-                    report["setting_check"] = "passed_primitive_direct_match"
-                else:
-                    reasons.append(
-                        "certificate validation failed: certificate_identity "
-                        "is unresolved for a non-primitive setting; a validated "
-                        "affine transform and centering evidence are required"
-                    )
-                    report["certificate_check"] = "failed"
-                    report["setting_check"] = "failed"
-            else:
-                report["certificate_check"] = "passed"
-                report["setting_check"] = "passed"
+    table_provenance = {
+        "data_source": data_source,
+        "package": package,
+        "package_version": package_version,
+        "space_group_number": table_sg_num,
+        "spinful": table_spinful,
+        "valleyscope_reduction": valleyscope_reduction,
+        "setting_identity": dict(table_setting),
+    }
 
-            # Distinct setting identities > 1 indicates internal inconsistency.
-            distinct = cert_id.get("distinct_setting_identities")
-            if isinstance(distinct, int) and distinct > 1:
-                reasons.append(
-                    f"certificate validation failed: "
-                    f"{distinct} distinct setting identities in one instance"
-                )
-                report["certificate_check"] = "failed"
-
-    promoted = not bool(reasons)
+    promoted = not blockers
     state = "validated_basis" if promoted else "sampled_basis"
     promoted_bundle: dict | None = None
     if promoted:
@@ -266,24 +301,180 @@ def promote_bundle_for_solve(
         promoted_bundle["hsp_basis_status"] = state
         promoted_bundle["promotion_provenance"] = {
             "source": "promote_bundle_for_solve",
-            "validation_report": report,
-            "table_provenance": {
-                "data_source": data_source,
-                "package": package,
-                "package_version": package_version,
-                "space_group_number": table_sg_num,
-                "spinful": table_spinful,
-                "valleyscope_reduction": valleyscope_reduction,
-            },
+            "validation_report": dict(report),
+            "table_provenance": dict(table_provenance),
+            "certificate_identity": dict(cert_id),
         }
 
     return {
         "promoted": promoted,
         "promoted_bundle": promoted_bundle,
-        "blocker_reasons": reasons,
+        "blocker_reasons": blockers,
         "validation_report": report,
         "canonical_state": state,
+        "table_provenance": table_provenance,
+        "certificate_identity": dict(cert_id),
     }
+
+
+def _is_positive_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def _normalized_hsp_set(value: object) -> set[str] | None:
+    """Return the HSP label set, or None if malformed."""
+    if not isinstance(value, list):
+        return set() if value is None else None
+    if not all(isinstance(h, str) and h for h in value):
+        return None
+    labels = list(value)
+    if len(set(labels)) != len(labels):
+        return None
+    return set(labels)
+
+
+def _validate_setting(
+    cert_id: dict,
+    blockers: list[dict[str, str]],
+    report: dict[str, object],
+) -> None:
+    """Validate centering presence and primitive/centered affine evidence."""
+    raw_centering = cert_id.get("centering_type")
+    # Missing centering evidence is unknown, not primitive.  ``None`` and an
+    # empty string are both treated as missing, never as "P".
+    centering = "" if raw_centering is None else str(raw_centering)
+    centering_types = cert_id.get("centering_types", [])
+    if not isinstance(centering_types, list):
+        centering_types = []
+    # Missing centering evidence is unknown, not primitive.
+    if not centering:
+        blockers.append(_blocker(
+            "centering_missing",
+            "certificate has no centering_type; missing centering is unknown, "
+            "not primitive"))
+        report["centering_check"] = "blocked"
+        report["affine_setting_check"] = "blocked"
+        return
+    if len(centering_types) > 1:
+        blockers.append(_blocker(
+            "centering_ambiguous",
+            f"multiple centering types in one instance: {centering_types}"))
+        report["centering_check"] = "failed"
+        report["affine_setting_check"] = "failed"
+        return
+    report["centering_check"] = "passed"
+
+    validation_status = str(cert_id.get("validation_status", ""))
+    if centering == "P":
+        relation = str(cert_id.get("primitive_conventional_relation", ""))
+        if validation_status == "validated" \
+                and relation in _PRIMITIVE_DIRECT_RELATIONS:
+            report["affine_setting_check"] = "passed"
+        else:
+            blockers.append(_blocker(
+                "primitive_relation_not_declared",
+                "primitive setting requires a validated certificate that "
+                "explicitly declares the primitive direct-coordinate relation; "
+                f"got validation_status={validation_status!r} "
+                f"relation={relation!r}"))
+            report["affine_setting_check"] = "failed"
+        return
+
+    # Centered / nontrivial setting.
+    if centering not in _CENTERED_TYPES:
+        blockers.append(_blocker(
+            "centering_unrecognized",
+            f"unrecognized centering_type {centering!r}"))
+        report["affine_setting_check"] = "failed"
+        return
+    transform = cert_id.get("normalized_direct_transform")
+    centering_vectors = cert_id.get("normalized_centering_vectors")
+    op_status = str(cert_id.get("operation_mapping_status", ""))
+    affine_status = str(cert_id.get("affine_validation_status", ""))
+    transform_ok = isinstance(transform, list) and len(transform) == 3 and all(
+        isinstance(row, list) and len(row) == 3 for row in transform)
+    vectors_ok = isinstance(centering_vectors, list) and bool(centering_vectors)
+    if transform_ok and vectors_ok and validation_status == "validated" \
+            and op_status == "validated" and affine_status == "validated":
+        report["affine_setting_check"] = "passed"
+    else:
+        blockers.append(_blocker(
+            "centered_affine_evidence_invalid",
+            "centered setting requires a validated normalized transform, "
+            "centering vectors, and passed operation/affine validation; got "
+            f"transform_ok={transform_ok} vectors_ok={vectors_ok} "
+            f"validation_status={validation_status!r} "
+            f"operation_mapping_status={op_status!r} "
+            f"affine_validation_status={affine_status!r}"))
+        report["affine_setting_check"] = "failed"
+
+
+def _validate_setting_identity_match(
+    cert_id: dict,
+    table_hall: object,
+    table_hall_symbol: str,
+    table_centering: str,
+    blockers: list[dict[str, str]],
+    report: dict[str, object],
+) -> None:
+    """Compare the bundle certificate setting identity with the table."""
+    bundle_hall = cert_id.get("hall_number")
+    bundle_hall_symbol = str(cert_id.get("hall_symbol", ""))
+    bundle_centering = str(cert_id.get("centering_type", ""))
+    if not _is_positive_int(bundle_hall) or not bundle_hall_symbol:
+        blockers.append(_blocker(
+            "setting_identity_missing",
+            "bundle certificate missing Hall setting identity"))
+        report["setting_identity_check"] = "blocked"
+        return
+    if not _is_positive_int(table_hall) or not table_hall_symbol \
+            or not table_centering:
+        report["setting_identity_check"] = "failed"  # table already blocked
+        return
+    if int(bundle_hall) != int(table_hall) \
+            or bundle_hall_symbol != table_hall_symbol \
+            or bundle_centering != table_centering:
+        blockers.append(_blocker(
+            "setting_identity_mismatch",
+            "Hall/setting identity mismatch: bundle "
+            f"(hall={bundle_hall}, symbol={bundle_hall_symbol!r}, "
+            f"centering={bundle_centering!r}) != table "
+            f"(hall={table_hall}, symbol={table_hall_symbol!r}, "
+            f"centering={table_centering!r})"))
+        report["setting_identity_check"] = "failed"
+    else:
+        report["setting_identity_check"] = "passed"
+
+
+def _bundle_spin_convention(bundle: dict, cert_id: dict) -> bool | None:
+    """Resolve the bundle spin convention from certificate/records.
+
+    Priority: explicit ``spinor``/``spinful`` on the bundle or the certificate
+    identity, then a consistent ``source_table_spinor`` across all irrep source
+    provenance records.  Returns None when absent or inconsistent.
+    """
+    for holder in (bundle, cert_id):
+        if isinstance(holder, dict):
+            for key in ("spinor", "spinful", "source_table_spinor"):
+                v = holder.get(key)
+                if isinstance(v, bool):
+                    return v
+    seen: set[bool] = set()
+    records = bundle.get("irrep_records_by_kpoint", {})
+    if isinstance(records, dict):
+        for kp_records in records.values():
+            if not isinstance(kp_records, list):
+                continue
+            for rec in kp_records:
+                if not isinstance(rec, dict):
+                    continue
+                p = rec.get("irrep_source_provenance")
+                if isinstance(p, dict) and isinstance(
+                        p.get("source_table_spinor"), bool):
+                    seen.add(p["source_table_spinor"])
+    if len(seen) == 1:
+        return next(iter(seen))
+    return None
 
 
 def load_reduced_ebr_table(path: str | Path) -> dict:
@@ -404,7 +595,6 @@ def build_reduced_ebr_mapping(
     table: dict | None = None,
     max_coefficient: int = 6,
     reduced_ebr_input: dict | None = None,
-    require_reviewed_table: bool = True,
 ) -> dict:
     """Exact reduced EBR decomposition of export bundle irrep vectors.
 
@@ -467,10 +657,7 @@ def build_reduced_ebr_mapping(
             bundle.get("ready_for_external_solver") is True
         )
         if is_validation_candidate or is_premarked_ready:
-            promo = promote_bundle_for_solve(
-                bundle=bundle, table=table,
-                require_reviewed_table=require_reviewed_table,
-            )
+            promo = promote_bundle_for_solve(bundle=bundle, table=table)
             if promo["promoted"] and promo["promoted_bundle"] is not None:
                 bundle = promo["promoted_bundle"]
             else:
@@ -484,9 +671,15 @@ def build_reduced_ebr_mapping(
                         bundle),
                     "reason": (
                         "validation blocked: "
-                        + "; ".join(promo["blocker_reasons"])
+                        + "; ".join(
+                            f"{b['code']}: {b['detail']}"
+                            for b in promo["blocker_reasons"]
+                        )
                     ),
+                    "blocker_reasons": promo["blocker_reasons"],
                     "validation_report": promo["validation_report"],
+                    "certificate_identity": promo["certificate_identity"],
+                    "table_provenance": promo["table_provenance"],
                 })
                 continue
         else:
@@ -591,7 +784,7 @@ def build_reduced_ebr_mapping(
         )
         # Extract per-kpoint irrep source provenance from bundle records.
         per_kp_prov = _build_per_kpoint_provenance(bundle)
-        solutions.append({
+        solution = {
             "bundle_id": bundle.get("bundle_id", ""),
             "valley": bundle.get("valley", ""),
             "subspace_group_candidate": bundle_group,
@@ -599,7 +792,19 @@ def build_reduced_ebr_mapping(
             "irrep_vector": irrep_counts,
             **(per_kp_prov if per_kp_prov else {}),
             **result,
-        })
+        }
+        # Preserve the promotion validation evidence in the solution record.
+        promo_prov = bundle.get("promotion_provenance")
+        if isinstance(promo_prov, dict):
+            solution["promotion_provenance"] = promo_prov
+            if isinstance(promo_prov.get("validation_report"), dict):
+                solution["validation_report"] = promo_prov["validation_report"]
+            if isinstance(promo_prov.get("table_provenance"), dict):
+                solution["table_provenance"] = promo_prov["table_provenance"]
+            if isinstance(promo_prov.get("certificate_identity"), dict):
+                solution["certificate_identity"] = \
+                    promo_prov["certificate_identity"]
+        solutions.append(solution)
 
     if not solutions:
         return {

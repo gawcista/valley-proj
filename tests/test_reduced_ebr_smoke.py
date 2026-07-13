@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from tests.reduced_ebr_promo_helpers import attach_promotion
 import yaml
 
 from valleyscope.io.config import load_config
@@ -271,9 +272,10 @@ def test_reduced_ebr_classifier_payload_written_consistently_to_public_outputs(t
             },
         ],
     }
+    attach_promotion(export_bundle, loaded_table)
     mapping = build_reduced_ebr_mapping(
         ebr_export_bundle=export_bundle,
-        table=loaded_table, require_reviewed_table=False
+        table=loaded_table
     )
     assert [s["classification"] for s in mapping["solutions"]] == [
         "atomic-compatible-candidate",

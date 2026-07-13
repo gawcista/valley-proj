@@ -2842,6 +2842,23 @@ def _build_auto_canonical_mapping(
         sg_num = int(sg_num)
         sg_candidate = str(b.get("subspace_group_candidate", ""))
 
+        # Setting identity the table must be built for, taken from the
+        # bundle's validated standard-setting certificate.  The promotion
+        # validator independently requires this certificate to be validated.
+        cert_id = b.get("certificate_identity", {})
+        setting_identity: dict[str, object] | None = None
+        if isinstance(cert_id, dict):
+            hall_number = cert_id.get("hall_number")
+            hall_symbol = cert_id.get("hall_symbol")
+            centering_type = cert_id.get("centering_type")
+            if hall_number or hall_symbol or centering_type:
+                setting_identity = {
+                    "hall_number": hall_number,
+                    "hall_symbol": hall_symbol,
+                    "centering_type": centering_type,
+                    "space_group_symbol": sg_candidate,
+                }
+
         # Build auto table and solve for this single bundle.
         try:
             table = build_auto_canonical_reduced_ebr_table(
@@ -2851,6 +2868,7 @@ def _build_auto_canonical_mapping(
                 expected_hsps=expected_hsps,
                 subspace_group_candidate=sg_candidate,
                 subspace_space_group=ssg if isinstance(ssg, dict) else None,
+                setting_identity=setting_identity,
             )
         except Exception as exc:
             all_excluded.append({

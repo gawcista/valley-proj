@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+from tests.reduced_ebr_promo_helpers import attach_promotion
 
 from valleyscope.analysis.irreptables_runtime_table_builder import (
     _load_ebr_data_from_irreptables,
@@ -256,9 +257,10 @@ def test_spec_file_table_feeds_reduced_ebr_mapping_e2e(tmp_path):
             }
         ],
     }
+    attach_promotion(bundle, validated)
     result = build_reduced_ebr_mapping(
         ebr_export_bundle=bundle,
-        table=validated, require_reviewed_table=False
+        table=validated
     )
 
     assert calls == [(150, True)]
@@ -2380,11 +2382,12 @@ def test_c3_real_source_mapping_e2e_solved_exact(tmp_path):
             "irreps_by_kpoint": irreps_by_kp,
         }],
     }
-    result = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table, require_reviewed_table=False)
+    attach_promotion(bundle, table)
+    result = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
 
-    assert result["mapping_status"] in ("solved_exact", "not_evaluated")
+    assert result["mapping_status"] == "solved_exact"
     # Production path may reject minimal table.
-    assert result["status"] in ("solved_exact", "not_evaluated")
+    assert result["status"] == "solved_exact"
     solution = result["solutions"][0]
     assert solution["classification"] == "atomic-compatible-candidate"
     assert solution["integer_span_status"] == "in_integer_span"
@@ -2517,11 +2520,12 @@ def test_c2_mm_m3_dry_run_mapping_e2e_solved_exact():
             "irreps_by_kpoint": irreps_by_kp,
         }],
     }
-    result = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table, require_reviewed_table=False)
+    attach_promotion(bundle, table)
+    result = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
 
     # Production path may reject minimal table.
-    assert result["status"] in ("solved_exact", "not_evaluated")
-    assert result["mapping_status"] in ("solved_exact", "not_evaluated")
+    assert result["status"] == "solved_exact"
+    assert result["mapping_status"] == "solved_exact"
     assert result["excluded_bundles"] == []
     solution = result["solutions"][0]
     assert solution["status"] == "solved_exact"  # solution-level

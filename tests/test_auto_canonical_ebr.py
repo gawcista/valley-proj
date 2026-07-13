@@ -15,6 +15,7 @@ from valleyscope.analysis.reduced_ebr_mapping import (
 )
 from valleyscope.analysis.reduced_ebr_solver import classify_bundle
 from tests.helpers_io_workflow import write_fixture, write_config
+from tests.reduced_ebr_promo_helpers import attach_promotion
 
 # ---------------------------------------------------------------------------
 # Shared compact factories
@@ -35,6 +36,22 @@ def _p4_loader(gm=None, x=None):
         ]}
     return _f
 
+_SETTING = {"hall_number": 1, "hall_symbol": "H 1", "centering_type": "P"}
+
+def _validated_cert(sg_num, symbol):
+    return {
+        "hall_numbers": [1], "hall_symbols": ["H 1"], "centering_types": ["P"],
+        "certificate_validation_statuses": ["validated"],
+        "any_unresolved": False, "distinct_setting_identities": 1,
+        "sg_number": sg_num, "sg_symbol": symbol,
+        "hall_number": 1, "hall_symbol": "H 1", "centering_type": "P",
+        "primitive_conventional_relation": "identity",
+        "transform_provenance": "derived_affine_equivalence",
+        "validation_status": "validated",
+        "operation_mapping_status": "validated",
+        "affine_validation_status": "validated",
+    }
+
 def _mk_bundle(bid, sg_num, symbol, hsps, irreps, ready=True):
     return {"bundle_id": bid, "valley": "K_valley",
             "subspace_group_candidate": symbol,
@@ -45,13 +62,8 @@ def _mk_bundle(bid, sg_num, symbol, hsps, irreps, ready=True):
             "ready_for_external_solver": ready,
             "ready_for_reduced_table_validation": ready,
             "expected_hsps": hsps, "irreps_by_kpoint": irreps,
-            "certificate_identity": {
-                "hall_numbers": [], "hall_symbols": [],
-                "centering_types": [],
-                "certificate_validation_statuses": ["not_evaluated"],
-                "any_unresolved": True,
-                "distinct_setting_identities": 1,
-            }}
+            "spinor": True,
+            "certificate_identity": _validated_cert(sg_num, symbol)}
 
 def _bm(*bundles): return _build_auto_canonical_mapping(
     ebr_export_bundle={"bundles": list(bundles)}, spinor_wf=True)
@@ -60,6 +72,7 @@ def _auto_table(sg, hsps, irreps, loader=None):
     return build_auto_canonical_reduced_ebr_table(
         subspace_sg_number=sg, spinor=True, bundle_irreps_by_kpoint=irreps,
         expected_hsps=hsps, subspace_group_candidate=symbol_for(sg),
+        setting_identity={**_SETTING, "space_group_symbol": symbol_for(sg)},
         source_loader=loader or _p4_loader())
 
 def symbol_for(sg): return {75: "P4", 143: "P3"}.get(sg, f"SG{sg}")
@@ -131,14 +144,14 @@ def test_auto_table_e2e_solve(tmp_path):
     t = _auto_table(75, ["GammaM"], {"GammaM": ["-GM5", "-GM6"]})
     p = tmp_path / "t.json"; p.write_text(json.dumps(t))
     eb = {"bundles": [_mk_bundle("b", 75, "P4", ["GammaM"], {"GammaM": ["-GM5", "-GM6"]})]}
-    r = build_reduced_ebr_mapping(ebr_export_bundle=eb, table=load_reduced_ebr_table(p), require_reviewed_table=False)
+    r = build_reduced_ebr_mapping(ebr_export_bundle=eb, table=load_reduced_ebr_table(p))
     assert r["mapping_status"] == "solved_exact" and r["solutions"][0]["classification"] == "atomic-compatible-candidate"
 
 def test_auto_table_hsp_mismatch(tmp_path):
     t = _auto_table(75, ["GammaM"], {"GammaM": ["-GM5"]})
     p = tmp_path / "t.json"; p.write_text(json.dumps(t))
     eb = {"bundles": [_mk_bundle("b", 75, "P4", ["GammaM", "XM"], {"GammaM": ["-GM5"], "XM": ["-X3"]})]}
-    r = build_reduced_ebr_mapping(ebr_export_bundle=eb, table=load_reduced_ebr_table(p), require_reviewed_table=False)
+    r = build_reduced_ebr_mapping(ebr_export_bundle=eb, table=load_reduced_ebr_table(p))
     assert len(r["excluded_bundles"]) == 1 and "expected_hsps mismatch" in r["excluded_bundles"][0]["reason"]
 
 def test_subspace_sg_not_parent():
@@ -285,14 +298,17 @@ def test_explicit_table_and_spec_regression(tmp_path):
     # table_file
     td = {"schema_version":"1.0.0","subspace_group_candidate":"P4","expected_hsps":["GammaM"],"irreps":["GammaM:-GM5","GammaM:-GM6"],"ebrs":[{"label":"E","vector":[1,0]}]}
     tp = tmp_path / "t.json"; tp.write_text(json.dumps(td))
-    r = build_reduced_ebr_mapping(ebr_export_bundle={"bundles": [_mk_bundle("b",75,"P4",["GammaM"],{"GammaM":["-GM5"]})]}, table=load_reduced_ebr_table(tp), reduced_ebr_input={"source":"table_file"}, require_reviewed_table=False)
+    eb = {"bundles": [_mk_bundle("b",75,"P4",["GammaM"],{"GammaM":["-GM5"]})]}
+    tt = load_reduced_ebr_table(tp); attach_promotion(eb, tt)
+    r = build_reduced_ebr_mapping(ebr_export_bundle=eb, table=tt, reduced_ebr_input={"source":"table_file"})
     assert r["mapping_status"] == "solved_exact"
     # spec_file — use a loader that returns exactly the labels declared in the spec
     from valleyscope.analysis.irreptables_runtime_table_builder import build_reduced_table_from_spec_file
     sp = tmp_path / "s.json"; sp.write_text(json.dumps({"schema_version":"1.1.0","data_source":"irreptables","space_group_number":75,"spinful":True,"source_hsp_by_irrep":{"-GM5":"GammaM","-GM6":"GammaM"},"valleyscope_irrep_multiplicity_by_source_irrep":{"-GM5":{"GammaM:-GM5":1},"-GM6":{"GammaM:-GM6":1}},"expected_hsps":["GammaM"],"allowed_irrep_keys":["GammaM:-GM5","GammaM:-GM6"],"subspace_group_candidate":"P4"}))
     def _spec_ld(sg,spin): return {"basis":{"irrep_labels":["-GM5","-GM6"]},"ebrs":[{"ebr_name":"E","vector":[1,0]}]}
     t2 = build_reduced_table_from_spec_file(str(sp), source_loader=_spec_ld)
-    r2 = build_reduced_ebr_mapping(ebr_export_bundle={"bundles": [_mk_bundle("b",75,"P4",["GammaM"],{"GammaM":["-GM5"]})]}, table=t2, reduced_ebr_input={"source":"spec_file"}, require_reviewed_table=False)
+    eb2 = {"bundles": [_mk_bundle("b",75,"P4",["GammaM"],{"GammaM":["-GM5"]})]}; attach_promotion(eb2, t2)
+    r2 = build_reduced_ebr_mapping(ebr_export_bundle=eb2, table=t2, reduced_ebr_input={"source":"spec_file"})
     assert r2["mapping_status"] == "solved_exact"
 
 def test_no_cn_like_labels():
