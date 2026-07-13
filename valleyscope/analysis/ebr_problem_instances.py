@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
+
 
 def build_ebr_problem_instances(
     *,
@@ -48,7 +50,9 @@ def build_ebr_problem_instances(
     # Group by certificate-aware physical identity.
     # Candidates with inconsistent or unresolved setting certificates
     # must not be silently merged into one final-ready EBR problem.
-    groups: dict[tuple[int, str, int, str, str], list[dict[str, object]]] = {}
+    # The key encodes the full normalized setting identity, not just
+    # Hall number + status.
+    groups: dict[tuple[int, str, int, str, object, object, str, object, str, str], list[dict[str, object]]] = {}
     for c in candidates:
         ssg = c.get("subspace_space_group", {})
         sg_symbol = (
@@ -60,16 +64,21 @@ def build_ebr_problem_instances(
         )
         sg = str(sg_symbol) if sg_symbol else str(c.get("subspace_group_candidate", ""))
         valley = str(c.get("valley", ""))
-        cert_fp = _certificate_fingerprint(c)
-        groups.setdefault(
-            (sg_number, sg, cert_fp.hall_number, cert_fp.validation_status, valley),
-            [],
-        ).append(c)
+        fp = _certificate_fingerprint(c)
+        key = (
+            sg_number, sg,
+            fp.hall_number, fp.hall_symbol,
+            fp.transform_key, fp.origin_shift_key,
+            fp.centering_type, fp.centering_vectors_key,
+            fp.validation_status,
+            valley,
+        )
+        groups.setdefault(key, []).append(c)
 
     instances: list[dict[str, object]] = []
     instance_counter = 0
 
-    for (_sg_num, sg, _hall, _cert_status, valley), cands in groups.items():
+    for (_sg_num, sg, _hall, _hall_sym, _tf, _os, _ct, _cv, _cert_st, valley), cands in groups.items():
         instance_counter += 1
         instance_id = f"ebr_instance_{instance_counter:03d}"
 
@@ -252,33 +261,248 @@ def _empty_report(reason: str) -> dict[str, object]:
 # Certificate-aware identity
 # ---------------------------------------------------------------------------
 
-class _CertFingerprint:
-    """Lightweight hashable fingerprint of per-candidate certificate data."""
+_CERT_TOL = 1e-9
 
-    __slots__ = ("hall_number", "validation_status")
 
-    def __init__(self, hall_number: int, validation_status: str):
+class _SettingIdentity:
+    """Hashable normalized standard-setting certificate identity.
+
+    Captures the setting-level affine evidence needed to distinguish
+    physically inequivalent conventions for the same space group.
+    HSP-specific fields (parent_k_frac, resolved_hsp_label) are excluded
+    because they vary per k-point and belong in per-row provenance.
+    """
+
+    __slots__ = (
+        "_hash",
+        "sg_number", "sg_symbol",
+        "hall_number", "hall_symbol",
+        "transform_key", "origin_shift_key",
+        "centering_type", "centering_vectors_key",
+        "primitive_conventional_relation",
+        "transform_provenance",
+        "validation_status",
+        "operation_mapping_status",
+        "affine_validation_status",
+    )
+
+    def __init__(
+        self,
+        sg_number: int,
+        sg_symbol: str,
+        hall_number: int,
+        hall_symbol: str,
+        transform_key: tuple[tuple[float, float, float],
+                            tuple[float, float, float],
+                            tuple[float, float, float]] | None,
+        origin_shift_key: tuple[float, float, float] | None,
+        centering_type: str,
+        centering_vectors_key: tuple[tuple[float, float, float], ...] | None,
+        primitive_conventional_relation: str,
+        transform_provenance: str,
+        validation_status: str,
+        operation_mapping_status: str,
+        affine_validation_status: str,
+    ):
+        self.sg_number = sg_number
+        self.sg_symbol = sg_symbol
         self.hall_number = hall_number
+        self.hall_symbol = hall_symbol
+        self.transform_key = transform_key
+        self.origin_shift_key = origin_shift_key
+        self.centering_type = centering_type
+        self.centering_vectors_key = centering_vectors_key
+        self.primitive_conventional_relation = primitive_conventional_relation
+        self.transform_provenance = transform_provenance
         self.validation_status = validation_status
+        self.operation_mapping_status = operation_mapping_status
+        self.affine_validation_status = affine_validation_status
+        self._hash = hash((
+            sg_number, sg_symbol,
+            hall_number, hall_symbol,
+            transform_key, origin_shift_key,
+            centering_type, centering_vectors_key,
+            primitive_conventional_relation,
+            transform_provenance,
+            validation_status,
+            operation_mapping_status,
+            affine_validation_status,
+        ))
+
+    def __hash__(self) -> int:
+        return self._hash
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _SettingIdentity):
+            return NotImplemented
+        return self._hash == other._hash and (
+            self.sg_number == other.sg_number
+            and self.sg_symbol == other.sg_symbol
+            and self.hall_number == other.hall_number
+            and self.hall_symbol == other.hall_symbol
+            and self.transform_key == other.transform_key
+            and self.origin_shift_key == other.origin_shift_key
+            and self.centering_type == other.centering_type
+            and self.centering_vectors_key == other.centering_vectors_key
+            and self.primitive_conventional_relation == other.primitive_conventional_relation
+            and self.transform_provenance == other.transform_provenance
+            and self.validation_status == other.validation_status
+            and self.operation_mapping_status == other.operation_mapping_status
+            and self.affine_validation_status == other.affine_validation_status
+        )
 
 
-def _certificate_fingerprint(candidate: dict[str, object]) -> _CertFingerprint:
-    """Extract a certificate fingerprint from one candidate."""
+def _normalize_transform(
+    matrix: object,
+) -> tuple[tuple[float, float, float],
+           tuple[float, float, float],
+           tuple[float, float, float]] | None:
+    """Normalize a 3×3 transform matrix to a hashable tuple.
+
+    Rounds to tolerance, replaces -0.0 with 0.0.  Returns None for
+    non-finite or non-3×3 input.
+    """
+    if not isinstance(matrix, (list, tuple)):
+        return None
+    if len(matrix) != 3:
+        return None
+    rows: list[tuple[float, float, float]] = []
+    for row in matrix:
+        if not isinstance(row, (list, tuple)) or len(row) != 3:
+            return None
+        r: list[float] = []
+        for v in row:
+            f = float(v)
+            if not np.isfinite(f):
+                return None
+            f = round(f / _CERT_TOL) * _CERT_TOL
+            if f == 0.0:
+                f = 0.0  # normalize -0.0
+            r.append(f)
+        rows.append((r[0], r[1], r[2]))
+    return (rows[0], rows[1], rows[2])
+
+
+def _normalize_origin_shift(
+    vector: object,
+) -> tuple[float, float, float] | None:
+    """Normalize a 3-vector origin shift to a hashable tuple."""
+    if not isinstance(vector, (list, tuple)) or len(vector) != 3:
+        return None
+    comps: list[float] = []
+    for v in vector:
+        f = float(v)
+        if not np.isfinite(f):
+            return None
+        # Modulo lattice: shift into [0, 1).
+        f = f - np.floor(f)
+        f = round(f / _CERT_TOL) * _CERT_TOL
+        if f == 0.0:
+            f = 0.0
+        # Remap 1.0 (from rounding) back to 0.0.
+        if f >= 1.0 - _CERT_TOL:
+            f = 0.0
+        comps.append(f)
+    return (comps[0], comps[1], comps[2])
+
+
+def _normalize_centering_vectors(
+    vectors: object,
+) -> tuple[tuple[float, float, float], ...] | None:
+    """Normalize centering vectors to a sorted hashable tuple."""
+    if not isinstance(vectors, list):
+        return None
+    normed: list[tuple[float, float, float]] = []
+    for v in vectors:
+        normalized = _normalize_origin_shift(v)
+        if normalized is None:
+            return None
+        normed.append(normalized)
+    return tuple(sorted(normed))
+
+
+def _certificate_fingerprint(candidate: dict[str, object]) -> _SettingIdentity:
+    """Extract a normalized setting identity from one candidate."""
     prov = candidate.get("irrep_source_provenance")
-    hall_number = 0
-    validation_status = "not_evaluated"
+    cert: dict[str, object] = {}
     if isinstance(prov, dict):
         kmap = prov.get("standard_setting_hsp_mapping")
         if isinstance(kmap, dict):
-            cert = kmap.get("standard_setting_certificate")
-            if isinstance(cert, dict):
-                hn = cert.get("hall_number")
-                if isinstance(hn, int) and not isinstance(hn, bool):
-                    hall_number = int(hn)
-                vs = cert.get("validation_status")
-                if isinstance(vs, str) and vs:
-                    validation_status = str(vs)
-    return _CertFingerprint(hall_number, validation_status)
+            c = kmap.get("standard_setting_certificate")
+            if isinstance(c, dict):
+                cert = c
+
+    sg_number = 0
+    sg_symbol = ""
+    hall_number = 0
+    hall_symbol = ""
+    centering_type = ""
+    primitive_conventional_relation = ""
+    transform_provenance = ""
+    validation_status = "not_evaluated"
+    operation_mapping_status = "not_attempted"
+    affine_validation_status = "not_attempted"
+
+    # Also check subspace_space_group for SG identity.
+    ssg = candidate.get("subspace_space_group")
+    if isinstance(ssg, dict):
+        sn = ssg.get("candidate_space_group_number")
+        if isinstance(sn, int) and not isinstance(sn, bool):
+            sg_number = int(sn)
+        sy = ssg.get("candidate_space_group_symbol")
+        if isinstance(sy, str) and sy:
+            sg_symbol = str(sy)
+
+    hn = cert.get("hall_number")
+    if isinstance(hn, int) and not isinstance(hn, bool):
+        hall_number = int(hn)
+    hs = cert.get("hall_symbol")
+    if isinstance(hs, str) and hs:
+        hall_symbol = str(hs)
+    vs = cert.get("validation_status")
+    if isinstance(vs, str) and vs:
+        validation_status = str(vs)
+    ct = cert.get("centering_type")
+    if isinstance(ct, str) and ct:
+        centering_type = str(ct)
+    pcr = cert.get("primitive_conventional_relation")
+    if isinstance(pcr, str) and pcr:
+        primitive_conventional_relation = str(pcr)
+    tp = cert.get("transform_provenance")
+    if isinstance(tp, str) and tp:
+        transform_provenance = str(tp)
+    oms = cert.get("operation_mapping_status")
+    if isinstance(oms, str) and oms:
+        operation_mapping_status = str(oms)
+    avs = cert.get("translation_validation_status")
+    if isinstance(avs, str) and avs:
+        affine_validation_status = str(avs)
+
+    transform_key = _normalize_transform(
+        cert.get("parent_to_standard_direct_transform")
+    )
+    origin_shift_key = _normalize_origin_shift(
+        cert.get("origin_shift_fractional")
+    )
+    centering_vectors_key = _normalize_centering_vectors(
+        cert.get("centering_vectors")
+    )
+
+    return _SettingIdentity(
+        sg_number=sg_number,
+        sg_symbol=sg_symbol,
+        hall_number=hall_number,
+        hall_symbol=hall_symbol,
+        transform_key=transform_key,
+        origin_shift_key=origin_shift_key,
+        centering_type=centering_type,
+        centering_vectors_key=centering_vectors_key,
+        primitive_conventional_relation=primitive_conventional_relation,
+        transform_provenance=transform_provenance,
+        validation_status=validation_status,
+        operation_mapping_status=operation_mapping_status,
+        affine_validation_status=affine_validation_status,
+    )
 
 
 def _certificate_identity(
@@ -286,19 +510,25 @@ def _certificate_identity(
 ) -> dict[str, object]:
     """Build certificate-identity dict from merged candidates.
 
-    Records the set of unique Hall numbers and validation statuses across
-    all candidates, plus whether any certificate is unresolved.
+    Records per-candidate normalized setting identities plus aggregate
+    diagnostics.
     """
-    hall_numbers: set[int] = set()
-    validation_statuses: set[str] = set()
-    for c in cands:
-        fp = _certificate_fingerprint(c)
-        if fp.hall_number:
-            hall_numbers.add(fp.hall_number)
-        validation_statuses.add(fp.validation_status)
+    fps = [_certificate_fingerprint(c) for c in cands]
+    hall_numbers = sorted({fp.hall_number for fp in fps if fp.hall_number})
+    hall_symbols = sorted({fp.hall_symbol for fp in fps if fp.hall_symbol})
+    validation_statuses = sorted({fp.validation_status for fp in fps})
+    centering_types = sorted({fp.centering_type for fp in fps if fp.centering_type})
     return {
-        "hall_numbers": sorted(hall_numbers),
-        "certificate_validation_statuses": sorted(validation_statuses),
-        "any_unresolved": "unresolved" in validation_statuses
-                          or "not_evaluated" in validation_statuses,
+        "hall_numbers": hall_numbers,
+        "hall_symbols": hall_symbols,
+        "centering_types": centering_types,
+        "certificate_validation_statuses": validation_statuses,
+        "any_unresolved": (
+            "unresolved" in validation_statuses
+            or "not_evaluated" in validation_statuses
+            or "rejected" in validation_statuses
+        ),
+        "distinct_setting_identities": len({
+            fp._hash for fp in fps
+        }),
     }

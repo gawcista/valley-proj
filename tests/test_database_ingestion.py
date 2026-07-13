@@ -539,7 +539,7 @@ def test_database_index_excluded_ebr_records_have_source_record():
 
 
 def test_ingestion_record_schema_version_is_1_3_0():
-    """Ingestion record schema_version is now 1.2.0."""
+    """Ingestion record schema_version is now 1.3.0."""
     from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
     summary = {"target_kpoints": [], "iband": [], "input": {}}
     record = build_database_ingestion_record(valley_summary=summary)

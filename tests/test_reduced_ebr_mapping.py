@@ -936,8 +936,8 @@ def test_atomic_compatible_classification():
     assert "ebr_decomposition" in s
     assert len(s["ebr_decomposition"]) > 0
 
-def test_fragile_topology_classification():
-    """Target in integer span but needs negative coefficient -> in integer span, no nonnegative witness."""
+def test_in_integer_span_no_nonnegative_witness_classification():
+    """Target in integer span but needs negative coefficient -> in_integer_span_no_nonnegative_witness."""
     # EBR columns: [1,0] (A), [1,1] (B)
     # Target: [0,1] = 1*B - 1*A -> needs negative coeff for A
     table = {
@@ -966,7 +966,7 @@ def test_fragile_topology_classification():
     assert coeffs.get("EBR_A") == -1
     assert coeffs.get("EBR_B") == 1
 
-def test_stable_topology_classification():
+def test_outside_integer_span_classification():
     """Target outside integer span -> outside_integer_span."""
     # EBR columns: [2,0] (A), [0,2] (B)
     # Target: [1,0] — requires 0.5*A, not in integer span

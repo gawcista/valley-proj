@@ -443,7 +443,7 @@ def _translation_matches(left: np.ndarray, right: np.ndarray, tolerance: float) 
     return bool(np.linalg.norm(delta_mod_lattice) <= tolerance)
 
 
-def _table_centering_from_name(table) -> str:
+def _table_centering_from_name(table) -> str | None:
     """Derive centering type from the irrep table's space-group name.
 
     The first character of the irreptables space-group name
@@ -451,12 +451,13 @@ def _table_centering_from_name(table) -> str:
     Bravais-lattice centering symbol.  This is the convention used
     by irreptables / Bilbao Crystallographic Server tables.
 
-    Returns ``"P"`` when the name is missing or unrecognised.
+    Returns ``None`` when the name is missing or unrecognised.
+    Unknown centering must block trusted HSP matching.
     """
     name = str(getattr(table, "name", "")).strip()
     if name and name[0] in "ABCFIPR":
         return name[0]
-    return "P"
+    return None
 
 
 def _centering_translations(centering: str) -> list[np.ndarray] | None:

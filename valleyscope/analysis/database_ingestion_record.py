@@ -73,7 +73,8 @@ def build_database_ingestion_record(
     record["spinor_convention_verified"] = valley_summary.get("input", {}).get("spinor_convention_verified", False)
 
     # --- valley_ebr_export_bundle (optional) ---
-    ready_count = 0
+    validation_candidate_count = 0
+    decomposition_ready_count = 0
     excluded_count = 0
     valley_irrep_records: list[dict[str, Any]] = []
 
@@ -83,19 +84,24 @@ def build_database_ingestion_record(
             for bundle in bundles:
                 if not isinstance(bundle, dict):
                     continue
-                if (
-                    bundle.get("ready_for_external_solver") is True
-                    or bundle.get("ready_for_reduced_table_validation") is True
-                ):
-                    ready_count += 1
+                is_solver_ready = bundle.get("ready_for_external_solver") is True
+                is_validation_candidate = (
+                    bundle.get("ready_for_reduced_table_validation") is True
+                )
+                if is_solver_ready:
+                    decomposition_ready_count += 1
                     _extract_irrep_records(bundle, valley_irrep_records)
+                elif is_validation_candidate:
+                    validation_candidate_count += 1
                 else:
                     excluded_count += 1
         excluded_count += int(valley_ebr_export_bundle.get("excluded_count", 0) or 0)
     else:
         excluded_count = 0  # No bundle file present
 
-    record["ready_bundle_count"] = ready_count
+    record["ready_bundle_count"] = decomposition_ready_count
+    record["validation_candidate_count"] = validation_candidate_count
+    record["decomposition_ready_count"] = decomposition_ready_count
     record["excluded_bundle_count"] = excluded_count
     record["valley_irrep_records"] = valley_irrep_records
 
@@ -187,7 +193,7 @@ def build_database_ingestion_record(
         record["reduced_ebr_records"] = []
 
     # --- Status ---
-    if ready_count > 0:
+    if decomposition_ready_count > 0:
         record["record_status"] = "has_ready_ebr_bundles"
     else:
         record["record_status"] = "no_ready_ebr_bundles"

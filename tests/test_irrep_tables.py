@@ -501,13 +501,15 @@ def test_centering_from_name_centered_types():
     assert _table_centering_from_name(T) == "R"
 
 
-def test_centering_from_name_fallback():
-    """Missing or unrecognised name falls back to P."""
+def test_centering_from_name_blocks_unknown():
+    """Missing or unrecognised name returns None (blocks trusted HSP matching)."""
     class T:
         pass
-    assert _table_centering_from_name(T) == "P"
+    assert _table_centering_from_name(T) is None
     T.name = ""
-    assert _table_centering_from_name(T) == "P"
+    assert _table_centering_from_name(T) is None
+    T.name = "unknown"
+    assert _table_centering_from_name(T) is None
 
 
 def test_match_kpoint_label_primitive_k_plus_n_equivalent():

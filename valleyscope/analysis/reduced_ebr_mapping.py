@@ -186,17 +186,23 @@ def build_reduced_ebr_mapping(
     for bundle in bundles:
         if not isinstance(bundle, dict):
             continue
-        solver_ready = (
-            bundle.get("ready_for_external_solver")
-            or bundle.get("ready_for_reduced_table_validation")
-        )
-        if not solver_ready:
+        # Gate: only ready_for_external_solver bundles may enter decomposition.
+        # ready_for_reduced_table_validation bundles are table-validation
+        # candidates, not solver-ready; promotion requires an explicit
+        # table/bundle compatibility check.
+        if not bundle.get("ready_for_external_solver"):
             excluded.append({
                 "bundle_id": bundle.get("bundle_id", "?"),
                 "subspace_group_candidate": bundle.get("subspace_group_candidate", ""),
                 "subspace_space_group": bundle.get("subspace_space_group", {}),
                 "irrep_source_provenance_by_kpoint": _per_kpoint_prov(bundle),
-                "reason": "not ready for external solver or reduced-table validation",
+                "reason": (
+                    "not ready for external solver"
+                    if not bundle.get("ready_for_reduced_table_validation")
+                    else "ready only for reduced-table validation; "
+                         "promotion to solver-ready requires table/bundle "
+                         "compatibility validation"
+                ),
             })
             continue
 
