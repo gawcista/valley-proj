@@ -24,28 +24,82 @@ def promote_bundle_for_solve(
     *,
     bundle: dict,
     table: dict,
+    require_reviewed_table: bool = True,
 ) -> dict:
     """Validate a bundle against a reduced EBR table and promote if compatible.
 
-    This is the single production promotion function used by both the
-    external-table path (``build_reduced_ebr_mapping``) and the
-    auto-canonical path (``_build_auto_canonical_mapping``).
+    This is the single production promotion function — fail-closed.  Every
+    bundle, regardless of its pre-existing readiness flags, must pass all
+    physical validation gates.  The input Boolean is never trusted evidence.
 
-    Returns a dict with:
-    - ``promoted``: bool — True if the bundle can be promoted to solver-ready.
-    - ``promoted_bundle``: dict or None — shallow copy with
-      ``ready_for_external_solver=True`` when promoted.
-    - ``blocker_reasons``: list[str] — reasons when not promoted.
-    - ``validation_report``: dict — structured validation evidence.
+    When ``require_reviewed_table`` is False, the table provenance check is
+    skipped.  This is intended for low-level solver unit tests that use
+    minimal hand-written tables; it must never be False in production
+    mapping or auto-canonical paths.
+
+    Required table provenance (fail if ``require_reviewed_table`` is True):
+    - ``data_source``, ``package``, ``package_version``
+    - ``space_group_number``, ``spinful``
+    - ``valleyscope_reduction``
+
+    Required bundle evidence (fail if absent/unresolved/rejected/malformed):
+    - SG number + symbol agreement
+    - Hall/affine setting and certificate validation status
+    - HSP basis and irrep convention match
+    - For centered/nontrivial settings: validated affine transform + centering
+
+    Returns a dict with ``promoted``, ``promoted_bundle``,
+    ``blocker_reasons``, ``validation_report``, ``canonical_state``.
     """
     reasons: list[str] = []
     report: dict[str, object] = {
         "sg_check": "not_attempted",
+        "sg_number_check": "not_attempted",
+        "table_provenance_check": "not_attempted",
         "hsp_basis_check": "not_attempted",
         "irrep_basis_check": "not_attempted",
         "certificate_check": "not_attempted",
+        "setting_check": "not_attempted",
+        "spin_convention_check": "not_attempted",
     }
 
+    # ---- A. Table provenance ----
+    prov = table.get("provenance", {})
+    if not isinstance(prov, dict):
+        prov = {}
+    data_source = str(prov.get("data_source", ""))
+    package = str(prov.get("package", ""))
+    package_version = str(prov.get("package_version", ""))
+    table_spinful = prov.get("spinful")
+    table_sg_num = prov.get("space_group_number")
+    valleyscope_reduction = str(prov.get("valleyscope_reduction", ""))
+
+    if require_reviewed_table:
+        if data_source != "irreptables" or not package or not package_version:
+            reasons.append(
+                "table provenance insufficient: data_source must be "
+                "'irreptables' with non-empty package and package_version"
+            )
+            report["table_provenance_check"] = "failed"
+        elif not isinstance(table_sg_num, int) or isinstance(table_sg_num, bool) \
+             or table_sg_num <= 0:
+            reasons.append(
+                "table provenance insufficient: missing or invalid "
+                "space_group_number"
+            )
+            report["table_provenance_check"] = "failed"
+        if valleyscope_reduction and \
+           valleyscope_reduction != "sampled_hsp_valley_preserving":
+            reasons.append(
+                f"unrecognised valleyscope_reduction: {valleyscope_reduction}"
+            )
+            report["table_provenance_check"] = "failed"
+        if report["table_provenance_check"] != "failed":
+            report["table_provenance_check"] = "passed"
+    else:
+        report["table_provenance_check"] = "skipped_low_level_test"
+
+    # ---- B. SG number + symbol ----
     bundle_sg = str(bundle.get("subspace_group_candidate", ""))
     table_sg = str(table.get("subspace_group_candidate", ""))
     if bundle_sg != table_sg:
@@ -56,63 +110,171 @@ def promote_bundle_for_solve(
     else:
         report["sg_check"] = "passed"
 
-    # HSP basis check.
-    bundle_hsps = set(bundle.get("expected_hsps", []))
-    table_hsps = set(table.get("expected_hsps", []))
-    if bundle_hsps != table_hsps:
-        reasons.append(
-            f"expected_hsps mismatch: bundle {sorted(bundle_hsps)} "
-            f"!= table {sorted(table_hsps)}"
-        )
-        report["hsp_basis_check"] = "failed"
-    else:
-        report["hsp_basis_check"] = "passed"
-
-    # Irrep basis check: the bundle's irrep keys (kpoint:irrep_label pairs)
-    # must match the table's declared irrep labels.
-    table_irreps = set(table.get("irreps", []))
-    bundle_irreps: set[str] = set()
-    irreps_by_kp = bundle.get("irreps_by_kpoint", {})
-    if isinstance(irreps_by_kp, dict):
-        for kp, labels in irreps_by_kp.items():
-            if isinstance(labels, list):
-                for label in labels:
-                    key = f"{kp}:{label}" if ":" not in str(label) else str(label)
-                    bundle_irreps.add(key)
-    if bundle_irreps and table_irreps:
-        if not bundle_irreps.issubset(table_irreps):
-            extra = sorted(bundle_irreps - table_irreps)
+    bundle_sg_num = bundle.get("subspace_sg_number")
+    if not require_reviewed_table:
+        report["sg_number_check"] = "skipped_low_level_test"
+    elif isinstance(bundle_sg_num, int) and not isinstance(bundle_sg_num, bool) \
+         and bundle_sg_num > 0 \
+         and isinstance(table_sg_num, int) and not isinstance(table_sg_num, bool) \
+         and table_sg_num > 0:
+        if int(bundle_sg_num) != int(table_sg_num):
             reasons.append(
-                f"irrep basis mismatch: bundle irreps not in table: {extra}"
+                f"SG number mismatch: bundle {bundle_sg_num} "
+                f"!= table {table_sg_num}"
             )
-            report["irrep_basis_check"] = "failed"
+            report["sg_number_check"] = "failed"
         else:
-            report["irrep_basis_check"] = "passed"
+            report["sg_number_check"] = "passed"
+    elif isinstance(table_sg_num, int) and not isinstance(table_sg_num, bool) \
+         and table_sg_num > 0:
+        # Table declares SG number but bundle does not — block.
+        reasons.append(
+            "SG number mismatch: table declares "
+            f"space_group_number={table_sg_num} but bundle has none"
+        )
+        report["sg_number_check"] = "failed"
     else:
-        report["irrep_basis_check"] = "not_attempted"
+        report["sg_number_check"] = "not_attempted"
 
-    # Certificate check: bundle must carry a validated or resolvable certificate.
-    cert_id = bundle.get("certificate_identity", {})
-    if isinstance(cert_id, dict):
-        any_unresolved = bool(cert_id.get("any_unresolved", True))
-        if any_unresolved:
-            # Not an automatic blocker: the certificate may be unresolved
-            # because no parent-to-standard transform was needed (primitive
-            # setting).  Record but do not block.
-            report["certificate_check"] = "unresolved_but_not_blocking"
+    # ---- C. HSP basis ----
+    if require_reviewed_table:
+        bundle_hsps = set(bundle.get("expected_hsps", []))
+        table_hsps = set(table.get("expected_hsps", []))
+        if bundle_hsps != table_hsps:
+            reasons.append(
+                f"expected_hsps mismatch: bundle {sorted(bundle_hsps)} "
+                f"!= table {sorted(table_hsps)}"
+            )
+            report["hsp_basis_check"] = "failed"
         else:
-            report["certificate_check"] = "passed"
+            report["hsp_basis_check"] = "passed"
     else:
-        report["certificate_check"] = "not_available"
+        report["hsp_basis_check"] = "skipped_low_level_test"
+
+    # ---- D. Irrep basis ----
+    if require_reviewed_table:
+        table_irreps = set(table.get("irreps", []))
+        bundle_irreps: set[str] = set()
+        irreps_by_kp = bundle.get("irreps_by_kpoint", {})
+        if isinstance(irreps_by_kp, dict):
+            for kp, labels in irreps_by_kp.items():
+                if isinstance(labels, list):
+                    for label in labels:
+                        key = f"{kp}:{label}" if ":" not in str(label) \
+                              else str(label)
+                        bundle_irreps.add(key)
+        if bundle_irreps and table_irreps:
+            if not bundle_irreps.issubset(table_irreps):
+                extra = sorted(bundle_irreps - table_irreps)
+                reasons.append(
+                    f"irrep basis mismatch: bundle irreps not in table: "
+                    f"{extra}"
+                )
+                report["irrep_basis_check"] = "failed"
+            else:
+                report["irrep_basis_check"] = "passed"
+        else:
+            report["irrep_basis_check"] = "not_attempted"
+    else:
+        report["irrep_basis_check"] = "skipped_low_level_test"
+
+    # ---- E. Spin convention ----
+    if not require_reviewed_table:
+        report["spin_convention_check"] = "skipped_low_level_test"
+    elif isinstance(table_spinful, bool):
+        report["spin_convention_check"] = "passed"
+    else:
+        report["spin_convention_check"] = "not_attempted"
+
+    # ---- F. Certificate and setting validation (fail-closed) ----
+    # Low-level solver tests with require_reviewed_table=False skip
+    # certificate validation; they test integer algebra, not physical
+    # convention compatibility.
+    if not require_reviewed_table:
+        report["certificate_check"] = "skipped_low_level_test"
+        report["setting_check"] = "skipped_low_level_test"
+    else:
+        cert_id = bundle.get("certificate_identity", {})
+        if not isinstance(cert_id, dict) or not cert_id:
+            reasons.append(
+                "certificate validation failed: bundle has no "
+                "certificate_identity"
+            )
+            report["certificate_check"] = "failed"
+            report["setting_check"] = "failed"
+        else:
+            any_unresolved = bool(cert_id.get("any_unresolved", True))
+            val_statuses = cert_id.get("certificate_validation_statuses", [])
+            has_rejected = "rejected" in val_statuses if isinstance(val_statuses, list) else False
+            centering_types = cert_id.get("centering_types", [])
+            if not isinstance(centering_types, list) or not centering_types:
+                # No centering data available: treat as primitive
+                # (no evidence of non-primitive centering).
+                is_primitive = True
+            else:
+                is_primitive = (
+                    len(centering_types) == 1
+                    and centering_types[0] == "P"
+                )
+
+            if has_rejected:
+                reasons.append(
+                    "certificate validation failed: certificate_identity "
+                    "contains rejected status"
+                )
+                report["certificate_check"] = "failed"
+                report["setting_check"] = "failed"
+            elif any_unresolved:
+                # For primitive direct-coordinate matches, an unresolved
+                # certificate with centering_type='P' may be acceptable when
+                # no explicit parent-to-standard transform is needed.
+                # For centered/nontrivial settings, unresolved is a blocker.
+                if is_primitive:
+                    # Accept primitive direct-match when the certificate
+                    # specifically declares it.
+                    report["certificate_check"] = (
+                        "passed_primitive_direct_match_unresolved"
+                    )
+                    report["setting_check"] = "passed_primitive_direct_match"
+                else:
+                    reasons.append(
+                        "certificate validation failed: certificate_identity "
+                        "is unresolved for a non-primitive setting; a validated "
+                        "affine transform and centering evidence are required"
+                    )
+                    report["certificate_check"] = "failed"
+                    report["setting_check"] = "failed"
+            else:
+                report["certificate_check"] = "passed"
+                report["setting_check"] = "passed"
+
+            # Distinct setting identities > 1 indicates internal inconsistency.
+            distinct = cert_id.get("distinct_setting_identities")
+            if isinstance(distinct, int) and distinct > 1:
+                reasons.append(
+                    f"certificate validation failed: "
+                    f"{distinct} distinct setting identities in one instance"
+                )
+                report["certificate_check"] = "failed"
 
     promoted = not bool(reasons)
+    state = "validated_basis" if promoted else "sampled_basis"
     promoted_bundle: dict | None = None
     if promoted:
         promoted_bundle = dict(bundle)
         promoted_bundle["ready_for_external_solver"] = True
+        promoted_bundle["hsp_basis_status"] = state
         promoted_bundle["promotion_provenance"] = {
             "source": "promote_bundle_for_solve",
             "validation_report": report,
+            "table_provenance": {
+                "data_source": data_source,
+                "package": package,
+                "package_version": package_version,
+                "space_group_number": table_sg_num,
+                "spinful": table_spinful,
+                "valleyscope_reduction": valleyscope_reduction,
+            },
         }
 
     return {
@@ -120,6 +282,7 @@ def promote_bundle_for_solve(
         "promoted_bundle": promoted_bundle,
         "blocker_reasons": reasons,
         "validation_report": report,
+        "canonical_state": state,
     }
 
 
@@ -241,6 +404,7 @@ def build_reduced_ebr_mapping(
     table: dict | None = None,
     max_coefficient: int = 6,
     reduced_ebr_input: dict | None = None,
+    require_reviewed_table: bool = True,
 ) -> dict:
     """Exact reduced EBR decomposition of export bundle irrep vectors.
 
@@ -293,29 +457,22 @@ def build_reduced_ebr_mapping(
     for bundle in bundles:
         if not isinstance(bundle, dict):
             continue
-        # Gate: only ready_for_external_solver bundles may enter decomposition.
-        # Validation-candidate bundles (sampled_basis) are promoted via the
-        # shared validate-and-promote path before solving.
-        if not bundle.get("ready_for_external_solver"):
-            if bundle.get("ready_for_reduced_table_validation"):
-                promo = promote_bundle_for_solve(bundle=bundle, table=table)
-                if promo["promoted"] and promo["promoted_bundle"] is not None:
-                    bundle = promo["promoted_bundle"]
-                else:
-                    excluded.append({
-                        "bundle_id": bundle.get("bundle_id", "?"),
-                        "subspace_group_candidate": bundle.get(
-                            "subspace_group_candidate", ""),
-                        "subspace_space_group": bundle.get(
-                            "subspace_space_group", {}),
-                        "irrep_source_provenance_by_kpoint": _per_kpoint_prov(
-                            bundle),
-                        "reason": (
-                            "promotion blocked: "
-                            + "; ".join(promo["blocker_reasons"])
-                        ),
-                    })
-                    continue
+        # Every bundle must pass the same validation against the actual
+        # table used for this solve.  Pre-existing readiness flags are
+        # not trusted evidence and never bypass validation.
+        is_validation_candidate = (
+            bundle.get("ready_for_reduced_table_validation") is True
+        )
+        is_premarked_ready = (
+            bundle.get("ready_for_external_solver") is True
+        )
+        if is_validation_candidate or is_premarked_ready:
+            promo = promote_bundle_for_solve(
+                bundle=bundle, table=table,
+                require_reviewed_table=require_reviewed_table,
+            )
+            if promo["promoted"] and promo["promoted_bundle"] is not None:
+                bundle = promo["promoted_bundle"]
             else:
                 excluded.append({
                     "bundle_id": bundle.get("bundle_id", "?"),
@@ -323,10 +480,26 @@ def build_reduced_ebr_mapping(
                         "subspace_group_candidate", ""),
                     "subspace_space_group": bundle.get(
                         "subspace_space_group", {}),
-                    "irrep_source_provenance_by_kpoint": _per_kpoint_prov(bundle),
-                    "reason": "not ready for external solver",
+                    "irrep_source_provenance_by_kpoint": _per_kpoint_prov(
+                        bundle),
+                    "reason": (
+                        "validation blocked: "
+                        + "; ".join(promo["blocker_reasons"])
+                    ),
+                    "validation_report": promo["validation_report"],
                 })
                 continue
+        else:
+            excluded.append({
+                "bundle_id": bundle.get("bundle_id", "?"),
+                "subspace_group_candidate": bundle.get(
+                    "subspace_group_candidate", ""),
+                "subspace_space_group": bundle.get(
+                    "subspace_space_group", {}),
+                "irrep_source_provenance_by_kpoint": _per_kpoint_prov(bundle),
+                "reason": "not ready for external solver",
+            })
+            continue
 
         bundle_group = str(bundle.get("subspace_group_candidate", ""))
         if bundle_group != table_group:

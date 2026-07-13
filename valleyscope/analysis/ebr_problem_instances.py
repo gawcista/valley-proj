@@ -502,15 +502,20 @@ def _certificate_identity(
 ) -> dict[str, object]:
     """Build certificate-identity dict from merged candidates.
 
-    Records per-candidate normalized setting identities plus aggregate
-    diagnostics.
+    All candidates in one group share the same ``_SettingIdentity``, so the
+    canonical identity is taken from the first candidate.  The complete
+    setting-level fields are serialized so that the promotion function can
+    validate affine evidence.
     """
     fps = [_certificate_fingerprint(c) for c in cands]
+    fp0 = fps[0] if fps else None
     hall_numbers = sorted({fp.hall_number for fp in fps if fp.hall_number})
     hall_symbols = sorted({fp.hall_symbol for fp in fps if fp.hall_symbol})
     validation_statuses = sorted({fp.validation_status for fp in fps})
     centering_types = sorted({fp.centering_type for fp in fps if fp.centering_type})
-    return {
+    distinct = len({fp._hash for fp in fps})
+
+    result: dict[str, object] = {
         "hall_numbers": hall_numbers,
         "hall_symbols": hall_symbols,
         "centering_types": centering_types,
@@ -520,7 +525,32 @@ def _certificate_identity(
             or "not_evaluated" in validation_statuses
             or "rejected" in validation_statuses
         ),
-        "distinct_setting_identities": len({
-            fp._hash for fp in fps
-        }),
+        "distinct_setting_identities": distinct,
     }
+
+    # Serialize the canonical _SettingIdentity fields.
+    if fp0 is not None:
+        result["sg_number"] = fp0.sg_number
+        result["sg_symbol"] = fp0.sg_symbol
+        result["hall_number"] = fp0.hall_number
+        result["hall_symbol"] = fp0.hall_symbol
+        result["centering_type"] = fp0.centering_type
+        result["primitive_conventional_relation"] = (
+            fp0.primitive_conventional_relation
+        )
+        result["transform_provenance"] = fp0.transform_provenance
+        result["validation_status"] = fp0.validation_status
+        result["operation_mapping_status"] = fp0.operation_mapping_status
+        result["affine_validation_status"] = fp0.affine_validation_status
+        if fp0.transform_key is not None:
+            result["normalized_direct_transform"] = list(
+                list(row) for row in fp0.transform_key
+            )
+        if fp0.origin_shift_key is not None:
+            result["normalized_origin_shift"] = list(fp0.origin_shift_key)
+        if fp0.centering_vectors_key is not None:
+            result["normalized_centering_vectors"] = [
+                list(v) for v in fp0.centering_vectors_key
+            ]
+
+    return result

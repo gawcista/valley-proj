@@ -236,7 +236,7 @@ def test_reduced_ebr_mapping_rejects_hsp_mismatch():
             "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
         }],
     }
-    r = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
+    r = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table, require_reviewed_table=False)
     assert len(r["solutions"]) == 0
     assert len(r["excluded_bundles"]) == 1
     assert "expected_hsps mismatch" in r["excluded_bundles"][0]["reason"]
@@ -312,7 +312,7 @@ def test_generic_p4_table_authoritative_bundle_maps_and_rejects_mismatch():
     }
     solved = build_reduced_ebr_mapping(
         ebr_export_bundle=export_bundle,
-        table=matching_table,
+        table=matching_table, require_reviewed_table=False
     )
     # Sampled-basis bundles do not reach the solver.
     assert solved["status"] == "solved_exact"
@@ -330,7 +330,7 @@ def test_generic_p4_table_authoritative_bundle_maps_and_rejects_mismatch():
     }
     rejected = build_reduced_ebr_mapping(
         ebr_export_bundle=export_bundle,
-        table=mismatched_table,
+        table=mismatched_table, require_reviewed_table=False
     )
     assert rejected["solutions"] == []
     assert len(rejected["excluded_bundles"]) == 1
@@ -411,7 +411,7 @@ def test_ready_export_bundle_maps_to_public_reduced_ebr_outputs_only(tmp_path):
     )
     mapping = build_reduced_ebr_mapping(
         ebr_export_bundle=export_bundle,
-        table=load_reduced_ebr_table(table_path),
+        table=load_reduced_ebr_table(table_path), require_reviewed_table=False
     )
     assert mapping["status"] == "solved_exact"
 
@@ -615,7 +615,7 @@ def test_reduced_ebr_mapping_ignores_irrep_records():
             "irrep_records_by_kpoint": records,
         }],
     }
-    r = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
+    r = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table, require_reviewed_table=False)
     assert r["status"] == "solved_exact"  # Provenance ignored; decomposition succeeds.
 
 
@@ -733,7 +733,7 @@ def test_generic_irrep_full_pipeline_smoke():
         ],
     }
     result = build_reduced_ebr_mapping(
-        ebr_export_bundle=bundle, table=matching_table,
+        ebr_export_bundle=bundle, table=matching_table, require_reviewed_table=False
     )
     assert result["mapping_status"] == "solved_exact"
 
@@ -746,7 +746,7 @@ def test_generic_irrep_full_pipeline_smoke():
         {"label": "EBR_B", "vector": [0, 1, 0]},
     ]
     result2 = build_reduced_ebr_mapping(
-        ebr_export_bundle=bundle, table=bad_table,
+        ebr_export_bundle=bundle, table=bad_table, require_reviewed_table=False
     )
     assert len(result2["excluded_bundles"]) == 1
     assert "expected_hsps" in result2["excluded_bundles"][0]["reason"]
@@ -893,7 +893,7 @@ def test_generic_ebr_builder_e2e_p4_group_agnostic(tmp_path):
 
     # 6. Exact reduced EBR solve with validated builder-generated table.
     result = build_reduced_ebr_mapping(
-        ebr_export_bundle=bundle, table=validated_table,
+        ebr_export_bundle=bundle, table=validated_table, require_reviewed_table=False
     )
     assert result["mapping_status"] == "solved_exact"
     assert result["solutions"][0]["classification"] == "atomic-compatible-candidate"
@@ -1058,7 +1058,7 @@ def test_irreptables_loader_e2e_p4_group_agnostic(tmp_path):
     assert validated_table["subspace_group_candidate"] == "P4"
 
     result = build_reduced_ebr_mapping(
-        ebr_export_bundle=bundle, table=validated_table,
+        ebr_export_bundle=bundle, table=validated_table, require_reviewed_table=False
     )
     assert result["mapping_status"] == "solved_exact"
     assert result["solutions"][0]["classification"] == "atomic-compatible-candidate"
@@ -1205,7 +1205,7 @@ def test_p4_public_output_contract(tmp_path):
     table_path.write_text(json.dumps(table_def), encoding="utf-8")
     loaded_table = load_reduced_ebr_table(table_path)
     result = build_reduced_ebr_mapping(
-        ebr_export_bundle=bundle, table=loaded_table,
+        ebr_export_bundle=bundle, table=loaded_table, require_reviewed_table=False
     )
     assert result["mapping_status"] == "solved_exact"
     assert result["solutions"][0]["subspace_group_candidate"] == "P4"
@@ -1610,7 +1610,7 @@ def test_reduced_ebr_solution_preserves_multi_hsp_provenance():
                     "source_table_sg_number": 75, "source_table_spinor": True}}],
         },
     }]}
-    r = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
+    r = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table, require_reviewed_table=False)
     assert r["mapping_status"] == "solved_exact"
     sol = r["solutions"][0]
     by_kp = sol.get("irrep_source_provenance_by_kpoint", {})
@@ -1637,7 +1637,7 @@ def test_reduced_ebr_excluded_preserves_provenance():
                         "irrep_source_provenance": {"source_hsp_label": "GM"}}],
         },
     }]}
-    r = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
+    r = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table, require_reviewed_table=False)
     assert len(r["excluded_bundles"]) == 1
     exc = r["excluded_bundles"][0]
     assert "expected_hsps mismatch" in exc["reason"]
@@ -1756,7 +1756,7 @@ def test_public_e2e_record_chain_with_certificate_provenance():
         "ebrs": [{"label": "EBR_P4_A", "vector": [2]}],
     }
     mapping_result = build_reduced_ebr_mapping(
-        ebr_export_bundle=bundle, table=table,
+        ebr_export_bundle=bundle, table=table, require_reviewed_table=False
     )
     assert mapping_result["mapping_status"] == "solved_exact"
     solution = mapping_result["solutions"][0]

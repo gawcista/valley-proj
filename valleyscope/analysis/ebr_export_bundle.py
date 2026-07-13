@@ -63,6 +63,7 @@ def build_ebr_export_bundle(
                 "source_instance_id": inst.get("instance_id", ""),
                 "valley": inst.get("valley", ""),
                 "subspace_group_candidate": inst.get("subspace_group_candidate", ""),
+                "subspace_sg_number": inst.get("subspace_sg_number"),
                 "subspace_space_group": inst.get("subspace_space_group", {}),
                 "certificate_identity": inst.get("certificate_identity", {}),
                 "workflow_path": inst.get("workflow_path", ""),

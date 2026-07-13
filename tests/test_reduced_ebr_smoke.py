@@ -273,7 +273,7 @@ def test_reduced_ebr_classifier_payload_written_consistently_to_public_outputs(t
     }
     mapping = build_reduced_ebr_mapping(
         ebr_export_bundle=export_bundle,
-        table=loaded_table,
+        table=loaded_table, require_reviewed_table=False
     )
     assert [s["classification"] for s in mapping["solutions"]] == [
         "atomic-compatible-candidate",
