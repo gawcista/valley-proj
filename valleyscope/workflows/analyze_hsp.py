@@ -761,9 +761,11 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                             list(k_frac_raw)
                             if k_frac_raw is not None else None
                         ),
-                        "source_table_sg_number": int(table.number),
-                        "source_table_name": str(table.name),
-                        "source_table_spinor": bool(table.spinor),
+                        "source_table_sg_number": int(
+                            getattr(table, "number", 0) or 0),
+                        "source_table_name": str(getattr(table, "name", "")),
+                        "source_table_spinor": bool(
+                            getattr(table, "spinor", False)),
                         "standard_setting_hsp_mapping": kmap_prov,
                     })
                     continue

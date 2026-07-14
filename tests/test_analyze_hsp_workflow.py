@@ -2190,7 +2190,17 @@ def test_hsp_override_does_not_bypass_unresolved_standard_setting_mapping():
 def test_override_agrees_with_resolved_label():
     """Override that agrees with resolved label passes through."""
     import numpy as np
-    from valleyscope.workflows.analyze_hsp import _resolve_generic_irrep_hsp_label
+    import spglib
+    from valleyscope.workflows.analyze_hsp import (
+        _resolve_generic_irrep_hsp_label_with_provenance,
+    )
+
+    def _detected_p3_ops():
+        sym = spglib.get_symmetry_from_database(430)
+        return [{"operation_id": i,
+                 "rotation_frac": np.asarray(sym["rotations"][i], float).tolist(),
+                 "translation_frac": np.asarray(sym["translations"][i], float).tolist()}
+                for i in range(3)]
 
     class _GMTable:
         number = 143
@@ -2203,14 +2213,18 @@ def test_override_agrees_with_resolved_label():
                 return "GM"
             return None
 
-    label, blocker = _resolve_generic_irrep_hsp_label(
+    label, blocker, _ = _resolve_generic_irrep_hsp_label_with_provenance(
         table=_GMTable(),
         k_frac=np.array([0.0, 0.0, 0.0]),
         override_label="GM",
         standard_match={
             "number": 143,
             "international_short": "P3",
+            "hall_number": 430,
+            "hall_symbol": "P 3",
+            "operation_ids": [0, 1, 2],
         },
+        detected_operations=_detected_p3_ops(),
     )
     assert label == "GM"
     assert blocker is None

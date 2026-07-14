@@ -11,8 +11,8 @@ from valleyscope.workflows.analyze_hsp import analyze_hsp
 from tests.helpers_io_workflow import write_fixture, write_config
 from tests.helpers_io_workflow import _E2E_SAMPLE_TABLE, e2e_write_table
 from tests.reduced_ebr_promo_helpers import (
-    apply_resolver_certificate, add_resolver_certificate_to_candidates,
-    complete_table_provenance, resolver_certificate_identity)
+    attach_real_certificate, add_real_certificate_to_candidates,
+    complete_table_provenance, real_primitive_certificate_identity)
 
 from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
 from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
@@ -239,7 +239,7 @@ def test_reduced_ebr_mapping_rejects_hsp_mismatch():
             "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
         }],
     }
-    apply_resolver_certificate(bundle, table)
+    attach_real_certificate(bundle, table)
     r = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
     assert len(r["solutions"]) == 0
     assert len(r["excluded_bundles"]) == 1
@@ -249,7 +249,7 @@ def test_reduced_ebr_mapping_rejects_hsp_mismatch():
 def test_generic_p4_table_authoritative_bundle_maps_and_rejects_mismatch():
     """P4 synthetic instance exports without hard-coded Cn HSP policy."""
     problem_instances = build_ebr_problem_instances(
-        ebr_input_candidates=add_resolver_certificate_to_candidates({
+        ebr_input_candidates=add_real_certificate_to_candidates({
             "status": "has_candidates",
             "candidates": [
                 {
@@ -285,7 +285,7 @@ def test_generic_p4_table_authoritative_bundle_maps_and_rejects_mismatch():
                     "ready_for_ebr_input": True,
                 },
             ],
-        }, 75, "P4", spinful=True),
+        }, 75, "P4", spinor=True),
     )
     inst = problem_instances["instances"][0]
     assert inst["subspace_group_candidate"] == "P4"
@@ -415,7 +415,7 @@ def test_ready_export_bundle_maps_to_public_reduced_ebr_outputs_only(tmp_path):
                 "missing_optional_hsps": ["MM"],
                 "ready_for_ebr_decomposition": False, "ready_for_reduced_table_validation": True,
                 "status": "sampled_basis",
-                "certificate_identity": resolver_certificate_identity(143, "P3"),
+                "certificate_identity": real_primitive_certificate_identity(143, "P3", spinor=True),
                 "irrep_records_by_kpoint": {
                     "GammaM": [{"matched_irrep": "C3_spinor_phase_+1/2",
                                 "irrep_source_provenance": {"source_table_spinor": True}}],
@@ -634,7 +634,7 @@ def test_reduced_ebr_mapping_ignores_irrep_records():
         }],
     }
     complete_table_provenance(table, 143, spinful=True)
-    apply_resolver_certificate(bundle, table)
+    attach_real_certificate(bundle, table)
     r = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
     assert r["status"] == "solved_exact"  # Provenance ignored; decomposition succeeds.
 
@@ -725,7 +725,7 @@ def test_generic_irrep_full_pipeline_smoke():
     assert candidates["candidate_count"] == 2
 
     # 3. Problem instances (table-authoritative: expected_hsps from actual).
-    candidates = add_resolver_certificate_to_candidates(candidates, 75, "P4", spinful=True)
+    candidates = add_real_certificate_to_candidates(candidates, 75, "P4", spinor=True)
     instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
     assert instances["instance_count"] == 1
     inst = instances["instances"][0]
@@ -867,7 +867,7 @@ def test_generic_ebr_builder_e2e_p4_group_agnostic(tmp_path):
         assert c["subspace_group_candidate"] == "P4"
 
     # 3. Problem instances.
-    candidates = add_resolver_certificate_to_candidates(candidates, 75, "P4", spinful=True)
+    candidates = add_real_certificate_to_candidates(candidates, 75, "P4", spinor=True)
     instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
     assert instances["instance_count"] == 1
     inst = instances["instances"][0]
@@ -1021,7 +1021,7 @@ def test_irreptables_loader_e2e_p4_group_agnostic(tmp_path):
         irrep_workflow_decisions=workflow,
         valley_irrep_matching=matching,
     )
-    candidates = add_resolver_certificate_to_candidates(candidates, 75, "P4", spinful=True)
+    candidates = add_real_certificate_to_candidates(candidates, 75, "P4", spinor=True)
     instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
     bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
     b = bundle["bundles"][0]
@@ -1206,7 +1206,7 @@ def test_p4_public_output_contract(tmp_path):
         irrep_workflow_decisions=workflow,
         valley_irrep_matching=matching,
     )
-    candidates = add_resolver_certificate_to_candidates(candidates, 75, "P4", spinful=True)
+    candidates = add_real_certificate_to_candidates(candidates, 75, "P4", spinor=True)
     instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
     bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
     b = bundle["bundles"][0]
@@ -1328,7 +1328,7 @@ def test_standard_outputs_no_cn_like_guardrail(tmp_path):
         irrep_workflow_decisions=workflow,
         valley_irrep_matching=matching,
     )
-    candidates = add_resolver_certificate_to_candidates(candidates, 75, "P4", spinful=True)
+    candidates = add_real_certificate_to_candidates(candidates, 75, "P4", spinor=True)
     instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
     bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
     rep_report = build_valley_projected_representation_report(
@@ -1641,7 +1641,7 @@ def test_reduced_ebr_solution_preserves_multi_hsp_provenance():
         },
     }]}
     complete_table_provenance(table, 75, spinful=True)
-    apply_resolver_certificate(bundle, table)
+    attach_real_certificate(bundle, table)
     r = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
     assert r["mapping_status"] == "solved_exact"
     sol = r["solutions"][0]
@@ -1669,7 +1669,7 @@ def test_reduced_ebr_excluded_preserves_provenance():
                         "irrep_source_provenance": {"source_hsp_label": "GM"}}],
         },
     }]}
-    apply_resolver_certificate(bundle, table)
+    attach_real_certificate(bundle, table)
     r = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
     assert len(r["excluded_bundles"]) == 1
     exc = r["excluded_bundles"][0]
@@ -1775,7 +1775,7 @@ def test_public_e2e_record_chain_with_certificate_provenance():
     cert_in_cand = c["irrep_source_provenance"]["standard_setting_hsp_mapping"]
     assert cert_in_cand["standard_setting_certificate"]["validation_status"] == "validated"
 
-    candidates = add_resolver_certificate_to_candidates(candidates, 75, "P4", spinful=True)
+    candidates = add_real_certificate_to_candidates(candidates, 75, "P4", spinor=True)
     instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
     assert instances["instance_count"] >= 1
     bundle = build_ebr_export_bundle(ebr_problem_instances=instances)

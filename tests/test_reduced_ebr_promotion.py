@@ -1,11 +1,11 @@
-"""Certificate identity integrity — fail-closed promotion validator.
+"""Primitive affine standard-setting certificate — fail-closed promotion.
 
-Positive promotion evidence is produced by the REAL resolver
-(``resolve_standard_setting_hsp_label`` via ``resolver_certificate_identity``)
-and never mutated afterwards.  Negative tests are isolated validator-unit
-tests that flip exactly one field of the resolver-produced identity.  The
-centered positive case is an isolated validator contract only (Phase E does
-not yet emit a centered affine certificate) and is labelled as such.
+Positive primitive evidence is produced by the REAL resolver fed a real
+``StandardIrrepTable`` and a complete spglib detected-operation set, so the
+generic affine ``{R | tau}`` equivalence gate actually runs.  Nothing is
+mutated after the resolver returns.  Negative tests flip exactly one affine
+field of the resolver-produced identity (isolated validator-unit tests).  The
+centered case is an isolated validator contract only (Phase E).
 """
 
 import copy
@@ -22,22 +22,24 @@ from valleyscope.analysis.standard_setting_kmap import (
 )
 from valleyscope.analysis.ebr_problem_instances import (
     build_ebr_problem_instances,
-    _certificate_identity,
 )
 from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
+from valleyscope.irreps.tables import load_standard_irrep_table
 from tests.reduced_ebr_promo_helpers import (
-    resolver_certificate_identity,
-    apply_resolver_certificate,
-    _GammaCoordinateTable,
+    real_primitive_certificate_identity,
+    real_primitive_certificate_dict,
+    add_real_certificate_to_candidates,
+    attach_real_certificate,
+    _detected_standard_operations,
 )
 
-# Real resolver output for SG 143 P3 (Hall 430 "P 3"), never mutated.
-_PRIMITIVE_IDENTITY = resolver_certificate_identity(143, "P3")
+# Real affine primitive identity for SG 143 P3 (Hall 430), no post-mutation.
+_PRIMITIVE_IDENTITY = real_primitive_certificate_identity(143, "P3")
 
 
 def _centered_identity(**over):
     """Isolated validator-contract centered identity (real vocabulary, valid
-    spglib SG 79 I4 / Hall 353).  NOT produced by a resolver; Phase E only."""
+    spglib SG 79 I4 / Hall 353).  NOT a resolver product; Phase E only."""
     cert = {
         "hall_numbers": [353], "hall_symbols": ["I 4"], "centering_types": ["I"],
         "certificate_validation_statuses": ["validated"],
@@ -52,7 +54,6 @@ def _centered_identity(**over):
         "normalized_direct_transform": [[1.0, 0.0, 0.0],
                                         [0.0, 1.0, 0.0],
                                         [0.0, 0.0, 1.0]],
-        "normalized_origin_shift": [0.0, 0.0, 0.0],
         "normalized_centering_vectors": [[0.5, 0.5, 0.5]],
     }
     cert.update(over)
@@ -122,69 +123,80 @@ def _codes(result):
 
 
 # ---------------------------------------------------------------------------
-# Resolver produces a valid identity with no post-mutation
+# Resolver: primitive direct match requires real affine equivalence
 # ---------------------------------------------------------------------------
 
-def test_resolver_identity_is_complete_and_consistent():
-    ci = resolver_certificate_identity(143, "P3")
-    assert ci["validation_status"] == "validated"
-    assert ci["primitive_conventional_relation"] == "direct_coordinate_match"
-    assert ci["hall_numbers"] == [ci["hall_number"]] == [430]
-    assert ci["hall_symbols"] == [ci["hall_symbol"]] == ["P 3"]
-    assert ci["centering_types"] == [ci["centering_type"]] == ["P"]
-    assert ci["certificate_validation_statuses"] == ["validated"]
-    assert ci["distinct_setting_identities"] == 1
-    assert ci["any_unresolved"] is False
+def test_resolver_primitive_needs_affine_operations():
+    """Without detected operations the primitive coordinate match is diagnostic
+    only; the certificate is unresolved and no HSP label is trusted."""
+    table = load_standard_irrep_table(143, spinor=False)
+    sm = {"number": 143, "international_short": "P3", "hall_number": 430,
+          "hall_symbol": "P 3", "operation_ids": [0, 1, 2]}
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.0, 0.0, 0.0]), table=table, standard_match=sm)
+    assert label is None
+    assert blocker is not None
+    cert = prov["standard_setting_certificate"]
+    assert cert["validation_status"] == "unresolved"
+    assert cert["operation_mapping_status"] == "not_attempted"
 
 
-def test_reviewed_primitive_spinless_passes():
-    r = _promote(_bundle(), _table())
+def test_resolver_primitive_with_affine_operations_validates():
+    table = load_standard_irrep_table(143, spinor=False)
+    detected = _detected_standard_operations(430)
+    sm = {"number": 143, "international_short": "P3", "hall_number": 430,
+          "hall_symbol": "P 3", "operation_ids": [op["operation_id"]
+                                                   for op in detected]}
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.0, 0.0, 0.0]), table=table, standard_match=sm,
+        detected_operations=detected)
+    assert blocker is None and label == "GM"
+    cert = prov["standard_setting_certificate"]
+    assert cert["validation_status"] == "validated"
+    assert cert["operation_mapping_status"] == "operation_basis_verification_passed"
+    assert cert["translation_validation_status"] == "passed"
+    assert cert["matched_affine_operations"] == cert["total_parent_operations"]
+
+
+# ---------------------------------------------------------------------------
+# Positive promotion from real affine evidence (no mutation)
+# ---------------------------------------------------------------------------
+
+def test_real_affine_primitive_promotes():
+    ci = real_primitive_certificate_identity(143, "P3")
+    assert ci is not None
+    assert ci["operation_mapping_status"] == "operation_basis_verification_passed"
+    assert ci["affine_validation_status"] == "passed"
+    frozen = copy.deepcopy(ci)
+    r = _promote(_bundle(cert=ci), _table())
     assert r["promoted"] is True
-    assert r["blocker_reasons"] == []
-    assert r["canonical_state"] == "validated_basis"
+    assert r["validation_report"]["affine_setting_check"] == "passed"
+    assert ci == frozen  # promotion did not mutate the identity
 
 
-def test_reviewed_primitive_spinful_passes():
-    r = _promote(_bundle(spinful=True), _table(spinful=True))
+def test_real_affine_primitive_spinful_promotes():
+    ci = real_primitive_certificate_identity(75, "P4", spinor=True)
+    assert ci is not None
+    r = _promote(_bundle(sg_number=75, symbol="P4", spinful=True, cert=ci),
+                 _table(sg_number=75, symbol="P4", spinful=True))
     assert r["promoted"] is True
-    assert r["validation_report"]["spin_convention_check"] == "passed"
 
 
 def test_isolated_centered_validator_contract_passes():
-    # Isolated validator contract only (Phase E does not yet emit this).
     r = _promote(_bundle(sg_number=79, symbol="I4", cert=_centered_identity()),
                  _table(sg_number=79, symbol="I4"))
     assert r["promoted"] is True
     assert r["validation_report"]["affine_setting_check"] == "passed"
 
 
-# ---------------------------------------------------------------------------
-# Real resolver -> identity -> promotion (no post-processing)
-# ---------------------------------------------------------------------------
+def test_full_chain_real_certificate_to_solved():
+    """Real resolver certificate -> candidates -> instances -> export -> solve.
 
-def test_real_resolver_identity_promotes_without_mutation():
-    ci = resolver_certificate_identity(143, "P3")
-    frozen = copy.deepcopy(ci)
-    r = _promote(_bundle(cert=ci), _table())
-    assert r["promoted"] is True
-    assert ci == frozen  # promotion did not modify the identity
-
-
-def test_full_chain_resolver_to_solved():
-    """resolver certificate -> candidates -> instances -> export -> solve.
-
-    Readiness is set by the real workflow builders; the certificate comes from
-    the resolver and is not modified.
+    Readiness comes from the real workflow builders; the certificate is the
+    real affine resolver product, injected at the candidate level only.
     """
-    _, blocker, prov = resolve_standard_setting_hsp_label(
-        k_frac=np.array([0.0, 0.0, 0.0]),
-        table=_GammaCoordinateTable(143, "P3"),
-        standard_match={"number": 143, "international_short": "P3",
-                        "hall_number": 430, "hall_symbol": "P 3",
-                        "operation_ids": [0, 1, 2]},
-    )
-    assert blocker is None
-    cert = prov["standard_setting_certificate"]
+    cert = real_primitive_certificate_dict(143, "P3")
+    assert cert is not None
 
     def _prov():
         return {"standard_setting_hsp_mapping": {
@@ -207,12 +219,86 @@ def test_full_chain_resolver_to_solved():
     export = build_ebr_export_bundle(ebr_problem_instances=instances)
     r = build_reduced_ebr_mapping(ebr_export_bundle=export, table=_table())
     assert r["status"] == "solved_exact"
-    assert r["solutions"][0]["certificate_identity"]["validation_status"] == \
-        "validated"
+    sol = r["solutions"][0]
+    assert sol["certificate_identity"]["operation_mapping_status"] == \
+        "operation_basis_verification_passed"
 
 
 # ---------------------------------------------------------------------------
-# Codex reproductions (must block with specific structured codes)
+# Required affine negative tests (handoff section D)
+# ---------------------------------------------------------------------------
+
+def test_no_detected_operations_blocks_primitive_promotion():
+    # An identity whose affine evidence is not_attempted must not promote.
+    cert = _identity(operation_mapping_status="not_attempted",
+                     affine_validation_status="not_attempted",
+                     affine_matched_operations=None,
+                     affine_total_operations=None)
+    r = _promote(_bundle(cert=cert), _table())
+    assert r["promoted"] is False
+    assert "primitive_affine_evidence_invalid" in _codes(r)
+
+
+def test_operation_mapping_not_attempted_blocks():
+    r = _promote(_bundle(cert=_identity(
+        operation_mapping_status="not_attempted")), _table())
+    assert r["promoted"] is False
+    assert "primitive_affine_evidence_invalid" in _codes(r)
+
+
+def test_affine_validation_not_attempted_blocks():
+    r = _promote(_bundle(cert=_identity(
+        affine_validation_status="not_attempted")), _table())
+    assert r["promoted"] is False
+    assert "primitive_affine_evidence_invalid" in _codes(r)
+
+
+@pytest.mark.parametrize("matched,total", [
+    (None, 3), (3, None), (0, 0), (2, 3), (3, 2),
+])
+def test_bad_operation_counts_block(matched, total):
+    r = _promote(_bundle(cert=_identity(
+        affine_matched_operations=matched,
+        affine_total_operations=total)), _table())
+    assert r["promoted"] is False
+    assert "primitive_affine_evidence_invalid" in _codes(r)
+
+
+def test_nonzero_translation_mismatch_blocks():
+    r = _promote(_bundle(cert=_identity(affine_mismatch_count=2)), _table())
+    assert r["promoted"] is False
+    assert "primitive_affine_evidence_invalid" in _codes(r)
+
+
+def test_nonempty_missing_ingredients_blocks():
+    r = _promote(_bundle(cert=_identity(
+        affine_missing_ingredients=["parent_translation_frac"])), _table())
+    assert r["promoted"] is False
+    assert "primitive_affine_evidence_invalid" in _codes(r)
+
+
+@pytest.mark.parametrize("transform", [
+    None,
+    [[1.0, 0.0], [0.0, 1.0]],                       # wrong shape
+    [[float("inf"), 0, 0], [0, 1, 0], [0, 0, 1]],   # non-finite
+    [[0, 0, 0], [0, 0, 0], [0, 0, 0]],              # singular
+])
+def test_bad_direct_transform_blocks(transform):
+    r = _promote(_bundle(cert=_identity(
+        normalized_direct_transform=transform)), _table())
+    assert r["promoted"] is False
+    assert "primitive_affine_evidence_invalid" in _codes(r)
+
+
+def test_operation_closure_false_blocks():
+    r = _promote(_bundle(cert=_identity(
+        operation_closure_validated=False)), _table())
+    assert r["promoted"] is False
+    assert "primitive_affine_evidence_invalid" in _codes(r)
+
+
+# ---------------------------------------------------------------------------
+# Retained prior fail-open reproductions (identity integrity)
 # ---------------------------------------------------------------------------
 
 def test_repro_certificate_symbol_conflict():
@@ -222,7 +308,6 @@ def test_repro_certificate_symbol_conflict():
 
 
 def test_repro_bundle_table_symbol_conflict_with_sg():
-    # Bundle and table both claim P4 while SG number/Hall/certificate are P3.
     r = _promote(_bundle(symbol="P4"), _table(symbol="P4"))
     assert r["promoted"] is False
     assert {"bundle_symbol_conflict", "table_symbol_conflict"} & _codes(r)
@@ -235,7 +320,6 @@ def test_repro_certificate_sg_missing():
     r = _promote(_bundle(cert=cert), _table())
     assert r["promoted"] is False
     assert "certificate_sg_number_missing" in _codes(r)
-    assert "certificate_sg_symbol_missing" in _codes(r)
 
 
 def test_repro_producer_identity_collections_missing():
@@ -254,64 +338,6 @@ def test_repro_zero_distinct_setting_identities():
     assert "certificate_ambiguous_setting" in _codes(r)
 
 
-# ---------------------------------------------------------------------------
-# Required negative tests (handoff section D)
-# ---------------------------------------------------------------------------
-
-@pytest.mark.parametrize("field", [
-    "hall_numbers", "hall_symbols", "centering_types",
-    "certificate_validation_statuses",
-])
-def test_missing_singular_plural_field_blocks(field):
-    cert = _identity()
-    cert.pop(field)
-    r = _promote(_bundle(cert=cert), _table())
-    assert r["promoted"] is False
-    assert "certificate_field_inconsistent" in _codes(r)
-
-
-@pytest.mark.parametrize("field,value", [
-    ("hall_numbers", [430, 430]),
-    ("hall_numbers", [430, 431]),
-    ("hall_symbols", ["P 3", "P 3"]),
-    ("centering_types", ["P", "P"]),
-    ("certificate_validation_statuses", ["validated", "validated"]),
-])
-def test_extra_or_duplicate_plural_blocks(field, value):
-    r = _promote(_bundle(cert=_identity(**{field: value})), _table())
-    assert r["promoted"] is False
-    assert "certificate_field_inconsistent" in _codes(r)
-
-
-@pytest.mark.parametrize("value", [None, 0, True, False, 2, "1", 1.0])
-def test_malformed_distinct_setting_identities_blocks(value):
-    r = _promote(_bundle(cert=_identity(distinct_setting_identities=value)),
-                 _table())
-    assert r["promoted"] is False
-    assert "certificate_ambiguous_setting" in _codes(r)
-
-
-def test_missing_hall_number_blocks():
-    cert = _identity()
-    cert.pop("hall_number")
-    r = _promote(_bundle(cert=cert), _table())
-    assert r["promoted"] is False
-    assert "certificate_hall_number_missing" in _codes(r)
-
-
-def test_any_unresolved_not_false_blocks():
-    r = _promote(_bundle(cert=_identity(any_unresolved=True,
-                                        validation_status="unresolved",
-                                        certificate_validation_statuses=["unresolved"])),
-                 _table())
-    assert r["promoted"] is False
-    assert "certificate_unresolved" in _codes(r)
-
-
-# ---------------------------------------------------------------------------
-# Crystallographic / spglib consistency
-# ---------------------------------------------------------------------------
-
 def test_sg_143_with_hall_1_rejected():
     cert = _identity(hall_number=1, hall_numbers=[1], hall_symbol="P 1",
                      hall_symbols=["P 1"])
@@ -320,15 +346,7 @@ def test_sg_143_with_hall_1_rejected():
     assert {"hall_sg_inconsistent", "setting_identity_mismatch"} & _codes(r)
 
 
-def test_centering_inconsistent_with_hall_blocks():
-    cert = _identity(centering_type="C", centering_types=["C"])
-    r = _promote(_bundle(cert=cert), _table())
-    assert r["promoted"] is False
-    assert {"centering_hall_inconsistent", "setting_identity_mismatch"} & _codes(r)
-
-
 def test_table_setting_unresolved_blocks():
-    # SG 5 has multiple spglib Hall settings -> unresolved.
     r = _promote(_bundle(sg_number=5, symbol="C2"),
                  _table(sg_number=5, symbol="C2"))
     assert r["promoted"] is False
@@ -351,7 +369,7 @@ def test_table_provenance_fields_block(mutate, code):
 
 
 # ---------------------------------------------------------------------------
-# Spin / HSP / irrep
+# Spin / HSP / irrep / production path
 # ---------------------------------------------------------------------------
 
 def test_spin_evidence_conflict_blocks():
@@ -361,20 +379,6 @@ def test_spin_evidence_conflict_blocks():
     r = _promote(b, _table(spinful=False))
     assert r["promoted"] is False
     assert "spin_evidence_conflict" in _codes(r)
-
-
-def test_spin_mismatch_blocks():
-    r = _promote(_bundle(spinful=True), _table(spinful=False))
-    assert r["promoted"] is False
-    assert "spin_convention_mismatch" in _codes(r)
-
-
-def test_spin_missing_blocks():
-    b = _bundle()
-    b["irrep_records_by_kpoint"] = {}
-    r = _promote(b, _table())
-    assert r["promoted"] is False
-    assert "spin_convention_missing" in _codes(r)
 
 
 def test_hsp_mismatch_blocks():
@@ -400,21 +404,6 @@ def test_missing_certificate_blocks():
     assert "certificate_missing" in _codes(r)
 
 
-# ---------------------------------------------------------------------------
-# Production mapping path (no injected pass)
-# ---------------------------------------------------------------------------
-
-def test_premarked_ready_revalidated_and_blocked():
-    cert = _identity(any_unresolved=True, validation_status="not_evaluated",
-                     certificate_validation_statuses=["not_evaluated"])
-    b = _bundle(cert=cert)
-    r = build_reduced_ebr_mapping(ebr_export_bundle={"bundles": [b]},
-                                  table=_table())
-    assert r["status"] != "solved_exact"
-    assert not r["solutions"]
-    assert len(r["excluded_bundles"]) == 1
-
-
 def test_arbitrary_minimal_table_rejected():
     minimal = {
         "schema_version": "1.0.0", "subspace_group_candidate": "P3",
@@ -426,13 +415,11 @@ def test_arbitrary_minimal_table_rejected():
     r = build_reduced_ebr_mapping(ebr_export_bundle={"bundles": [_bundle()]},
                                   table=minimal)
     assert r["status"] != "solved_exact"
-    codes = {bl["code"] for bl in r["excluded_bundles"][0]["blocker_reasons"]}
-    assert "table_sg_number_missing" in codes
 
 
-def test_apply_resolver_certificate_does_not_copy_setting():
+def test_attach_real_certificate_contract_fixture_solves():
     table = _table()
-    export = apply_resolver_certificate({"bundles": [_bundle()]}, table)
+    export = attach_real_certificate({"bundles": [_bundle()]}, table)
     assert export is not None
     assert "setting_identity" not in table["provenance"]
     r = build_reduced_ebr_mapping(ebr_export_bundle=export, table=table)

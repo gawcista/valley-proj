@@ -270,6 +270,11 @@ class _SettingIdentity:
         "validation_status",
         "operation_mapping_status",
         "affine_validation_status",
+        "affine_matched_operations",
+        "affine_total_operations",
+        "affine_mismatch_count",
+        "affine_missing_ingredients",
+        "operation_closure_validated",
     )
 
     def __init__(
@@ -289,6 +294,11 @@ class _SettingIdentity:
         validation_status: str,
         operation_mapping_status: str,
         affine_validation_status: str,
+        affine_matched_operations: int | None = None,
+        affine_total_operations: int | None = None,
+        affine_mismatch_count: int | None = None,
+        affine_missing_ingredients: tuple[str, ...] = (),
+        operation_closure_validated: bool | None = None,
     ):
         self.sg_number = sg_number
         self.sg_symbol = sg_symbol
@@ -303,6 +313,11 @@ class _SettingIdentity:
         self.validation_status = validation_status
         self.operation_mapping_status = operation_mapping_status
         self.affine_validation_status = affine_validation_status
+        self.affine_matched_operations = affine_matched_operations
+        self.affine_total_operations = affine_total_operations
+        self.affine_mismatch_count = affine_mismatch_count
+        self.affine_missing_ingredients = affine_missing_ingredients
+        self.operation_closure_validated = operation_closure_validated
         self._hash = hash((
             sg_number, sg_symbol,
             hall_number, hall_symbol,
@@ -313,6 +328,11 @@ class _SettingIdentity:
             validation_status,
             operation_mapping_status,
             affine_validation_status,
+            affine_matched_operations,
+            affine_total_operations,
+            affine_mismatch_count,
+            affine_missing_ingredients,
+            operation_closure_validated,
         ))
 
     def __hash__(self) -> int:
@@ -335,6 +355,11 @@ class _SettingIdentity:
             and self.validation_status == other.validation_status
             and self.operation_mapping_status == other.operation_mapping_status
             and self.affine_validation_status == other.affine_validation_status
+            and self.affine_matched_operations == other.affine_matched_operations
+            and self.affine_total_operations == other.affine_total_operations
+            and self.affine_mismatch_count == other.affine_mismatch_count
+            and self.affine_missing_ingredients == other.affine_missing_ingredients
+            and self.operation_closure_validated == other.operation_closure_validated
         )
 
 
@@ -470,6 +495,21 @@ def _certificate_fingerprint(candidate: dict[str, object]) -> _SettingIdentity:
     if isinstance(avs, str) and avs:
         affine_validation_status = str(avs)
 
+    def _opt_int(value: object) -> int | None:
+        return int(value) if isinstance(value, int) \
+            and not isinstance(value, bool) else None
+
+    affine_matched_operations = _opt_int(cert.get("matched_affine_operations"))
+    affine_total_operations = _opt_int(cert.get("total_parent_operations"))
+    affine_mismatch_count = _opt_int(cert.get("mismatched_translation_count"))
+    missing = cert.get("missing_affine_ingredients")
+    affine_missing_ingredients = (
+        tuple(sorted(str(m) for m in missing))
+        if isinstance(missing, list) else ()
+    )
+    closure = cert.get("operation_closure_validated")
+    operation_closure_validated = closure if isinstance(closure, bool) else None
+
     transform_key = _normalize_transform(
         cert.get("parent_to_standard_direct_transform")
     )
@@ -494,6 +534,11 @@ def _certificate_fingerprint(candidate: dict[str, object]) -> _SettingIdentity:
         validation_status=validation_status,
         operation_mapping_status=operation_mapping_status,
         affine_validation_status=affine_validation_status,
+        affine_matched_operations=affine_matched_operations,
+        affine_total_operations=affine_total_operations,
+        affine_mismatch_count=affine_mismatch_count,
+        affine_missing_ingredients=affine_missing_ingredients,
+        operation_closure_validated=operation_closure_validated,
     )
 
 
@@ -542,6 +587,13 @@ def _certificate_identity(
         result["validation_status"] = fp0.validation_status
         result["operation_mapping_status"] = fp0.operation_mapping_status
         result["affine_validation_status"] = fp0.affine_validation_status
+        result["affine_matched_operations"] = fp0.affine_matched_operations
+        result["affine_total_operations"] = fp0.affine_total_operations
+        result["affine_mismatch_count"] = fp0.affine_mismatch_count
+        result["affine_missing_ingredients"] = list(
+            fp0.affine_missing_ingredients
+        )
+        result["operation_closure_validated"] = fp0.operation_closure_validated
         if fp0.transform_key is not None:
             result["normalized_direct_transform"] = list(
                 list(row) for row in fp0.transform_key

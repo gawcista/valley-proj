@@ -1,6 +1,15 @@
 """Tests for standard-setting HSP k-coordinate mapping."""
 
 import numpy as np
+import spglib
+
+
+def _detected_std_ops(hall_number, ids):
+    sym = spglib.get_symmetry_from_database(int(hall_number))
+    return [{"operation_id": i,
+             "rotation_frac": np.asarray(sym["rotations"][i], float).tolist(),
+             "translation_frac": np.asarray(sym["translations"][i], float).tolist()}
+            for i in ids]
 
 from valleyscope.analysis.standard_setting_kmap import (
     resolve_standard_setting_hsp_label,
@@ -123,6 +132,7 @@ def test_p3_m_direct_match_with_standard_match():
             "hall_symbol": "P 3",
             "operation_ids": [0, 1, 2],
         },
+        detected_operations=_detected_std_ops(430, [0, 1, 2]),
     )
     assert label == "M"
     assert blocker is None
@@ -165,7 +175,9 @@ def test_p3_m_point_matches_direct():
             "international_short": "P3",
             "hall_number": 430,
             "hall_symbol": "P 3",
+            "operation_ids": [0, 1, 2],
         },
+        detected_operations=_detected_std_ops(430, [0, 1, 2]),
     )
     assert label == "M"
     assert blocker is None
@@ -524,6 +536,7 @@ def test_direct_match_produces_validated_certificate():
             "hall_number": 430, "hall_symbol": "P 3",
             "operation_ids": [0, 1, 2],
         },
+        detected_operations=_detected_std_ops(430, [0, 1, 2]),
     )
     assert label == "GM"
     cert = prov.get("standard_setting_certificate")
@@ -939,6 +952,7 @@ def test_negative_hall_prefix_primitive_direct_match_is_trusted():
             "hall_number": 2, "hall_symbol": "-P 1",
             "operation_ids": [0],
         },
+        detected_operations=_detected_std_ops(2, [0]),
     )
     assert label == "GM"
     assert blocker is None
@@ -1389,6 +1403,7 @@ def test_primitive_direct_match_resolves_label_in_resolver():
             "hall_number": 430, "hall_symbol": "P 3",
             "operation_ids": [0, 1, 2],
         },
+        detected_operations=_detected_std_ops(430, [0, 1, 2]),
     )
     assert label == "M"
     assert blocker is None

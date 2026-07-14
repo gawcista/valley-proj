@@ -666,57 +666,93 @@ def resolve_standard_setting_hsp_label(
         and direct_match_trusted
     ):
         prov["direct_match_succeeded"] = True
-        cert = build_standard_setting_certificate(
-            standard_match=standard_match,
-            validation_status="validated",
-            parent_basis_operation_ids=(
-                _operation_ids_list(standard_match)
-                if isinstance(standard_match, dict) else None
-            ),
-            parent_k_frac=k_frac,
-            resolved_hsp_label=direct_label,
-            origin_shift_fractional=origin_shift_fractional,
+        is_primitive_group = (
+            isinstance(standard_match, dict) and direct_match_is_primitive
         )
-        cert.operation_mapping_status = "not_attempted"
-        if isinstance(standard_match, dict) and direct_match_is_primitive:
-            cert.centering_status = "primitive_direct_match"
-            cert.primitive_conventional_relation = "direct_coordinate_match"
-        cert.standard_setting_source = (
-            "spglib.per_valley_standard_matches"
-            if isinstance(standard_match, dict)
-            else "coordinate_match_only"
-        )
-        # Affine validation for direct match.
-        if isinstance(standard_match, dict) and detected_operations:
-            vp_ids = _operation_ids_list(standard_match)
-            # Direct primitive coordinate match means the parent fractional
-            # basis is already being treated as the standard basis.
-            hall_symbol = str(standard_match.get("hall_symbol", "") or "")
-            direct_transform = (
-                np.eye(3)
-                if _hall_centering_symbol(hall_symbol) == "P"
-                else None
-            )
-            aff = _validate_affine_operation_equivalence(
-                vp_operations=list(detected_operations),
-                vp_operation_ids=vp_ids,
+        if not is_primitive_group:
+            # Coordinate-only match with no primitive standard-group claim:
+            # record the label as diagnostic provenance with a weak certificate
+            # that cannot enable trusted irrep/EBR promotion.
+            cert = build_standard_setting_certificate(
                 standard_match=standard_match,
-                parent_to_standard_direct_transform=direct_transform,
+                validation_status="validated",
+                parent_basis_operation_ids=(
+                    _operation_ids_list(standard_match)
+                    if isinstance(standard_match, dict) else None
+                ),
+                parent_k_frac=k_frac,
+                resolved_hsp_label=direct_label,
                 origin_shift_fractional=origin_shift_fractional,
             )
+            cert.operation_mapping_status = "not_attempted"
+            cert.standard_setting_source = "coordinate_match_only"
+            prov["standard_setting_certificate"] = cert.to_dict()
+            return direct_label, None, prov
+
+        # Primitive standard group: a bare Gamma/coordinate match is true in
+        # every reciprocal basis and is NOT sufficient.  Trust the primitive
+        # direct-coordinate setting only when generic affine {R|tau} operation
+        # equivalence passes under the identity direct transform.
+        vp_ids = _operation_ids_list(standard_match)
+        aff = _validate_affine_operation_equivalence(
+            vp_operations=(
+                list(detected_operations) if detected_operations else None
+            ),
+            vp_operation_ids=vp_ids,
+            standard_match=standard_match,
+            parent_to_standard_direct_transform=np.eye(3),
+            origin_shift_fractional=origin_shift_fractional,
+        )
+        prov["affine_validation"] = aff
+        if aff.get("status") == "passed":
+            cert = build_standard_setting_certificate(
+                standard_match=standard_match,
+                validation_status="validated",
+                parent_basis_operation_ids=vp_ids,
+                parent_to_standard_direct_transform=np.eye(3),
+                origin_shift_fractional=origin_shift_fractional,
+                transform_provenance="primitive_direct_identity",
+                parent_k_frac=k_frac,
+                resolved_hsp_label=direct_label,
+            )
+            cert.centering_status = "primitive_direct_match"
+            cert.primitive_conventional_relation = "direct_coordinate_match"
+            cert.operation_mapping_status = "operation_basis_verification_passed"
+            cert.standard_setting_source = "spglib.per_valley_standard_matches"
             _apply_affine_validation_to_certificate(cert, aff)
-            if aff.get("status") == "failed":
-                blocker = _affine_failure_blocker(
-                    aff, source="direct coordinate match"
-                )
-                cert.validation_status = "rejected"
-                cert.unresolved_reason = blocker
-                cert.resolved_hsp_label = None
-                prov["affine_validation"] = aff
-                prov["standard_setting_certificate"] = cert.to_dict()
-                return None, blocker, prov
+            prov["standard_setting_certificate"] = cert.to_dict()
+            return direct_label, None, prov
+
+        # Affine equivalence did not pass: coordinate match is diagnostic only.
+        if aff.get("status") == "failed":
+            blocker = _affine_failure_blocker(
+                aff, source="primitive direct coordinate match")
+            validation_status = "rejected"
+        else:
+            blocker = (
+                "standard_setting_hsp_mapping_unresolved: primitive direct "
+                "coordinate match requires passed affine operation equivalence "
+                f"(affine status={aff.get('status')!r}, missing="
+                f"{aff.get('missing_ingredients')})"
+            )
+            validation_status = "unresolved"
+        cert = build_standard_setting_certificate(
+            standard_match=standard_match,
+            validation_status=validation_status,
+            unresolved_reason=blocker,
+            parent_basis_operation_ids=vp_ids,
+            parent_to_standard_direct_transform=np.eye(3),
+            origin_shift_fractional=origin_shift_fractional,
+            transform_provenance="primitive_direct_identity",
+            parent_k_frac=k_frac,
+        )
+        cert.centering_status = "primitive_direct_match"
+        cert.primitive_conventional_relation = "direct_coordinate_match"
+        cert.operation_mapping_status = "not_attempted"
+        cert.standard_setting_source = "spglib.per_valley_standard_matches"
+        _apply_affine_validation_to_certificate(cert, aff)
         prov["standard_setting_certificate"] = cert.to_dict()
-        return direct_label, None, prov
+        return None, blocker, prov
 
     prov["direct_match_succeeded"] = False
     if direct_label is not None:
