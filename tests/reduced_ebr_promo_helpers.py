@@ -1,21 +1,23 @@
-"""Real-producer promotion helpers for reduced-EBR tests.
+"""Real-resolver promotion helpers for reduced-EBR tests.
 
-These helpers build a certificate identity through the ACTUAL producer
-(``StandardSettingCertificate`` + ``ebr_problem_instances._certificate_identity``)
-and let the promotion validator derive the table standard setting
-independently from spglib.  Nothing here copies a setting from the bundle
-into the table, and no hand-written certificate vocabulary is used — the
-serializer emits the production field names/enum values verbatim.
+Certificates are produced by the ACTUAL resolver
+(``resolve_standard_setting_hsp_label``) and serialized by
+``ebr_problem_instances._certificate_identity``.  No field is assigned or
+mutated after construction, no setting is copied from the bundle into the
+table (the validator re-derives it from spglib), and no symbol->SG lookup is
+fabricated: the table must already declare its ``space_group_number``.
 
-For a group whose international number does not map to a unique spglib Hall
-setting, ``real_certificate_identity`` returns None; the caller must then
-expect a ``table_standard_setting_unresolved`` (table) or convention blocker.
+Only primitive space groups with a unique spglib Hall setting yield a
+validated certificate here (the resolver's direct-coordinate-match path).
+Centered/nontrivial affine certificates require Phase E and are not produced.
 """
 
 from __future__ import annotations
 
+import numpy as np
+
 from valleyscope.analysis.standard_setting_kmap import (
-    build_standard_setting_certificate,
+    resolve_standard_setting_hsp_label,
 )
 from valleyscope.analysis.ebr_problem_instances import _certificate_identity
 from valleyscope.analysis.reduced_ebr_mapping import (
@@ -23,17 +25,32 @@ from valleyscope.analysis.reduced_ebr_mapping import (
 )
 
 
-def real_certificate_identity(sg_number: int, sg_symbol: str) -> dict | None:
-    """Build a real validated primitive certificate identity via the producer.
+class _GammaCoordinateTable:
+    """Minimal coordinate table: only Gamma (origin) matches a label."""
 
-    Uses the spglib-canonical Hall setting for ``sg_number``.  Returns None
-    when the SG number has no unique standard setting (the promotion path is
-    then legitimately unresolved and cannot be forced).
+    def __init__(self, sg_number: int, sg_symbol: str):
+        self.number = int(sg_number)
+        self.name = sg_symbol
+        self.spinor = True
+
+    def match_kpoint_label(self, k_frac, *, tolerance: float = 1e-6):
+        if float(np.linalg.norm(np.asarray(k_frac, dtype=float))) <= tolerance:
+            return "GM"
+        return None
+
+
+def resolver_certificate_identity(sg_number: int, sg_symbol: str) -> dict | None:
+    """Real resolver -> serialized certificate identity, with no post-mutation.
+
+    Returns None when the SG number has no unique primitive spglib setting, so
+    the promotion path is legitimately unresolved rather than forced.
     """
     setting = _derive_table_standard_setting(int(sg_number))
     if setting is None or setting["centering_type"] != "P":
         return None
-    cert = build_standard_setting_certificate(
+    _, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.0, 0.0, 0.0]),
+        table=_GammaCoordinateTable(int(sg_number), sg_symbol),
         standard_match={
             "number": int(sg_number),
             "international_short": sg_symbol,
@@ -41,17 +58,12 @@ def real_certificate_identity(sg_number: int, sg_symbol: str) -> dict | None:
             "hall_symbol": setting["hall_symbol"],
             "operation_ids": [0, 1, 2],
         },
-        validation_status="validated",
-        parent_basis_operation_ids=[0, 1, 2],
-        parent_k_frac=[0.0, 0.0, 0.0],
-        resolved_hsp_label="GM1",
     )
-    # Field assignments mirror the producer's validated primitive direct-match
-    # branch in standard_setting_kmap.resolve_standard_setting_hsp_label.
-    cert.operation_mapping_status = "not_attempted"
-    cert.centering_status = "primitive_direct_match"
-    cert.primitive_conventional_relation = "direct_coordinate_match"
-    cert.translation_validation_status = "passed"
+    if blocker is not None:
+        return None
+    cert = prov.get("standard_setting_certificate")
+    if not isinstance(cert, dict):
+        return None
     candidate = {
         "subspace_space_group": {
             "candidate_space_group_number": int(sg_number),
@@ -59,28 +71,30 @@ def real_certificate_identity(sg_number: int, sg_symbol: str) -> dict | None:
         },
         "irrep_source_provenance": {
             "standard_setting_hsp_mapping": {
-                "standard_setting_certificate": cert.to_dict(),
+                "standard_setting_certificate": cert,
             },
         },
     }
     return _certificate_identity([candidate])
 
 
-def real_promotion(export_bundle: dict, table: dict) -> dict | None:
-    """Attach a real validated certificate + spin evidence to each bundle.
+def apply_resolver_certificate(export_bundle: dict, table: dict) -> dict | None:
+    """Attach a REAL resolver certificate + spin evidence to each bundle.
 
-    The table standard setting is NOT copied here — the validator derives it
-    independently from spglib.  This only ensures the table provenance carries
-    the six trusted fields and that each bundle carries a producer-built
-    certificate and consistent per-record spin evidence.
-
-    Returns the (mutated) export bundle, or None when the table SG number has
-    no unique standard setting so no valid promotion is possible.
+    The table must already declare ``space_group_number`` in its provenance;
+    the standard setting is NOT copied from the bundle.  Returns the export
+    bundle, or None when the SG number has no unique primitive setting (the
+    caller must then expect a fail-closed blocker).
     """
     prov = table.get("provenance")
     if not isinstance(prov, dict):
         prov = {}
         table["provenance"] = prov
+    sg = prov.get("space_group_number")
+    if not (isinstance(sg, int) and not isinstance(sg, bool) and sg > 0):
+        return None
+    # The SG number must be declared explicitly (no fabricated symbol->SG
+    # lookup); the remaining trusted provenance fields are conventional.
     prov.setdefault("data_source", "irreptables")
     prov.setdefault("package", "irreptables")
     prov.setdefault("package_version", "0.0.test")
@@ -89,19 +103,15 @@ def real_promotion(export_bundle: dict, table: dict) -> dict | None:
     if not isinstance(spinful, bool):
         spinful = False
         prov["spinful"] = spinful
-    sg = prov.get("space_group_number")
     symbol = str(table.get("subspace_group_candidate", ""))
-    if not (isinstance(sg, int) and not isinstance(sg, bool) and sg > 0):
-        return None
-    cert_identity = real_certificate_identity(int(sg), symbol)
+    cert_identity = resolver_certificate_identity(int(sg), symbol)
     if cert_identity is None:
         return None
     for b in export_bundle.get("bundles", []):
-        if not isinstance(b, dict):
-            continue
-        b["certificate_identity"] = dict(cert_identity)
-        b["subspace_sg_number"] = int(sg)
-        _inject_spin_records(b, spinful)
+        if isinstance(b, dict):
+            b["certificate_identity"] = dict(cert_identity)
+            b["subspace_sg_number"] = int(sg)
+            _inject_spin_records(b, spinful)
     return export_bundle
 
 
@@ -129,30 +139,70 @@ def _inject_spin_records(bundle: dict, spinful: bool) -> None:
                     p["source_table_spinor"] = spinful
 
 
-# Test-only symbol -> international SG number for groups with a UNIQUE spglib
-# standard setting.  Used only to backfill an absent table sg_number so the
-# real trust chain can run; it is not production logic.
-_REAL_UNIQUE_SG = {"P3": 143, "P4": 75, "P1": 1, "P6": 168, "I4": 79}
+def _resolver_certificate_dict(sg_number: int, sg_symbol: str) -> dict | None:
+    """Raw resolver certificate dict (pre-serialization); no post-mutation."""
+    setting = _derive_table_standard_setting(int(sg_number))
+    if setting is None or setting["centering_type"] != "P":
+        return None
+    _, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.0, 0.0, 0.0]),
+        table=_GammaCoordinateTable(int(sg_number), sg_symbol),
+        standard_match={
+            "number": int(sg_number), "international_short": sg_symbol,
+            "hall_number": setting["hall_number"],
+            "hall_symbol": setting["hall_symbol"], "operation_ids": [0, 1, 2],
+        },
+    )
+    if blocker is not None:
+        return None
+    cert = prov.get("standard_setting_certificate")
+    return dict(cert) if isinstance(cert, dict) else None
 
 
-def attach_promotion(export_bundle: dict, table: dict):
-    """Route an export bundle + table through the REAL trust chain.
+def add_resolver_certificate_to_candidates(
+    ebr_input_candidates: dict, sg_number: int, sg_symbol: str,
+    *, spinful: bool = False) -> dict:
+    """Inject a REAL resolver certificate + spin into each input candidate so
+    the workflow serializes a validated bundle identity naturally (no bundle
+    injection).  Returns the mutated candidates dict."""
+    cert = _resolver_certificate_dict(int(sg_number), sg_symbol)
+    if cert is None:
+        return ebr_input_candidates
+    for c in ebr_input_candidates.get("candidates", []):
+        if not isinstance(c, dict):
+            continue
+        prov = c.get("irrep_source_provenance")
+        if not isinstance(prov, dict):
+            prov = {}
+            c["irrep_source_provenance"] = prov
+        kmap = prov.get("standard_setting_hsp_mapping")
+        if not isinstance(kmap, dict):
+            kmap = {}
+            prov["standard_setting_hsp_mapping"] = kmap
+        kmap["standard_setting_certificate"] = dict(cert)
+        prov["source_table_spinor"] = spinful
+    return ebr_input_candidates
 
-    Backfills the table SG number from the group symbol when a unique spglib
-    setting exists, then attaches a producer-built certificate via
-    ``real_promotion``.  The table standard setting is never copied from the
-    bundle.  Returns (export_bundle, table).  When the group has no unique
-    setting, the bundle is left without a valid certificate so the validator
-    blocks (the caller must expect that).
-    """
+
+def complete_table_provenance(table: dict, sg_number: int | None = None,
+                              spinful: bool | None = None) -> dict:
+    """Fill the conventional irreptables provenance constants on a table.
+
+    ``sg_number`` / ``spinful`` are declared explicitly by the caller (no
+    fabricated symbol->SG lookup).  Certificates and crystallographic setting
+    evidence are untouched (the validator derives setting from spglib)."""
     prov = table.get("provenance")
     if not isinstance(prov, dict):
         prov = {}
         table["provenance"] = prov
-    sg = prov.get("space_group_number")
-    if not (isinstance(sg, int) and not isinstance(sg, bool) and sg > 0):
-        symbol = str(table.get("subspace_group_candidate", ""))
-        if symbol in _REAL_UNIQUE_SG:
-            prov["space_group_number"] = _REAL_UNIQUE_SG[symbol]
-    real_promotion(export_bundle, table)
-    return export_bundle, table
+    if sg_number is not None:
+        prov["space_group_number"] = int(sg_number)
+    prov.setdefault("data_source", "irreptables")
+    prov.setdefault("package", "irreptables")
+    prov.setdefault("package_version", "0.0.test")
+    prov.setdefault("valleyscope_reduction", "sampled_hsp_valley_preserving")
+    if spinful is not None:
+        prov["spinful"] = bool(spinful)
+    elif not isinstance(prov.get("spinful"), bool):
+        prov["spinful"] = False
+    return table

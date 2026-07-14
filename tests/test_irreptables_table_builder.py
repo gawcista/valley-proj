@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
-from tests.reduced_ebr_promo_helpers import attach_promotion
+from tests.reduced_ebr_promo_helpers import apply_resolver_certificate
 
 from valleyscope.analysis.irreptables_runtime_table_builder import (
     _load_ebr_data_from_irreptables,
@@ -257,7 +257,11 @@ def test_spec_file_table_feeds_reduced_ebr_mapping_e2e(tmp_path):
             }
         ],
     }
-    attach_promotion(bundle, validated)
+    # SG 150 is P321; use the spglib-canonical symbol so the identity
+    # cross-check passes (the placeholder "P3" was physically wrong).
+    validated["subspace_group_candidate"] = "P321"
+    bundle["bundles"][0]["subspace_group_candidate"] = "P321"
+    apply_resolver_certificate(bundle, validated)
     result = build_reduced_ebr_mapping(
         ebr_export_bundle=bundle,
         table=validated
@@ -2381,7 +2385,9 @@ def test_c3_real_source_mapping_e2e_solved_exact(tmp_path):
             "irreps_by_kpoint": irreps_by_kp,
         }],
     }
-    attach_promotion(bundle, table)
+    table["subspace_group_candidate"] = "P321"
+    bundle["bundles"][0]["subspace_group_candidate"] = "P321"
+    apply_resolver_certificate(bundle, table)
     result = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
 
     assert result["mapping_status"] == "solved_exact"
@@ -2519,7 +2525,9 @@ def test_c2_mm_m3_dry_run_mapping_e2e_solved_exact():
             "irreps_by_kpoint": irreps_by_kp,
         }],
     }
-    attach_promotion(bundle, table)
+    table["subspace_group_candidate"] = "P312"
+    bundle["bundles"][0]["subspace_group_candidate"] = "P312"
+    apply_resolver_certificate(bundle, table)
     result = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
 
     # Production path may reject minimal table.

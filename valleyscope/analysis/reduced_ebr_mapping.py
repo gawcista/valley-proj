@@ -218,7 +218,7 @@ def promote_bundle_for_solve(*, bundle: dict, table: dict) -> dict:
     else:
         report["sg_number_check"] = "passed"
 
-    # ---- C. Certificate presence, status, internal consistency ----
+    # ---- C. Certificate presence, contract, and cross-checks ----
     cert_id = bundle.get("certificate_identity", {})
     if not isinstance(cert_id, dict) or not cert_id:
         blockers.append(_blocker("certificate_missing",
@@ -230,9 +230,10 @@ def promote_bundle_for_solve(*, bundle: dict, table: dict) -> dict:
         cert_id = {}
     else:
         _validate_certificate_status(cert_id, blockers, report)
-        _validate_identity_internal_consistency(cert_id, blockers, report)
-        _validate_cert_sg_consistency(
-            cert_id, bundle_sg_num, table_sg_num, blockers, report)
+        _validate_certificate_identity_contract(cert_id, blockers, report)
+        _validate_sg_identity_crosscheck(
+            cert_id, bundle_sg, bundle_sg_num, table_sg, table_sg_num,
+            table_setting, blockers, report)
         _validate_setting(cert_id, blockers, report)
         _validate_hall_consistency(
             cert_id, table_hall, table_hall_symbol, table_centering,
@@ -329,15 +330,22 @@ def _normalized_hsp_set(value: object) -> set[str] | None:
     return set(labels)
 
 
+_RECOGNIZED_CENTERINGS = frozenset({"P", "A", "B", "C", "I", "F", "R"})
+
+
+def _norm_symbol(value: object) -> str:
+    """Whitespace-insensitive normalized international symbol."""
+    return "".join(str(value or "").split())
+
+
 def _validate_certificate_status(cert_id, blockers, report):
-    """Certificate must be present, validated, not unresolved/rejected/ambiguous."""
+    """Certificate must be validated, not unresolved/rejected."""
     val_statuses = cert_id.get("certificate_validation_statuses", [])
     if not isinstance(val_statuses, list):
         val_statuses = []
     validation_status = str(cert_id.get("validation_status", ""))
-    distinct = cert_id.get("distinct_setting_identities")
     ok = True
-    if "rejected" in val_statuses:
+    if "rejected" in val_statuses or validation_status == "rejected":
         blockers.append(_blocker("certificate_rejected",
             "certificate_identity contains a rejected validation status"))
         ok = False
@@ -350,56 +358,115 @@ def _validate_certificate_status(cert_id, blockers, report):
             f"certificate validation_status must be 'validated', got "
             f"{validation_status!r}"))
         ok = False
-    if isinstance(distinct, int) and not isinstance(distinct, bool) and distinct > 1:
-        blockers.append(_blocker("certificate_ambiguous_setting",
-            f"{distinct} distinct setting identities in one instance"))
-        ok = False
     report["certificate_check"] = "passed" if ok else "failed"
 
 
-def _validate_identity_internal_consistency(cert_id, blockers, report):
-    """Singular fields must be consistent with their plural collections."""
+def _validate_certificate_identity_contract(cert_id, blockers, report):
+    """Enforce the complete serialized certificate identity contract.
+
+    Every producer field must be present with the exact type, and each
+    singular field must equal its normalized plural collection.  Missing,
+    empty, extra, duplicate, malformed, zero, or Boolean values block; nothing
+    is inferred from another field.
+    """
     ok = True
+    if not _is_positive_int(cert_id.get("sg_number")):
+        blockers.append(_blocker("certificate_sg_number_missing",
+            "certificate missing positive integer sg_number"))
+        ok = False
+    sg_symbol = cert_id.get("sg_symbol")
+    if not isinstance(sg_symbol, str) or not sg_symbol.strip():
+        blockers.append(_blocker("certificate_sg_symbol_missing",
+            "certificate missing non-empty sg_symbol"))
+        ok = False
+
     hall_number = cert_id.get("hall_number")
-    hall_numbers = cert_id.get("hall_numbers")
-    if isinstance(hall_numbers, list) and hall_numbers \
-            and hall_number not in hall_numbers:
-        blockers.append(_blocker("certificate_field_inconsistent",
-            f"hall_number {hall_number!r} not in hall_numbers {hall_numbers!r}"))
+    hall_symbol = cert_id.get("hall_symbol")
+    if not _is_positive_int(hall_number):
+        blockers.append(_blocker("certificate_hall_number_missing",
+            "certificate missing positive integer hall_number"))
         ok = False
-    centering_type = cert_id.get("centering_type")
-    centering_types = cert_id.get("centering_types")
-    if isinstance(centering_types, list) and centering_types \
-            and centering_type not in centering_types:
+    elif cert_id.get("hall_numbers") != [hall_number]:
         blockers.append(_blocker("certificate_field_inconsistent",
-            f"centering_type {centering_type!r} not in centering_types "
-            f"{centering_types!r}"))
+            f"hall_numbers {cert_id.get('hall_numbers')!r} != [{hall_number}]"))
         ok = False
-    validation_status = cert_id.get("validation_status")
-    val_statuses = cert_id.get("certificate_validation_statuses")
-    if isinstance(val_statuses, list) and val_statuses \
-            and validation_status is not None \
-            and validation_status not in val_statuses:
+    if not isinstance(hall_symbol, str) or not hall_symbol.strip():
+        blockers.append(_blocker("certificate_hall_symbol_missing",
+            "certificate missing non-empty hall_symbol"))
+        ok = False
+    elif cert_id.get("hall_symbols") != [hall_symbol]:
         blockers.append(_blocker("certificate_field_inconsistent",
-            f"validation_status {validation_status!r} not in "
-            f"certificate_validation_statuses {val_statuses!r}"))
+            f"hall_symbols {cert_id.get('hall_symbols')!r} != [{hall_symbol!r}]"))
         ok = False
+
+    centering = cert_id.get("centering_type")
+    if centering not in _RECOGNIZED_CENTERINGS:
+        blockers.append(_blocker("certificate_centering_invalid",
+            f"unrecognized centering_type {centering!r}"))
+        ok = False
+    elif cert_id.get("centering_types") != [centering]:
+        blockers.append(_blocker("certificate_field_inconsistent",
+            f"centering_types {cert_id.get('centering_types')!r} != "
+            f"[{centering!r}]"))
+        ok = False
+
+    vs = cert_id.get("validation_status")
+    if not isinstance(vs, str) or not vs:
+        blockers.append(_blocker("certificate_validation_status_missing",
+            "certificate missing non-empty validation_status"))
+        ok = False
+    elif cert_id.get("certificate_validation_statuses") != [vs]:
+        blockers.append(_blocker("certificate_field_inconsistent",
+            "certificate_validation_statuses "
+            f"{cert_id.get('certificate_validation_statuses')!r} != [{vs!r}]"))
+        ok = False
+
+    dsi = cert_id.get("distinct_setting_identities")
+    if not isinstance(dsi, int) or isinstance(dsi, bool) or dsi != 1:
+        blockers.append(_blocker("certificate_ambiguous_setting",
+            f"distinct_setting_identities must be integer 1, got {dsi!r}"))
+        ok = False
+
+    if cert_id.get("any_unresolved") is not False:
+        blockers.append(_blocker("certificate_field_inconsistent",
+            f"any_unresolved must be exactly False, got "
+            f"{cert_id.get('any_unresolved')!r}"))
+        ok = False
+
     report["certificate_consistency_check"] = "passed" if ok else "failed"
 
 
-def _validate_cert_sg_consistency(cert_id, bundle_sg_num, table_sg_num,
-                                  blockers, report):
-    """Certificate SG number/symbol must agree with bundle and table SG."""
-    cert_sg = cert_id.get("sg_number")
+def _validate_sg_identity_crosscheck(cert_id, bundle_sg, bundle_sg_num,
+                                     table_sg, table_sg_num, table_setting,
+                                     blockers, report):
+    """Cross-check certificate/bundle/table SG number AND symbol against the
+    independently derived spglib group.  Bundle/table agreement is insufficient
+    when both disagree with the spglib/Hall evidence."""
+    if table_setting is None:
+        report["cert_sg_consistency_check"] = "failed"
+        return
+    canonical_number = int(table_setting["space_group_number"])
+    canonical_symbol = _norm_symbol(table_setting["space_group_symbol"])
     ok = True
-    if _is_positive_int(cert_sg):
-        for name, other in (("bundle", bundle_sg_num), ("table", table_sg_num)):
-            if _is_positive_int(other) and int(cert_sg) != int(other):
-                blockers.append(_blocker("certificate_sg_conflict",
-                    f"certificate sg_number {cert_sg} conflicts with {name} "
-                    f"SG {other}"))
-                ok = False
+    for name, num, code in (
+            ("certificate", cert_id.get("sg_number"), "certificate_sg_conflict"),
+            ("bundle", bundle_sg_num, "bundle_sg_conflict"),
+            ("table", table_sg_num, "table_sg_conflict")):
+        if not _is_positive_int(num) or int(num) != canonical_number:
+            blockers.append(_blocker(code,
+                f"{name} SG number {num!r} != spglib SG {canonical_number}"))
+            ok = False
+    for name, sym, code in (
+            ("certificate", cert_id.get("sg_symbol"), "certificate_symbol_conflict"),
+            ("bundle", bundle_sg, "bundle_symbol_conflict"),
+            ("table", table_sg, "table_symbol_conflict")):
+        if _norm_symbol(sym) != canonical_symbol:
+            blockers.append(_blocker(code,
+                f"{name} SG symbol {sym!r} != spglib symbol "
+                f"{canonical_symbol!r} for SG {canonical_number}"))
+            ok = False
     report["cert_sg_consistency_check"] = "passed" if ok else "failed"
+
 
 
 def _validate_setting(cert_id, blockers, report):

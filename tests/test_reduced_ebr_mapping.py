@@ -11,7 +11,7 @@ from valleyscope.analysis.reduced_ebr_mapping import (
     build_reduced_ebr_mapping,
 )
 from valleyscope.io.config import load_config
-from tests.reduced_ebr_promo_helpers import attach_promotion
+from tests.reduced_ebr_promo_helpers import apply_resolver_certificate
 from valleyscope.analysis.reduced_ebr_solver import classify_bundle
 
 def _write_table(path: Path, data: dict) -> None:
@@ -19,7 +19,7 @@ def _write_table(path: Path, data: dict) -> None:
 
 def _ready(export: dict, table: dict) -> dict:
     """Make an export bundle + table pass the fail-closed promotion validator."""
-    attach_promotion(export, table)
+    apply_resolver_certificate(export, table)
     return export
 
 _SAMPLE_TABLE = {
@@ -257,6 +257,7 @@ def test_unique_operation_suffix_fallback_does_not_double_count():
         "expected_hsps": ["GammaM"],
         "irreps": ["GammaM:C3_spinor_phase_+1/2:op1"],
         "ebrs": [{"label": "EBR_A", "vector": [1]}],
+        "provenance": {"space_group_number": 143},
     }
     b = {
         "bundles": [{
@@ -1412,7 +1413,7 @@ def test_table_file_and_spec_file_equivalent_outputs():
     }
     table = dict(_SAMPLE_TABLE)
 
-    attach_promotion(bundle, _SAMPLE_TABLE)
+    apply_resolver_certificate(bundle, _SAMPLE_TABLE)
     result_table = build_reduced_ebr_mapping(
         ebr_export_bundle=bundle,
         table=table,
@@ -1450,7 +1451,7 @@ def test_reduced_ebr_input_provenance_in_output():
             "irreps_by_kpoint": bundle_vec,
         }],
     }
-    attach_promotion(bundle, _SAMPLE_TABLE)
+    apply_resolver_certificate(bundle, _SAMPLE_TABLE)
     result = build_reduced_ebr_mapping(
         ebr_export_bundle=bundle,
         table=dict(_SAMPLE_TABLE),
@@ -1492,7 +1493,7 @@ def test_reduced_ebr_input_provenance_in_ingestion_record():
             "irreps_by_kpoint": bundle_vec,
         }],
     }
-    attach_promotion(bundle, _SAMPLE_TABLE)
+    apply_resolver_certificate(bundle, _SAMPLE_TABLE)
     mapping = build_reduced_ebr_mapping(
         ebr_export_bundle=bundle,
         table=dict(_SAMPLE_TABLE),
@@ -1529,7 +1530,7 @@ def test_reduced_ebr_input_not_present_when_not_provided():
             "irreps_by_kpoint": bundle_vec,
         }],
     }
-    attach_promotion(bundle, _SAMPLE_TABLE)
+    apply_resolver_certificate(bundle, _SAMPLE_TABLE)
     result = build_reduced_ebr_mapping(
         ebr_export_bundle=bundle,
         table=dict(_SAMPLE_TABLE)

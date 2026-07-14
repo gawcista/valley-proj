@@ -10,7 +10,9 @@ from valleyscope.workflows.analyze_hsp import analyze_hsp
 
 from tests.helpers_io_workflow import write_fixture, write_config
 from tests.helpers_io_workflow import _E2E_SAMPLE_TABLE, e2e_write_table
-from tests.reduced_ebr_promo_helpers import attach_promotion
+from tests.reduced_ebr_promo_helpers import (
+    apply_resolver_certificate, add_resolver_certificate_to_candidates,
+    complete_table_provenance, resolver_certificate_identity)
 
 from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
 from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
@@ -237,7 +239,7 @@ def test_reduced_ebr_mapping_rejects_hsp_mismatch():
             "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
         }],
     }
-    attach_promotion(bundle, table)
+    apply_resolver_certificate(bundle, table)
     r = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
     assert len(r["solutions"]) == 0
     assert len(r["excluded_bundles"]) == 1
@@ -247,7 +249,7 @@ def test_reduced_ebr_mapping_rejects_hsp_mismatch():
 def test_generic_p4_table_authoritative_bundle_maps_and_rejects_mismatch():
     """P4 synthetic instance exports without hard-coded Cn HSP policy."""
     problem_instances = build_ebr_problem_instances(
-        ebr_input_candidates={
+        ebr_input_candidates=add_resolver_certificate_to_candidates({
             "status": "has_candidates",
             "candidates": [
                 {
@@ -283,7 +285,7 @@ def test_generic_p4_table_authoritative_bundle_maps_and_rejects_mismatch():
                     "ready_for_ebr_input": True,
                 },
             ],
-        },
+        }, 75, "P4", spinful=True),
     )
     inst = problem_instances["instances"][0]
     assert inst["subspace_group_candidate"] == "P4"
@@ -311,8 +313,9 @@ def test_generic_p4_table_authoritative_bundle_maps_and_rejects_mismatch():
             "XM:P4_spinor_phase_-1/4",
         ],
         "ebrs": [{"label": "EBR_P4_A", "vector": [1, 1]}],
+        "provenance": {"space_group_number": 75, "spinful": True},
     }
-    attach_promotion(export_bundle, matching_table)
+    complete_table_provenance(matching_table, 75, spinful=True)
     solved = build_reduced_ebr_mapping(
         ebr_export_bundle=export_bundle,
         table=matching_table
@@ -330,8 +333,9 @@ def test_generic_p4_table_authoritative_bundle_maps_and_rejects_mismatch():
             "MM:P4_spinor_phase_-1/4",
         ],
         "ebrs": [{"label": "EBR_P4_bad", "vector": [1, 1]}],
+        "provenance": {"space_group_number": 75, "spinful": True},
     }
-    attach_promotion(export_bundle, mismatched_table)
+    complete_table_provenance(mismatched_table, 75, spinful=True)
     rejected = build_reduced_ebr_mapping(
         ebr_export_bundle=export_bundle,
         table=mismatched_table
@@ -398,6 +402,7 @@ def test_ready_export_bundle_maps_to_public_reduced_ebr_outputs_only(tmp_path):
                 "instance_id": "ebr_instance_001",
                 "valley": "K_valley",
                 "subspace_group_candidate": "P3",
+                "subspace_sg_number": 143,
                 "workflow_path": "direct_qcut",
                 "readiness_level": "trusted",
                 "irreps_by_kpoint": {
@@ -410,11 +415,18 @@ def test_ready_export_bundle_maps_to_public_reduced_ebr_outputs_only(tmp_path):
                 "missing_optional_hsps": ["MM"],
                 "ready_for_ebr_decomposition": False, "ready_for_reduced_table_validation": True,
                 "status": "sampled_basis",
+                "certificate_identity": resolver_certificate_identity(143, "P3"),
+                "irrep_records_by_kpoint": {
+                    "GammaM": [{"matched_irrep": "C3_spinor_phase_+1/2",
+                                "irrep_source_provenance": {"source_table_spinor": True}}],
+                    "KM": [{"matched_irrep": "C3_spinor_phase_+1/6",
+                            "irrep_source_provenance": {"source_table_spinor": True}}],
+                },
             }],
         }
     )
     _loaded_414 = load_reduced_ebr_table(table_path)
-    attach_promotion(export_bundle, _loaded_414)
+    complete_table_provenance(_loaded_414, 143, spinful=True)
     mapping = build_reduced_ebr_mapping(
         ebr_export_bundle=export_bundle,
         table=_loaded_414
@@ -621,7 +633,8 @@ def test_reduced_ebr_mapping_ignores_irrep_records():
             "irrep_records_by_kpoint": records,
         }],
     }
-    attach_promotion(bundle, table)
+    complete_table_provenance(table, 143, spinful=True)
+    apply_resolver_certificate(bundle, table)
     r = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
     assert r["status"] == "solved_exact"  # Provenance ignored; decomposition succeeds.
 
@@ -712,6 +725,7 @@ def test_generic_irrep_full_pipeline_smoke():
     assert candidates["candidate_count"] == 2
 
     # 3. Problem instances (table-authoritative: expected_hsps from actual).
+    candidates = add_resolver_certificate_to_candidates(candidates, 75, "P4", spinful=True)
     instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
     assert instances["instance_count"] == 1
     inst = instances["instances"][0]
@@ -739,7 +753,7 @@ def test_generic_irrep_full_pipeline_smoke():
             {"label": "EBR_B", "vector": [0, 1]},
         ],
     }
-    attach_promotion(bundle, matching_table)
+    complete_table_provenance(matching_table, 75, spinful=True)
     result = build_reduced_ebr_mapping(
         ebr_export_bundle=bundle, table=matching_table
     )
@@ -753,7 +767,7 @@ def test_generic_irrep_full_pipeline_smoke():
         {"label": "EBR_A", "vector": [1, 0, 0]},
         {"label": "EBR_B", "vector": [0, 1, 0]},
     ]
-    attach_promotion(bundle, bad_table)
+    complete_table_provenance(bad_table, 75, spinful=True)
     result2 = build_reduced_ebr_mapping(
         ebr_export_bundle=bundle, table=bad_table
     )
@@ -853,6 +867,7 @@ def test_generic_ebr_builder_e2e_p4_group_agnostic(tmp_path):
         assert c["subspace_group_candidate"] == "P4"
 
     # 3. Problem instances.
+    candidates = add_resolver_certificate_to_candidates(candidates, 75, "P4", spinful=True)
     instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
     assert instances["instance_count"] == 1
     inst = instances["instances"][0]
@@ -901,7 +916,7 @@ def test_generic_ebr_builder_e2e_p4_group_agnostic(tmp_path):
     assert validated_table["expected_hsps"] == ["GammaM"]
 
     # 6. Exact reduced EBR solve with validated builder-generated table.
-    attach_promotion(bundle, validated_table)
+    complete_table_provenance(validated_table, 75, spinful=True)
     result = build_reduced_ebr_mapping(
         ebr_export_bundle=bundle, table=validated_table
     )
@@ -1006,6 +1021,7 @@ def test_irreptables_loader_e2e_p4_group_agnostic(tmp_path):
         irrep_workflow_decisions=workflow,
         valley_irrep_matching=matching,
     )
+    candidates = add_resolver_certificate_to_candidates(candidates, 75, "P4", spinful=True)
     instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
     bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
     b = bundle["bundles"][0]
@@ -1067,7 +1083,7 @@ def test_irreptables_loader_e2e_p4_group_agnostic(tmp_path):
     validated_table = load_reduced_ebr_table(table_path)
     assert validated_table["subspace_group_candidate"] == "P4"
 
-    attach_promotion(bundle, validated_table)
+    complete_table_provenance(validated_table, 75, spinful=True)
     result = build_reduced_ebr_mapping(
         ebr_export_bundle=bundle, table=validated_table
     )
@@ -1190,6 +1206,7 @@ def test_p4_public_output_contract(tmp_path):
         irrep_workflow_decisions=workflow,
         valley_irrep_matching=matching,
     )
+    candidates = add_resolver_certificate_to_candidates(candidates, 75, "P4", spinful=True)
     instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
     bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
     b = bundle["bundles"][0]
@@ -1215,7 +1232,7 @@ def test_p4_public_output_contract(tmp_path):
     table_path = tmp_path / "contract_table.json"
     table_path.write_text(json.dumps(table_def), encoding="utf-8")
     loaded_table = load_reduced_ebr_table(table_path)
-    attach_promotion(bundle, loaded_table)
+    complete_table_provenance(loaded_table, 75, spinful=True)
     result = build_reduced_ebr_mapping(
         ebr_export_bundle=bundle, table=loaded_table
     )
@@ -1311,6 +1328,7 @@ def test_standard_outputs_no_cn_like_guardrail(tmp_path):
         irrep_workflow_decisions=workflow,
         valley_irrep_matching=matching,
     )
+    candidates = add_resolver_certificate_to_candidates(candidates, 75, "P4", spinful=True)
     instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
     bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
     rep_report = build_valley_projected_representation_report(
@@ -1622,7 +1640,8 @@ def test_reduced_ebr_solution_preserves_multi_hsp_provenance():
                     "source_table_sg_number": 75, "source_table_spinor": True}}],
         },
     }]}
-    attach_promotion(bundle, table)
+    complete_table_provenance(table, 75, spinful=True)
+    apply_resolver_certificate(bundle, table)
     r = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
     assert r["mapping_status"] == "solved_exact"
     sol = r["solutions"][0]
@@ -1650,7 +1669,7 @@ def test_reduced_ebr_excluded_preserves_provenance():
                         "irrep_source_provenance": {"source_hsp_label": "GM"}}],
         },
     }]}
-    attach_promotion(bundle, table)
+    apply_resolver_certificate(bundle, table)
     r = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
     assert len(r["excluded_bundles"]) == 1
     exc = r["excluded_bundles"][0]
@@ -1756,6 +1775,7 @@ def test_public_e2e_record_chain_with_certificate_provenance():
     cert_in_cand = c["irrep_source_provenance"]["standard_setting_hsp_mapping"]
     assert cert_in_cand["standard_setting_certificate"]["validation_status"] == "validated"
 
+    candidates = add_resolver_certificate_to_candidates(candidates, 75, "P4", spinful=True)
     instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
     assert instances["instance_count"] >= 1
     bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
@@ -1769,7 +1789,7 @@ def test_public_e2e_record_chain_with_certificate_provenance():
         "irreps": ["GammaM:A"],
         "ebrs": [{"label": "EBR_P4_A", "vector": [2]}],
     }
-    attach_promotion(bundle, table)
+    complete_table_provenance(table, 75, spinful=True)
     mapping_result = build_reduced_ebr_mapping(
         ebr_export_bundle=bundle, table=table
     )

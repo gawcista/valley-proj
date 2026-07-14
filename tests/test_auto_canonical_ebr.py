@@ -16,7 +16,7 @@ from valleyscope.analysis.reduced_ebr_mapping import (
 from valleyscope.analysis.reduced_ebr_solver import classify_bundle
 from tests.helpers_io_workflow import write_fixture, write_config
 from tests.reduced_ebr_promo_helpers import (
-    attach_promotion, real_certificate_identity,
+    apply_resolver_certificate, resolver_certificate_identity,
 )
 
 # ---------------------------------------------------------------------------
@@ -47,7 +47,7 @@ def _spin_records(irreps, spinful=True):
 def _mk_bundle(bid, sg_num, symbol, hsps, irreps, ready=True):
     # Real producer-built primitive certificate for a spglib-unique SG; None
     # for unresolved/invalid SGs so the validator blocks.
-    cert = real_certificate_identity(sg_num, symbol)
+    cert = resolver_certificate_identity(sg_num, symbol)
     return {"bundle_id": bid, "valley": "K_valley",
             "subspace_group_candidate": symbol,
             "subspace_sg_number": sg_num,
@@ -290,10 +290,10 @@ def test_disabled_no_artifacts(tmp_path):
 
 def test_explicit_table_and_spec_regression(tmp_path):
     # table_file
-    td = {"schema_version":"1.0.0","subspace_group_candidate":"P4","expected_hsps":["GammaM"],"irreps":["GammaM:-GM5","GammaM:-GM6"],"ebrs":[{"label":"E","vector":[1,0]}]}
+    td = {"schema_version":"1.0.0","subspace_group_candidate":"P4","expected_hsps":["GammaM"],"irreps":["GammaM:-GM5","GammaM:-GM6"],"ebrs":[{"label":"E","vector":[1,0]}],"provenance":{"space_group_number":75,"spinful":True}}
     tp = tmp_path / "t.json"; tp.write_text(json.dumps(td))
     eb = {"bundles": [_mk_bundle("b",75,"P4",["GammaM"],{"GammaM":["-GM5"]})]}
-    tt = load_reduced_ebr_table(tp); attach_promotion(eb, tt)
+    tt = load_reduced_ebr_table(tp); apply_resolver_certificate(eb, tt)
     r = build_reduced_ebr_mapping(ebr_export_bundle=eb, table=tt, reduced_ebr_input={"source":"table_file"})
     assert r["mapping_status"] == "solved_exact"
     # spec_file — use a loader that returns exactly the labels declared in the spec
@@ -301,7 +301,7 @@ def test_explicit_table_and_spec_regression(tmp_path):
     sp = tmp_path / "s.json"; sp.write_text(json.dumps({"schema_version":"1.1.0","data_source":"irreptables","space_group_number":75,"spinful":True,"source_hsp_by_irrep":{"-GM5":"GammaM","-GM6":"GammaM"},"valleyscope_irrep_multiplicity_by_source_irrep":{"-GM5":{"GammaM:-GM5":1},"-GM6":{"GammaM:-GM6":1}},"expected_hsps":["GammaM"],"allowed_irrep_keys":["GammaM:-GM5","GammaM:-GM6"],"subspace_group_candidate":"P4"}))
     def _spec_ld(sg,spin): return {"basis":{"irrep_labels":["-GM5","-GM6"]},"ebrs":[{"ebr_name":"E","vector":[1,0]}]}
     t2 = build_reduced_table_from_spec_file(str(sp), source_loader=_spec_ld)
-    eb2 = {"bundles": [_mk_bundle("b",75,"P4",["GammaM"],{"GammaM":["-GM5"]})]}; attach_promotion(eb2, t2)
+    eb2 = {"bundles": [_mk_bundle("b",75,"P4",["GammaM"],{"GammaM":["-GM5"]})]}; apply_resolver_certificate(eb2, t2)
     r2 = build_reduced_ebr_mapping(ebr_export_bundle=eb2, table=t2, reduced_ebr_input={"source":"spec_file"})
     assert r2["mapping_status"] == "solved_exact"
 

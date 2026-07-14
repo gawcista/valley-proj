@@ -3,7 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from tests.reduced_ebr_promo_helpers import attach_promotion
+from tests.reduced_ebr_promo_helpers import apply_resolver_certificate
 import yaml
 
 from valleyscope.io.config import load_config
@@ -241,6 +241,7 @@ def test_reduced_ebr_classifier_payload_written_consistently_to_public_outputs(t
             {"label": "EBR_B", "vector": [1, 1, 0]},
             {"label": "EBR_C", "vector": [0, 0, 2]},
         ],
+        "provenance": {"space_group_number": 143},
     }
     e2e_write_table(table_path, table)
     loaded_table = load_reduced_ebr_table(table_path)
@@ -272,7 +273,7 @@ def test_reduced_ebr_classifier_payload_written_consistently_to_public_outputs(t
             },
         ],
     }
-    attach_promotion(export_bundle, loaded_table)
+    apply_resolver_certificate(export_bundle, loaded_table)
     mapping = build_reduced_ebr_mapping(
         ebr_export_bundle=export_bundle,
         table=loaded_table
