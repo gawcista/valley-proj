@@ -248,6 +248,7 @@ def _empty_report(reason: str) -> dict[str, object]:
 # ---------------------------------------------------------------------------
 
 _CERT_TOL = 1e-9
+_SENTINEL_MISSING = object()  # distinguishes absent from empty in fingerprints
 
 
 class _SettingIdentity:
@@ -274,6 +275,11 @@ class _SettingIdentity:
         "affine_total_operations",
         "affine_mismatch_count",
         "affine_missing_ingredients",
+        "affine_standard_setting_op_count",
+        "affine_operation_map",
+        "affine_unmatched_parents",
+        "affine_unused_std",
+        "affine_required_op_count",
         "operation_closure_validated",
     )
 
@@ -297,7 +303,12 @@ class _SettingIdentity:
         affine_matched_operations: int | None = None,
         affine_total_operations: int | None = None,
         affine_mismatch_count: int | None = None,
-        affine_missing_ingredients: tuple[str, ...] = (),
+        affine_missing_ingredients: tuple[str, ...] | None = None,
+        affine_standard_setting_op_count: int | None = None,
+        affine_operation_map: tuple[tuple[str, int], ...] | None = None,
+        affine_unmatched_parents: tuple[str, ...] = (),
+        affine_unused_std: tuple[int, ...] = (),
+        affine_required_op_count: int | None = None,
         operation_closure_validated: bool | None = None,
     ):
         self.sg_number = sg_number
@@ -317,6 +328,11 @@ class _SettingIdentity:
         self.affine_total_operations = affine_total_operations
         self.affine_mismatch_count = affine_mismatch_count
         self.affine_missing_ingredients = affine_missing_ingredients
+        self.affine_standard_setting_op_count = affine_standard_setting_op_count
+        self.affine_operation_map = affine_operation_map
+        self.affine_unmatched_parents = affine_unmatched_parents
+        self.affine_unused_std = affine_unused_std
+        self.affine_required_op_count = affine_required_op_count
         self.operation_closure_validated = operation_closure_validated
         self._hash = hash((
             sg_number, sg_symbol,
@@ -332,6 +348,11 @@ class _SettingIdentity:
             affine_total_operations,
             affine_mismatch_count,
             affine_missing_ingredients,
+            affine_standard_setting_op_count,
+            affine_operation_map,
+            affine_unmatched_parents,
+            affine_unused_std,
+            affine_required_op_count,
             operation_closure_validated,
         ))
 
@@ -359,6 +380,11 @@ class _SettingIdentity:
             and self.affine_total_operations == other.affine_total_operations
             and self.affine_mismatch_count == other.affine_mismatch_count
             and self.affine_missing_ingredients == other.affine_missing_ingredients
+            and self.affine_standard_setting_op_count == other.affine_standard_setting_op_count
+            and self.affine_operation_map == other.affine_operation_map
+            and self.affine_unmatched_parents == other.affine_unmatched_parents
+            and self.affine_unused_std == other.affine_unused_std
+            and self.affine_required_op_count == other.affine_required_op_count
             and self.operation_closure_validated == other.operation_closure_validated
         )
 
@@ -502,13 +528,39 @@ def _certificate_fingerprint(candidate: dict[str, object]) -> _SettingIdentity:
     affine_matched_operations = _opt_int(cert.get("matched_affine_operations"))
     affine_total_operations = _opt_int(cert.get("total_parent_operations"))
     affine_mismatch_count = _opt_int(cert.get("mismatched_translation_count"))
-    missing = cert.get("missing_affine_ingredients")
-    affine_missing_ingredients = (
-        tuple(sorted(str(m) for m in missing))
-        if isinstance(missing, list) else ()
-    )
+    # Distinguish missing/absent from empty: None = evidence absent.
+    # The list may still be empty — that is explicit evidence (no ingredients
+    # missing).  A missing key / None is unknown.
+    missing = cert.get("missing_affine_ingredients", _SENTINEL_MISSING)
+    if missing is _SENTINEL_MISSING:
+        affine_missing_ingredients = None  # absent
+    elif isinstance(missing, list):
+        affine_missing_ingredients = tuple(sorted(str(m) for m in missing))
+    else:
+        affine_missing_ingredients = None  # malformed → absent
+
     closure = cert.get("operation_closure_validated")
     operation_closure_validated = closure if isinstance(closure, bool) else None
+
+    std_op_count = _opt_int(cert.get("standard_setting_operation_count"))
+    req_op_count = _opt_int(cert.get("required_operation_id_count"))
+    op_map = cert.get("affine_operation_map")
+    affine_operation_map = (
+        tuple(sorted((str(k), int(v)) for k, v in op_map.items()))
+        if isinstance(op_map, dict) else None
+    )
+    unmatched = cert.get("unmatched_parent_operations")
+    affine_unmatched_parents = (
+        tuple(sorted(str(r.get("operation_id", "?"))
+                     for r in unmatched))
+        if isinstance(unmatched, list) and unmatched else ()
+    )
+    unused = cert.get("unused_standard_operation_indices")
+    affine_unused_std = (
+        tuple(sorted(int(i) for i in unused
+                     if isinstance(i, int) and not isinstance(i, bool)))
+        if isinstance(unused, list) and unused else ()
+    )
 
     transform_key = _normalize_transform(
         cert.get("parent_to_standard_direct_transform")
@@ -538,6 +590,11 @@ def _certificate_fingerprint(candidate: dict[str, object]) -> _SettingIdentity:
         affine_total_operations=affine_total_operations,
         affine_mismatch_count=affine_mismatch_count,
         affine_missing_ingredients=affine_missing_ingredients,
+        affine_standard_setting_op_count=std_op_count,
+        affine_operation_map=affine_operation_map,
+        affine_unmatched_parents=affine_unmatched_parents,
+        affine_unused_std=affine_unused_std,
+        affine_required_op_count=req_op_count,
         operation_closure_validated=operation_closure_validated,
     )
 
@@ -590,9 +647,17 @@ def _certificate_identity(
         result["affine_matched_operations"] = fp0.affine_matched_operations
         result["affine_total_operations"] = fp0.affine_total_operations
         result["affine_mismatch_count"] = fp0.affine_mismatch_count
-        result["affine_missing_ingredients"] = list(
-            fp0.affine_missing_ingredients
+        result["affine_missing_ingredients"] = (
+            list(fp0.affine_missing_ingredients)
+            if fp0.affine_missing_ingredients is not None else None
         )
+        result["affine_standard_setting_op_count"] = \
+            fp0.affine_standard_setting_op_count
+        result["affine_operation_map"] = (
+            dict(fp0.affine_operation_map)
+            if fp0.affine_operation_map is not None else None
+        )
+        result["affine_required_op_count"] = fp0.affine_required_op_count
         result["operation_closure_validated"] = fp0.operation_closure_validated
         if fp0.transform_key is not None:
             result["normalized_direct_transform"] = list(

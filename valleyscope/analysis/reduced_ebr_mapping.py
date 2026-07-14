@@ -547,47 +547,84 @@ def _finite_nonsingular_3x3(m: object) -> bool:
 
 def _validate_primitive_affine_setting(cert_id, validation_status, relation,
                                        blockers, report):
-    """A primitive direct-coordinate match is trusted only with complete
-    PASSED affine {R|tau} operation-equivalence evidence under the identity
-    transform.  A bare coordinate/Gamma match is not sufficient."""
+    """A primitive direct-coordinate match is trusted only with a complete
+    one-to-one affine operation-group bijection under the strict 3x3 identity
+    transform, explicit zero-mismatch and empty-missing-ingredient evidence,
+    and proven affine group closure."""
     op_status = str(cert_id.get("operation_mapping_status", ""))
     affine_status = str(cert_id.get("affine_validation_status", ""))
     transform = cert_id.get("normalized_direct_transform")
+    transform_prov = str(cert_id.get("transform_provenance", ""))
     matched = cert_id.get("affine_matched_operations")
     total = cert_id.get("affine_total_operations")
+    std_op = cert_id.get("affine_standard_setting_op_count")
+    req_op = cert_id.get("affine_required_op_count")
     mismatch = cert_id.get("affine_mismatch_count")
     missing = cert_id.get("affine_missing_ingredients")
+    op_map = cert_id.get("affine_operation_map")
     closure = cert_id.get("operation_closure_validated")
+
+    def _opt_int(val: object) -> int | None:
+        return int(val) if isinstance(val, int) and not isinstance(val, bool) \
+            else None
 
     reasons: list[str] = []
     if validation_status != "validated":
         reasons.append(f"validation_status={validation_status!r}")
     if relation != _PRIMITIVE_DIRECT_RELATION:
         reasons.append(f"relation={relation!r}")
-    if op_status == "not_attempted" or op_status != _OP_MAPPING_PASSED:
+    if op_status != _OP_MAPPING_PASSED:
         reasons.append(f"operation_mapping_status={op_status!r}")
     if affine_status != _AFFINE_PASSED:
         reasons.append(f"affine_validation_status={affine_status!r}")
-    if not _finite_nonsingular_3x3(transform):
-        reasons.append("direct_transform_not_finite_nonsingular_3x3")
-    if not (_is_positive_int(total) and _is_positive_int(matched)
-            and int(matched) == int(total)):
-        reasons.append(f"operation_counts(matched={matched!r},total={total!r})")
-    if not (mismatch is None or (isinstance(mismatch, int)
-            and not isinstance(mismatch, bool) and mismatch == 0)):
+    # Exact identity transform required for primitive direct-coordinate.
+    if not _is_exact_identity_3x3(transform):
+        reasons.append("direct_transform_not_exact_3x3_identity")
+    if transform_prov != "primitive_direct_identity":
+        reasons.append(f"transform_provenance={transform_prov!r}")
+
+    m = _opt_int(matched); t = _opt_int(total)
+    s = _opt_int(std_op); r = _opt_int(req_op)
+    if not (t is not None and t > 0
+            and m is not None and m == t
+            and s is not None and s == t
+            and r is not None and r == t):
+        reasons.append(
+            f"bijection_counts(matched={m},parent_total={t},"
+            f"std_op={s},required={r})")
+    if not (isinstance(mismatch, int) and not isinstance(mismatch, bool)
+            and mismatch == 0):
         reasons.append(f"mismatch_count={mismatch!r}")
-    if not (missing is None or (isinstance(missing, list) and len(missing) == 0)):
+    if not (isinstance(missing, list) and len(missing) == 0):
         reasons.append(f"missing_ingredients={missing!r}")
-    if closure is False:
-        reasons.append("operation_closure_validated=False")
+    if not isinstance(op_map, dict) or not op_map:
+        reasons.append("affine_operation_map_missing_or_empty")
+    if closure is not True:
+        reasons.append(f"operation_closure_validated={closure!r}")
 
     if reasons:
         blockers.append(_blocker("primitive_affine_evidence_invalid",
-            "primitive direct-coordinate setting requires complete passed "
-            "affine operation equivalence; " + "; ".join(reasons)))
+            "primitive direct-coordinate setting requires a complete one-to-one "
+            "affine operation-group bijection; " + "; ".join(reasons)))
         report["affine_setting_check"] = "failed"
     else:
         report["affine_setting_check"] = "passed"
+
+
+def _is_exact_identity_3x3(m: object) -> bool:
+    """True when ``m`` is exactly [[1,0,0],[0,1,0],[0,0,1]]."""
+    if isinstance(m, list) and len(m) == 3:
+        for i, row in enumerate(m):
+            if not isinstance(row, list) or len(row) != 3:
+                return False
+            for j, v in enumerate(row):
+                if not isinstance(v, (int, float)) or isinstance(v, bool):
+                    return False
+                expected = 1.0 if i == j else 0.0
+                if abs(float(v) - expected) > 1e-9:
+                    return False
+        return True
+    return False
 
 
 def _validate_hall_consistency(cert_id, table_hall, table_hall_symbol,

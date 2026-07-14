@@ -104,6 +104,16 @@ class StandardSettingCertificate:
     """Whether the VP operations form a closed set under multiplication
     (validated via spglib standard match or explicit check)."""
 
+    # --- Operation bijection ---
+    affine_operation_map: dict[str, int] | None = None
+    """Parent operation ID -> standard operation index (bijection)."""
+    unmatched_parent_operations: list[dict[str, object]] | None = None
+    """Parent operations that could not be matched to any standard op."""
+    unused_standard_operation_indices: list[int] | None = None
+    """Standard operation indices not matched by any parent op."""
+    required_operation_id_count: int | None = None
+    """Number of distinct required VP operation IDs."""
+
     # --- Blockers ---
     unresolved_reason: str | None = None
     """Human-readable explanation when validation_status != "validated"."""
@@ -114,11 +124,25 @@ class StandardSettingCertificate:
     """Source HSP label, only when validated."""
 
     def to_dict(self) -> dict[str, object]:
-        """Serialize to a JSON-compatible dict, omitting None defaults."""
+        """Serialize to a JSON-compatible dict, omitting None defaults.
+
+        Empty ``missing_affine_ingredients`` is explicit evidence (nothing
+        is missing) and is preserved; so is ``affine_operation_map``.
+        """
         d: dict[str, object] = {}
         for key, value in asdict(self).items():
-            if value is not None and value != []:
+            if value is None:
+                continue
+            # Preserve empty lists/dicts that are explicit evidence.
+            if isinstance(value, list) and not value:
+                if key in ("missing_affine_ingredients",):
+                    d[key] = []
+                    continue
+                continue
+            if isinstance(value, dict) and not value:
                 d[key] = value
+                continue
+            d[key] = value
         return d
 
 
@@ -274,36 +298,47 @@ def _validate_affine_operation_equivalence(
     origin_shift_fractional: np.ndarray | None = None,
     tolerance: float = 1e-6,
 ) -> dict[str, object]:
-    """Validate affine (rotation + translation) operation equivalence.
+    """Validate affine operation-group bijection.
 
-    When a candidate direct-basis transform T is provided, transforms
-    each parent {R_p, τ_p} into the standard basis via
-    {T·R_p·T⁻¹, T·τ_p} and compares against standard-setting
-    {R_s, τ_s} from spglib, modulo lattice translations.
+    Builds a one-to-one parent-to-standard operation map under the basis
+    transform T, requiring that every required valley-preserving parent
+    operation maps to a distinct standard operation and every primitive
+    standard operation is used exactly once.  Then validates affine group
+    closure of the complete detected parent operation set.
 
-    When an origin shift ``o`` is provided, the transformed
-    translation is computed as
-
-        τ_std = T·τ_parent + o - R_std·o   (modulo lattice)
-
-    where R_std = T·R_parent·T⁻¹.
-
-    Returns a status dict with ``status`` (``"passed"``, ``"failed"``,
-    or ``"unresolved"``), matched/unmatched counts, and a list of
-    missing affine ingredients.
+    Returns a status dict with ``status`` (``"passed"``, ``"failed"``, or
+    ``"unresolved"``), bijection evidence (operation map, unmatched/unused
+    indices), mismatch diagnostics, missing ingredients, and closure status.
     """
     result: dict[str, object] = {
         "status": "not_attempted",
         "missing_ingredients": [],
     }
 
+    # ---- A. Operation-ID coverage ----
     if not vp_operations:
         result["status"] = "unresolved"
         result["missing_ingredients"].append("vp_operation_data")
         return result
+    required_ids = [int(i) for i in vp_operation_ids]
+    required_set = set(required_ids)
+    if not required_set:
+        result["status"] = "unresolved"
+        result["missing_ingredients"].append("vp_operation_data")
+        return result
+    if len(required_ids) != len(required_set):
+        result["status"] = "failed"
+        result["missing_ingredients"].append("duplicate_required_operation_id")
+        result["required_operation_ids"] = required_ids
+        return result
+    result["required_operation_id_count"] = len(required_set)
 
-    vp_id_set = set(vp_operation_ids)
-    ops_with_translations: list[dict[str, object]] = []
+    # Index by ID, checking for duplicates and malformed entries.
+    by_id: dict[int, dict[str, object]] = {}
+    duplicate_ids: list[int] = []
+    unexpected_ids: list[object] = []
+    missing_required: list[int] = []
+    malformed: list[dict[str, object]] = []
     for op in vp_operations:
         if not isinstance(op, dict):
             continue
@@ -313,31 +348,60 @@ def _validate_affine_operation_equivalence(
         try:
             oid = int(oid_raw)
         except (TypeError, ValueError):
-            continue
-        if oid not in vp_id_set:
+            malformed.append({"operation_id": oid_raw, "reason": "non_integer_id"})
             continue
         rot = op.get("rotation_frac")
         trans = op.get("translation_frac")
-        if rot is not None and trans is not None:
-            ops_with_translations.append(op)
+        if rot is None or trans is None:
+            malformed.append({"operation_id": oid,
+                              "reason": "missing_rotation_or_translation"})
+            continue
+        if oid not in required_set:
+            unexpected_ids.append(oid)
+            continue
+        if oid in by_id:
+            duplicate_ids.append(oid)
+            continue
+        by_id[oid] = op
 
-    result["total_parent_operations"] = len(ops_with_translations)
+    for rid in required_ids:
+        if rid not in by_id:
+            missing_required.append(rid)
 
-    if not ops_with_translations:
+    if duplicate_ids:
+        result["status"] = "failed"
+        result["missing_ingredients"].append("duplicate_detected_operation_id")
+        result["duplicate_detected_operation_ids"] = duplicate_ids
+    if unexpected_ids:
+        result["status"] = "failed"
+        result["missing_ingredients"].append("unexpected_operation_ids")
+        result["unexpected_operation_ids"] = unexpected_ids
+    if malformed:
+        result["missing_ingredients"].append("malformed_detected_operations")
+        result["malformed_detected_operations"] = malformed
+    if missing_required:
+        result["status"] = "failed"
+        result["missing_ingredients"].append("missing_required_operation_ids")
+        result["missing_required_operation_ids"] = missing_required
+
+    # Derive the ordered list that bijection analysis consumes.
+    ops_with_translations: list[dict[str, object]] = [
+        by_id[rid] for rid in required_ids if rid in by_id
+    ]
+    if not ops_with_translations and not missing_required:
         result["status"] = "unresolved"
         result["missing_ingredients"].append("parent_translation_frac")
         return result
 
-    # Check spglib standard-setting translations.
+    # ---- B. Hall / spglib standard operations ----
     hall_number = standard_match.get("hall_number")
     if not isinstance(hall_number, int) or isinstance(hall_number, bool):
-        result["status"] = "unresolved"
+        if result["status"] not in ("failed",):
+            result["status"] = "unresolved"
         result["missing_ingredients"].append("standard_setting_translations")
         return result
-
     hall_number = int(hall_number)
 
-    # Hall-number / SG-number consistency guard.
     sg_number = standard_match.get("number")
     _hall_ok, _hall_blocker = _validate_hall_sg_consistency(
         hall_number=hall_number,
@@ -346,7 +410,8 @@ def _validate_affine_operation_equivalence(
         else None,
     )
     if not _hall_ok:
-        result["status"] = "failed"
+        if result["status"] not in ("failed",):
+            result["status"] = "failed"
         result["missing_ingredients"].append("hall_number")
         result["hall_sg_consistency"] = _hall_blocker
         return result
@@ -356,116 +421,255 @@ def _validate_affine_operation_equivalence(
         std_sym = spglib.get_symmetry_from_database(hall_number)
     except Exception:
         std_sym = None
-
     if std_sym is None:
-        result["status"] = "unresolved"
+        if result["status"] not in ("failed",):
+            result["status"] = "unresolved"
         result["missing_ingredients"].append("spglib_database_access")
         return result
 
     std_rotations = [np.asarray(r, dtype=float) for r in std_sym["rotations"]]
     std_translations = [np.asarray(t, dtype=float) for t in std_sym["translations"]]
-    result["standard_setting_operation_count"] = len(std_translations)
+    std_op_count = len(std_translations)
+    result["standard_setting_operation_count"] = std_op_count
 
+    # Centering guard.
     hall_symbol = str(standard_match.get("hall_symbol", "") or "")
     centering_vectors = _centering_cosets(hall_symbol)
     if centering_vectors and len(centering_vectors) > 1:
-        # Non-primitive: centering cosets are available.
-        # Affine comparison below will use them for translation matching.
         result["centering_cosets_count"] = len(centering_vectors)
     elif _hall_centering_symbol(hall_symbol) in ("A", "B", "C", "I", "F", "R"):
-        # Centering type recognised but no explicit cosets derived.
-        # Keep unresolved until explicit centering data is available.
+        if result["status"] not in ("failed",):
+            result["status"] = "unresolved"
         result["missing_ingredients"].append("conventional_centering_vectors")
-        result["status"] = "unresolved"
         return result
 
-    # If no candidate transform, we cannot compare — unresolved.
+    # Primitive-path group-order equality: required parent ops must equal
+    # standard ops for a correct primitive direct-coordinate match.
+    parent_op_count = len(ops_with_translations)
+    if _hall_centering_symbol(hall_symbol) == "P" \
+            and parent_op_count != std_op_count:
+        if result["status"] not in ("failed",):
+            result["status"] = "failed"
+        result["missing_ingredients"].append(
+            f"parent_standard_group_order_mismatch: parent has "
+            f"{parent_op_count} operations, standard has {std_op_count}"
+        )
+    result["total_parent_operations"] = parent_op_count
+
+    # If already failed on coverage issues, stop.
+    if result["status"] in ("failed",) and result["missing_ingredients"]:
+        result["mismatched_translation_count"] = 0
+        return result
+
+    # ---- C. Transform validation ----
     if parent_to_standard_direct_transform is None:
-        result["status"] = "unresolved"
+        if result["status"] not in ("failed",):
+            result["status"] = "unresolved"
         result["missing_ingredients"].append("direct_lattice_transform")
         return result
-
     T = np.asarray(parent_to_standard_direct_transform, dtype=float)
     if T.shape != (3, 3):
-        result["status"] = "unresolved"
+        if result["status"] not in ("failed",):
+            result["status"] = "unresolved"
         result["missing_ingredients"].append("direct_lattice_transform")
         return result
-
-    # Compare transformed parent affine ops against standard ops.
     try:
         T_inv = np.linalg.inv(T)
     except np.linalg.LinAlgError:
-        result["status"] = "failed"
+        if result["status"] not in ("failed",):
+            result["status"] = "failed"
         result["missing_ingredients"].append("singular_transform")
         return result
 
-    # Centering cosets for non-primitive conventional cells.
-    hall_symbol = str(standard_match.get("hall_symbol", "") or "")
     centering_vectors = _centering_cosets(hall_symbol) or [np.array([0.0, 0.0, 0.0])]
 
-    matched_count = 0
-    mismatched_translations: list[dict[str, object]] = []
+    # ---- D. Build one-to-one parent-to-standard bijection ----
+    # For each parent op, record which standard op(s) it could match.
+    candidates: list[list[int]] = []
+    unmatched_parents: list[dict[str, object]] = []
     for op in ops_with_translations:
         r_p = np.asarray(op["rotation_frac"], dtype=float)
         t_p = np.asarray(op["translation_frac"], dtype=float)
-
-        r_transformed = np.rint(T @ r_p @ T_inv).astype(int)
-        r_transformed_float = T @ r_p @ T_inv
+        r_transformed = T @ r_p @ T_inv
         t_transformed = T @ t_p
-        # Apply origin shift: tau_std = T·tau_parent + o - R_std·o
         if origin_shift_fractional is not None:
             o = np.asarray(origin_shift_fractional, dtype=float)
-            t_transformed = t_transformed + o - r_transformed_float @ o
+            t_transformed = t_transformed + o - r_transformed @ o
 
-        found = False
+        matched_indices: list[int] = []
         for j, (r_s, t_s) in enumerate(zip(std_rotations, std_translations)):
             if not np.allclose(r_transformed, r_s, atol=tolerance):
                 continue
-            # Compare translation modulo lattice + centering cosets.
-            # For primitive: cosets = {(0,0,0)} → mod-1 comparison.
-            # For centered: also compare against standard translation
-            # shifted by each centering vector.
             t_diff = t_transformed - t_s
+            match_count = 0
             for cv in centering_vectors:
-                t_diff_cv = t_diff - cv
-                t_diff_mod = t_diff_cv - np.rint(t_diff_cv)
-                if np.linalg.norm(t_diff_mod) <= tolerance:
-                    matched_count += 1
-                    found = True
-                    break
-            if found:
-                break
-
-        if not found:
-            mismatched_translations.append({
-                "parent_operation_id": op.get("operation_id"),
+                d = t_diff - cv
+                d_mod = d - np.rint(d)
+                if np.linalg.norm(d_mod) <= tolerance:
+                    matched_indices.append(j)
+                    match_count += 1
+                    break  # one centering vector match suffices
+        if matched_indices:
+            candidates.append(matched_indices)
+        else:
+            unmatched_parents.append({
+                "operation_id": op.get("operation_id"),
                 "parent_translation_frac": t_p.tolist(),
                 "transformed_translation": t_transformed.tolist(),
             })
 
-    result["matched_affine_operations"] = matched_count
-    result["total_parent_operations"] = len(ops_with_translations)
+    # Find a perfect bijection (each parent → unique std op) by greedy
+    # assignment over the deterministic sorted required-ID order.
+    used_std: list[int] = []
+    used = [False] * std_op_count
+    op_map: dict[int, int] = {}  # parent operation_id -> std index
+    ambiguous = False
+    for op, cand_list in zip(ops_with_translations, candidates):
+        free = [j for j in cand_list if not used[j]]
+        if len(free) == 0:
+            unmatched_parents.append({
+                "operation_id": op.get("operation_id"),
+                "parent_translation_frac": op.get("translation_frac"),
+                "reason": "all_standard_operations_already_used",
+            })
+            continue
+        if len(free) > 1:
+            ambiguous = True
+        # Take the first free standard operation (deterministic order).
+        j = free[0]
+        used[j] = True
+        used_std.append(j)
+        oid = op.get("operation_id")
+        if oid is not None:
+            op_map[int(oid)] = j
 
-    if mismatched_translations:
-        result["status"] = "failed"
-        result["mismatched_translation_count"] = len(mismatched_translations)
-        result["mismatched_translations"] = mismatched_translations[:3]
-    elif matched_count > 0:
-        result["status"] = "passed"
-    else:
+    unmatched_count = len(unmatched_parents)
+    unused_std = sorted(set(range(std_op_count)) - set(used_std))
+    result["operation_map"] = {str(k): int(v) for k, v in op_map.items()}
+    if unmatched_parents:
+        result["unmatched_parent_operations"] = unmatched_parents
+    if unused_std:
+        result["unused_standard_operation_indices"] = unused_std
+
+    result["matched_affine_operations"] = len(used_std)
+    result["total_parent_operations"] = parent_op_count
+
+    # ---- E. Determine status ----
+    if unmatched_parents:
+        result["mismatched_translation_count"] = unmatched_count
+        result["mismatched_translations"] = unmatched_parents[:3]
+        if result["status"] not in ("failed",):
+            result["status"] = "failed"
+    elif ambiguous:
+        # Ambiguous mapping (multiple possible bijections): unresolved for
+        # automated primitive-path (human review would be needed).
+        result["mismatched_translation_count"] = 0
         result["status"] = "unresolved"
-        result["missing_ingredients"].append(
-            "no_affine_operations_matched_after_transform"
-        )
+        result["missing_ingredients"].append("ambiguous_affine_operation_map")
+    else:
+        result["mismatched_translation_count"] = 0
+        result["status"] = "passed"
+
+    # ---- F. Affine group closure of the complete detected parent set ----
+    _validate_affine_group_closure(by_id, result)
 
     return result
+
+
+def _validate_affine_group_closure(
+    by_id: dict[int, dict[str, object]], result: dict[str, object],
+) -> None:
+    """Validate the detected parent affine operation set is closed under
+    composition modulo lattice translations.
+
+    Checks: a unique identity exists, every operation has an inverse in the
+    set, and pairwise products stay in the set (mod lattice).  Sets
+    ``operation_closure_validated`` to True or False in *result*.
+    """
+    if not by_id:
+        result["operation_closure_validated"] = False
+        return
+    ops = list(by_id.values())
+    try:
+        rotations = [np.asarray(op["rotation_frac"], dtype=float) for op in ops]
+        translations = [np.asarray(op["translation_frac"], dtype=float) for op in ops]
+    except (KeyError, ValueError):
+        result["operation_closure_validated"] = False
+        return
+
+    n = len(ops)
+    # Identity: ⟨identity rotation, zero translation-mod-1⟩ in the set
+    def _is_identity(idx: int) -> bool:
+        r = rotations[idx]
+        return np.allclose(r, np.eye(3, dtype=float), atol=1e-6) \
+            and _mod1_norm(translations[idx]) < 1e-6
+
+    identity_indices = [i for i in range(n) if _is_identity(i)]
+    if len(identity_indices) != 1:
+        result["operation_closure_validated"] = False
+        result["affine_closure_diagnostic"] = (
+            f"expected 1 identity; found {len(identity_indices)}"
+        )
+        return
+    e_idx = identity_indices[0]
+
+    # Inverse: for every op g, find h such that g*h = identity (mod lattice).
+    for i in range(n):
+        r_i = rotations[i].astype(float)
+        t_i = translations[i].astype(float)
+        found_inv = False
+        for j in range(n):
+            r_j = rotations[j].astype(float)
+            t_j = translations[j].astype(float)
+            # g · h = (R_i · R_j,  t_i + R_i · t_j) mod 1
+            r_prod = r_i @ r_j
+            t_prod = t_i + r_i @ t_j
+            if np.allclose(r_prod, np.eye(3), atol=1e-6) \
+                    and _mod1_norm(t_prod) < 1e-6:
+                found_inv = True
+                break
+        if not found_inv:
+            result["operation_closure_validated"] = False
+            result["affine_closure_diagnostic"] = (
+                f"operation {i} has no inverse in the detected set"
+            )
+            return
+
+    # Closure under multiplication: R_i * R_j, T_i + R_i * T_j (mod 1)
+    for i in range(n):
+        for j in range(n):
+            r_ij = rotations[i] @ rotations[j]
+            t_ij = translations[i] + rotations[i] @ translations[j]
+            # t_ij modulo 1
+            t_ij_mod = t_ij - np.rint(t_ij)
+            # Heuristic: only check that each product has SOME element with
+            # matching rotation and a translation within tolerance.
+            found_prod = False
+            for k in range(n):
+                if np.allclose(rotations[k], r_ij, atol=1e-6) \
+                        and _mod1_norm(translations[k] - t_ij_mod) < 1e-6:
+                    found_prod = True
+                    break
+            if not found_prod:
+                result["operation_closure_validated"] = False
+                result["affine_closure_diagnostic"] = (
+                    f"product of operations {i} and {j} is not in the set"
+                )
+                return
+
+    result["operation_closure_validated"] = True
+
+
+def _mod1_norm(vec: np.ndarray) -> float:
+    return float(np.linalg.norm(vec - np.rint(vec)))
 
 
 def _apply_affine_validation_to_certificate(
     cert: StandardSettingCertificate,
     affine_result: dict[str, object],
 ) -> None:
-    """Copy affine validation diagnostics into a certificate."""
+    """Copy affine validation diagnostics including bijection evidence into
+    the certificate."""
     cert.translation_validation_status = str(
         affine_result.get("status", "unresolved")
     )
@@ -480,11 +684,21 @@ def _apply_affine_validation_to_certificate(
         "missing_ingredients", []
     )
     cert.mismatched_translation_count = affine_result.get(
-        "mismatched_translation_count"
+        "mismatched_translation_count", 0
     )
     cert.mismatched_translations = affine_result.get(
         "mismatched_translations", []
     )
+    cert.operation_closure_validated = affine_result.get(
+        "operation_closure_validated"
+    )
+    # Bijection evidence.
+    op_map = affine_result.get("operation_map")
+    if isinstance(op_map, dict):
+        cert.affine_operation_map = {str(k): int(v) for k, v in op_map.items()}
+    cert.unmatched_parent_operations = affine_result.get("unmatched_parent_operations")
+    cert.unused_standard_operation_indices = affine_result.get("unused_standard_operation_indices")
+    cert.required_operation_id_count = affine_result.get("required_operation_id_count")
 
 
 def _affine_failure_blocker(
