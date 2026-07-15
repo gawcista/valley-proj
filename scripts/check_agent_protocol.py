@@ -7,9 +7,8 @@ import sys
 from pathlib import Path
 
 
-COMMIT_RE = re.compile(r"\b[0-9a-f]{7,40}\b")
 _HASH_LINE_RE = re.compile(
-    r"^(?:Commit|Reviewed HEAD)\s*:\s*(?:`)?([0-9a-f]{7,40})(?:`)?",
+    r"^(?:Commit|Reviewed HEAD)\s*:\s*(?:`)?([0-9a-f]{7,40})(?:`)?(?=\s|$)",
     re.IGNORECASE | re.MULTILINE,
 )
 _PLACEHOLDER_RE = re.compile(r"#\s*\[targeted counts\]|#\s*\[exact output\]|#\s*<placeholder")
@@ -18,23 +17,41 @@ _PLACEHOLDER_RE = re.compile(r"#\s*\[targeted counts\]|#\s*\[exact output\]|#\s*
 def _head_hash() -> str:
     try:
         return subprocess.run(
-            ["git", "rev-parse", "--short=7", "HEAD"],
+            ["git", "rev-parse", "HEAD"],
             check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         ).stdout.strip()
     except Exception:
         return ""
 
 
-def check_handoff_text(text: str) -> list[str]:
+def check_handoff_text(
+    text: str,
+    expected_head: str | None = None,
+) -> list[str]:
+    """Validate handoff text without reading mutable repository state.
+
+    The CLI supplies the actual full HEAD.  Unit tests may supply a fixed
+    expected hash or omit it when testing repository-independent text rules.
+    """
     errors: list[str] = []
     lower = text.lower()
 
-    if not COMMIT_RE.search(text):
-        errors.append("handoff must include a commit hash")
-    head = _head_hash()
-    if head:
-        hash_lines = _HASH_LINE_RE.findall(text)
-        if hash_lines and head not in hash_lines:
+    hash_lines = [value.lower() for value in _HASH_LINE_RE.findall(text)]
+    if not hash_lines:
+        errors.append(
+            "handoff must include an explicit Commit: or Reviewed HEAD: hash line"
+        )
+    else:
+        longest = max(hash_lines, key=len)
+        if any(not longest.startswith(value) for value in hash_lines):
+            errors.append(
+                f"handoff contains conflicting explicit hash lines: {hash_lines}"
+            )
+    if expected_head:
+        head = expected_head.lower()
+        if not re.fullmatch(r"[0-9a-f]{7,40}", head):
+            errors.append(f"expected HEAD hash is malformed: {expected_head!r}")
+        elif hash_lines and any(not head.startswith(value) for value in hash_lines):
             errors.append(
                 f"handoff hash(es) {hash_lines} do not match current HEAD "
                 f"({head}); the handoff is stale or referencing a wrong commit"
@@ -151,7 +168,10 @@ def main(argv: list[str] | None = None) -> int:
     if not handoff_path.exists():
         errors.append(f"handoff file not found: {handoff_path}")
     else:
-        errors.extend(check_handoff_text(handoff_path.read_text(encoding="utf-8")))
+        errors.extend(check_handoff_text(
+            handoff_path.read_text(encoding="utf-8"),
+            expected_head=_head_hash() or None,
+        ))
 
     try:
         errors.extend(check_branch_policy(_current_branch(), _current_upstream()))

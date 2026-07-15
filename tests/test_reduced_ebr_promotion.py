@@ -16,12 +16,14 @@ import pytest
 from valleyscope.analysis.reduced_ebr_mapping import (
     promote_bundle_for_solve,
     build_reduced_ebr_mapping,
+    _validate_primitive_affine_setting,
 )
 from valleyscope.analysis.standard_setting_kmap import (
     resolve_standard_setting_hsp_label,
 )
 from valleyscope.analysis.ebr_problem_instances import (
     build_ebr_problem_instances,
+    _certificate_identity,
 )
 from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
 from valleyscope.irreps.tables import load_standard_irrep_table
@@ -157,6 +159,79 @@ def test_resolver_primitive_with_affine_operations_validates():
     assert cert["operation_mapping_status"] == "operation_basis_verification_passed"
     assert cert["translation_validation_status"] == "passed"
     assert cert["matched_affine_operations"] == cert["total_parent_operations"]
+    assert cert["missing_affine_ingredients"] == []
+    assert cert["unmatched_parent_operations"] == []
+    assert cert["unused_standard_operation_indices"] == []
+
+
+def _p2_relabelled_certificate_identity():
+    """Real Hall-3 P2 affine operations with opaque parent IDs [0, 4]."""
+    sym = _detected_standard_operations(3)
+    assert sym is not None and len(sym) == 2
+    detected = [dict(sym[0]), dict(sym[1])]
+    detected[0]["operation_id"] = 0
+    detected[1]["operation_id"] = 4
+    table = load_standard_irrep_table(3, spinor=False)
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.0, 0.0, 0.0]),
+        table=table,
+        standard_match={
+            "number": 3,
+            "international_short": "P2",
+            "hall_number": 3,
+            "hall_symbol": "P 2y",
+            "operation_ids": [0, 4],
+        },
+        detected_operations=detected,
+    )
+    assert label == "GM" and blocker is None
+    cert = prov["standard_setting_certificate"]
+    candidate = {
+        "subspace_space_group": {
+            "candidate_space_group_number": 3,
+            "candidate_space_group_symbol": "P2",
+        },
+        "irrep_source_provenance": {
+            "standard_setting_hsp_mapping": {
+                "standard_setting_certificate": cert,
+            },
+        },
+    }
+    return _certificate_identity([candidate])
+
+
+def test_noncontiguous_required_operation_ids_pass_promotion_affine_gate():
+    cert_id = _p2_relabelled_certificate_identity()
+    assert cert_id["affine_required_operation_ids"] == [0, 4]
+    assert cert_id["affine_operation_map"] == {"0": 0, "4": 1}
+    blockers = []
+    report = {}
+    _validate_primitive_affine_setting(
+        cert_id,
+        cert_id["validation_status"],
+        cert_id["primitive_conventional_relation"],
+        blockers,
+        report,
+    )
+    assert blockers == []
+    assert report["affine_setting_check"] == "passed"
+
+
+def test_dense_map_keys_rejected_for_noncontiguous_required_operation_ids():
+    cert_id = _p2_relabelled_certificate_identity()
+    cert_id["affine_operation_map"] = {"0": 0, "1": 1}
+    blockers = []
+    report = {}
+    _validate_primitive_affine_setting(
+        cert_id,
+        cert_id["validation_status"],
+        cert_id["primitive_conventional_relation"],
+        blockers,
+        report,
+    )
+    assert len(blockers) == 1
+    assert blockers[0]["code"] == "primitive_affine_evidence_invalid"
+    assert "keys_do_not_match_required_ids" in blockers[0]["detail"]
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +248,72 @@ def test_real_affine_primitive_promotes():
     assert r["promoted"] is True
     assert r["validation_report"]["affine_setting_check"] == "passed"
     assert ci == frozen  # promotion did not mutate the identity
+
+
+def test_absent_raw_audit_fields_remain_none_and_block_promotion():
+    raw = real_primitive_certificate_dict(143, "P3")
+    assert raw is not None
+    raw.pop("unmatched_parent_operations")
+    raw.pop("unused_standard_operation_indices")
+    candidate = {
+        "subspace_space_group": {
+            "candidate_space_group_number": 143,
+            "candidate_space_group_symbol": "P3",
+        },
+        "irrep_source_provenance": {
+            "standard_setting_hsp_mapping": {
+                "standard_setting_certificate": raw,
+            },
+        },
+    }
+    cert_id = _certificate_identity([candidate])
+    assert cert_id["affine_unmatched_parent_operations"] is None
+    assert cert_id["affine_unused_standard_operation_indices"] is None
+    out = _promote(_bundle(cert=cert_id), _table())
+    assert out["promoted"] is False
+    assert "primitive_affine_evidence_invalid" in _codes(out)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("affine_unmatched_parent_operations", "bad"),
+    ("affine_unmatched_parent_operations", {}),
+    ("affine_unmatched_parent_operations", ()),
+    ("affine_unmatched_parent_operations", False),
+    ("affine_unmatched_parent_operations", [{"operation_id": 0}]),
+    ("affine_unused_standard_operation_indices", "bad"),
+    ("affine_unused_standard_operation_indices", {}),
+    ("affine_unused_standard_operation_indices", ()),
+    ("affine_unused_standard_operation_indices", False),
+    ("affine_unused_standard_operation_indices", ["0"]),
+    ("affine_missing_ingredients", "bad"),
+    ("affine_missing_ingredients", {}),
+    ("affine_missing_ingredients", ()),
+    ("affine_missing_ingredients", False),
+    ("affine_missing_ingredients", [0]),
+    ("affine_required_operation_ids", "bad"),
+    ("affine_required_operation_ids", {}),
+    ("affine_required_operation_ids", (0, 1, 2)),
+    ("affine_required_operation_ids", False),
+    ("affine_required_operation_ids", [0, True, 2]),
+    ("affine_operation_map", "bad"),
+    ("affine_operation_map", []),
+    ("affine_operation_map", False),
+    ("affine_operation_map", {"0": 0, "1": "1", "2": 2}),
+])
+def test_malformed_affine_audit_evidence_blocks(field, value):
+    cert = _identity()
+    cert[field] = value
+    out = _promote(_bundle(cert=cert), _table())
+    assert out["promoted"] is False
+    assert "primitive_affine_evidence_invalid" in _codes(out)
+
+
+def test_operation_map_key_aliases_are_rejected():
+    cert = _identity()
+    cert["affine_operation_map"] = {0: 0, "0": 1, "2": 2}
+    out = _promote(_bundle(cert=cert), _table())
+    assert out["promoted"] is False
+    assert "primitive_affine_evidence_invalid" in _codes(out)
 
 
 def test_real_affine_primitive_spinful_promotes():
@@ -501,7 +642,7 @@ def test_closure_failure_blocks_resolver_hsp_label():
     )
     assert label is None
     assert blocker is not None
-    assert ("affine_group_not_closed" in str(prov) or "parent_standard_group_order_mismatch" in str(prov))
+    assert "parent_standard_group_order_mismatch" in str(prov)
 
 
 # ---------------------------------------------------------------------------

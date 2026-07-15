@@ -408,7 +408,7 @@ def test_write_analysis_outputs_plumbs_hsp_star_reports_to_summary(tmp_path):
     assert "C3_like" not in json.dumps(payload)
     # valley_irrep_matching moved to debug profile; standard uses valley_resolved_irreps
     assert "valley_irrep_matching" not in payload
-    assert payload["valley_resolved_irreps"]["status"] in ("ok", "no_generic_irrep_data")
+    assert payload["valley_resolved_irreps"]["status"] == "no_generic_irrep_data"
     assert payload["valley_ebr_input_candidates"] == ebr_input_candidates
     assert payload["valley_ebr_problem_instances"] == ebr_problem_instances
     assert payload["valley_ebr_export_bundle"] == ebr_export_bundle
@@ -891,7 +891,7 @@ def test_generic_irrep_source_blocked_negative_toy_fixture(tmp_path):
     summary = json.loads(outputs["valley_summary_json"].read_text())
     resolved = summary["valley_resolved_irreps"]
     blocked = [r for r in resolved["rows"] if r["matching_status"] == "blocked"]
-    assert len(blocked) >= 1
+    assert len(blocked) == 2
     assert blocked[0]["matching_strategy"] == "bilbao_restricted_character"
     assert summary["valley_ebr_input_candidates"]["status"] == "no_candidates"
     assert summary["valley_ebr_input_candidates"]["candidate_count"] == 0
@@ -1128,9 +1128,9 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     # Standard summary uses compact valley_resolved_irreps, not raw matching.
     resolved = summary["valley_resolved_irreps"]
     assert resolved["status"] == "ok"
-    # Toy H5 supplies real spglib P3 operations (via symmetry_payload);
-    # the matched count is determined by the affine gate.
-    assert resolved["matched_count"] >= 1
+    # Toy H5 supplies one deterministic generic match through the affine gate.
+    assert resolved["matched_count"] == 1
+    assert resolved["blocked_count"] == 0
     gm = resolved["rows"][0]
     assert gm["matching_status"] == "matched"
     assert gm["matching_strategy"] == "bilbao_restricted_character"
@@ -1140,7 +1140,7 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     assert isinstance(vpr, dict) and vpr
     rep_recs = vpr.get("representation_records", [])
     assert len(rep_recs) == 1
-    assert rep_recs[0]["subspace_space_group"]["candidate_space_group_symbol"] in ("P4", "P3")
+    assert rep_recs[0]["subspace_space_group"]["candidate_space_group_symbol"] == "P3"
     assert rep_recs[0]["irrep_matching"]["matching_strategy"] == "bilbao_restricted_character"
     # Public summary must not emit deprecated Cn-like provenance.
     raw_summary = json.dumps(summary)
@@ -1151,7 +1151,7 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     assert summary["valley_ebr_problem_instances"]["instance_count"] == 1
     inst = summary["valley_ebr_problem_instances"]["instances"][0]
     assert inst["ready_for_reduced_table_validation"] is True; assert inst["ready_for_ebr_decomposition"] is False
-    assert inst["subspace_group_candidate"] in ("P4", "P3")
+    assert inst["subspace_group_candidate"] == "P3"
     assert inst["expected_hsps"] == ["GammaM"]
     assert summary["valley_ebr_export_bundle"]["bundle_count"] == 1
     b = summary["valley_ebr_export_bundle"]["bundles"][0]
@@ -1175,12 +1175,7 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     bad_mapping = bad_summary["valley_reduced_ebr_mapping"]
     assert bad_mapping["mapping_status"] == "not_evaluated"
     assert bad_mapping["excluded_bundles"]
-    # Exclusion may be at validation gate (sampled_basis) or at HSP check.
-    assert (
-        "expected_hsps" in bad_mapping["excluded_bundles"][0]["reason"]
-        or "ready only for reduced-table validation"
-        in bad_mapping["excluded_bundles"][0]["reason"]
-    )
+    assert "expected_hsps mismatch" in bad_mapping["excluded_bundles"][0]["reason"]
 
 
 def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
@@ -1593,7 +1588,8 @@ def test_strict_auto_p4_subgroup_match(tmp_path, monkeypatch):
     # operations that don't match the standard setting — that is a
     # valid physical outcome (blocked with explicit reason).
     assert resolved["status"] == "ok"
-    assert resolved["matched_count"] + resolved["blocked_count"] >= 1
+    assert resolved["matched_count"] == 0
+    assert resolved["blocked_count"] == 1
     # All rows use the canonical strategy.
     for row in resolved["rows"]:
         assert row["matching_strategy"] == "bilbao_restricted_character"
@@ -2104,10 +2100,10 @@ def test_spinful_p3_analyze_hsp_unmocked_feasibility(tmp_path):
     assert symmetry["spacegroup_number"] == 191
     assert summary["input"]["spinor_convention_verified"] is False
 
-    # All eigenphase rows are diagnostic-only or fail the rotation-readiness
-    # gate; no trusted non-identity valley-preserving character row exists.
+    # All eigenphase rows are diagnostic-only because the spinor convention is
+    # intentionally unverified.
     for row in summary.get("symmetry_eigenvalues", []):
-        assert row.get("diagnostic_only") is True or row.get("rotation_ready") is False, (
+        assert row.get("diagnostic_only") is True, (
             "BLOCKER CLEARED: toy fixture has trusted eigenphase rows"
         )
     assert summary["valley_ebr_input_candidates"]["candidate_count"] == 0
@@ -2379,8 +2375,8 @@ def test_scalar_wavefunction_no_spinor_blockers():
     d = result["by_kpoint"]["GammaM"]["M1_valley"]
     # Scalar workflow: spinor_convention_unverified must NOT block.
     assert "spinor convention" not in d.get("reason", "")
-    assert d["workflow_path"] != "blocked"
-    assert d["readiness_level"] in ("trusted", "usable_with_caution")
+    assert d["workflow_path"] == "direct_qcut"
+    assert d["readiness_level"] == "trusted"
 
 
 def test_spinful_unverified_spinor_convention_blocks_trusted_irrep():

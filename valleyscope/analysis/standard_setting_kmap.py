@@ -44,7 +44,7 @@ class StandardSettingCertificate:
     """One of ``"validated"``, ``"unresolved"``, ``"rejected"``."""
 
     # --- Operation mapping ---
-    parent_basis_operation_ids: list[int] = field(default_factory=list)
+    parent_basis_operation_ids: list[int] | None = None
     standard_setting_operation_count: int | None = None
     operation_mapping_status: str = "not_attempted"
 
@@ -94,7 +94,7 @@ class StandardSettingCertificate:
     """Short diagnostic sample for failed affine translation matches."""
 
     # --- Affine missing ingredients ---
-    missing_affine_ingredients: list[str] = field(default_factory=list)
+    missing_affine_ingredients: list[str] | None = None
     """List of missing affine ingredients when unresolved, e.g.
     ``"conventional_centering_vectors"``, ``"origin_shift_fractional"``,
     ``"standard_setting_translations"``, ``"direct_lattice_transform"``."""
@@ -126,8 +126,8 @@ class StandardSettingCertificate:
     def to_dict(self) -> dict[str, object]:
         """Serialize to a JSON-compatible dict, omitting None defaults.
 
-        Empty ``missing_affine_ingredients`` is explicit evidence (nothing
-        is missing) and is preserved; so is ``affine_operation_map``.
+        Successful empty affine audit collections are explicit evidence and
+        are preserved.  ``None`` remains absent/unknown.
         """
         d: dict[str, object] = {}
         for key, value in asdict(self).items():
@@ -135,7 +135,11 @@ class StandardSettingCertificate:
                 continue
             # Preserve empty lists/dicts that are explicit evidence.
             if isinstance(value, list) and not value:
-                if key in ("missing_affine_ingredients",):
+                if key in (
+                    "missing_affine_ingredients",
+                    "unmatched_parent_operations",
+                    "unused_standard_operation_indices",
+                ):
                     d[key] = []
                     continue
                 continue
@@ -292,7 +296,7 @@ def _attach_transform_candidate(
 def _validate_affine_operation_equivalence(
     *,
     vp_operations: list[dict[str, object]] | None,
-    vp_operation_ids: list[int],
+    vp_operation_ids: object,
     standard_match: dict[str, object],
     parent_to_standard_direct_transform: np.ndarray | None = None,
     origin_shift_fractional: np.ndarray | None = None,
@@ -313,25 +317,38 @@ def _validate_affine_operation_equivalence(
     result: dict[str, object] = {
         "status": "not_attempted",
         "missing_ingredients": [],
+        "required_operation_ids": None,
+        "operation_map": None,
+        "unmatched_parent_operations": None,
+        "unused_standard_operation_indices": None,
     }
 
     # ---- A. Operation-ID coverage ----
-    if not vp_operations:
-        result["status"] = "unresolved"
-        result["missing_ingredients"].append("vp_operation_data")
+    if not isinstance(vp_operation_ids, list) or any(
+        not isinstance(i, int) or isinstance(i, bool)
+        for i in vp_operation_ids
+    ):
+        result["status"] = "failed"
+        result["missing_ingredients"].append(
+            "malformed_required_operation_ids"
+        )
         return result
-    required_ids = [int(i) for i in vp_operation_ids]
+    required_ids = list(vp_operation_ids)
     required_set = set(required_ids)
+    if len(required_ids) != len(required_set):
+        result["status"] = "failed"
+        result["missing_ingredients"].append("duplicate_required_operation_id")
+        return result
+    result["required_operation_ids"] = required_ids
+    result["required_operation_id_count"] = len(required_ids)
     if not required_set:
         result["status"] = "unresolved"
         result["missing_ingredients"].append("vp_operation_data")
         return result
-    if len(required_ids) != len(required_set):
-        result["status"] = "failed"
-        result["missing_ingredients"].append("duplicate_required_operation_id")
-        result["required_operation_ids"] = required_ids
+    if not vp_operations:
+        result["status"] = "unresolved"
+        result["missing_ingredients"].append("vp_operation_data")
         return result
-    result["required_operation_id_count"] = len(required_set)
 
     # Index by ID, checking for duplicates and malformed entries.
     # Operations outside the required valley-preserving subset are silently
@@ -342,6 +359,7 @@ def _validate_affine_operation_equivalence(
     missing_required: list[int] = []
     malformed: list[dict[str, object]] = []
     excluded_extra: list[int] = []
+    seen_required_ids: set[int] = set()
     for op in vp_operations:
         if not isinstance(op, dict):
             continue
@@ -351,19 +369,19 @@ def _validate_affine_operation_equivalence(
         try:
             oid = int(oid_raw)
         except (TypeError, ValueError):
-            malformed.append({"operation_id": oid_raw, "reason": "non_integer_id"})
             continue
+        if oid not in required_set:
+            excluded_extra.append(oid)
+            continue
+        if oid in seen_required_ids:
+            duplicate_ids.append(oid)
+            continue
+        seen_required_ids.add(oid)
         rot = op.get("rotation_frac")
         trans = op.get("translation_frac")
         if rot is None or trans is None:
             malformed.append({"operation_id": oid,
                               "reason": "missing_rotation_or_translation"})
-            continue
-        if oid not in required_set:
-            excluded_extra.append(oid)
-            continue
-        if oid in by_id:
-            duplicate_ids.append(oid)
             continue
         by_id[oid] = op
 
@@ -555,10 +573,8 @@ def _validate_affine_operation_equivalence(
         set(range(std_op_count)) - set(std_match.keys())
     )
     result["operation_map"] = {str(k): int(v) for k, v in op_map.items()}
-    if unmatched_parents:
-        result["unmatched_parent_operations"] = unmatched_parents
-    if unused_std:
-        result["unused_standard_operation_indices"] = unused_std
+    result["unmatched_parent_operations"] = unmatched_parents
+    result["unused_standard_operation_indices"] = unused_std
 
     result["matched_affine_operations"] = len(op_map)
     result["total_parent_operations"] = parent_op_count
@@ -585,6 +601,20 @@ def _validate_affine_operation_equivalence(
         if result["status"] == "passed":
             result["status"] = "failed"
             result["missing_ingredients"].append("affine_group_not_closed")
+
+    if result["status"] == "passed" and not (
+        result.get("missing_ingredients") == []
+        and result.get("unmatched_parent_operations") == []
+        and result.get("unused_standard_operation_indices") == []
+        and result.get("operation_closure_validated") is True
+        and isinstance(result.get("operation_map"), dict)
+        and len(result["operation_map"]) == len(required_ids)
+    ):
+        result["status"] = "failed"
+        if "incomplete_affine_success_evidence" not in result["missing_ingredients"]:
+            result["missing_ingredients"].append(
+                "incomplete_affine_success_evidence"
+            )
 
     return result
 
@@ -693,24 +723,60 @@ def _apply_affine_validation_to_certificate(
     cert.standard_setting_operation_count = affine_result.get(
         "standard_setting_operation_count"
     )
-    cert.missing_affine_ingredients = affine_result.get(
-        "missing_ingredients", []
+    missing = affine_result.get("missing_ingredients")
+    cert.missing_affine_ingredients = (
+        list(missing)
+        if isinstance(missing, list)
+        and all(isinstance(item, str) for item in missing)
+        else None
     )
     cert.mismatched_translation_count = affine_result.get(
         "mismatched_translation_count"
     )
-    cert.mismatched_translations = affine_result.get(
-        "mismatched_translations", []
+    mismatched = affine_result.get("mismatched_translations")
+    cert.mismatched_translations = (
+        list(mismatched) if isinstance(mismatched, list) else []
     )
     cert.operation_closure_validated = affine_result.get(
         "operation_closure_validated"
     )
     # Bijection evidence.
     op_map = affine_result.get("operation_map")
-    if isinstance(op_map, dict):
+    if isinstance(op_map, dict) and all(
+        isinstance(k, str)
+        and isinstance(v, int)
+        and not isinstance(v, bool)
+        for k, v in op_map.items()
+    ):
         cert.affine_operation_map = {str(k): int(v) for k, v in op_map.items()}
-    cert.unmatched_parent_operations = affine_result.get("unmatched_parent_operations")
-    cert.unused_standard_operation_indices = affine_result.get("unused_standard_operation_indices")
+    unmatched = affine_result.get("unmatched_parent_operations")
+    cert.unmatched_parent_operations = (
+        [dict(item) for item in unmatched]
+        if isinstance(unmatched, list)
+        and all(isinstance(item, dict) for item in unmatched)
+        else None
+    )
+    unused = affine_result.get("unused_standard_operation_indices")
+    cert.unused_standard_operation_indices = (
+        list(unused)
+        if isinstance(unused, list)
+        and all(
+            isinstance(item, int) and not isinstance(item, bool)
+            for item in unused
+        )
+        else None
+    )
+    required_ids = affine_result.get("required_operation_ids")
+    cert.parent_basis_operation_ids = (
+        list(required_ids)
+        if isinstance(required_ids, list)
+        and all(
+            isinstance(item, int) and not isinstance(item, bool)
+            for item in required_ids
+        )
+        and len(required_ids) == len(set(required_ids))
+        else None
+    )
     cert.required_operation_id_count = affine_result.get("required_operation_id_count")
 
 
@@ -766,7 +832,14 @@ def build_standard_setting_certificate(
             cert.hall_symbol = str(v)
             cert.centering_type = _hall_centering_symbol(str(v)) or None
 
-    if parent_basis_operation_ids is not None:
+    if (
+        isinstance(parent_basis_operation_ids, list)
+        and all(
+            isinstance(item, int) and not isinstance(item, bool)
+            for item in parent_basis_operation_ids
+        )
+        and len(parent_basis_operation_ids) == len(set(parent_basis_operation_ids))
+    ):
         cert.parent_basis_operation_ids = list(parent_basis_operation_ids)
 
     if parent_to_standard_direct_transform is not None:

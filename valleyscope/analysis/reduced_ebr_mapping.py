@@ -545,10 +545,32 @@ def _finite_nonsingular_3x3(m: object) -> bool:
     return abs(det) > 1e-9
 
 
-def _validate_operation_map_structure(op_map: dict, req_op_count,
-                                      std_op_count, cert_id,
+def _normalize_operation_map_key(value: object) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        normalized = int(value)
+    except ValueError:
+        return None
+    if str(normalized) != value:
+        return None
+    return normalized
+
+
+def _validate_operation_map_structure(op_map: dict, required_ids,
+                                      req_op_count, std_op_count, cert_id,
                                       reasons: list[str]):
     """Independently verify the claimed bijection structure."""
+    if not isinstance(required_ids, list) or any(
+        not isinstance(item, int) or isinstance(item, bool)
+        for item in required_ids
+    ) or len(required_ids) != len(set(required_ids)):
+        reasons.append(
+            f"affine_required_operation_ids_malformed({required_ids!r})"
+        )
+        return
     if req_op_count is None or req_op_count <= 0:
         reasons.append(f"affine_operation_map_untestable(req_op={req_op_count!r})")
         return
@@ -556,23 +578,30 @@ def _validate_operation_map_structure(op_map: dict, req_op_count,
         reasons.append(f"affine_operation_map_untestable(std_op={std_op_count!r})")
         return
     r = int(req_op_count); s = int(std_op_count)
-    # Keys: must be nonnegative integer strings, count == required.
-    try:
-        keys = [int(k) for k in op_map]
-    except (ValueError, TypeError):
-        reasons.append("affine_operation_map_keys_non_integer")
+    if len(required_ids) != r:
+        reasons.append(
+            f"affine_required_operation_id_count({len(required_ids)}!={r})"
+        )
         return
+    # Keys are opaque integer IDs.  Reject aliases such as 0 and "0".
+    keys: list[int] = []
+    for raw_key in op_map:
+        key = _normalize_operation_map_key(raw_key)
+        if key is None:
+            reasons.append("affine_operation_map_keys_non_integer")
+            return
+        if key in keys:
+            reasons.append("affine_operation_map_key_alias_or_duplicate")
+            return
+        keys.append(key)
     if len(keys) != r:
         reasons.append(f"affine_operation_map_cardinality({len(keys)}!={r})")
         return
-    if sorted(keys) != list(range(r)):
-        reasons.append("affine_operation_map_keys_not_sorted_required")
+    if set(keys) != set(required_ids):
+        reasons.append("affine_operation_map_keys_do_not_match_required_ids")
         return
     # Values: unique, within range, non-bool integers.
     values = list(op_map.values())
-    if len(set(values)) != len(values):
-        reasons.append("affine_operation_map_duplicate_targets")
-        return
     for v in values:
         if not isinstance(v, int) or isinstance(v, bool):
             reasons.append(f"affine_operation_map_value_non_integer({v!r})")
@@ -580,12 +609,18 @@ def _validate_operation_map_structure(op_map: dict, req_op_count,
         if v < 0 or v >= s:
             reasons.append(f"affine_operation_map_target_out_of_range({v},0..{s-1})")
             return
+    if len(set(values)) != len(values):
+        reasons.append("affine_operation_map_duplicate_targets")
+        return
+    if set(values) != set(range(s)):
+        reasons.append("affine_operation_map_targets_do_not_cover_standard_set")
+        return
     # Audit collections: absent is unknown (block), explicit empty is required.
     unmatched = cert_id.get("affine_unmatched_parent_operations")
-    if unmatched is None or (isinstance(unmatched, list) and unmatched):
+    if type(unmatched) is not list or unmatched != []:
         reasons.append(f"affine_unmatched_parent_operations={unmatched!r}")
     unused = cert_id.get("affine_unused_standard_operation_indices")
-    if unused is None or (isinstance(unused, list) and unused):
+    if type(unused) is not list or unused != []:
         reasons.append(f"affine_unused_std_indices={unused!r}")
 
 
@@ -603,6 +638,7 @@ def _validate_primitive_affine_setting(cert_id, validation_status, relation,
     total = cert_id.get("affine_total_operations")
     std_op = cert_id.get("affine_standard_setting_op_count")
     req_op = cert_id.get("affine_required_op_count")
+    required_ids = cert_id.get("affine_required_operation_ids")
     mismatch = cert_id.get("affine_mismatch_count")
     missing = cert_id.get("affine_missing_ingredients")
     op_map = cert_id.get("affine_operation_map")
@@ -645,7 +681,7 @@ def _validate_primitive_affine_setting(cert_id, validation_status, relation,
         reasons.append("affine_operation_map_missing_or_empty")
     else:
         _validate_operation_map_structure(
-            op_map, r, s, cert_id, reasons)
+            op_map, required_ids, r, s, cert_id, reasons)
 
     if closure is not True:
         reasons.append(f"operation_closure_validated={closure!r}")

@@ -1,6 +1,7 @@
 """Tests for standard-setting HSP k-coordinate mapping."""
 
 import numpy as np
+import pytest
 import spglib
 
 
@@ -655,7 +656,7 @@ def test_direct_match_certificate_has_affine_status():
     )
     cert = prov["standard_setting_certificate"]
     # Bijection: only 1 of 3 required P3 ops → validation fails closed.
-    assert cert["validation_status"] in ("failed", "unresolved", "rejected")
+    assert cert["validation_status"] == "rejected"
 
 
 def test_unresolved_certificate_has_missing_ingredients():
@@ -736,10 +737,10 @@ def test_explicit_transform_rejected_when_translations_inconsistent():
     assert label is None
     assert blocker is not None
     tf = prov.get("explicit_transform", {})
-    assert tf.get("status") in ("rejected", "failed", "unresolved")
+    assert tf.get("status") == "rejected"
     # Under bijection, insufficient ops → transform is unresolved.
     cert = prov.get("standard_setting_certificate", {})
-    assert cert.get("validation_status") in ("rejected", "unresolved")
+    assert cert.get("validation_status") == "unresolved"
     tc = prov["transform_candidate"]
 
 
@@ -963,12 +964,14 @@ def test_negative_hall_prefix_primitive_direct_match_is_trusted():
         standard_match={
             "number": 2, "international_short": "P-1",
             "hall_number": 2, "hall_symbol": "-P 1",
-            "operation_ids": [0, 1, 2, 3],
+            "operation_ids": [0, 1],
         },
-        detected_operations=_detected_std_ops(2, [0, 1, 2, 3]),
+        detected_operations=_detected_std_ops(2, [0, 1]),
     )
-    # Bijection: all 4 P-1 ops supplied.
+    assert label == "GM"
+    assert blocker is None
     cert = prov["standard_setting_certificate"]
+    assert cert["validation_status"] == "validated"
     assert cert["centering_type"] == "P"
     assert cert["centering_status"] == "primitive_direct_match"
 
@@ -1135,7 +1138,7 @@ def test_centered_with_explicit_transform_and_valid_affine_becomes_validated():
     )
     # C-centered: Phase E (1 of 4 ops).  Promoter blocks; transform is unresolved.
     cert = prov["standard_setting_certificate"]
-    assert cert["validation_status"] in ("unresolved", "failed", "rejected")
+    assert cert["validation_status"] == "rejected"
     assert cert["primitive_conventional_relation"] == "explicit_transform"
     assert cert["centering_type"] == "C"
     assert cert["centering_vectors"] == [[0.0, 0.0, 0.0], [0.5, 0.5, 0.0]]
@@ -1166,7 +1169,7 @@ def test_centered_with_explicit_transform_fails_with_bad_affine_translation():
     assert cert["validation_status"] == "rejected"
     assert cert["translation_validation_status"] == "failed"
     assert cert["matched_affine_operations"] == 0
-    assert cert["mismatched_translation_count"] == 1
+    assert cert["mismatched_translation_count"] == 4
     tc = prov.get("transform_candidate", {})
     assert tc["validation_status"] == "rejected"
     assert tc["affine_validation_status"] == "failed"
@@ -1197,7 +1200,7 @@ def test_centered_transform_certificate_has_centering_vectors():
     cert = prov.get("standard_setting_certificate", {})
     assert cert["centering_vectors"] == cv
     assert cert["centering_type"] == "C"
-    assert cert["validation_status"] == "validated"
+    assert cert["validation_status"] == "rejected"
 
 
 def test_centering_cosets_negative_p_type():
@@ -1358,7 +1361,7 @@ def test_plumbing_derived_transform_provenance_reaches_ebr_candidate():
         irrep_workflow_decisions=workflow,
         valley_irrep_matching=matching,
     )
-    assert candidates["candidate_count"] >= 1
+    assert candidates["candidate_count"] == 1
     c = candidates["candidates"][0]
     prov = c.get("irrep_source_provenance", {})
     kmap = prov.get("standard_setting_hsp_mapping", {})
@@ -1411,3 +1414,149 @@ def test_primitive_direct_match_resolves_label_in_resolver():
     assert cert["validation_status"] == "validated"
     assert "standard_setting_hsp_mapping_unresolved" not in str(prov)
     # Direct coordinate match bypasses derivation entirely — no basis_transform.
+
+
+def test_malformed_nonrequired_operation_is_ignored_before_affine_validation():
+    """Parent operations outside G_k^(a) do not enter affine field checks."""
+    detected = _detected_std_ops(1, [0])
+    detected.append({
+        "operation_id": 99,
+        "rotation_frac": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        # Deliberately no translation_frac: irrelevant outside required {0}.
+    })
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.zeros(3),
+        table=_FakeTable(labels={"GM": (0.0, 0.0, 0.0)}),
+        standard_match={
+            "number": 1,
+            "international_short": "P1",
+            "hall_number": 1,
+            "hall_symbol": "P 1",
+            "operation_ids": [0],
+        },
+        detected_operations=detected,
+    )
+    assert label == "GM"
+    assert blocker is None
+    cert = prov["standard_setting_certificate"]
+    assert cert["validation_status"] == "validated"
+    assert cert["missing_affine_ingredients"] == []
+    assert cert["unmatched_parent_operations"] == []
+    assert cert["unused_standard_operation_indices"] == []
+
+
+def test_malformed_required_operation_blocks_affine_validation():
+    from valleyscope.analysis.standard_setting_kmap import (
+        _validate_affine_operation_equivalence,
+    )
+    result = _validate_affine_operation_equivalence(
+        vp_operations=[{
+            "operation_id": 0,
+            "rotation_frac": np.eye(3).tolist(),
+        }],
+        vp_operation_ids=[0],
+        standard_match={
+            "number": 1, "hall_number": 1, "hall_symbol": "P 1",
+        },
+        parent_to_standard_direct_transform=np.eye(3),
+    )
+    assert result["status"] == "failed"
+    assert result["missing_required_operation_ids"] == [0]
+    assert "malformed_detected_operations" in result["missing_ingredients"]
+
+
+def test_missing_required_operation_id_blocks_affine_validation():
+    from valleyscope.analysis.standard_setting_kmap import (
+        _validate_affine_operation_equivalence,
+    )
+    result = _validate_affine_operation_equivalence(
+        vp_operations=_detected_std_ops(430, [0, 1]),
+        vp_operation_ids=[0, 1, 2],
+        standard_match={
+            "number": 143, "hall_number": 430, "hall_symbol": "P 3",
+        },
+        parent_to_standard_direct_transform=np.eye(3),
+    )
+    assert result["status"] == "failed"
+    assert result["missing_required_operation_ids"] == [2]
+
+
+def test_duplicate_required_operation_id_blocks_affine_validation():
+    from valleyscope.analysis.standard_setting_kmap import (
+        _validate_affine_operation_equivalence,
+    )
+    result = _validate_affine_operation_equivalence(
+        vp_operations=_detected_std_ops(1, [0]),
+        vp_operation_ids=[0, 0],
+        standard_match={
+            "number": 1, "hall_number": 1, "hall_symbol": "P 1",
+        },
+        parent_to_standard_direct_transform=np.eye(3),
+    )
+    assert result["status"] == "failed"
+    assert result["required_operation_ids"] is None
+    assert result["missing_ingredients"] == ["duplicate_required_operation_id"]
+
+
+def test_duplicate_affine_content_under_distinct_ids_blocks_bijection():
+    from valleyscope.analysis.standard_setting_kmap import (
+        _validate_affine_operation_equivalence,
+    )
+    identity = {
+        "rotation_frac": np.eye(3).tolist(),
+        "translation_frac": [0.0, 0.0, 0.0],
+    }
+    result = _validate_affine_operation_equivalence(
+        vp_operations=[
+            {"operation_id": 0, **identity},
+            {"operation_id": 4, **identity},
+        ],
+        vp_operation_ids=[0, 4],
+        standard_match={
+            "number": 3, "hall_number": 3, "hall_symbol": "P 2y",
+        },
+        parent_to_standard_direct_transform=np.eye(3),
+    )
+    assert result["status"] == "failed"
+    assert len(result["unmatched_parent_operations"]) == 1
+    assert result["operation_closure_validated"] is False
+
+
+def test_early_unmatched_operation_preserves_later_map_provenance():
+    from valleyscope.analysis.standard_setting_kmap import (
+        _validate_affine_operation_equivalence,
+    )
+    ops = _detected_std_ops(430, [0, 1, 2])
+    ops[0]["translation_frac"] = [0.25, 0.0, 0.0]
+    result = _validate_affine_operation_equivalence(
+        vp_operations=ops,
+        vp_operation_ids=[0, 1, 2],
+        standard_match={
+            "number": 143, "hall_number": 430, "hall_symbol": "P 3",
+        },
+        parent_to_standard_direct_transform=np.eye(3),
+    )
+    assert result["status"] == "failed"
+    assert result["operation_map"] == {"1": 1, "2": 2}
+    assert result["unmatched_parent_operations"] == [{
+        "operation_id": 0,
+        "parent_translation_frac": [0.25, 0.0, 0.0],
+    }]
+
+
+@pytest.mark.parametrize("required_ids", [None, (0,), [True], [0.0], ["0"]])
+def test_malformed_required_operation_id_collection_is_unknown(required_ids):
+    from valleyscope.analysis.standard_setting_kmap import (
+        _validate_affine_operation_equivalence,
+    )
+    result = _validate_affine_operation_equivalence(
+        vp_operations=_detected_std_ops(1, [0]),
+        vp_operation_ids=required_ids,
+        standard_match={
+            "number": 1, "hall_number": 1, "hall_symbol": "P 1",
+        },
+        parent_to_standard_direct_transform=np.eye(3),
+    )
+    assert result["status"] == "failed"
+    assert result["required_operation_ids"] is None
+    assert result["missing_ingredients"] == ["malformed_required_operation_ids"]

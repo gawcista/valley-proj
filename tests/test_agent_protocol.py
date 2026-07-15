@@ -6,6 +6,9 @@ from scripts.check_agent_protocol import (
 )
 
 
+_EXPECTED_HEAD = "705a7a2f0f751abcc4f0d1f49d7c62e984f60345"
+
+
 def test_handoff_requires_commit_tests_and_remote_branch_statement():
     good = """
 Branch: cc/example
@@ -20,7 +23,7 @@ git diff --check HEAD
 Do not merge to `main`; leave the branch ready for Codex review.
 """
 
-    assert check_handoff_text(good) == []
+    assert check_handoff_text(good, expected_head=_EXPECTED_HEAD) == []
 
     bad = """
 Branch: cc/example
@@ -28,7 +31,7 @@ Commit: 705a7a2 Fix example
 pytest -q
 """
 
-    errors = check_handoff_text(bad)
+    errors = check_handoff_text(bad, expected_head=_EXPECTED_HEAD)
     assert any("remote feature branch" in error for error in errors)
     assert any("git diff --check HEAD" in error for error in errors)
     assert any("test result output" in error for error in errors)
@@ -85,7 +88,7 @@ COMPLETED - Phase A1
 Remaining Risks:
 - State 2 (table_validation_passed) is not yet wired.
 """
-    errors = check_handoff_text(text)
+    errors = check_handoff_text(text, expected_head=_EXPECTED_HEAD)
     assert any("not yet wired" in e for e in errors)
 
 
@@ -102,7 +105,7 @@ COMPLETED - Phase A1
 Remaining Risks:
 - Centered settings without explicit transform remain unresolved.
 """
-    assert check_handoff_text(text) == []
+    assert check_handoff_text(text, expected_head=_EXPECTED_HEAD) == []
 
 
 def test_placeholder_output_is_rejected():
@@ -115,15 +118,60 @@ pytest -q tests/test_example.py
 git diff --check HEAD
 # clean
 """
-    errors = check_handoff_text(text)
+    errors = check_handoff_text(text, expected_head=_EXPECTED_HEAD)
     assert any("placeholder" in e for e in errors)
 
 
 def test_stale_head_hash_is_detected():
-    """A handoff referencing a hash not matching HEAD is detected as stale."""
+    """A handoff referencing a hash not matching expected HEAD is stale."""
     text = """
 Branch: cc/example
 Commit: deadbeef Stale handoff
+Remote feature branch: No
+pytest -q
+# 100 passed in 1.00s
+git diff --check HEAD
+# clean
+"""
+    errors = check_handoff_text(text, expected_head=_EXPECTED_HEAD)
+    assert errors == [
+        "handoff hash(es) ['deadbeef'] do not match current HEAD "
+        f"({_EXPECTED_HEAD}); the handoff is stale or referencing a wrong commit"
+    ]
+
+
+def test_handoff_requires_explicit_hash_line():
+    text = """
+Branch: cc/example
+Remote feature branch: No
+pytest -q
+# 100 passed in 1.00s
+git diff --check HEAD
+# unrelated provenance 705a7a2
+"""
+    errors = check_handoff_text(text, expected_head=_EXPECTED_HEAD)
+    assert errors == ["handoff must include an explicit Commit: or Reviewed HEAD: hash line"]
+
+
+def test_short_and_full_matching_hashes_are_accepted():
+    base = """
+Branch: cc/example
+Remote feature branch: No
+pytest -q
+# 100 passed in 1.00s
+git diff --check HEAD
+# clean
+"""
+    short = f"Commit: {_EXPECTED_HEAD[:7]}\n{base}"
+    full = f"Reviewed HEAD: {_EXPECTED_HEAD}\n{base}"
+    assert check_handoff_text(short, expected_head=_EXPECTED_HEAD) == []
+    assert check_handoff_text(full, expected_head=_EXPECTED_HEAD) == []
+
+
+def test_conflicting_explicit_hash_lines_are_rejected():
+    text = f"""
+Branch: cc/example
+Commit: {_EXPECTED_HEAD[:7]}
 Reviewed HEAD: cafebabe
 Remote feature branch: No
 pytest -q
@@ -131,5 +179,18 @@ pytest -q
 git diff --check HEAD
 # clean
 """
-    errors = check_handoff_text(text)
-    assert any("stale" in e.lower() or "head" in e.lower() or "wrong commit" in e.lower() for e in errors)
+    errors = check_handoff_text(text, expected_head=_EXPECTED_HEAD)
+    assert any("conflicting" in error for error in errors)
+
+
+def test_text_validation_without_expected_head_is_repository_independent():
+    text = """
+Branch: cc/example
+Commit: deadbeef
+Remote feature branch: No
+pytest -q
+# 100 passed in 1.00s
+git diff --check HEAD
+# clean
+"""
+    assert check_handoff_text(text) == []

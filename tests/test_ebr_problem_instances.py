@@ -1,6 +1,7 @@
 import json
 
 from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
+from tests.reduced_ebr_promo_helpers import real_primitive_certificate_dict
 
 
 def _make_c3_preserving_candidates():
@@ -332,7 +333,7 @@ def test_same_valley_different_provenance_merged_into_one_instance():
     assert r["instance_count"] == 1
     inst = r["instances"][0]
     assert set(inst["workflow_paths"]) == {"direct_qcut", "symmetry_adapted"}
-    assert inst["workflow_path"] in ("direct_qcut", "symmetry_adapted")
+    assert inst["workflow_path"] == "direct_qcut"
     gamma_records = inst["irrep_records_by_kpoint"]["GammaM"]
     row_paths = {rec["workflow_path"] for rec in gamma_records}
     assert row_paths == {"direct_qcut", "symmetry_adapted"}
@@ -443,7 +444,7 @@ def test_aggregate_workflow_provenance():
     )
     inst = r["instances"][0]
     assert isinstance(inst["workflow_paths"], list)
-    assert len(inst["workflow_paths"]) >= 1
+    assert inst["workflow_paths"] == ["direct_qcut"]
     assert isinstance(inst["readiness_evidence"], list)
     assert isinstance(inst["workflow_path"], str)
     assert isinstance(inst["readiness_level"], str)
@@ -602,3 +603,36 @@ def test_per_row_provenance_preserved():
             assert "readiness_level" in rec
             assert isinstance(rec["workflow_path"], str)
             assert isinstance(rec["readiness_level"], str)
+
+
+def test_malformed_raw_operation_map_does_not_crash_instance_construction():
+    cert = real_primitive_certificate_dict(143, "P3")
+    assert cert is not None
+    cert["affine_operation_map"] = {"0": "not-an-integer"}
+    cands = {
+        "candidates": [{
+            "kpoint": "GM",
+            "valley": "K_valley",
+            "workflow_path": "direct_qcut",
+            "readiness_level": "trusted",
+            "subspace_group_candidate": "P3",
+            "subspace_space_group": {
+                "candidate_space_group_symbol": "P3",
+                "candidate_space_group_number": 143,
+                "valley_preserving_operation_ids": [0, 1, 2],
+            },
+            "operation_id": 0,
+            "operation_order": 1,
+            "matched_irrep": "GM1",
+            "ready_for_ebr_input": True,
+            "irrep_source_provenance": {
+                "standard_setting_hsp_mapping": {
+                    "standard_setting_certificate": cert,
+                },
+            },
+        }],
+    }
+    report = build_ebr_problem_instances(ebr_input_candidates=cands)
+    assert report["instance_count"] == 1
+    identity = report["instances"][0]["certificate_identity"]
+    assert identity["affine_operation_map"] is None

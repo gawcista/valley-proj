@@ -279,6 +279,7 @@ class _SettingIdentity:
         "affine_operation_map",
         "affine_unmatched_parents",
         "affine_unused_std",
+        "affine_required_operation_ids",
         "affine_required_op_count",
         "operation_closure_validated",
     )
@@ -305,9 +306,10 @@ class _SettingIdentity:
         affine_mismatch_count: int | None = None,
         affine_missing_ingredients: tuple[str, ...] | None = None,
         affine_standard_setting_op_count: int | None = None,
-        affine_operation_map: tuple[tuple[str, int], ...] | None = None,
-        affine_unmatched_parents: tuple[str, ...] = (),
-        affine_unused_std: tuple[int, ...] = (),
+        affine_operation_map: tuple[tuple[int, int], ...] | None = None,
+        affine_unmatched_parents: tuple[int, ...] | None = None,
+        affine_unused_std: tuple[int, ...] | None = None,
+        affine_required_operation_ids: tuple[int, ...] | None = None,
         affine_required_op_count: int | None = None,
         operation_closure_validated: bool | None = None,
     ):
@@ -332,6 +334,7 @@ class _SettingIdentity:
         self.affine_operation_map = affine_operation_map
         self.affine_unmatched_parents = affine_unmatched_parents
         self.affine_unused_std = affine_unused_std
+        self.affine_required_operation_ids = affine_required_operation_ids
         self.affine_required_op_count = affine_required_op_count
         self.operation_closure_validated = operation_closure_validated
         self._hash = hash((
@@ -352,6 +355,7 @@ class _SettingIdentity:
             affine_operation_map,
             affine_unmatched_parents,
             affine_unused_std,
+            affine_required_operation_ids,
             affine_required_op_count,
             operation_closure_validated,
         ))
@@ -384,6 +388,7 @@ class _SettingIdentity:
             and self.affine_operation_map == other.affine_operation_map
             and self.affine_unmatched_parents == other.affine_unmatched_parents
             and self.affine_unused_std == other.affine_unused_std
+            and self.affine_required_operation_ids == other.affine_required_operation_ids
             and self.affine_required_op_count == other.affine_required_op_count
             and self.operation_closure_validated == other.operation_closure_validated
         )
@@ -464,6 +469,78 @@ def _normalize_centering_vectors(
     return tuple(sorted(normed))
 
 
+def _normalize_strict_int_list(
+    value: object,
+    *,
+    unique: bool = False,
+) -> tuple[int, ...] | None:
+    """Normalize an exact runtime ``list[int]`` without coercion."""
+    if not isinstance(value, list):
+        return None
+    if any(not isinstance(item, int) or isinstance(item, bool) for item in value):
+        return None
+    if unique and len(value) != len(set(value)):
+        return None
+    return tuple(sorted(value))
+
+
+def _normalize_strict_string_list(value: object) -> tuple[str, ...] | None:
+    if not isinstance(value, list):
+        return None
+    if any(not isinstance(item, str) for item in value):
+        return None
+    return tuple(sorted(value))
+
+
+def _normalize_operation_id_key(value: object) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        normalized = int(value)
+    except ValueError:
+        return None
+    if str(normalized) != value:
+        return None
+    return normalized
+
+
+def _normalize_affine_operation_map(
+    value: object,
+) -> tuple[tuple[int, int], ...] | None:
+    """Normalize an operation map and reject key aliases after coercion."""
+    if not isinstance(value, dict):
+        return None
+    normalized: dict[int, int] = {}
+    for raw_key, raw_value in value.items():
+        key = _normalize_operation_id_key(raw_key)
+        if key is None or key in normalized:
+            return None
+        if not isinstance(raw_value, int) or isinstance(raw_value, bool):
+            return None
+        normalized[key] = raw_value
+    return tuple(sorted(normalized.items()))
+
+
+def _normalize_unmatched_parent_operations(
+    value: object,
+) -> tuple[int, ...] | None:
+    if not isinstance(value, list):
+        return None
+    operation_ids: list[int] = []
+    for row in value:
+        if not isinstance(row, dict):
+            return None
+        operation_id = row.get("operation_id")
+        if not isinstance(operation_id, int) or isinstance(operation_id, bool):
+            return None
+        operation_ids.append(operation_id)
+    if len(operation_ids) != len(set(operation_ids)):
+        return None
+    return tuple(sorted(operation_ids))
+
+
 def _certificate_fingerprint(candidate: dict[str, object]) -> _SettingIdentity:
     """Extract a normalized setting identity from one candidate."""
     prov = candidate.get("irrep_source_provenance")
@@ -532,34 +609,30 @@ def _certificate_fingerprint(candidate: dict[str, object]) -> _SettingIdentity:
     # The list may still be empty — that is explicit evidence (no ingredients
     # missing).  A missing key / None is unknown.
     missing = cert.get("missing_affine_ingredients", _SENTINEL_MISSING)
-    if missing is _SENTINEL_MISSING:
-        affine_missing_ingredients = None  # absent
-    elif isinstance(missing, list):
-        affine_missing_ingredients = tuple(sorted(str(m) for m in missing))
-    else:
-        affine_missing_ingredients = None  # malformed → absent
+    affine_missing_ingredients = (
+        None
+        if missing is _SENTINEL_MISSING
+        else _normalize_strict_string_list(missing)
+    )
 
     closure = cert.get("operation_closure_validated")
     operation_closure_validated = closure if isinstance(closure, bool) else None
 
     std_op_count = _opt_int(cert.get("standard_setting_operation_count"))
     req_op_count = _opt_int(cert.get("required_operation_id_count"))
-    op_map = cert.get("affine_operation_map")
-    affine_operation_map = (
-        tuple(sorted((str(k), int(v)) for k, v in op_map.items()))
-        if isinstance(op_map, dict) else None
+    affine_operation_map = _normalize_affine_operation_map(
+        cert.get("affine_operation_map", _SENTINEL_MISSING)
     )
-    unmatched = cert.get("unmatched_parent_operations")
-    affine_unmatched_parents = (
-        tuple(sorted(str(r.get("operation_id", "?"))
-                     for r in unmatched))
-        if isinstance(unmatched, list) and unmatched else ()
+    affine_unmatched_parents = _normalize_unmatched_parent_operations(
+        cert.get("unmatched_parent_operations", _SENTINEL_MISSING)
     )
-    unused = cert.get("unused_standard_operation_indices")
-    affine_unused_std = (
-        tuple(sorted(int(i) for i in unused
-                     if isinstance(i, int) and not isinstance(i, bool)))
-        if isinstance(unused, list) and unused else ()
+    affine_unused_std = _normalize_strict_int_list(
+        cert.get("unused_standard_operation_indices", _SENTINEL_MISSING),
+        unique=True,
+    )
+    affine_required_operation_ids = _normalize_strict_int_list(
+        cert.get("parent_basis_operation_ids", _SENTINEL_MISSING),
+        unique=True,
     )
 
     transform_key = _normalize_transform(
@@ -594,6 +667,7 @@ def _certificate_fingerprint(candidate: dict[str, object]) -> _SettingIdentity:
         affine_operation_map=affine_operation_map,
         affine_unmatched_parents=affine_unmatched_parents,
         affine_unused_std=affine_unused_std,
+        affine_required_operation_ids=affine_required_operation_ids,
         affine_required_op_count=req_op_count,
         operation_closure_validated=operation_closure_validated,
     )
@@ -654,8 +728,12 @@ def _certificate_identity(
         result["affine_standard_setting_op_count"] = \
             fp0.affine_standard_setting_op_count
         result["affine_operation_map"] = (
-            dict(fp0.affine_operation_map)
+            {str(key): value for key, value in fp0.affine_operation_map}
             if fp0.affine_operation_map is not None else None
+        )
+        result["affine_required_operation_ids"] = (
+            list(fp0.affine_required_operation_ids)
+            if fp0.affine_required_operation_ids is not None else None
         )
         result["affine_required_op_count"] = fp0.affine_required_op_count
         result["affine_unmatched_parent_operations"] = (
