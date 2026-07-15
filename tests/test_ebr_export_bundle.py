@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
 
@@ -209,6 +210,20 @@ def test_schema_fields():
               "hsp_basis_status"]:
         assert k in b, f"missing: {k}"
     assert "certificate_identity" in b
+
+
+def test_schema_doc_covers_centered_export_and_ingestion_versions():
+    schema = Path("docs/schema.md").read_text(encoding="utf-8")
+    normalized_schema = " ".join(schema.split())
+    assert 'Schema version `"1.2.0"`' in schema
+    assert 'Current ingestion-record schema version: `"1.4.0"`' in schema
+    assert "centered_affine_operation_map" in schema
+    assert "centering_coset_index" in schema
+    assert (
+        "no downstream grouping or serialization step may reorder"
+        in normalized_schema
+    )
+    assert "fail closed at promotion" in schema
 
 
 def test_schema_1_2_preserves_required_operation_ids_in_certificate_identity():

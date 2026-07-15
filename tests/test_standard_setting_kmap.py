@@ -1700,6 +1700,20 @@ _CENTERED_TRANSFORMS = {
                    [1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0]]),
 }
 
+_CENTERED_CASES = [
+    (5, 9, "C 2y", "C", [-3, 4], 2),
+    (79, 353, "I 4", "I", [-7, 0, 4, 11], 2),
+    (22, 122, "F 2 2", "F", [-5, 0, 4, 19], 4),
+    (
+        166,
+        458,
+        '-R 3 2"',
+        "R",
+        [-11, -3, 0, 4, 8, 12, 17, 23, 31, 40, 52, 71],
+        3,
+    ),
+]
+
 
 def _primitive_parent_ops_from_irreptables(sg_number, transform, operation_ids):
     from valleyscope.irreps.tables import load_standard_irrep_table
@@ -1720,20 +1734,14 @@ def _primitive_parent_ops_from_irreptables(sg_number, transform, operation_ids):
     return table, operations
 
 
-@pytest.mark.parametrize(
-    "sg_number,hall_number,hall_symbol,centering,operation_ids,index",
-    [
-        (5, 9, "C 2y", "C", [-3, 4], 2),
-        (79, 353, "I 4", "I", [-7, 0, 4, 11], 2),
-        (22, 122, "F 2 2", "F", [-5, 0, 4, 19], 4),
-        (166, 458, '-R 3 2"', "R", [-11, -3, 0, 4, 8, 12, 17, 23, 31, 40, 52, 71], 3),
-    ],
-)
-def test_generic_centered_expansion_produces_complete_affine_certificate(
-    sg_number, hall_number, hall_symbol, centering, operation_ids, index,
+def _resolved_centered_certificate_fixture(
+    sg_number, hall_number, hall_symbol, centering, operation_ids,
 ):
+    from valleyscope.analysis.ebr_problem_instances import _certificate_identity
+
+    transform = _CENTERED_TRANSFORMS[centering]
     table, detected = _primitive_parent_ops_from_irreptables(
-        sg_number, _CENTERED_TRANSFORMS[centering], operation_ids,
+        sg_number, transform, operation_ids,
     )
     label, blocker, provenance = resolve_standard_setting_hsp_label(
         k_frac=np.zeros(3),
@@ -1746,14 +1754,38 @@ def test_generic_centered_expansion_produces_complete_affine_certificate(
             "operation_ids": operation_ids,
         },
         detected_operations=detected,
-        parent_to_standard_direct_transform=_CENTERED_TRANSFORMS[centering],
+        parent_to_standard_direct_transform=transform,
         origin_shift_fractional=np.zeros(3),
         transform_provenance="reviewed_test_primitive_to_conventional",
     )
-
     assert label == "GM"
     assert blocker is None
-    cert = provenance["standard_setting_certificate"]
+    certificate = provenance["standard_setting_certificate"]
+    candidate = {
+        "subspace_space_group": {
+            "candidate_space_group_number": sg_number,
+            "candidate_space_group_symbol": table.name,
+        },
+        "irrep_source_provenance": {
+            "standard_setting_hsp_mapping": {
+                "standard_setting_certificate": certificate,
+            },
+        },
+    }
+    identity = _certificate_identity([candidate])
+    return table, detected, certificate, identity
+
+
+@pytest.mark.parametrize(
+    "sg_number,hall_number,hall_symbol,centering,operation_ids,index",
+    _CENTERED_CASES,
+)
+def test_generic_centered_expansion_produces_complete_affine_certificate(
+    sg_number, hall_number, hall_symbol, centering, operation_ids, index,
+):
+    _, _, cert, _ = _resolved_centered_certificate_fixture(
+        sg_number, hall_number, hall_symbol, centering, operation_ids,
+    )
     assert cert["validation_status"] == "validated"
     assert cert["canonical_setting_status"] == "unique_match"
     assert cert["canonical_hall_numbers"] == [hall_number]
@@ -1769,6 +1801,86 @@ def test_generic_centered_expansion_produces_complete_affine_certificate(
     assert {
         row["parent_operation_id"] for row in cert["centered_affine_operation_map"]
     } == set(operation_ids)
+
+
+@pytest.mark.parametrize(
+    "sg_number,hall_number,hall_symbol,centering,operation_ids,index",
+    _CENTERED_CASES,
+)
+def test_serialized_centering_coset_indices_reconstruct_standard_affine_operations(
+    sg_number, hall_number, hall_symbol, centering, operation_ids, index,
+):
+    import spglib
+
+    _, detected, _, identity = _resolved_centered_certificate_fixture(
+        sg_number, hall_number, hall_symbol, centering, operation_ids,
+    )
+    standard = spglib.get_symmetry_from_database(hall_number)
+    assert standard is not None
+    standard_rotations = np.asarray(standard["rotations"], dtype=float)
+    standard_translations = np.asarray(standard["translations"], dtype=float)
+    detected_by_id = {row["operation_id"]: row for row in detected}
+    transform = np.asarray(identity["normalized_direct_transform"], dtype=float)
+    transform_inv = np.linalg.inv(transform)
+    origin = np.asarray(identity["normalized_origin_shift"], dtype=float)
+    serialized_cosets = identity["normalized_centering_vectors"]
+
+    assert len(serialized_cosets) == index
+    for mapping in identity["centered_affine_operation_map"]:
+        parent = detected_by_id[mapping["parent_operation_id"]]
+        parent_rotation = np.asarray(parent["rotation_frac"], dtype=float)
+        parent_translation = np.asarray(parent["translation_frac"], dtype=float)
+        standard_index = mapping["standard_operation_index"]
+        transformed_rotation = transform @ parent_rotation @ transform_inv
+        transformed_translation = (
+            transform @ parent_translation
+            + origin
+            - transformed_rotation @ origin
+            + np.asarray(
+                serialized_cosets[mapping["centering_coset_index"]],
+                dtype=float,
+            )
+        )
+
+        assert np.allclose(
+            transformed_rotation, standard_rotations[standard_index], atol=1e-8,
+        )
+        translation_delta = (
+            transformed_translation - standard_translations[standard_index]
+        )
+        assert np.linalg.norm(
+            translation_delta - np.rint(translation_delta)
+        ) <= 1e-8
+
+
+def test_r_centered_identity_rows_preserve_canonical_coset_indices():
+    import spglib
+
+    case = _CENTERED_CASES[-1]
+    _, _, _, identity = _resolved_centered_certificate_fixture(*case[:-1])
+    identity_parent_id = case[4][0]
+    identity_rows = {
+        row["centering_coset_index"]: row["standard_operation_index"]
+        for row in identity["centered_affine_operation_map"]
+        if row["parent_operation_id"] == identity_parent_id
+    }
+
+    assert np.allclose(
+        identity["normalized_centering_vectors"],
+        [[0.0, 0.0, 0.0],
+         [1.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0],
+         [2.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0]],
+        atol=1e-8,
+    )
+    assert identity_rows == {0: 0, 1: 24, 2: 12}
+    standard = spglib.get_symmetry_from_database(458)
+    assert standard is not None
+    for coset_index, standard_index in identity_rows.items():
+        assert np.allclose(
+            identity["normalized_centering_vectors"][coset_index],
+            standard["translations"][standard_index],
+            atol=1e-8,
+        )
 
 
 def test_same_sg_multiple_hall_settings_are_selected_from_source_affine_evidence():

@@ -1,11 +1,10 @@
-"""Primitive affine standard-setting certificate — fail-closed promotion.
+"""Affine standard-setting certificate fail-closed promotion tests.
 
-Positive primitive and centered evidence is produced by the REAL resolver fed a real
-``StandardIrrepTable`` and a complete spglib detected-operation set, so the
-generic affine ``{R | tau}`` equivalence gate actually runs.  Nothing is
-mutated after the resolver returns.  Negative tests flip exactly one affine
-field of the resolver-produced identity (isolated validator-unit tests).  The
-centered case exercises the same resolver-to-solver trust chain.
+Positive certificate evidence is produced by the real resolver from a
+``StandardIrrepTable`` and complete spglib operations.  ``_table`` is only a
+synthetic low-level validator fixture; it does not prove EBR data provenance.
+The SG 79 centered exact-solve test separately uses the default installed
+irreptables EBR loader and the runtime auto-canonical table builder.
 """
 
 import copy
@@ -26,6 +25,9 @@ from valleyscope.analysis.ebr_problem_instances import (
     _certificate_identity,
 )
 from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
+from valleyscope.analysis.irreptables_runtime_table_builder import (
+    build_auto_canonical_reduced_ebr_table,
+)
 from valleyscope.irreps.tables import load_standard_irrep_table
 
 from tests.reduced_ebr_promo_helpers import (
@@ -129,6 +131,7 @@ def _spin_records(spinful):
 
 
 def _table(*, sg_number=143, symbol="P3", spinful=False, **over):
+    """Synthetic table for isolated promotion-validator unit tests only."""
     table = {
         "schema_version": "1.0.0",
         "subspace_group_candidate": symbol,
@@ -305,7 +308,7 @@ def test_legacy_export_without_required_operation_ids_remains_fail_closed():
 # Positive promotion from real affine evidence (no mutation)
 # ---------------------------------------------------------------------------
 
-def test_real_affine_primitive_promotes():
+def test_resolver_primitive_identity_passes_low_level_promotion_validator():
     ci = real_primitive_certificate_identity(143, "P3")
     assert ci is not None
     assert ci["operation_mapping_status"] == "operation_basis_verification_passed"
@@ -383,7 +386,7 @@ def test_operation_map_key_aliases_are_rejected():
     assert "primitive_affine_evidence_invalid" in _codes(out)
 
 
-def test_real_affine_primitive_spinful_promotes():
+def test_resolver_spinful_identity_passes_low_level_promotion_validator():
     ci = real_primitive_certificate_identity(75, "P4", spinor=True)
     assert ci is not None
     r = _promote(_bundle(sg_number=75, symbol="P4", spinful=True, cert=ci),
@@ -398,7 +401,7 @@ def test_legacy_centered_validator_contract_without_expansion_map_fails_closed()
     assert "centered_affine_evidence_invalid" in _codes(r)
 
 
-def test_real_centered_resolver_identity_promotes():
+def test_resolver_centered_identity_passes_low_level_promotion_validator():
     cert = _real_centered_identity()
     r = _promote(
         _bundle(sg_number=79, symbol="I4", cert=cert),
@@ -409,8 +412,50 @@ def test_real_centered_resolver_identity_promotes():
     assert r["validation_report"]["hall_setting_check"] == "passed"
 
 
-def test_real_centered_certificate_survives_full_chain_and_solves_exactly():
+def test_sg79_centered_resolver_to_exact_solve_uses_default_irreptables_table():
     raw_certificate = _real_centered_certificate_dict()
+
+    standard_table = load_standard_irrep_table(79, spinor=False)
+    gamma_labels = [
+        irrep.label for irrep in standard_table.irreps
+        if irrep.kpoint_label == "GM"
+    ]
+    assert gamma_labels == ["GM1", "GM2", "GM3", "GM4"]
+
+    subspace_group = {
+        "candidate_space_group_number": 79,
+        "candidate_space_group_symbol": "I4",
+        "status": "resolved",
+    }
+    generated_table = build_auto_canonical_reduced_ebr_table(
+        subspace_sg_number=79,
+        spinor=False,
+        bundle_irreps_by_kpoint={"GammaM": [gamma_labels[0]]},
+        expected_hsps=["GammaM"],
+        subspace_group_candidate="I4",
+        subspace_space_group=subspace_group,
+    )
+    setting_identity = generated_table["provenance"][
+        "standard_setting_identity"
+    ]
+    assert generated_table["provenance"]["data_source"] == "irreptables"
+    assert generated_table["provenance"]["package"] == "irreptables"
+    assert generated_table["provenance"]["package_version"]
+    assert generated_table["provenance"]["auto_canonical"] is True
+    assert setting_identity["status"] == "unique_match"
+    assert setting_identity["hall_number"] == 353
+    assert setting_identity["centering_type"] == "I"
+
+    selected_ebr = next(
+        ebr for ebr in generated_table["ebrs"] if any(ebr["vector"])
+    )
+    target_rows = [
+        (irrep_key.split(":", 1)[0], irrep_key.split(":", 1)[1], multiplicity)
+        for irrep_key, multiplicity
+        in zip(generated_table["irreps"], selected_ebr["vector"])
+        if multiplicity
+    ]
+    assert target_rows
 
     def _provenance():
         return {
@@ -418,14 +463,11 @@ def test_real_centered_certificate_survives_full_chain_and_solves_exactly():
                 "standard_setting_certificate": copy.deepcopy(raw_certificate),
             },
             "source_table_spinor": False,
+            "source_table_sg_number": 79,
+            "source_table_name": "I4",
+            "source_hsp_label": "GM",
         }
 
-    subspace_group = {
-        "candidate_space_group_number": 79,
-        "candidate_space_group_symbol": "I4",
-        "status": "resolved",
-    }
-    rows = [("GammaM", "A", 2), ("KM", "A", 1), ("KM", "B", 1)]
     candidates = [{
         "ready_for_ebr_input": True,
         "valley": "K_valley",
@@ -436,7 +478,7 @@ def test_real_centered_certificate_survives_full_chain_and_solves_exactly():
         "subspace_group_candidate": "I4",
         "subspace_space_group": dict(subspace_group),
         "irrep_source_provenance": _provenance(),
-    } for operation_id, (kpoint, irrep, multiplicity) in enumerate(rows)]
+    } for operation_id, (kpoint, irrep, multiplicity) in enumerate(target_rows)]
 
     instances = build_ebr_problem_instances(
         ebr_input_candidates={"candidates": candidates},
@@ -451,10 +493,22 @@ def test_real_centered_certificate_survives_full_chain_and_solves_exactly():
 
     result = build_reduced_ebr_mapping(
         ebr_export_bundle=export,
-        table=_table(sg_number=79, symbol="I4"),
+        table=generated_table,
     )
     assert result["status"] == "solved_exact"
-    solution_identity = result["solutions"][0]["certificate_identity"]
+    solution = result["solutions"][0]
+    assert solution["irrep_vector"] == selected_ebr["vector"]
+    assert solution["ebr_decomposition"] == [{
+        "label": selected_ebr["label"], "coefficient": 1,
+    }]
+    assert set(solution["validation_report"].values()) == {"passed"}
+    promotion_table = solution["promotion_provenance"]["table_provenance"]
+    assert promotion_table["data_source"] == "irreptables"
+    assert promotion_table["package_version"] == (
+        generated_table["provenance"]["package_version"]
+    )
+    assert promotion_table["independent_setting_identity"]["hall_number"] == 353
+    solution_identity = solution["certificate_identity"]
     assert solution_identity["centered_affine_operation_map"] == (
         expected_identity["centered_affine_operation_map"]
     )
@@ -490,7 +544,13 @@ def test_malformed_or_incomplete_centered_affine_evidence_blocks(field, value):
 
 @pytest.mark.parametrize(
     "mutation",
-    ["missing_coset", "duplicate_coset", "wrong_coset", "reused_standard"],
+    [
+        "missing_coset",
+        "duplicate_coset",
+        "wrong_coset",
+        "reordered_cosets",
+        "reused_standard",
+    ],
 )
 def test_nonbijective_centered_affine_evidence_blocks(mutation):
     cert = _real_centered_identity()
@@ -504,6 +564,10 @@ def test_nonbijective_centered_affine_evidence_blocks(mutation):
         cert["normalized_centering_vectors"] = [
             [0.0, 0.0, 0.0], [0.5, 0.0, 0.0],
         ]
+    elif mutation == "reordered_cosets":
+        cert["normalized_centering_vectors"] = [
+            [0.5, 0.5, 0.5], [0.0, 0.0, 0.0],
+        ]
     else:
         cert["centered_affine_operation_map"][1]["standard_operation_index"] = 0
 
@@ -515,11 +579,11 @@ def test_nonbijective_centered_affine_evidence_blocks(mutation):
     assert "centered_affine_evidence_invalid" in _codes(result)
 
 
-def test_full_chain_real_certificate_to_solved():
-    """Real resolver certificate -> candidates -> instances -> export -> solve.
+def test_injected_primitive_certificate_with_synthetic_table_solves_plumbing():
+    """Resolver certificate -> plumbing -> synthetic validator table solve.
 
-    Readiness comes from the real workflow builders; the certificate is the
-    real affine resolver product, injected at the candidate level only.
+    This is not production EBR provenance evidence.  It checks only that the
+    resolver-produced affine identity survives the plumbing layers.
     """
     cert = real_primitive_certificate_dict(143, "P3")
     assert cert is not None
@@ -744,7 +808,7 @@ def test_arbitrary_minimal_table_rejected():
     assert r["status"] != "solved_exact"
 
 
-def test_attach_real_certificate_contract_fixture_solves():
+def test_attach_resolver_certificate_to_synthetic_validator_fixture_solves():
     table = _table()
     export = attach_real_certificate({"bundles": [_bundle()]}, table)
     assert export is not None
@@ -881,7 +945,7 @@ def test_map_integrity_blocks_promotion(name, patch, expected_code):
 # E7: Real P3 and P4 identity promotes with exact map keys/values
 # ---------------------------------------------------------------------------
 
-def test_real_p3_identity_has_exact_map():
+def test_resolver_p3_identity_has_exact_map_in_low_level_validator():
     ci = real_primitive_certificate_identity(143, "P3")
     assert ci is not None
     assert ci["affine_operation_map"] == {"0": 0, "1": 1, "2": 2}
@@ -891,7 +955,7 @@ def test_real_p3_identity_has_exact_map():
     assert out["promoted"] is True
 
 
-def test_real_p4_identity_promotes():
+def test_resolver_p4_identity_passes_low_level_promotion_validator():
     ci = real_primitive_certificate_identity(75, "P4", spinor=True)
     assert ci is not None
     assert len(ci["affine_operation_map"]) == 4  # P4 has 4 ops

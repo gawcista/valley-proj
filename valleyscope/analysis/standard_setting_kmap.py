@@ -1850,6 +1850,23 @@ def _translation_key(vector: object, tolerance: float = 1e-8) -> tuple[int, int,
     return tuple(int(np.rint(value / tolerance)) for value in reduced)
 
 
+def _canonical_centering_cosets(
+    vectors: list[np.ndarray],
+    tolerance: float = 1e-8,
+) -> list[np.ndarray]:
+    """Return normalized cosets in the one order used by map indices."""
+    normalized: list[np.ndarray] = []
+    for vector in vectors:
+        reduced = np.asarray(vector, dtype=float)
+        reduced = reduced - np.floor(reduced + tolerance)
+        reduced[np.abs(reduced - 1.0) <= tolerance] = 0.0
+        normalized.append(reduced)
+    return sorted(
+        normalized,
+        key=lambda vector: _translation_key(vector, tolerance),
+    )
+
+
 def _affine_operation_key(
     rotation: object,
     translation: object,
@@ -1948,9 +1965,12 @@ def _centering_cosets_from_hall_database(
         )
         return result
 
-    coset_keys = set(raw_keys)
-    for left in raw_cosets:
-        for right in raw_cosets:
+    centering_cosets = _canonical_centering_cosets(raw_cosets, tolerance)
+    coset_keys = {
+        _translation_key(vector, tolerance) for vector in centering_cosets
+    }
+    for left in centering_cosets:
+        for right in centering_cosets:
             if _translation_key(left + right, tolerance) not in coset_keys:
                 result["status"] = "failed"
                 result["reason"] = "centering_cosets_not_closed"
@@ -1961,8 +1981,7 @@ def _centering_cosets_from_hall_database(
         "centering_type": centering_type,
         "primitive_conventional_index": expected_index,
         "centering_cosets": [
-            (vector - np.floor(vector + tolerance)).tolist()
-            for vector in raw_cosets
+            vector.tolist() for vector in centering_cosets
         ],
         "standard_setting_operation_count": len(rotations),
         "standard_operation_closure_validated": (
@@ -2139,7 +2158,12 @@ def derive_irreptables_standard_setting_identity(
 
 
 def _centering_cosets(hall_symbol: str) -> list[np.ndarray] | None:
-    """Return conventional centering cosets from Hall symbol.
+    """Return legacy diagnostic centering cosets from a Hall symbol.
+
+    This helper is used only by the small-integer transform-candidate search,
+    which performs set-membership diagnostics and never assigns serialized
+    coset indices.  Trusted affine expansion and certificate evidence use
+    ``_centering_cosets_from_hall_database`` and its canonical ordering.
 
     Returns fractional translation vectors that define the centering.
     For primitive settings (P), returns [ (0,0,0) ] only.

@@ -583,12 +583,14 @@ def _valid_fractional_vector(value: object) -> bool:
     )
 
 
-def _fractional_vector_set(value: object) -> set[tuple[float, float, float]] | None:
+def _fractional_vector_sequence(
+    value: object,
+) -> tuple[tuple[float, float, float], ...] | None:
     if not isinstance(value, list) or not all(
         _valid_fractional_vector(vector) for vector in value
     ):
         return None
-    normalized: set[tuple[float, float, float]] = set()
+    normalized: list[tuple[float, float, float]] = []
     for vector in value:
         entries = []
         for item in vector:
@@ -596,8 +598,8 @@ def _fractional_vector_set(value: object) -> set[tuple[float, float, float]] | N
             if abs(reduced) <= 1e-8 or abs(reduced - 1.0) <= 1e-8:
                 reduced = 0.0
             entries.append(round(reduced, 8))
-        normalized.add(tuple(entries))
-    return normalized
+        normalized.append(tuple(entries))
+    return tuple(normalized)
 
 
 def _validate_centered_affine_setting(
@@ -677,10 +679,10 @@ def _validate_centered_affine_setting(
     else:
         if index != _exact_int(table_setting.get("primitive_conventional_index")):
             reasons.append("primitive_conventional_index_table_mismatch")
-        expected_vectors = _fractional_vector_set(
+        expected_vectors = _fractional_vector_sequence(
             table_setting.get("centering_cosets")
         )
-        actual_vectors = _fractional_vector_set(vectors)
+        actual_vectors = _fractional_vector_sequence(vectors)
         if expected_vectors is None or actual_vectors != expected_vectors:
             reasons.append("centering_vectors_table_mismatch")
 

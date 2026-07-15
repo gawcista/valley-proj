@@ -513,7 +513,7 @@ def _normalize_origin_shift(
 def _normalize_centering_vectors(
     vectors: object,
 ) -> tuple[tuple[float, float, float], ...] | None:
-    """Normalize centering vectors to a sorted hashable tuple."""
+    """Normalize vectors without changing their map-index ordering."""
     if not isinstance(vectors, list):
         return None
     normed: list[tuple[float, float, float]] = []
@@ -522,7 +522,7 @@ def _normalize_centering_vectors(
         if normalized is None:
             return None
         normed.append(normalized)
-    return tuple(sorted(normed))
+    return tuple(normed)
 
 
 def _normalize_strict_int_list(
