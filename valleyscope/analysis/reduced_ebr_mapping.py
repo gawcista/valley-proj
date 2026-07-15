@@ -71,34 +71,50 @@ def _centering_from_hall_symbol(hall_symbol: object) -> str:
 
 
 @functools.lru_cache(maxsize=None)
-def _derive_table_standard_setting(sg_number: int) -> dict | None:
-    """Canonical standard setting for an international SG number via spglib.
+def _derive_table_standard_setting(
+    sg_number: int,
+    spinful: bool = False,
+) -> dict | None:
+    """Derive the canonical Hall setting from irreptables source operations.
 
-    Independent of any bundle: reads only spglib's crystallographic database.
-    Returns hall_number/hall_symbol/centering_type/space_group_symbol when the
-    international number maps to a UNIQUE Hall setting.  Returns None when
-    several settings (origin/axis/cell choices) exist and irreptables does not
-    expose which one its data uses — the caller must then block with
-    ``table_standard_setting_unresolved`` rather than synthesize one.
+    This evidence is independent of the bundle certificate.  All Hall choices
+    for the same SG are checked; zero or multiple affine matches fail closed.
     """
     try:
-        import spglib
+        from valleyscope.analysis.standard_setting_kmap import (
+            derive_irreptables_standard_setting_identity,
+        )
+        from valleyscope.irreps.tables import load_standard_irrep_table
+        table = load_standard_irrep_table(sg_number, spinor=spinful)
+        identity = derive_irreptables_standard_setting_identity(table, sg_number)
     except Exception:
         return None
-    matches = []
-    for h in range(1, 531):
-        t = spglib.get_spacegroup_type(h)
-        if t is not None and int(t.number) == int(sg_number):
-            matches.append((h, t))
-    if len(matches) != 1:
+    if identity.get("status") != "unique_match":
         return None
-    h, t = matches[0]
     return {
-        "hall_number": int(h),
-        "hall_symbol": str(t.hall_symbol),
-        "centering_type": _centering_from_hall_symbol(t.hall_symbol),
-        "space_group_number": int(t.number),
-        "space_group_symbol": str(t.international_short),
+        "hall_number": int(identity["hall_number"]),
+        "hall_symbol": str(identity["hall_symbol"]),
+        "centering_type": str(identity["centering_type"]),
+        "space_group_number": int(identity["space_group_number"]),
+        "space_group_symbol": str(identity["space_group_symbol"]),
+        "canonical_setting_status": str(identity["status"]),
+        "canonical_setting_source": str(identity["source"]),
+        "candidate_hall_numbers": list(identity["candidate_hall_numbers"]),
+        "affine_matching_hall_numbers": list(
+            identity["affine_matching_hall_numbers"]
+        ),
+        "primitive_conventional_index": int(
+            identity["primitive_conventional_index"]
+        ),
+        "centering_cosets": [
+            list(vector) for vector in identity["centering_cosets"]
+        ],
+        "standard_setting_operation_count": int(
+            identity["standard_setting_operation_count"]
+        ),
+        "standard_operation_closure_validated": bool(
+            identity["standard_operation_closure_validated"]
+        ),
     }
 
 
@@ -124,6 +140,7 @@ def promote_bundle_for_solve(*, bundle: dict, table: dict) -> dict:
     report: dict[str, object] = {
         "table_provenance_check": "not_attempted",
         "table_setting_check": "not_attempted",
+        "table_serialized_setting_check": "not_attempted",
         "sg_symbol_check": "not_attempted",
         "sg_number_check": "not_attempted",
         "certificate_check": "not_attempted",
@@ -175,8 +192,9 @@ def promote_bundle_for_solve(*, bundle: dict, table: dict) -> dict:
 
     # ---- A2. Independent table standard-setting evidence (spglib) ----
     table_setting = (
-        _derive_table_standard_setting(int(table_sg_num))
-        if _is_positive_int(table_sg_num) else None
+        _derive_table_standard_setting(int(table_sg_num), table_spinful)
+        if _is_positive_int(table_sg_num) and isinstance(table_spinful, bool)
+        else None
     )
     if table_setting is None:
         blockers.append(_blocker("table_standard_setting_unresolved",
@@ -192,6 +210,45 @@ def promote_bundle_for_solve(*, bundle: dict, table: dict) -> dict:
         table_hall = table_setting["hall_number"]
         table_hall_symbol = table_setting["hall_symbol"]
         table_centering = table_setting["centering_type"]
+
+    serialized_table_setting = prov.get("standard_setting_identity")
+    if serialized_table_setting is None:
+        report["table_serialized_setting_check"] = "not_provided"
+    elif not isinstance(serialized_table_setting, dict) or table_setting is None:
+        blockers.append(_blocker(
+            "table_serialized_setting_invalid",
+            "table provenance standard_setting_identity is malformed or "
+            "cannot be independently validated",
+        ))
+        report["table_serialized_setting_check"] = "failed"
+    else:
+        serialized_ok = (
+            serialized_table_setting.get("status") == "unique_match"
+            and serialized_table_setting.get("hall_number") == table_hall
+            and serialized_table_setting.get("hall_symbol") == table_hall_symbol
+            and serialized_table_setting.get("centering_type") == table_centering
+            and serialized_table_setting.get("affine_matching_hall_numbers")
+            == [table_hall]
+            and serialized_table_setting.get("primitive_conventional_index")
+            == table_setting["primitive_conventional_index"]
+            and serialized_table_setting.get("centering_cosets")
+            == table_setting["centering_cosets"]
+            and serialized_table_setting.get(
+                "standard_setting_operation_count"
+            ) == table_setting["standard_setting_operation_count"]
+            and serialized_table_setting.get(
+                "standard_operation_closure_validated"
+            ) is True
+        )
+        if serialized_ok:
+            report["table_serialized_setting_check"] = "passed"
+        else:
+            blockers.append(_blocker(
+                "table_serialized_setting_mismatch",
+                "serialized irreptables standard-setting identity does not "
+                "match an independent source-table derivation",
+            ))
+            report["table_serialized_setting_check"] = "failed"
 
     # ---- B. SG number + symbol: bundle vs table ----
     bundle_sg = str(bundle.get("subspace_group_candidate", ""))
@@ -234,7 +291,7 @@ def promote_bundle_for_solve(*, bundle: dict, table: dict) -> dict:
         _validate_sg_identity_crosscheck(
             cert_id, bundle_sg, bundle_sg_num, table_sg, table_sg_num,
             table_setting, blockers, report)
-        _validate_setting(cert_id, blockers, report)
+        _validate_setting(cert_id, table_setting, blockers, report)
         _validate_hall_consistency(
             cert_id, table_hall, table_hall_symbol, table_centering,
             table_setting is not None, blockers, report)
@@ -287,7 +344,10 @@ def promote_bundle_for_solve(*, bundle: dict, table: dict) -> dict:
         "spinful": table_spinful,
         "valleyscope_reduction": valleyscope_reduction,
         "independent_setting_identity": dict(table_setting) if table_setting else None,
-        "setting_source": "spglib.get_spacegroup_type",
+        "setting_source": (
+            table_setting.get("canonical_setting_source")
+            if table_setting else None
+        ),
     }
 
     promoted = not blockers
@@ -469,7 +529,7 @@ def _validate_sg_identity_crosscheck(cert_id, bundle_sg, bundle_sg_num,
 
 
 
-def _validate_setting(cert_id, blockers, report):
+def _validate_setting(cert_id, table_setting, blockers, report):
     """Validate centering + primitive/centered affine evidence (real vocab)."""
     raw_centering = cert_id.get("centering_type")
     centering = "" if raw_centering is None else str(raw_centering)
@@ -500,27 +560,238 @@ def _validate_setting(cert_id, blockers, report):
             f"unrecognized centering_type {centering!r}"))
         report["affine_setting_check"] = "failed"
         return
+    _validate_centered_affine_setting(
+        cert_id, table_setting, validation_status, relation, blockers, report,
+    )
+
+
+def _exact_int(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _valid_fractional_vector(value: object) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) == 3
+        and all(
+            isinstance(item, (int, float))
+            and not isinstance(item, bool)
+            and float(item) == float(item)
+            and float(item) not in (float("inf"), float("-inf"))
+            for item in value
+        )
+    )
+
+
+def _fractional_vector_set(value: object) -> set[tuple[float, float, float]] | None:
+    if not isinstance(value, list) or not all(
+        _valid_fractional_vector(vector) for vector in value
+    ):
+        return None
+    normalized: set[tuple[float, float, float]] = set()
+    for vector in value:
+        entries = []
+        for item in vector:
+            reduced = float(item) % 1.0
+            if abs(reduced) <= 1e-8 or abs(reduced - 1.0) <= 1e-8:
+                reduced = 0.0
+            entries.append(round(reduced, 8))
+        normalized.add(tuple(entries))
+    return normalized
+
+
+def _validate_centered_affine_setting(
+    cert_id, table_setting, validation_status, relation, blockers, report,
+):
+    """Validate a complete primitive-to-centered Hall operation bijection."""
+    reasons: list[str] = []
+    op_status = cert_id.get("operation_mapping_status")
+    affine_status = cert_id.get("affine_validation_status")
+    if validation_status != "validated":
+        reasons.append(f"validation_status={validation_status!r}")
+    if relation not in _CENTERED_RELATIONS:
+        reasons.append(f"relation={relation!r}")
+    if op_status != _OP_MAPPING_PASSED:
+        reasons.append(f"operation_mapping_status={op_status!r}")
+    if affine_status != _AFFINE_PASSED:
+        reasons.append(f"affine_validation_status={affine_status!r}")
+
+    canonical_status = cert_id.get("canonical_setting_status")
+    canonical_source = cert_id.get("canonical_setting_source")
+    hall_number = cert_id.get("hall_number")
+    canonical_halls = cert_id.get("canonical_hall_numbers")
+    candidate_halls = cert_id.get("canonical_candidate_hall_numbers")
+    if canonical_status != "unique_match":
+        reasons.append(f"canonical_setting_status={canonical_status!r}")
+    if not isinstance(canonical_source, str) or not canonical_source:
+        reasons.append("canonical_setting_source_missing")
+    if canonical_halls != [hall_number]:
+        reasons.append(
+            f"canonical_hall_numbers={canonical_halls!r} expected [{hall_number!r}]"
+        )
+    if type(candidate_halls) is not list or any(
+        not isinstance(item, int) or isinstance(item, bool)
+        for item in candidate_halls
+    ) or len(candidate_halls) != len(set(candidate_halls)) \
+            or hall_number not in candidate_halls:
+        reasons.append("canonical_candidate_hall_numbers_malformed")
+
     transform = cert_id.get("normalized_direct_transform")
-    centering_vectors = cert_id.get("normalized_centering_vectors")
-    op_status = str(cert_id.get("operation_mapping_status", ""))
-    affine_status = str(cert_id.get("affine_validation_status", ""))
-    transform_ok = isinstance(transform, list) and len(transform) == 3 and all(
-        isinstance(row, list) and len(row) == 3 for row in transform)
-    vectors_ok = isinstance(centering_vectors, list) and bool(centering_vectors)
-    if transform_ok and vectors_ok and validation_status == "validated" \
-            and relation in _CENTERED_RELATIONS \
-            and op_status == _OP_MAPPING_PASSED \
-            and affine_status == _AFFINE_PASSED:
-        report["affine_setting_check"] = "passed"
+    index = _exact_int(cert_id.get("primitive_conventional_index"))
+    coset_count = _exact_int(cert_id.get("centering_coset_count"))
+    if not _finite_nonsingular_3x3(transform):
+        reasons.append("direct_transform_missing_or_singular")
+    elif index is None or index <= 1:
+        reasons.append(f"primitive_conventional_index={index!r}")
     else:
-        blockers.append(_blocker("centered_affine_evidence_invalid",
-            "centered setting requires a validated transform + centering "
-            "vectors + passed operation/affine validation with producer "
-            f"vocabulary; got transform_ok={transform_ok} "
-            f"vectors_ok={vectors_ok} validation_status={validation_status!r} "
-            f"relation={relation!r} operation_mapping_status={op_status!r} "
-            f"affine_validation_status={affine_status!r}"))
+        rows = [[float(item) for item in row] for row in transform]
+        (a, b, c), (d, e, f), (g, h, i) = rows
+        determinant = (
+            a * (e * i - f * h)
+            - b * (d * i - f * g)
+            + c * (d * h - e * g)
+        )
+        if abs(abs(determinant) - 1.0 / index) > 1e-8:
+            reasons.append(
+                f"transform_determinant_index_mismatch(det={determinant},index={index})"
+            )
+    if index is None or coset_count != index:
+        reasons.append(f"centering_coset_count={coset_count!r},index={index!r}")
+
+    origin = cert_id.get("normalized_origin_shift")
+    if not _valid_fractional_vector(origin):
+        reasons.append("normalized_origin_shift_missing_or_malformed")
+    vectors = cert_id.get("normalized_centering_vectors")
+    if type(vectors) is not list or index is None or len(vectors) != index \
+            or not all(_valid_fractional_vector(vector) for vector in vectors):
+        reasons.append("normalized_centering_vectors_malformed")
+    elif len({tuple(float(item) for item in vector) for vector in vectors}) \
+            != len(vectors):
+        reasons.append("normalized_centering_vectors_duplicate")
+    elif [0.0, 0.0, 0.0] not in [
+        [float(item) for item in vector] for vector in vectors
+    ]:
+        reasons.append("identity_centering_vector_missing")
+    if not isinstance(table_setting, dict):
+        reasons.append("independent_table_setting_missing")
+    else:
+        if index != _exact_int(table_setting.get("primitive_conventional_index")):
+            reasons.append("primitive_conventional_index_table_mismatch")
+        expected_vectors = _fractional_vector_set(
+            table_setting.get("centering_cosets")
+        )
+        actual_vectors = _fractional_vector_set(vectors)
+        if expected_vectors is None or actual_vectors != expected_vectors:
+            reasons.append("centering_vectors_table_mismatch")
+
+    required_ids = cert_id.get("affine_required_operation_ids")
+    req_count = _exact_int(cert_id.get("affine_required_op_count"))
+    std_count = _exact_int(cert_id.get("affine_standard_setting_op_count"))
+    expanded_count = _exact_int(cert_id.get("expanded_parent_operation_count"))
+    matched_expanded = _exact_int(cert_id.get("matched_expanded_operations"))
+    matched_parent = _exact_int(cert_id.get("affine_matched_operations"))
+    parent_total = _exact_int(cert_id.get("affine_total_operations"))
+    table_std_count = (
+        _exact_int(table_setting.get("standard_setting_operation_count"))
+        if isinstance(table_setting, dict) else None
+    )
+    if type(required_ids) is not list or any(
+        not isinstance(item, int) or isinstance(item, bool)
+        for item in required_ids
+    ) or len(required_ids) != len(set(required_ids)):
+        reasons.append("affine_required_operation_ids_malformed")
+        required_ids = []
+    if not (
+        req_count is not None and req_count > 0
+        and len(required_ids) == req_count
+        and parent_total == req_count
+        and matched_parent == req_count
+        and index is not None
+        and expanded_count == req_count * index
+        and matched_expanded == expanded_count
+        and std_count == expanded_count
+        and table_std_count == std_count
+    ):
+        reasons.append(
+            "centered_bijection_counts("
+            f"required={req_count},parent={parent_total},matched_parent={matched_parent},"
+            f"index={index},expanded={expanded_count},"
+            f"matched_expanded={matched_expanded},standard={std_count})"
+        )
+
+    centered_map = cert_id.get("centered_affine_operation_map")
+    if type(centered_map) is not list or not centered_map:
+        reasons.append("centered_affine_operation_map_missing_or_empty")
+    else:
+        pair_keys: list[tuple[int, int]] = []
+        standard_indices: list[int] = []
+        for row in centered_map:
+            if not isinstance(row, dict) or set(row) != {
+                "parent_operation_id", "centering_coset_index",
+                "standard_operation_index",
+            }:
+                reasons.append("centered_affine_operation_map_row_malformed")
+                break
+            parent_id = row["parent_operation_id"]
+            coset_index = row["centering_coset_index"]
+            standard_index = row["standard_operation_index"]
+            if any(_exact_int(value) is None for value in (
+                parent_id, coset_index, standard_index,
+            )):
+                reasons.append("centered_affine_operation_map_value_non_integer")
+                break
+            if parent_id not in required_ids:
+                reasons.append("centered_affine_operation_map_parent_id_unknown")
+                break
+            if index is None or coset_index < 0 or coset_index >= index:
+                reasons.append("centered_affine_operation_map_coset_out_of_range")
+                break
+            if std_count is None or standard_index < 0 or standard_index >= std_count:
+                reasons.append("centered_affine_operation_map_target_out_of_range")
+                break
+            pair_keys.append((parent_id, coset_index))
+            standard_indices.append(standard_index)
+        if len(pair_keys) != len(set(pair_keys)):
+            reasons.append("centered_affine_operation_map_duplicate_pairs")
+        if len(standard_indices) != len(set(standard_indices)):
+            reasons.append("centered_affine_operation_map_reused_standard_operation")
+        if index is not None:
+            expected_pairs = {
+                (parent_id, coset_index)
+                for parent_id in required_ids
+                for coset_index in range(index)
+            }
+            if set(pair_keys) != expected_pairs:
+                reasons.append("centered_affine_operation_map_incomplete_pairs")
+        if std_count is not None and set(standard_indices) != set(range(std_count)):
+            reasons.append("centered_affine_operation_map_incomplete_standard_coverage")
+
+    if cert_id.get("affine_operation_map") is not None:
+        reasons.append("primitive_affine_operation_map_must_be_absent_for_centered")
+    for field in (
+        "affine_unmatched_parent_operations",
+        "affine_unmatched_centered_operation_pairs",
+        "affine_unused_standard_operation_indices",
+        "affine_missing_ingredients",
+    ):
+        if type(cert_id.get(field)) is not list or cert_id.get(field) != []:
+            reasons.append(f"{field}={cert_id.get(field)!r}")
+    if cert_id.get("affine_mismatch_count") != 0:
+        reasons.append(f"affine_mismatch_count={cert_id.get('affine_mismatch_count')!r}")
+    if cert_id.get("operation_closure_validated") is not True:
+        reasons.append("operation_closure_validated_not_true")
+    if cert_id.get("standard_operation_closure_validated") is not True:
+        reasons.append("standard_operation_closure_validated_not_true")
+
+    if reasons:
+        blockers.append(_blocker(
+            "centered_affine_evidence_invalid",
+            "centered setting requires a complete expanded affine bijection; "
+            + "; ".join(reasons),
+        ))
         report["affine_setting_check"] = "failed"
+    else:
+        report["affine_setting_check"] = "passed"
 
 
 def _finite_nonsingular_3x3(m: object) -> bool:

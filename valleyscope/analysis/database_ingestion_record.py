@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-_SCHEMA_VERSION = "1.3.0"
+_SCHEMA_VERSION = "1.4.0"
 
 
 def build_database_ingestion_record(
@@ -306,6 +306,7 @@ def _extract_irrep_records(
                 "source": rec.get("source", ""),
                 "source_bundle_id": source_bundle_id,
                 "source_instance_id": source_instance_id,
+                "certificate_identity": bundle.get("certificate_identity", {}),
             }
             # Preserve generic irrep provenance fields when present.
             for key in (

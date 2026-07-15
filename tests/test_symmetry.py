@@ -485,6 +485,25 @@ def test_rotation_order_selection_from_user_value_and_spacegroup():
     assert resolve_rotation_order("auto", international="P422", candidate_orders=[2, 4]) == 4
 
 
+@pytest.mark.parametrize(
+    "international,candidate_orders,expected",
+    [
+        ("P321", [2, 3], 3),
+        ("P312", [2, 3, 4], 4),
+        ("P422", [2, 3], 3),
+        ("arbitrary", [2], 2),
+        ("arbitrary", [2, 3, 4, 6], 6),
+        ("arbitrary", [], None),
+    ],
+)
+def test_auto_rotation_order_depends_only_on_candidate_operation_content(
+    international, candidate_orders, expected,
+):
+    assert resolve_rotation_order(
+        "auto", international=international, candidate_orders=candidate_orders,
+    ) == expected
+
+
 def test_rotation_generator_filter_keeps_one_cyclic_generator():
     c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]])
     c3_squared = c3 @ c3

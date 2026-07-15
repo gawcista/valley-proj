@@ -38,6 +38,10 @@ class StandardSettingCertificate:
     hall_number: int | None = None
     hall_symbol: str | None = None
     standard_setting_source: str = "spglib.get_spacegroup_type_from_symmetry"
+    canonical_setting_status: str = "not_evaluated"
+    canonical_setting_source: str | None = None
+    canonical_hall_numbers: list[int] | None = None
+    canonical_candidate_hall_numbers: list[int] | None = None
 
     # --- Validation ---
     validation_status: str = "not_evaluated"
@@ -79,6 +83,8 @@ class StandardSettingCertificate:
     ``"not_evaluated"``."""
     centering_vectors: list[list[float]] | None = None
     """Conventional centering cosets when known; None if unavailable."""
+    centering_coset_count: int | None = None
+    primitive_conventional_index: int | None = None
 
     # --- Affine translation validation ---
     translation_validation_status: str = "not_attempted"
@@ -113,6 +119,12 @@ class StandardSettingCertificate:
     """Standard operation indices not matched by any parent op."""
     required_operation_id_count: int | None = None
     """Number of distinct required VP operation IDs."""
+    centered_affine_operation_map: list[dict[str, int]] | None = None
+    """Expanded centered operation map keyed by parent ID and coset index."""
+    unmatched_centered_operation_pairs: list[dict[str, int]] | None = None
+    expanded_parent_operation_count: int | None = None
+    matched_expanded_operations: int | None = None
+    standard_operation_closure_validated: bool | None = None
 
     # --- Blockers ---
     unresolved_reason: str | None = None
@@ -138,6 +150,7 @@ class StandardSettingCertificate:
                 if key in (
                     "missing_affine_ingredients",
                     "unmatched_parent_operations",
+                    "unmatched_centered_operation_pairs",
                     "unused_standard_operation_indices",
                 ):
                     d[key] = []
@@ -222,9 +235,12 @@ def _build_transform_candidate(
         v = standard_match.get("hall_symbol")
         if isinstance(v, str) and v:
             c.centering_type = _hall_centering_symbol(str(v)) or None
-            cv = _centering_cosets(str(v))
-            if cv and len(cv) > 1:
-                c.centering_vectors = [vec.tolist() for vec in cv]
+            hall_number = standard_match.get("hall_number")
+            coset_evidence = _centering_cosets_from_hall_database(hall_number)
+            if coset_evidence.get("status") == "passed":
+                cv = coset_evidence.get("centering_cosets")
+                if isinstance(cv, list) and len(cv) > 1:
+                    c.centering_vectors = [list(vec) for vec in cv]
 
     if parent_to_standard_direct_transform is not None:
         T = np.asarray(parent_to_standard_direct_transform, dtype=float)
@@ -321,7 +337,9 @@ def _validate_affine_operation_equivalence(
         "missing_ingredients": [],
         "required_operation_ids": None,
         "operation_map": None,
+        "centered_operation_map": None,
         "unmatched_parent_operations": None,
+        "unmatched_centered_operation_pairs": None,
         "unused_standard_operation_indices": None,
     }
 
@@ -453,27 +471,45 @@ def _validate_affine_operation_equivalence(
     std_op_count = len(std_translations)
     result["standard_setting_operation_count"] = std_op_count
 
-    # Centering guard.
+    # Centering evidence is derived from the Hall operation set itself.
     hall_symbol = str(standard_match.get("hall_symbol", "") or "")
-    centering_vectors = _centering_cosets(hall_symbol)
-    if centering_vectors and len(centering_vectors) > 1:
-        result["centering_cosets_count"] = len(centering_vectors)
-    elif _hall_centering_symbol(hall_symbol) in ("A", "B", "C", "I", "F", "R"):
-        if result["status"] not in ("failed",):
-            result["status"] = "unresolved"
+    centering_evidence = _centering_cosets_from_hall_database(
+        hall_number, tolerance=tolerance,
+    )
+    if centering_evidence.get("status") != "passed":
+        result["status"] = (
+            "failed" if centering_evidence.get("status") == "failed"
+            else "unresolved"
+        )
         result["missing_ingredients"].append("conventional_centering_vectors")
+        result["centering_evidence_reason"] = centering_evidence.get("reason")
         return result
+    centering_vectors = [
+        np.asarray(vector, dtype=float)
+        for vector in centering_evidence["centering_cosets"]
+    ]
+    centering_index = int(
+        centering_evidence["primitive_conventional_index"]
+    )
+    result["centering_cosets_count"] = len(centering_vectors)
+    result["primitive_conventional_index"] = centering_index
+    result["standard_operation_closure_validated"] = centering_evidence.get(
+        "standard_operation_closure_validated"
+    )
 
-    # Primitive-path group-order equality: required parent ops must equal
-    # standard ops for a correct primitive direct-coordinate match.
+    # A parent primitive operation expands over every conventional centering
+    # coset.  The expanded order must equal the full Hall operation count.
     parent_op_count = len(ops_with_translations)
-    if _hall_centering_symbol(hall_symbol) == "P" \
-            and parent_op_count != std_op_count:
+    expanded_parent_count = parent_op_count * centering_index
+    result["expanded_parent_operation_count"] = expanded_parent_count
+    if expanded_parent_count != std_op_count:
         if result["status"] not in ("failed",):
             result["status"] = "failed"
         result["missing_ingredients"].append(
             f"parent_standard_group_order_mismatch: parent has "
-            f"{parent_op_count} operations, standard has {std_op_count}"
+            f"{parent_op_count} primitive operations, centering index is "
+            f"{centering_index}, expanded parent has {expanded_parent_count}, "
+            f"standard has {std_op_count}"
         )
     result["total_parent_operations"] = parent_op_count
 
@@ -501,69 +537,101 @@ def _validate_affine_operation_equivalence(
             result["status"] = "failed"
         result["missing_ingredients"].append("singular_transform")
         return result
+    determinant = float(np.linalg.det(T))
+    expected_abs_determinant = 1.0 / float(centering_index)
+    result["transform_determinant"] = determinant
+    result["expected_transform_abs_determinant"] = expected_abs_determinant
+    if not np.isclose(
+        abs(determinant), expected_abs_determinant, atol=tolerance, rtol=0.0,
+    ):
+        result["status"] = "failed"
+        result["missing_ingredients"].append(
+            "primitive_conventional_transform_index"
+        )
+        return result
+    if centering_index > 1 and origin_shift_fractional is None:
+        result["status"] = "unresolved"
+        result["missing_ingredients"].append("origin_shift_fractional")
+        return result
+    if origin_shift_fractional is not None:
+        origin = np.asarray(origin_shift_fractional, dtype=float)
+        if origin.shape != (3,) or not np.all(np.isfinite(origin)):
+            result["status"] = "failed"
+            result["missing_ingredients"].append("origin_shift_fractional")
+            return result
+    else:
+        origin = np.zeros(3, dtype=float)
 
-    centering_vectors = _centering_cosets(hall_symbol) or [np.array([0.0, 0.0, 0.0])]
-
-    # ---- D. Build one-to-one parent-to-standard bijection ----
-    # ID-keyed candidate graph:  parent_operation_id -> list[std_indices].
-    candidate_graph: dict[int, list[int]] = {}
+    # ---- D. Build expanded parent/coset -> standard-operation bijection ----
+    Pair = tuple[int, int]
+    candidate_graph: dict[Pair, list[int]] = {}
     for op in ops_with_translations:
         r_p = np.asarray(op["rotation_frac"], dtype=float)
         t_p = np.asarray(op["translation_frac"], dtype=float)
         r_transformed = T @ r_p @ T_inv
-        t_transformed = T @ t_p
-        if origin_shift_fractional is not None:
-            o = np.asarray(origin_shift_fractional, dtype=float)
-            t_transformed = t_transformed + o - r_transformed @ o
-
-        matched_indices: list[int] = []
-        for j, (r_s, t_s) in enumerate(zip(std_rotations, std_translations)):
-            if not np.allclose(r_transformed, r_s, atol=tolerance):
-                continue
-            t_diff = t_transformed - t_s
-            for cv in centering_vectors:
-                d = t_diff - cv
-                d_mod = d - np.rint(d)
-                if np.linalg.norm(d_mod) <= tolerance:
-                    matched_indices.append(j)
-                    break  # one centering vector match suffices
+        t_base = T @ t_p + origin - r_transformed @ origin
         oid = op.get("operation_id")
-        if _is_exact_operation_id(oid) and matched_indices:
-            candidate_graph[oid] = matched_indices
+        if not _is_exact_operation_id(oid):
+            continue
+        for coset_index, centering_vector in enumerate(centering_vectors):
+            expanded_translation = t_base + centering_vector
+            matched_indices = [
+                standard_index
+                for standard_index, (standard_rotation, standard_translation)
+                in enumerate(zip(std_rotations, std_translations))
+                if np.allclose(r_transformed, standard_rotation, atol=tolerance)
+                and _mod1_norm(
+                    expanded_translation - standard_translation
+                ) <= tolerance
+            ]
+            candidate_graph[(oid, coset_index)] = matched_indices
 
     # Deterministic augmenting-path bipartite matching (Hopcroft-Karp style,
     # single-path DFS for simplicity).  Required IDs are processed in sorted
     # order for deterministic output.
-    parent_match: dict[int, int] = {}   # parent_id -> std_index
-    std_match: dict[int, int] = {}       # std_index -> parent_id
-    parent_candidates = list(by_id.keys())
-    parent_candidates.sort()
+    pair_match: dict[Pair, int] = {}
+    std_match: dict[int, Pair] = {}
+    parent_candidates = sorted(by_id)
+    pair_candidates = [
+        (parent_id, coset_index)
+        for parent_id in parent_candidates
+        for coset_index in range(centering_index)
+    ]
 
     # Build adjacency for augmenting-path.
-    adj: dict[int, list[int]] = {
-        pid: list(candidate_graph.get(pid, [])) for pid in parent_candidates
+    adj: dict[Pair, list[int]] = {
+        pair: list(candidate_graph.get(pair, [])) for pair in pair_candidates
     }
 
-    def _dfs_augment(u: int, visited: set[int]) -> bool:
+    def _dfs_augment(u: Pair, visited: set[int]) -> bool:
         for v in adj.get(u, []):
             if v in visited:
                 continue
             visited.add(v)
             if v not in std_match or _dfs_augment(std_match[v], visited):
-                parent_match[u] = v
+                pair_match[u] = v
                 std_match[v] = u
                 return True
         return False
 
     # Match in sorted parent order for deterministic result.
-    for pid in parent_candidates:
-        _dfs_augment(pid, set())
+    for pair in pair_candidates:
+        _dfs_augment(pair, set())
 
-    # Build result maps from the matching.
-    op_map = dict(parent_match)
+    unmatched_pairs = [
+        {
+            "parent_operation_id": parent_id,
+            "centering_coset_index": coset_index,
+        }
+        for parent_id, coset_index in pair_candidates
+        if (parent_id, coset_index) not in pair_match
+    ]
     unmatched_parents: list[dict[str, object]] = []
     for pid in parent_candidates:
-        if pid not in parent_match:
+        if any(
+            (pid, coset_index) not in pair_match
+            for coset_index in range(centering_index)
+        ):
             op_data = by_id.get(pid, {})
             unmatched_parents.append({
                 "operation_id": pid,
@@ -574,17 +642,41 @@ def _validate_affine_operation_equivalence(
     unused_std = sorted(
         set(range(std_op_count)) - set(std_match.keys())
     )
-    result["operation_map"] = {str(k): int(v) for k, v in op_map.items()}
+    if centering_index == 1:
+        result["operation_map"] = {
+            str(parent_id): int(pair_match[(parent_id, 0)])
+            for parent_id in parent_candidates
+            if (parent_id, 0) in pair_match
+        }
+        result["centered_operation_map"] = None
+    else:
+        result["operation_map"] = None
+        result["centered_operation_map"] = [
+            {
+                "parent_operation_id": parent_id,
+                "centering_coset_index": coset_index,
+                "standard_operation_index": int(standard_index),
+            }
+            for (parent_id, coset_index), standard_index
+            in sorted(pair_match.items())
+        ]
     result["unmatched_parent_operations"] = unmatched_parents
+    result["unmatched_centered_operation_pairs"] = unmatched_pairs
     result["unused_standard_operation_indices"] = unused_std
-
-    result["matched_affine_operations"] = len(op_map)
+    result["matched_expanded_operations"] = len(pair_match)
+    result["matched_affine_operations"] = sum(
+        all(
+            (parent_id, coset_index) in pair_match
+            for coset_index in range(centering_index)
+        )
+        for parent_id in parent_candidates
+    )
     result["total_parent_operations"] = parent_op_count
 
     # ---- E. Determine status ----
-    if unmatched_parents or unused_std:
+    if unmatched_pairs or unused_std:
         result["mismatched_translation_count"] = max(
-            len(unmatched_parents), len(unused_std),
+            len(unmatched_pairs), len(unused_std),
         )
         if unmatched_parents:
             result["mismatched_translations"] = unmatched_parents[:3]
@@ -607,10 +699,19 @@ def _validate_affine_operation_equivalence(
     if result["status"] == "passed" and not (
         result.get("missing_ingredients") == []
         and result.get("unmatched_parent_operations") == []
+        and result.get("unmatched_centered_operation_pairs") == []
         and result.get("unused_standard_operation_indices") == []
         and result.get("operation_closure_validated") is True
-        and isinstance(result.get("operation_map"), dict)
-        and len(result["operation_map"]) == len(required_ids)
+        and result.get("standard_operation_closure_validated") is True
+        and result.get("matched_expanded_operations") == std_op_count
+        and (
+            centering_index > 1
+            and isinstance(result.get("centered_operation_map"), list)
+            and len(result["centered_operation_map"]) == std_op_count
+            or centering_index == 1
+            and isinstance(result.get("operation_map"), dict)
+            and len(result["operation_map"]) == len(required_ids)
+        )
     ):
         result["status"] = "failed"
         if "incomplete_affine_success_evidence" not in result["missing_ingredients"]:
@@ -780,6 +881,45 @@ def _apply_affine_validation_to_certificate(
         else None
     )
     cert.required_operation_id_count = affine_result.get("required_operation_id_count")
+    cert.centering_coset_count = affine_result.get("centering_cosets_count")
+    cert.primitive_conventional_index = affine_result.get(
+        "primitive_conventional_index"
+    )
+    cert.expanded_parent_operation_count = affine_result.get(
+        "expanded_parent_operation_count"
+    )
+    cert.matched_expanded_operations = affine_result.get(
+        "matched_expanded_operations"
+    )
+    cert.standard_operation_closure_validated = affine_result.get(
+        "standard_operation_closure_validated"
+    )
+    centered_map = affine_result.get("centered_operation_map")
+    cert.centered_affine_operation_map = (
+        [dict(row) for row in centered_map]
+        if isinstance(centered_map, list)
+        and all(
+            isinstance(row, dict)
+            and set(row) == {
+                "parent_operation_id",
+                "centering_coset_index",
+                "standard_operation_index",
+            }
+            and all(
+                isinstance(row[key], int) and not isinstance(row[key], bool)
+                for key in row
+            )
+            for row in centered_map
+        )
+        else None
+    )
+    unmatched_pairs = affine_result.get("unmatched_centered_operation_pairs")
+    cert.unmatched_centered_operation_pairs = (
+        [dict(row) for row in unmatched_pairs]
+        if isinstance(unmatched_pairs, list)
+        and all(isinstance(row, dict) for row in unmatched_pairs)
+        else None
+    )
 
 
 def _affine_failure_blocker(
@@ -833,6 +973,36 @@ def build_standard_setting_certificate(
         if isinstance(v, str) and v:
             cert.hall_symbol = str(v)
             cert.centering_type = _hall_centering_symbol(str(v)) or None
+        canonical_status = standard_match.get("canonical_setting_status")
+        if isinstance(canonical_status, str) and canonical_status:
+            cert.canonical_setting_status = canonical_status
+        canonical_source = standard_match.get("canonical_setting_source")
+        if isinstance(canonical_source, str) and canonical_source:
+            cert.canonical_setting_source = canonical_source
+        canonical_halls = standard_match.get("canonical_hall_numbers")
+        if isinstance(canonical_halls, list) and all(
+            isinstance(item, int) and not isinstance(item, bool)
+            for item in canonical_halls
+        ):
+            cert.canonical_hall_numbers = list(canonical_halls)
+        candidate_halls = standard_match.get("canonical_candidate_hall_numbers")
+        if isinstance(candidate_halls, list) and all(
+            isinstance(item, int) and not isinstance(item, bool)
+            for item in candidate_halls
+        ):
+            cert.canonical_candidate_hall_numbers = list(candidate_halls)
+        hall_number = standard_match.get("hall_number")
+        coset_evidence = _centering_cosets_from_hall_database(hall_number)
+        if coset_evidence.get("status") == "passed":
+            cert.centering_vectors = [
+                list(vector) for vector in coset_evidence["centering_cosets"]
+            ]
+            cert.centering_coset_count = int(
+                coset_evidence["primitive_conventional_index"]
+            )
+            cert.primitive_conventional_index = int(
+                coset_evidence["primitive_conventional_index"]
+            )
 
     if (
         isinstance(parent_basis_operation_ids, list)
@@ -879,6 +1049,53 @@ def build_standard_setting_certificate(
             cert.origin_shift_status = "explicit"
 
     return cert
+
+
+def _match_table_kpoint_label(
+    table: object,
+    k_frac: np.ndarray,
+    *,
+    tolerance: float,
+    standard_match: dict[str, object] | None,
+) -> str | None:
+    """Match an HSP using Hall-derived centering evidence when available."""
+    try:
+        label = table.match_kpoint_label(k_frac, tolerance=tolerance)
+    except TypeError:
+        label = table.match_kpoint_label(k_frac)
+    if label is not None:
+        return label
+    if not isinstance(standard_match, dict):
+        return None
+    evidence = _centering_cosets_from_hall_database(
+        standard_match.get("hall_number"), tolerance=tolerance,
+    )
+    cosets = evidence.get("centering_cosets")
+    irreps = getattr(table, "irreps", None)
+    if evidence.get("status") != "passed" or not isinstance(cosets, list) \
+            or not isinstance(irreps, (list, tuple)):
+        return None
+    labels_by_coordinate: dict[str, np.ndarray] = {}
+    for irrep in irreps:
+        irrep_label = getattr(irrep, "kpoint_label", None)
+        irrep_k = getattr(irrep, "k_frac", None)
+        if isinstance(irrep_label, str) and irrep_k is not None:
+            labels_by_coordinate.setdefault(
+                irrep_label, np.asarray(irrep_k, dtype=float),
+            )
+    for irrep_label, table_k in labels_by_coordinate.items():
+        delta = np.asarray(k_frac, dtype=float) - table_k
+        integer_delta = np.rint(delta)
+        if np.linalg.norm(delta - integer_delta) > tolerance:
+            continue
+        if all(
+            abs(float(np.dot(integer_delta, np.asarray(coset, dtype=float)))
+                - np.rint(np.dot(integer_delta, np.asarray(coset, dtype=float))))
+            <= tolerance
+            for coset in cosets
+        ):
+            return irrep_label
+    return None
 
 
 def resolve_standard_setting_hsp_label(
@@ -938,12 +1155,80 @@ def resolve_standard_setting_hsp_label(
         "attempted_direct_match": True,
     }
 
+    canonical_blocker: str | None = None
+    if isinstance(standard_match, dict):
+        standard_match = dict(standard_match)
+        declared_sg_number = standard_match.get("number")
+        declared_hall_number = standard_match.get("hall_number")
+        declared_hall_ok, declared_hall_blocker = _validate_hall_sg_consistency(
+            hall_number=(
+                declared_hall_number
+                if isinstance(declared_hall_number, int)
+                and not isinstance(declared_hall_number, bool)
+                else None
+            ),
+            sg_number=(
+                declared_sg_number
+                if isinstance(declared_sg_number, int)
+                and not isinstance(declared_sg_number, bool)
+                else None
+            ),
+        )
+        canonical_identity = derive_irreptables_standard_setting_identity(
+            table, declared_sg_number,
+        )
+        prov["canonical_setting_evidence"] = dict(canonical_identity)
+        if not declared_hall_ok:
+            canonical_blocker = (
+                "standard_setting_hsp_mapping_unresolved: declared Hall/SG "
+                f"identity is inconsistent: {declared_hall_blocker}."
+            )
+            standard_match["canonical_setting_status"] = "input_conflict"
+        elif canonical_identity.get("status") != "unique_match":
+            canonical_blocker = (
+                "standard_setting_hsp_mapping_unresolved: irreptables "
+                "canonical Hall setting is not uniquely established "
+                f"(status={canonical_identity.get('status')!r}, matching_halls="
+                f"{canonical_identity.get('affine_matching_hall_numbers')!r})."
+            )
+            standard_match["canonical_setting_status"] = str(
+                canonical_identity.get("status", "unresolved")
+            )
+            standard_match["canonical_setting_source"] = str(
+                canonical_identity.get("source", "")
+            )
+            standard_match["canonical_hall_numbers"] = list(
+                canonical_identity.get("affine_matching_hall_numbers", [])
+            )
+            standard_match["canonical_candidate_hall_numbers"] = list(
+                canonical_identity.get("candidate_hall_numbers", [])
+            )
+        else:
+            standard_match["detected_setting_hall_number"] = declared_hall_number
+            standard_match["detected_setting_hall_symbol"] = standard_match.get(
+                "hall_symbol"
+            )
+            standard_match["hall_number"] = canonical_identity["hall_number"]
+            standard_match["hall_symbol"] = canonical_identity["hall_symbol"]
+            standard_match["international_short"] = canonical_identity[
+                "space_group_symbol"
+            ]
+            standard_match["canonical_setting_status"] = "unique_match"
+            standard_match["canonical_setting_source"] = canonical_identity["source"]
+            standard_match["canonical_hall_numbers"] = [
+                canonical_identity["hall_number"]
+            ]
+            standard_match["canonical_candidate_hall_numbers"] = list(
+                canonical_identity["candidate_hall_numbers"]
+            )
+
     # 1. Direct coordinate match (existing behavior).
-    try:
-        direct_label = table.match_kpoint_label(k_frac, tolerance=tolerance)
-    except TypeError:
-        # Compatibility with test mocks that don't accept tolerance.
-        direct_label = table.match_kpoint_label(k_frac)
+    direct_label = _match_table_kpoint_label(
+        table, k_frac, tolerance=tolerance, standard_match=standard_match,
+    )
+
+    if canonical_blocker is not None:
+        prov["canonical_setting_blocker"] = canonical_blocker
     direct_hall_symbol = (
         str(standard_match.get("hall_symbol", "") or "")
         if isinstance(standard_match, dict)
@@ -1006,7 +1291,7 @@ def resolve_standard_setting_hsp_label(
             origin_shift_fractional=origin_shift_fractional,
         )
         prov["affine_validation"] = aff
-        if aff.get("status") == "passed":
+        if aff.get("status") == "passed" and canonical_blocker is None:
             cert = build_standard_setting_certificate(
                 standard_match=standard_match,
                 validation_status="validated",
@@ -1030,6 +1315,9 @@ def resolve_standard_setting_hsp_label(
             blocker = _affine_failure_blocker(
                 aff, source="primitive direct coordinate match")
             validation_status = "rejected"
+        elif canonical_blocker is not None:
+            blocker = canonical_blocker
+            validation_status = "unresolved"
         else:
             blocker = (
                 "standard_setting_hsp_mapping_unresolved: primitive direct "
@@ -1099,10 +1387,10 @@ def resolve_standard_setting_hsp_label(
                 T_inv = np.linalg.inv(T)
                 transformed_k = k_frac @ T_inv.T
                 prov["transformed_k_frac"] = transformed_k.tolist()
-                try:
-                    label = table.match_kpoint_label(transformed_k, tolerance=tolerance)
-                except TypeError:
-                    label = table.match_kpoint_label(transformed_k)
+                label = _match_table_kpoint_label(
+                    table, transformed_k, tolerance=tolerance,
+                    standard_match=standard_match,
+                )
                 if label is not None:
                     # Affine gate: explicit transform must not bypass
                     # translation validation when affine data is available.
@@ -1116,16 +1404,31 @@ def resolve_standard_setting_hsp_label(
                             parent_to_standard_direct_transform=T,
                             origin_shift_fractional=origin_shift_fractional,
                         )
-                    if aff is not None and aff.get("status") == "failed":
+                    if aff is not None and aff.get("status") != "passed":
                         prov["affine_validation"] = aff
-                        tf_result["status"] = "rejected"
-                        tf_result["rejection_reason"] = _affine_failure_blocker(
-                            aff, source="explicit transform"
+                        affine_failed = aff.get("status") == "failed"
+                        tf_result["status"] = (
+                            "rejected" if affine_failed else "unresolved"
+                        )
+                        tf_result["rejection_reason"] = (
+                            _affine_failure_blocker(
+                                aff, source="explicit transform"
+                            )
+                            if affine_failed
+                            else (
+                                "standard_setting_hsp_mapping_unresolved: "
+                                "explicit transform requires complete affine "
+                                "operation evidence; "
+                                f"status={aff.get('status')!r}, missing="
+                                f"{aff.get('missing_ingredients')!r}."
+                            )
                         )
                         prov["explicit_transform"] = tf_result
                         cert = build_standard_setting_certificate(
                             standard_match=standard_match,
-                            validation_status="rejected",
+                            validation_status=(
+                                "rejected" if affine_failed else "unresolved"
+                            ),
                             unresolved_reason=tf_result["rejection_reason"],
                             parent_basis_operation_ids=(
                                 _operation_ids_list(standard_match)
@@ -1164,6 +1467,29 @@ def resolve_standard_setting_hsp_label(
                         prov["standard_setting_certificate"] = cert.to_dict()
                         return None, tf_result["rejection_reason"], prov
                     else:
+                        if canonical_blocker is not None:
+                            cert = build_standard_setting_certificate(
+                                standard_match=standard_match,
+                                validation_status="unresolved",
+                                unresolved_reason=canonical_blocker,
+                                parent_basis_operation_ids=(
+                                    _operation_ids_list(standard_match)
+                                    if isinstance(standard_match, dict) else None
+                                ),
+                                parent_to_standard_direct_transform=T,
+                                origin_shift_fractional=origin_shift_fractional,
+                                transform_provenance=explicit_provenance,
+                                parent_k_frac=k_frac,
+                            )
+                            cert.standard_setting_source = "explicit_transform"
+                            cert.primitive_conventional_relation = "explicit_transform"
+                            cert.operation_mapping_status = (
+                                "operation_basis_verification_passed"
+                            )
+                            if aff is not None:
+                                _apply_affine_validation_to_certificate(cert, aff)
+                            prov["standard_setting_certificate"] = cert.to_dict()
+                            return None, canonical_blocker, prov
                         prov["explicit_transformed_match_succeeded"] = True
                         prov["explicit_transformed_hsp_label"] = label
                         cert = build_standard_setting_certificate(
@@ -1191,6 +1517,8 @@ def resolve_standard_setting_hsp_label(
                         )
                         if aff is not None:
                             _apply_affine_validation_to_certificate(cert, aff)
+                            if aff.get("primitive_conventional_index", 1) > 1:
+                                cert.centering_status = "centered_affine_validated"
                             candidate = _build_transform_candidate(
                                 standard_match=standard_match,
                                 parent_to_standard_direct_transform=T,
@@ -1264,10 +1592,10 @@ def resolve_standard_setting_hsp_label(
             T_inv = np.linalg.inv(T)
             transformed_k = k_frac @ T_inv.T
             prov["transformed_k_frac"] = transformed_k.tolist()
-            try:
-                transformed_label = table.match_kpoint_label(transformed_k, tolerance=tolerance)
-            except TypeError:
-                transformed_label = table.match_kpoint_label(transformed_k)
+            transformed_label = _match_table_kpoint_label(
+                table, transformed_k, tolerance=tolerance,
+                standard_match=standard_match,
+            )
             if transformed_label is not None:
                 aff = None
                 if isinstance(standard_match, dict) and detected_operations:
@@ -1323,6 +1651,24 @@ def resolve_standard_setting_hsp_label(
                         )
                         prov["standard_setting_certificate"] = cert.to_dict()
                         return None, blocker, prov
+                if canonical_blocker is not None:
+                    cert = build_standard_setting_certificate(
+                        standard_match=standard_match,
+                        validation_status="unresolved",
+                        unresolved_reason=canonical_blocker,
+                        parent_basis_operation_ids=_operation_ids_list(standard_match),
+                        parent_to_standard_direct_transform=T,
+                        origin_shift_fractional=origin_shift_fractional,
+                        transform_provenance="operation_basis_reconstruction",
+                        parent_k_frac=k_frac,
+                    )
+                    cert.primitive_conventional_relation = (
+                        "operation_basis_reconstruction"
+                    )
+                    if aff is not None:
+                        _apply_affine_validation_to_certificate(cert, aff)
+                    prov["standard_setting_certificate"] = cert.to_dict()
+                    return None, canonical_blocker, prov
                 prov["basis_transformed_match_succeeded"] = True
                 prov["transformed_hsp_label"] = transformed_label
                 cert = build_standard_setting_certificate(
@@ -1347,6 +1693,8 @@ def resolve_standard_setting_hsp_label(
                 )
                 if aff is not None:
                     _apply_affine_validation_to_certificate(cert, aff)
+                    if aff.get("primitive_conventional_index", 1) > 1:
+                        cert.centering_status = "centered_affine_validated"
                     candidate = _build_transform_candidate(
                         standard_match=standard_match,
                         parent_to_standard_direct_transform=T,
@@ -1378,11 +1726,11 @@ def resolve_standard_setting_hsp_label(
 
     if transform_result.get("transformed_k_frac") is not None:
         transformed_k = np.asarray(transform_result["transformed_k_frac"], dtype=float)
-        try:
-            transformed_label = table.match_kpoint_label(transformed_k, tolerance=tolerance)
-        except TypeError:
-            transformed_label = table.match_kpoint_label(transformed_k)
-        if transformed_label is not None:
+        transformed_label = _match_table_kpoint_label(
+            table, transformed_k, tolerance=tolerance,
+            standard_match=standard_match,
+        )
+        if transformed_label is not None and canonical_blocker is None:
             prov["transformed_match_succeeded"] = True
             prov["transformed_k_frac"] = transformed_k.tolist()
             prov["transformed_hsp_label"] = transformed_label
@@ -1482,6 +1830,312 @@ def _hall_centering_symbol(hall_symbol: str) -> str:
     if token.startswith("-"):
         token = token[1:].lstrip()
     return token[:1].upper()
+
+
+_CENTERING_INDICES = {
+    "P": 1,
+    "A": 2,
+    "B": 2,
+    "C": 2,
+    "I": 2,
+    "F": 4,
+    "R": 3,
+}
+
+
+def _translation_key(vector: object, tolerance: float = 1e-8) -> tuple[int, int, int]:
+    values = np.asarray(vector, dtype=float)
+    reduced = values - np.floor(values + tolerance)
+    reduced[np.abs(reduced - 1.0) <= tolerance] = 0.0
+    return tuple(int(np.rint(value / tolerance)) for value in reduced)
+
+
+def _affine_operation_key(
+    rotation: object,
+    translation: object,
+    tolerance: float = 1e-8,
+) -> tuple[tuple[int, ...], tuple[int, int, int]]:
+    rotation_array = np.asarray(rotation, dtype=float)
+    return (
+        tuple(int(value) for value in np.rint(rotation_array).reshape(-1)),
+        _translation_key(translation, tolerance),
+    )
+
+
+def _affine_operation_set_is_closed(
+    rotations: list[np.ndarray],
+    translations: list[np.ndarray],
+    tolerance: float = 1e-8,
+) -> bool:
+    if not rotations or len(rotations) != len(translations):
+        return False
+    keys = {
+        _affine_operation_key(rotation, translation, tolerance)
+        for rotation, translation in zip(rotations, translations)
+    }
+    if len(keys) != len(rotations):
+        return False
+    for left_rotation, left_translation in zip(rotations, translations):
+        for right_rotation, right_translation in zip(rotations, translations):
+            product_rotation = left_rotation @ right_rotation
+            product_translation = (
+                left_translation + left_rotation @ right_translation
+            )
+            if _affine_operation_key(
+                product_rotation, product_translation, tolerance,
+            ) not in keys:
+                return False
+    return True
+
+
+def _centering_cosets_from_hall_database(
+    hall_number: object,
+    *,
+    tolerance: float = 1e-8,
+) -> dict[str, object]:
+    """Derive conventional centering cosets from one Hall operation set.
+
+    The cosets are the distinct translations attached to the identity
+    rotation in spglib's Hall database.  The Hall lattice symbol supplies the
+    crystallographic primitive/conventional index, but never the coordinates
+    of the cosets themselves.
+    """
+    result: dict[str, object] = {"status": "unresolved"}
+    if not isinstance(hall_number, int) or isinstance(hall_number, bool):
+        result["reason"] = "hall_number_missing_or_malformed"
+        return result
+    try:
+        import spglib
+        sg_type = spglib.get_spacegroup_type(hall_number)
+        symmetry = spglib.get_symmetry_from_database(hall_number)
+    except Exception:
+        sg_type = None
+        symmetry = None
+    if sg_type is None or symmetry is None:
+        result["reason"] = "spglib_hall_database_unavailable"
+        return result
+
+    centering_type = _hall_centering_symbol(str(sg_type.hall_symbol))
+    expected_index = _CENTERING_INDICES.get(centering_type)
+    if expected_index is None:
+        result["reason"] = "unrecognized_hall_centering"
+        return result
+
+    rotations = [np.asarray(value, dtype=float) for value in symmetry["rotations"]]
+    translations = [
+        np.asarray(value, dtype=float) for value in symmetry["translations"]
+    ]
+    identity = np.eye(3, dtype=float)
+    raw_cosets = [
+        translation for rotation, translation in zip(rotations, translations)
+        if np.allclose(rotation, identity, atol=tolerance)
+    ]
+    raw_keys = [_translation_key(vector, tolerance) for vector in raw_cosets]
+    if len(raw_keys) != len(set(raw_keys)):
+        result["status"] = "failed"
+        result["reason"] = "duplicate_centering_cosets"
+        return result
+    if _translation_key(np.zeros(3), tolerance) not in raw_keys:
+        result["status"] = "failed"
+        result["reason"] = "identity_centering_coset_missing"
+        return result
+    if len(raw_cosets) != expected_index:
+        result["status"] = "failed"
+        result["reason"] = (
+            "centering_coset_count_mismatch: "
+            f"Hall centering {centering_type} requires {expected_index}, "
+            f"database operations provide {len(raw_cosets)}"
+        )
+        return result
+
+    coset_keys = set(raw_keys)
+    for left in raw_cosets:
+        for right in raw_cosets:
+            if _translation_key(left + right, tolerance) not in coset_keys:
+                result["status"] = "failed"
+                result["reason"] = "centering_cosets_not_closed"
+                return result
+
+    result.update({
+        "status": "passed",
+        "centering_type": centering_type,
+        "primitive_conventional_index": expected_index,
+        "centering_cosets": [
+            (vector - np.floor(vector + tolerance)).tolist()
+            for vector in raw_cosets
+        ],
+        "standard_setting_operation_count": len(rotations),
+        "standard_operation_closure_validated": (
+            _affine_operation_set_is_closed(rotations, translations, tolerance)
+        ),
+        "source": "spglib.get_symmetry_from_database",
+    })
+    if result["standard_operation_closure_validated"] is not True:
+        result["status"] = "failed"
+        result["reason"] = "standard_hall_operation_set_not_closed"
+    return result
+
+
+def _table_operations_match_hall(
+    table: object,
+    hall_number: int,
+    *,
+    tolerance: float = 1e-8,
+) -> bool:
+    operations = getattr(table, "operations", None)
+    if not isinstance(operations, (list, tuple)) or not operations:
+        return False
+    evidence = _centering_cosets_from_hall_database(
+        hall_number, tolerance=tolerance,
+    )
+    if evidence.get("status") != "passed":
+        return False
+    try:
+        import spglib
+        symmetry = spglib.get_symmetry_from_database(hall_number)
+    except Exception:
+        symmetry = None
+    if symmetry is None:
+        return False
+    standard_keys = [
+        _affine_operation_key(rotation, translation, tolerance)
+        for rotation, translation in zip(
+            symmetry["rotations"], symmetry["translations"],
+        )
+    ]
+    cosets = evidence.get("centering_cosets")
+    if not isinstance(cosets, list):
+        return False
+    expanded_keys = []
+    for operation in operations:
+        rotation = getattr(operation, "rotation_frac", None)
+        translation = getattr(operation, "translation_frac", None)
+        if rotation is None or translation is None:
+            return False
+        for coset in cosets:
+            expanded_keys.append(_affine_operation_key(
+                rotation,
+                np.asarray(translation, dtype=float) + np.asarray(coset, dtype=float),
+                tolerance,
+            ))
+    return (
+        len(expanded_keys) == len(standard_keys)
+        and len(set(expanded_keys)) == len(expanded_keys)
+        and set(expanded_keys) == set(standard_keys)
+    )
+
+
+def derive_irreptables_standard_setting_identity(
+    table: object,
+    sg_number: object,
+) -> dict[str, object]:
+    """Identify the irreptables Hall setting from independent source data.
+
+    Every Hall setting for the same international SG number is enumerated.
+    Candidates are retained only when the irreptables source centering and
+    source affine operation set agree.  No candidate ordering is used as a
+    fallback.
+    """
+    result: dict[str, object] = {
+        "status": "unresolved",
+        "source": "irreptables.StandardIrrepTable+spglib.HallDatabase",
+        "candidate_hall_numbers": [],
+        "affine_matching_hall_numbers": [],
+    }
+    if not isinstance(sg_number, int) or isinstance(sg_number, bool) \
+            or sg_number <= 0:
+        result["reason"] = "space_group_number_missing_or_malformed"
+        return result
+    operations = getattr(table, "operations", None)
+    has_source_operations = (
+        isinstance(operations, (list, tuple)) and bool(operations)
+    )
+    table_number = getattr(table, "number", None)
+    if has_source_operations \
+            and isinstance(table_number, int) and not isinstance(table_number, bool) \
+            and table_number != sg_number:
+        result["status"] = "no_match"
+        result["reason"] = "irreptables_space_group_number_mismatch"
+        return result
+    try:
+        import spglib
+    except Exception:
+        result["reason"] = "spglib_unavailable"
+        return result
+
+    candidates: list[tuple[int, object]] = []
+    for hall_number in range(1, 531):
+        sg_type = spglib.get_spacegroup_type(hall_number)
+        if sg_type is not None and int(sg_type.number) == sg_number:
+            candidates.append((hall_number, sg_type))
+    result["candidate_hall_numbers"] = [number for number, _ in candidates]
+    if not candidates:
+        result["status"] = "no_match"
+        result["reason"] = "no_spglib_hall_setting_for_space_group"
+        return result
+
+    if not has_source_operations:
+        if len(candidates) == 1:
+            matching = candidates
+        else:
+            result["status"] = "ambiguous"
+            result["affine_matching_hall_numbers"] = [
+                number for number, _ in candidates
+            ]
+            result["reason"] = "irreptables_affine_operations_unavailable"
+            return result
+    else:
+        source_centering = _hall_centering_symbol(
+            str(getattr(table, "name", "") or "")
+        )
+        matching = []
+        for hall_number, sg_type in candidates:
+            hall_centering = _hall_centering_symbol(str(sg_type.hall_symbol))
+            if source_centering in _CENTERING_INDICES \
+                    and hall_centering != source_centering:
+                continue
+            if _table_operations_match_hall(table, hall_number):
+                matching.append((hall_number, sg_type))
+
+    result["affine_matching_hall_numbers"] = [
+        number for number, _ in matching
+    ]
+    if len(matching) == 0:
+        result["status"] = "no_match"
+        result["reason"] = "irreptables_affine_operations_match_no_hall_setting"
+        return result
+    if len(matching) > 1:
+        result["status"] = "ambiguous"
+        result["reason"] = "irreptables_affine_operations_match_multiple_hall_settings"
+        return result
+
+    hall_number, sg_type = matching[0]
+    coset_evidence = _centering_cosets_from_hall_database(hall_number)
+    if coset_evidence.get("status") != "passed":
+        result["status"] = "no_match"
+        result["reason"] = str(coset_evidence.get("reason", "centering_unresolved"))
+        return result
+    result.update({
+        "status": "unique_match",
+        "hall_number": hall_number,
+        "hall_symbol": str(sg_type.hall_symbol),
+        "centering_type": str(coset_evidence["centering_type"]),
+        "primitive_conventional_index": int(
+            coset_evidence["primitive_conventional_index"]
+        ),
+        "space_group_number": int(sg_type.number),
+        "space_group_symbol": str(getattr(table, "name", "") or sg_type.international_short),
+        "centering_cosets": [
+            list(vector) for vector in coset_evidence["centering_cosets"]
+        ],
+        "standard_setting_operation_count": int(
+            coset_evidence["standard_setting_operation_count"]
+        ),
+        "standard_operation_closure_validated": bool(
+            coset_evidence["standard_operation_closure_validated"]
+        ),
+    })
+    return result
 
 
 def _centering_cosets(hall_symbol: str) -> list[np.ndarray] | None:

@@ -294,7 +294,7 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
 
     record = load_database_ingestion_record_from_directory(run_dir)
 
-    assert record["schema_version"] == "1.3.0"
+    assert record["schema_version"] == "1.4.0"
     assert record["record_status"] == "has_ready_ebr_bundles"
     assert record["ready_bundle_count"] == 2
     assert len(record["valley_irrep_records"]) == 8
@@ -538,12 +538,12 @@ def test_database_index_excluded_ebr_records_have_source_record():
     assert er["source_record"] == "/tmp/rec.json"
 
 
-def test_ingestion_record_schema_version_is_1_3_0():
-    """Ingestion record schema_version is now 1.3.0."""
+def test_ingestion_record_schema_version_is_1_4_0():
+    """Ingestion record schema_version is now 1.4.0."""
     from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
     summary = {"target_kpoints": [], "iband": [], "input": {}}
     record = build_database_ingestion_record(valley_summary=summary)
-    assert record["schema_version"] == "1.3.0"
+    assert record["schema_version"] == "1.4.0"
 
 
 # -----------------------------------------------------------------------
@@ -609,6 +609,54 @@ def test_irrep_records_preserve_generic_fields():
     assert cert["validation_status"] == "validated"
     assert cert["subspace_sg_number"] == 143
     assert cert["resolved_hsp_label"] == "GM"
+
+
+def test_ingestion_preserves_centered_certificate_identity_from_bundle():
+    from valleyscope.analysis.database_ingestion_record import (
+        build_database_ingestion_record,
+    )
+
+    centered_map = [{
+        "parent_operation_id": -3,
+        "centering_coset_index": 0,
+        "standard_operation_index": 0,
+    }, {
+        "parent_operation_id": -3,
+        "centering_coset_index": 1,
+        "standard_operation_index": 1,
+    }]
+    certificate_identity = {
+        "sg_number": 5,
+        "hall_number": 9,
+        "centering_type": "C",
+        "centered_affine_operation_map": centered_map,
+        "affine_unmatched_centered_operation_pairs": [],
+    }
+    bundle = {
+        "bundles": [{
+            "bundle_id": "b_centered",
+            "source_instance_id": "i_centered",
+            "subspace_group_candidate": "C2",
+            "ready_for_external_solver": True,
+            "certificate_identity": certificate_identity,
+            "irrep_records_by_kpoint": {
+                "GM": [{
+                    "valley": "K_valley",
+                    "operation_id": -3,
+                    "matched_irrep": "GM1",
+                }],
+            },
+        }],
+    }
+    record = build_database_ingestion_record(
+        valley_summary={"target_kpoints": ["GM"], "iband": [1], "input": {}},
+        valley_ebr_export_bundle=bundle,
+    )
+
+    assert record["schema_version"] == "1.4.0"
+    assert record["valley_irrep_records"][0]["certificate_identity"] == (
+        certificate_identity
+    )
 
 
 def test_legacy_records_still_ingest_without_generic_fields():

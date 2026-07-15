@@ -282,6 +282,17 @@ class _SettingIdentity:
         "affine_required_operation_ids",
         "affine_required_op_count",
         "operation_closure_validated",
+        "canonical_setting_status",
+        "canonical_setting_source",
+        "canonical_hall_numbers",
+        "canonical_candidate_hall_numbers",
+        "centering_coset_count",
+        "primitive_conventional_index",
+        "expanded_parent_operation_count",
+        "matched_expanded_operations",
+        "centered_affine_operation_map",
+        "affine_unmatched_centered_pairs",
+        "standard_operation_closure_validated",
     )
 
     def __init__(
@@ -312,6 +323,17 @@ class _SettingIdentity:
         affine_required_operation_ids: tuple[int, ...] | None = None,
         affine_required_op_count: int | None = None,
         operation_closure_validated: bool | None = None,
+        canonical_setting_status: str = "not_evaluated",
+        canonical_setting_source: str = "",
+        canonical_hall_numbers: tuple[int, ...] | None = None,
+        canonical_candidate_hall_numbers: tuple[int, ...] | None = None,
+        centering_coset_count: int | None = None,
+        primitive_conventional_index: int | None = None,
+        expanded_parent_operation_count: int | None = None,
+        matched_expanded_operations: int | None = None,
+        centered_affine_operation_map: tuple[tuple[int, int, int], ...] | None = None,
+        affine_unmatched_centered_pairs: tuple[tuple[int, int], ...] | None = None,
+        standard_operation_closure_validated: bool | None = None,
     ):
         self.sg_number = sg_number
         self.sg_symbol = sg_symbol
@@ -337,6 +359,18 @@ class _SettingIdentity:
         self.affine_required_operation_ids = affine_required_operation_ids
         self.affine_required_op_count = affine_required_op_count
         self.operation_closure_validated = operation_closure_validated
+        self.canonical_setting_status = canonical_setting_status
+        self.canonical_setting_source = canonical_setting_source
+        self.canonical_hall_numbers = canonical_hall_numbers
+        self.canonical_candidate_hall_numbers = canonical_candidate_hall_numbers
+        self.centering_coset_count = centering_coset_count
+        self.primitive_conventional_index = primitive_conventional_index
+        self.expanded_parent_operation_count = expanded_parent_operation_count
+        self.matched_expanded_operations = matched_expanded_operations
+        self.centered_affine_operation_map = centered_affine_operation_map
+        self.affine_unmatched_centered_pairs = affine_unmatched_centered_pairs
+        self.standard_operation_closure_validated = \
+            standard_operation_closure_validated
         self._hash = hash((
             sg_number, sg_symbol,
             hall_number, hall_symbol,
@@ -358,6 +392,17 @@ class _SettingIdentity:
             affine_required_operation_ids,
             affine_required_op_count,
             operation_closure_validated,
+            canonical_setting_status,
+            canonical_setting_source,
+            canonical_hall_numbers,
+            canonical_candidate_hall_numbers,
+            centering_coset_count,
+            primitive_conventional_index,
+            expanded_parent_operation_count,
+            matched_expanded_operations,
+            centered_affine_operation_map,
+            affine_unmatched_centered_pairs,
+            standard_operation_closure_validated,
         ))
 
     def __hash__(self) -> int:
@@ -391,6 +436,17 @@ class _SettingIdentity:
             and self.affine_required_operation_ids == other.affine_required_operation_ids
             and self.affine_required_op_count == other.affine_required_op_count
             and self.operation_closure_validated == other.operation_closure_validated
+            and self.canonical_setting_status == other.canonical_setting_status
+            and self.canonical_setting_source == other.canonical_setting_source
+            and self.canonical_hall_numbers == other.canonical_hall_numbers
+            and self.canonical_candidate_hall_numbers == other.canonical_candidate_hall_numbers
+            and self.centering_coset_count == other.centering_coset_count
+            and self.primitive_conventional_index == other.primitive_conventional_index
+            and self.expanded_parent_operation_count == other.expanded_parent_operation_count
+            and self.matched_expanded_operations == other.matched_expanded_operations
+            and self.centered_affine_operation_map == other.centered_affine_operation_map
+            and self.affine_unmatched_centered_pairs == other.affine_unmatched_centered_pairs
+            and self.standard_operation_closure_validated == other.standard_operation_closure_validated
         )
 
 
@@ -541,6 +597,60 @@ def _normalize_unmatched_parent_operations(
     return tuple(sorted(operation_ids))
 
 
+def _normalize_centered_affine_operation_map(
+    value: object,
+) -> tuple[tuple[int, int, int], ...] | None:
+    if not isinstance(value, list):
+        return None
+    normalized: list[tuple[int, int, int]] = []
+    for row in value:
+        if not isinstance(row, dict) or set(row) != {
+            "parent_operation_id",
+            "centering_coset_index",
+            "standard_operation_index",
+        }:
+            return None
+        fields = (
+            row["parent_operation_id"],
+            row["centering_coset_index"],
+            row["standard_operation_index"],
+        )
+        if any(
+            not isinstance(item, int) or isinstance(item, bool)
+            for item in fields
+        ):
+            return None
+        normalized.append(fields)
+    if len(normalized) != len(set(normalized)):
+        return None
+    return tuple(sorted(normalized))
+
+
+def _normalize_unmatched_centered_pairs(
+    value: object,
+) -> tuple[tuple[int, int], ...] | None:
+    if not isinstance(value, list):
+        return None
+    normalized: list[tuple[int, int]] = []
+    for row in value:
+        if not isinstance(row, dict) or set(row) != {
+            "parent_operation_id", "centering_coset_index",
+        }:
+            return None
+        fields = (
+            row["parent_operation_id"], row["centering_coset_index"],
+        )
+        if any(
+            not isinstance(item, int) or isinstance(item, bool)
+            for item in fields
+        ):
+            return None
+        normalized.append(fields)
+    if len(normalized) != len(set(normalized)):
+        return None
+    return tuple(sorted(normalized))
+
+
 def _certificate_fingerprint(candidate: dict[str, object]) -> _SettingIdentity:
     """Extract a normalized setting identity from one candidate."""
     prov = candidate.get("irrep_source_provenance")
@@ -617,6 +727,10 @@ def _certificate_fingerprint(candidate: dict[str, object]) -> _SettingIdentity:
 
     closure = cert.get("operation_closure_validated")
     operation_closure_validated = closure if isinstance(closure, bool) else None
+    standard_closure = cert.get("standard_operation_closure_validated")
+    standard_operation_closure_validated = (
+        standard_closure if isinstance(standard_closure, bool) else None
+    )
 
     std_op_count = _opt_int(cert.get("standard_setting_operation_count"))
     req_op_count = _opt_int(cert.get("required_operation_id_count"))
@@ -633,6 +747,39 @@ def _certificate_fingerprint(candidate: dict[str, object]) -> _SettingIdentity:
     affine_required_operation_ids = _normalize_strict_int_list(
         cert.get("parent_basis_operation_ids", _SENTINEL_MISSING),
         unique=True,
+    )
+    canonical_setting_status = (
+        str(cert.get("canonical_setting_status"))
+        if isinstance(cert.get("canonical_setting_status"), str)
+        else "not_evaluated"
+    )
+    canonical_setting_source = (
+        str(cert.get("canonical_setting_source"))
+        if isinstance(cert.get("canonical_setting_source"), str)
+        else ""
+    )
+    canonical_hall_numbers = _normalize_strict_int_list(
+        cert.get("canonical_hall_numbers", _SENTINEL_MISSING), unique=True,
+    )
+    canonical_candidate_hall_numbers = _normalize_strict_int_list(
+        cert.get("canonical_candidate_hall_numbers", _SENTINEL_MISSING),
+        unique=True,
+    )
+    centering_coset_count = _opt_int(cert.get("centering_coset_count"))
+    primitive_conventional_index = _opt_int(
+        cert.get("primitive_conventional_index")
+    )
+    expanded_parent_operation_count = _opt_int(
+        cert.get("expanded_parent_operation_count")
+    )
+    matched_expanded_operations = _opt_int(
+        cert.get("matched_expanded_operations")
+    )
+    centered_affine_operation_map = _normalize_centered_affine_operation_map(
+        cert.get("centered_affine_operation_map", _SENTINEL_MISSING)
+    )
+    affine_unmatched_centered_pairs = _normalize_unmatched_centered_pairs(
+        cert.get("unmatched_centered_operation_pairs", _SENTINEL_MISSING)
     )
 
     transform_key = _normalize_transform(
@@ -670,6 +817,19 @@ def _certificate_fingerprint(candidate: dict[str, object]) -> _SettingIdentity:
         affine_required_operation_ids=affine_required_operation_ids,
         affine_required_op_count=req_op_count,
         operation_closure_validated=operation_closure_validated,
+        canonical_setting_status=canonical_setting_status,
+        canonical_setting_source=canonical_setting_source,
+        canonical_hall_numbers=canonical_hall_numbers,
+        canonical_candidate_hall_numbers=canonical_candidate_hall_numbers,
+        centering_coset_count=centering_coset_count,
+        primitive_conventional_index=primitive_conventional_index,
+        expanded_parent_operation_count=expanded_parent_operation_count,
+        matched_expanded_operations=matched_expanded_operations,
+        centered_affine_operation_map=centered_affine_operation_map,
+        affine_unmatched_centered_pairs=affine_unmatched_centered_pairs,
+        standard_operation_closure_validated=(
+            standard_operation_closure_validated
+        ),
     )
 
 
@@ -745,6 +905,50 @@ def _certificate_identity(
             if fp0.affine_unused_std is not None else None
         )
         result["operation_closure_validated"] = fp0.operation_closure_validated
+        result["canonical_setting_status"] = fp0.canonical_setting_status
+        result["canonical_setting_source"] = fp0.canonical_setting_source
+        result["canonical_hall_numbers"] = (
+            list(fp0.canonical_hall_numbers)
+            if fp0.canonical_hall_numbers is not None else None
+        )
+        result["canonical_candidate_hall_numbers"] = (
+            list(fp0.canonical_candidate_hall_numbers)
+            if fp0.canonical_candidate_hall_numbers is not None else None
+        )
+        result["centering_coset_count"] = fp0.centering_coset_count
+        result["primitive_conventional_index"] = (
+            fp0.primitive_conventional_index
+        )
+        result["expanded_parent_operation_count"] = (
+            fp0.expanded_parent_operation_count
+        )
+        result["matched_expanded_operations"] = fp0.matched_expanded_operations
+        result["centered_affine_operation_map"] = (
+            [
+                {
+                    "parent_operation_id": parent_id,
+                    "centering_coset_index": coset_index,
+                    "standard_operation_index": standard_index,
+                }
+                for parent_id, coset_index, standard_index
+                in fp0.centered_affine_operation_map
+            ]
+            if fp0.centered_affine_operation_map is not None else None
+        )
+        result["affine_unmatched_centered_operation_pairs"] = (
+            [
+                {
+                    "parent_operation_id": parent_id,
+                    "centering_coset_index": coset_index,
+                }
+                for parent_id, coset_index
+                in fp0.affine_unmatched_centered_pairs
+            ]
+            if fp0.affine_unmatched_centered_pairs is not None else None
+        )
+        result["standard_operation_closure_validated"] = (
+            fp0.standard_operation_closure_validated
+        )
         if fp0.transform_key is not None:
             result["normalized_direct_transform"] = list(
                 list(row) for row in fp0.transform_key

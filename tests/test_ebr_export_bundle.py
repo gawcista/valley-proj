@@ -200,7 +200,7 @@ def test_schema_fields():
             "excluded_instances", "interpretation"}
     assert keys <= set(r)
     assert r["reduced_ebr_decomposition_status"] == "not_implemented"
-    assert r["schema_version"] == "1.1.0"
+    assert r["schema_version"] == "1.2.0"
     b = r["bundles"][0]
     for k in ["bundle_id", "source_instance_id", "valley",
               "irreps_by_kpoint", "operations_by_kpoint",
@@ -211,7 +211,7 @@ def test_schema_fields():
     assert "certificate_identity" in b
 
 
-def test_schema_1_1_preserves_required_operation_ids_in_certificate_identity():
+def test_schema_1_2_preserves_required_operation_ids_in_certificate_identity():
     instance = dict(_VALIDATED_BASIS_INSTANCE["instances"][0])
     certificate_identity = dict(instance["certificate_identity"])
     certificate_identity["affine_required_operation_ids"] = [-3, 4]
@@ -221,9 +221,52 @@ def test_schema_1_1_preserves_required_operation_ids_in_certificate_identity():
         ebr_problem_instances={"instances": [instance]},
     )
 
-    assert report["schema_version"] == "1.1.0"
+    assert report["schema_version"] == "1.2.0"
     exported_identity = report["bundles"][0]["certificate_identity"]
     assert exported_identity["affine_required_operation_ids"] == [-3, 4]
+
+
+def test_schema_1_2_preserves_centered_expansion_identity_without_loss():
+    instance = dict(_VALIDATED_BASIS_INSTANCE["instances"][0])
+    certificate_identity = dict(instance["certificate_identity"])
+    centered_map = [
+        {
+            "parent_operation_id": -3,
+            "centering_coset_index": 0,
+            "standard_operation_index": 0,
+        },
+        {
+            "parent_operation_id": -3,
+            "centering_coset_index": 1,
+            "standard_operation_index": 1,
+        },
+        {
+            "parent_operation_id": 4,
+            "centering_coset_index": 0,
+            "standard_operation_index": 2,
+        },
+        {
+            "parent_operation_id": 4,
+            "centering_coset_index": 1,
+            "standard_operation_index": 3,
+        },
+    ]
+    certificate_identity.update({
+        "centering_coset_count": 2,
+        "primitive_conventional_index": 2,
+        "expanded_parent_operation_count": 4,
+        "matched_expanded_operations": 4,
+        "centered_affine_operation_map": centered_map,
+        "affine_unmatched_centered_operation_pairs": [],
+    })
+    instance["certificate_identity"] = certificate_identity
+
+    report = build_ebr_export_bundle(
+        ebr_problem_instances={"instances": [instance]},
+    )
+
+    assert report["schema_version"] == "1.2.0"
+    assert report["bundles"][0]["certificate_identity"] == certificate_identity
 
 
 def test_no_forbidden_terms():

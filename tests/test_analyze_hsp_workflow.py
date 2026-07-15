@@ -933,14 +933,14 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
                     "reference_valley": "K_valley",
                     "orbit": ["K_valley"],
                     "hsp_preserving_operation_ids": [0, 4],
-                    "subspace_space_group": {
-                        "valley_preserving_operation_ids": [0, 4],
-                        "candidate_space_group_symbol": "P4",
-                    },
-                    "subspace_group": {
-                        "subspace_group_candidate": "P4",
+                        "subspace_space_group": {
+                            "valley_preserving_operation_ids": [0, 4],
+                            "candidate_space_group_symbol": "P2",
+                        },
+                        "subspace_group": {
+                            "subspace_group_candidate": "P2",
+                        },
                         "operation_orders": {"0": 1, "4": 2},
-                    },
                     "valley_preserving_character_diagnostics": {
                         "per_valley": {
                             "K_valley": [
@@ -969,7 +969,7 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     }
     matching_table = {
         "schema_version": "1.0.0",
-        "subspace_group_candidate": "P3",
+        "subspace_group_candidate": "P2",
         "expected_hsps": ["GammaM"],
         "irreps": ["GammaM:A", "GammaM:B"],
         "ebrs": [
@@ -999,7 +999,8 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
             "valley_preserving_subgroup_report": {
                 "per_valley_standard_matches": {
                     "K_valley": {"standard_group_match": {
-                        "international_short": "P3", "number": 143,
+                        "international_short": "P2", "number": 3,
+                        "hall_number": 4, "hall_symbol": "P 2",
                         "operation_ids": [0, 4],
                     }, "standard_group_match_status": "unique_match"},
                 },
@@ -1027,14 +1028,15 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
         "build_irrep_workflow_decisions",
         _capturing_build_irrep_workflow_decisions,
     )
+    from valleyscope.irreps.tables import (
+        load_standard_irrep_table as real_load_standard_irrep_table,
+    )
     monkeypatch.setattr(
         workflow_mod,
         "load_standard_irrep_table",
-        lambda spacegroup_number, *, spinor: type(
-            "ToyTable",
-            (),
-            {"match_kpoint_label": lambda self, k_frac: "GM"},
-        )(),
+        lambda spacegroup_number, *, spinor: real_load_standard_irrep_table(
+            spacegroup_number, spinor=spinor,
+        ),
     )
     monkeypatch.setattr(
         workflow_mod,
@@ -1067,18 +1069,18 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
                 "degeneracy_tol_meV": 1.0,
                 "generic_irrep_source": {
                     "enabled": True,
-                    "spacegroup_number": 143,
+                    "spacegroup_number": 3,
                     "spinor": False,
                     "source_hsp_labels": {"GammaM": {"K_valley": "GM"}},
                 },
                 "standard_setting": {
                     "parent_to_standard_direct_transform": [
                         [1.0, 0.0, 0.0],
-                        [0.0, 1.0, 0.0],
                         [0.0, 0.0, 1.0],
+                        [0.0, 1.0, 0.0],
                     ],
                     "origin_shift_fractional": [0.0, 0.0, 0.0],
-                    "transform_provenance": "unit-test identity standard setting",
+                    "transform_provenance": "unit-test axis-permutation standard setting",
                 },
                 "reduced_ebr": {
                     "enabled": True,
@@ -1140,7 +1142,7 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     assert isinstance(vpr, dict) and vpr
     rep_recs = vpr.get("representation_records", [])
     assert len(rep_recs) == 1
-    assert rep_recs[0]["subspace_space_group"]["candidate_space_group_symbol"] == "P3"
+    assert rep_recs[0]["subspace_space_group"]["candidate_space_group_symbol"] == "P2"
     assert rep_recs[0]["irrep_matching"]["matching_strategy"] == "bilbao_restricted_character"
     # Public summary must not emit deprecated Cn-like provenance.
     raw_summary = json.dumps(summary)
@@ -1151,7 +1153,7 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     assert summary["valley_ebr_problem_instances"]["instance_count"] == 1
     inst = summary["valley_ebr_problem_instances"]["instances"][0]
     assert inst["ready_for_reduced_table_validation"] is True; assert inst["ready_for_ebr_decomposition"] is False
-    assert inst["subspace_group_candidate"] == "P3"
+    assert inst["subspace_group_candidate"] == "P2"
     assert inst["expected_hsps"] == ["GammaM"]
     assert summary["valley_ebr_export_bundle"]["bundle_count"] == 1
     b = summary["valley_ebr_export_bundle"]["bundles"][0]

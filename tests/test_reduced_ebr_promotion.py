@@ -1,11 +1,11 @@
 """Primitive affine standard-setting certificate — fail-closed promotion.
 
-Positive primitive evidence is produced by the REAL resolver fed a real
+Positive primitive and centered evidence is produced by the REAL resolver fed a real
 ``StandardIrrepTable`` and a complete spglib detected-operation set, so the
 generic affine ``{R | tau}`` equivalence gate actually runs.  Nothing is
 mutated after the resolver returns.  Negative tests flip exactly one affine
 field of the resolver-produced identity (isolated validator-unit tests).  The
-centered case is an isolated validator contract only (Phase E).
+centered case exercises the same resolver-to-solver trust chain.
 """
 
 import copy
@@ -61,6 +61,56 @@ def _centered_identity(**over):
     }
     cert.update(over)
     return cert
+
+
+def _real_centered_certificate_dict():
+    """Resolver-produced SG 79 I4 centered certificate with opaque IDs."""
+    table = load_standard_irrep_table(79, spinor=False)
+    transform = np.array([[-0.5, 0.5, 0.5],
+                          [0.5, -0.5, 0.5],
+                          [0.5, 0.5, -0.5]])
+    transform_inv = np.linalg.inv(transform)
+    operation_ids = [-7, 0, 4, 11]
+    detected = []
+    for operation_id, operation in zip(operation_ids, table.operations):
+        parent_rotation = transform_inv @ operation.rotation_frac @ transform
+        detected.append({
+            "operation_id": operation_id,
+            "rotation_frac": np.rint(parent_rotation).astype(int).tolist(),
+            "translation_frac": (
+                transform_inv @ operation.translation_frac
+            ).tolist(),
+        })
+    label, blocker, provenance = resolve_standard_setting_hsp_label(
+        k_frac=np.zeros(3), table=table,
+        standard_match={
+            "number": 79, "international_short": "I4",
+            "hall_number": 353, "hall_symbol": "I 4",
+            "operation_ids": operation_ids,
+        },
+        detected_operations=detected,
+        parent_to_standard_direct_transform=transform,
+        origin_shift_fractional=np.zeros(3),
+        transform_provenance="reviewed_test_primitive_to_conventional",
+    )
+    assert label == "GM"
+    assert blocker is None
+    return provenance["standard_setting_certificate"]
+
+
+def _real_centered_identity():
+    candidate = {
+        "subspace_space_group": {
+            "candidate_space_group_number": 79,
+            "candidate_space_group_symbol": "I4",
+        },
+        "irrep_source_provenance": {
+            "standard_setting_hsp_mapping": {
+                "standard_setting_certificate": _real_centered_certificate_dict(),
+            },
+        },
+    }
+    return _certificate_identity([candidate])
 
 
 def _identity(**over):
@@ -341,11 +391,128 @@ def test_real_affine_primitive_spinful_promotes():
     assert r["promoted"] is True
 
 
-def test_isolated_centered_validator_contract_passes():
+def test_legacy_centered_validator_contract_without_expansion_map_fails_closed():
     r = _promote(_bundle(sg_number=79, symbol="I4", cert=_centered_identity()),
                  _table(sg_number=79, symbol="I4"))
+    assert r["promoted"] is False
+    assert "centered_affine_evidence_invalid" in _codes(r)
+
+
+def test_real_centered_resolver_identity_promotes():
+    cert = _real_centered_identity()
+    r = _promote(
+        _bundle(sg_number=79, symbol="I4", cert=cert),
+        _table(sg_number=79, symbol="I4"),
+    )
     assert r["promoted"] is True
     assert r["validation_report"]["affine_setting_check"] == "passed"
+    assert r["validation_report"]["hall_setting_check"] == "passed"
+
+
+def test_real_centered_certificate_survives_full_chain_and_solves_exactly():
+    raw_certificate = _real_centered_certificate_dict()
+
+    def _provenance():
+        return {
+            "standard_setting_hsp_mapping": {
+                "standard_setting_certificate": copy.deepcopy(raw_certificate),
+            },
+            "source_table_spinor": False,
+        }
+
+    subspace_group = {
+        "candidate_space_group_number": 79,
+        "candidate_space_group_symbol": "I4",
+        "status": "resolved",
+    }
+    rows = [("GammaM", "A", 2), ("KM", "A", 1), ("KM", "B", 1)]
+    candidates = [{
+        "ready_for_ebr_input": True,
+        "valley": "K_valley",
+        "kpoint": kpoint,
+        "matched_irrep": irrep,
+        "irrep_multiplicity": multiplicity,
+        "operation_id": operation_id,
+        "subspace_group_candidate": "I4",
+        "subspace_space_group": dict(subspace_group),
+        "irrep_source_provenance": _provenance(),
+    } for operation_id, (kpoint, irrep, multiplicity) in enumerate(rows)]
+
+    instances = build_ebr_problem_instances(
+        ebr_input_candidates={"candidates": candidates},
+    )
+    export = build_ebr_export_bundle(ebr_problem_instances=instances)
+    exported_identity = export["bundles"][0]["certificate_identity"]
+    expected_identity = _real_centered_identity()
+    assert exported_identity["centered_affine_operation_map"] == (
+        expected_identity["centered_affine_operation_map"]
+    )
+    assert exported_identity["affine_required_operation_ids"] == [-7, 0, 4, 11]
+
+    result = build_reduced_ebr_mapping(
+        ebr_export_bundle=export,
+        table=_table(sg_number=79, symbol="I4"),
+    )
+    assert result["status"] == "solved_exact"
+    solution_identity = result["solutions"][0]["certificate_identity"]
+    assert solution_identity["centered_affine_operation_map"] == (
+        expected_identity["centered_affine_operation_map"]
+    )
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("centered_affine_operation_map", []),
+        ("centered_affine_operation_map", [{
+            "parent_operation_id": -7,
+            "centering_coset_index": 0,
+            "standard_operation_index": 0,
+        }]),
+        ("affine_unmatched_centered_operation_pairs", None),
+        ("centering_coset_count", 1),
+        ("primitive_conventional_index", 1),
+        ("expanded_parent_operation_count", 7),
+        ("matched_expanded_operations", 7),
+        ("standard_operation_closure_validated", False),
+    ],
+)
+def test_malformed_or_incomplete_centered_affine_evidence_blocks(field, value):
+    cert = _real_centered_identity()
+    cert[field] = value
+    r = _promote(
+        _bundle(sg_number=79, symbol="I4", cert=cert),
+        _table(sg_number=79, symbol="I4"),
+    )
+    assert r["promoted"] is False
+    assert "centered_affine_evidence_invalid" in _codes(r)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["missing_coset", "duplicate_coset", "wrong_coset", "reused_standard"],
+)
+def test_nonbijective_centered_affine_evidence_blocks(mutation):
+    cert = _real_centered_identity()
+    if mutation == "missing_coset":
+        cert["normalized_centering_vectors"] = [[0.0, 0.0, 0.0]]
+    elif mutation == "duplicate_coset":
+        cert["normalized_centering_vectors"] = [
+            [0.0, 0.0, 0.0], [0.0, 0.0, 0.0],
+        ]
+    elif mutation == "wrong_coset":
+        cert["normalized_centering_vectors"] = [
+            [0.0, 0.0, 0.0], [0.5, 0.0, 0.0],
+        ]
+    else:
+        cert["centered_affine_operation_map"][1]["standard_operation_index"] = 0
+
+    result = _promote(
+        _bundle(sg_number=79, symbol="I4", cert=cert),
+        _table(sg_number=79, symbol="I4"),
+    )
+    assert result["promoted"] is False
+    assert "centered_affine_evidence_invalid" in _codes(result)
 
 
 def test_full_chain_real_certificate_to_solved():
@@ -505,11 +672,12 @@ def test_sg_143_with_hall_1_rejected():
     assert {"hall_sg_inconsistent", "setting_identity_mismatch"} & _codes(r)
 
 
-def test_table_setting_unresolved_blocks():
+def test_centered_table_setting_is_independently_resolved_before_cert_conflict():
     r = _promote(_bundle(sg_number=5, symbol="C2"),
                  _table(sg_number=5, symbol="C2"))
     assert r["promoted"] is False
-    assert "table_standard_setting_unresolved" in _codes(r)
+    assert r["validation_report"]["table_setting_check"] == "passed"
+    assert "certificate_sg_conflict" in _codes(r)
 
 
 @pytest.mark.parametrize("mutate,code", [

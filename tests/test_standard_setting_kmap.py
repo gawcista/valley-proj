@@ -1056,10 +1056,14 @@ def test_centering_affine_validation_with_explicit_cosets_passes_toy():
         },
         parent_to_standard_direct_transform=T_id,
     )
-    # Centering cosets allow comparison modulo C-centered lattice.
+    # One primitive operation expands to two conventional operations, but Hall
+    # 9 contains four: the incomplete primitive group is rejected first.
     assert result["status"] == "failed"
     assert result["centering_cosets_count"] == 2
-    assert result["matched_affine_operations"] == 1
+    assert any(
+        item.startswith("parent_standard_group_order_mismatch")
+        for item in result["missing_ingredients"]
+    )
 
 
 def test_centering_cosets_c_type():
@@ -1168,8 +1172,10 @@ def test_centered_with_explicit_transform_fails_with_bad_affine_translation():
     cert = prov["standard_setting_certificate"]
     assert cert["validation_status"] == "rejected"
     assert cert["translation_validation_status"] == "failed"
-    assert cert["matched_affine_operations"] == 0
-    assert cert["mismatched_translation_count"] == 4
+    assert any(
+        item.startswith("parent_standard_group_order_mismatch")
+        for item in cert["missing_affine_ingredients"]
+    )
     tc = prov.get("transform_candidate", {})
     assert tc["validation_status"] == "rejected"
     assert tc["affine_validation_status"] == "failed"
@@ -1564,8 +1570,8 @@ def test_malformed_required_operation_id_collection_is_unknown(required_ids):
 
 @pytest.mark.parametrize(
     "malformed_id",
-    [0.5, "0", False, np.float64(0.0)],
-    ids=["float", "string", "boolean", "numpy_float"],
+    [0.5, "0", False, np.float64(0.0), np.int64(0)],
+    ids=["float", "string", "boolean", "numpy_float", "numpy_int"],
 )
 def test_malformed_detected_operation_id_cannot_impersonate_required_integer(
     malformed_id,
@@ -1627,8 +1633,8 @@ def test_malformed_nonselected_id_is_harmless_when_required_integer_is_present(
 
 @pytest.mark.parametrize(
     "malformed_required_ids",
-    [[0.5], ["0"], [False], [np.float64(0.0)]],
-    ids=["float", "string", "boolean", "numpy_float"],
+    [[0.5], ["0"], [False], [np.float64(0.0)], [np.int64(0)]],
+    ids=["float", "string", "boolean", "numpy_float", "numpy_int"],
 )
 def test_resolver_rejects_malformed_standard_match_operation_ids(
     malformed_required_ids,
@@ -1673,3 +1679,202 @@ def test_signed_opaque_operation_id_preserved_by_affine_bijection():
     assert result["status"] == "passed"
     assert result["required_operation_ids"] == [-3]
     assert result["operation_map"] == {"-3": 0}
+
+
+# ---------------------------------------------------------------------------
+# Generic centered primitive -> conventional trust chain
+# ---------------------------------------------------------------------------
+
+_CENTERED_TRANSFORMS = {
+    "C": np.array([[0.5, -0.5, 0.0],
+                   [0.5, 0.5, 0.0],
+                   [0.0, 0.0, 1.0]]),
+    "I": np.array([[-0.5, 0.5, 0.5],
+                   [0.5, -0.5, 0.5],
+                   [0.5, 0.5, -0.5]]),
+    "F": np.array([[0.0, 0.5, 0.5],
+                   [0.5, 0.0, 0.5],
+                   [0.5, 0.5, 0.0]]),
+    "R": np.array([[2.0 / 3.0, -1.0 / 3.0, -1.0 / 3.0],
+                   [1.0 / 3.0, 1.0 / 3.0, -2.0 / 3.0],
+                   [1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0]]),
+}
+
+
+def _primitive_parent_ops_from_irreptables(sg_number, transform, operation_ids):
+    from valleyscope.irreps.tables import load_standard_irrep_table
+
+    table = load_standard_irrep_table(sg_number, spinor=False)
+    transform_inv = np.linalg.inv(transform)
+    assert len(table.operations) == len(operation_ids)
+    operations = []
+    for operation_id, operation in zip(operation_ids, table.operations):
+        parent_rotation = transform_inv @ operation.rotation_frac @ transform
+        parent_translation = transform_inv @ operation.translation_frac
+        assert np.allclose(parent_rotation, np.rint(parent_rotation))
+        operations.append({
+            "operation_id": operation_id,
+            "rotation_frac": np.rint(parent_rotation).astype(int).tolist(),
+            "translation_frac": parent_translation.tolist(),
+        })
+    return table, operations
+
+
+@pytest.mark.parametrize(
+    "sg_number,hall_number,hall_symbol,centering,operation_ids,index",
+    [
+        (5, 9, "C 2y", "C", [-3, 4], 2),
+        (79, 353, "I 4", "I", [-7, 0, 4, 11], 2),
+        (22, 122, "F 2 2", "F", [-5, 0, 4, 19], 4),
+        (166, 458, '-R 3 2"', "R", [-11, -3, 0, 4, 8, 12, 17, 23, 31, 40, 52, 71], 3),
+    ],
+)
+def test_generic_centered_expansion_produces_complete_affine_certificate(
+    sg_number, hall_number, hall_symbol, centering, operation_ids, index,
+):
+    table, detected = _primitive_parent_ops_from_irreptables(
+        sg_number, _CENTERED_TRANSFORMS[centering], operation_ids,
+    )
+    label, blocker, provenance = resolve_standard_setting_hsp_label(
+        k_frac=np.zeros(3),
+        table=table,
+        standard_match={
+            "number": sg_number,
+            "international_short": table.name,
+            "hall_number": hall_number,
+            "hall_symbol": hall_symbol,
+            "operation_ids": operation_ids,
+        },
+        detected_operations=detected,
+        parent_to_standard_direct_transform=_CENTERED_TRANSFORMS[centering],
+        origin_shift_fractional=np.zeros(3),
+        transform_provenance="reviewed_test_primitive_to_conventional",
+    )
+
+    assert label == "GM"
+    assert blocker is None
+    cert = provenance["standard_setting_certificate"]
+    assert cert["validation_status"] == "validated"
+    assert cert["canonical_setting_status"] == "unique_match"
+    assert cert["canonical_hall_numbers"] == [hall_number]
+    assert cert["primitive_conventional_index"] == index
+    assert cert["centering_coset_count"] == index
+    assert cert["parent_basis_operation_ids"] == operation_ids
+    assert cert["expanded_parent_operation_count"] == len(operation_ids) * index
+    assert cert["matched_expanded_operations"] == len(operation_ids) * index
+    assert cert["standard_setting_operation_count"] == len(operation_ids) * index
+    assert cert["unmatched_centered_operation_pairs"] == []
+    assert cert["unused_standard_operation_indices"] == []
+    assert len(cert["centered_affine_operation_map"]) == len(operation_ids) * index
+    assert {
+        row["parent_operation_id"] for row in cert["centered_affine_operation_map"]
+    } == set(operation_ids)
+
+
+def test_same_sg_multiple_hall_settings_are_selected_from_source_affine_evidence():
+    from valleyscope.analysis.standard_setting_kmap import (
+        derive_irreptables_standard_setting_identity,
+    )
+    from valleyscope.irreps.tables import load_standard_irrep_table
+
+    identity = derive_irreptables_standard_setting_identity(
+        load_standard_irrep_table(5, spinor=False), 5,
+    )
+
+    assert identity["status"] == "unique_match"
+    assert identity["candidate_hall_numbers"] == list(range(9, 18))
+    assert identity["affine_matching_hall_numbers"] == [9]
+    assert identity["hall_number"] == 9
+    assert identity["hall_symbol"] == "C 2y"
+
+
+def test_same_sg_multiple_hall_without_source_centering_is_ambiguous():
+    from dataclasses import replace
+    from valleyscope.analysis.standard_setting_kmap import (
+        derive_irreptables_standard_setting_identity,
+    )
+    from valleyscope.irreps.tables import load_standard_irrep_table
+
+    table = replace(load_standard_irrep_table(5, spinor=False), name="")
+    identity = derive_irreptables_standard_setting_identity(table, 5)
+
+    assert identity["status"] == "ambiguous"
+    assert identity["affine_matching_hall_numbers"] == [9, 10, 11]
+    assert "hall_number" not in identity
+
+
+def test_same_sg_multiple_hall_with_no_affine_match_is_unresolved():
+    from dataclasses import replace
+    from valleyscope.analysis.standard_setting_kmap import (
+        derive_irreptables_standard_setting_identity,
+    )
+    from valleyscope.irreps.tables import load_standard_irrep_table
+
+    table = load_standard_irrep_table(5, spinor=False)
+    bad_operation = replace(
+        table.operations[1], translation_frac=np.array([0.123, 0.0, 0.0]),
+    )
+    identity = derive_irreptables_standard_setting_identity(
+        replace(table, operations=(table.operations[0], bad_operation)), 5,
+    )
+
+    assert identity["status"] == "no_match"
+    assert identity["affine_matching_hall_numbers"] == []
+    assert "hall_number" not in identity
+
+
+def test_centered_affine_rejects_wrong_transform_index():
+    _, detected = _primitive_parent_ops_from_irreptables(
+        5, _CENTERED_TRANSFORMS["C"], [-3, 4],
+    )
+    from valleyscope.analysis.standard_setting_kmap import (
+        _validate_affine_operation_equivalence,
+    )
+    result = _validate_affine_operation_equivalence(
+        vp_operations=detected,
+        vp_operation_ids=[-3, 4],
+        standard_match={
+            "number": 5, "international_short": "C2",
+            "hall_number": 9, "hall_symbol": "C 2y",
+            "operation_ids": [-3, 4],
+        },
+        parent_to_standard_direct_transform=np.eye(3),
+        origin_shift_fractional=np.zeros(3),
+    )
+
+    assert result["status"] == "failed"
+    assert "primitive_conventional_transform_index" in result["missing_ingredients"]
+
+
+def test_centered_affine_requires_explicit_origin_evidence():
+    table, detected = _primitive_parent_ops_from_irreptables(
+        79, _CENTERED_TRANSFORMS["I"], [-7, 0, 4, 11],
+    )
+    label, blocker, provenance = resolve_standard_setting_hsp_label(
+        k_frac=np.zeros(3), table=table,
+        standard_match={
+            "number": 79, "international_short": "I4",
+            "hall_number": 353, "hall_symbol": "I 4",
+            "operation_ids": [-7, 0, 4, 11],
+        },
+        detected_operations=detected,
+        parent_to_standard_direct_transform=_CENTERED_TRANSFORMS["I"],
+    )
+
+    assert label is None
+    assert blocker is not None
+    cert = provenance["standard_setting_certificate"]
+    assert cert["validation_status"] != "validated"
+    assert "origin_shift_fractional" in cert["missing_affine_ingredients"]
+
+
+def test_centering_cosets_are_derived_from_hall_operations_for_r_setting():
+    from valleyscope.analysis.standard_setting_kmap import (
+        _centering_cosets_from_hall_database,
+    )
+
+    evidence = _centering_cosets_from_hall_database(458)
+    assert evidence["status"] == "passed"
+    assert evidence["centering_type"] == "R"
+    assert evidence["primitive_conventional_index"] == 3
+    assert len(evidence["centering_cosets"]) == 3

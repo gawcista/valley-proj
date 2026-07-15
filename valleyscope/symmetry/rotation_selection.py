@@ -48,11 +48,6 @@ def resolve_rotation_order(
         return None
     if lowered != "auto":
         raise ValueError("requested rotation order must be an integer, 'auto', or None")
-    symbol = _normalize_spacegroup_symbol(international)
-    if symbol.startswith(("P321", "P312")):
-        return 3
-    if symbol.startswith("P422"):
-        return 4
     available = set(candidate_orders)
     for order in (6, 4, 3, 2):
         if order in available:
@@ -93,10 +88,6 @@ def _validate_order(value: int) -> int:
     if value not in SUPPORTED_ROTATION_ORDERS:
         raise ValueError("rotation_order currently supports only 2, 3, 4, or 6")
     return value
-
-
-def _normalize_spacegroup_symbol(symbol: str) -> str:
-    return "".join(str(symbol).upper().replace("_", " ").replace("-", " ").split())
 
 
 def _cyclic_subgroup_key(rotation: np.ndarray, order: int) -> tuple[tuple[int, ...], ...]:

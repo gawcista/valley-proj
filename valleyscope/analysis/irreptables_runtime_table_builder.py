@@ -489,6 +489,12 @@ def build_auto_canonical_reduced_ebr_table(
 
     # --- 1. Load StandardIrrepTable; validate canonical bundle labels ---
     irrep_table = load_standard_irrep_table(subspace_sg_number, spinor=spinor)
+    from valleyscope.analysis.standard_setting_kmap import (
+        derive_irreptables_standard_setting_identity,
+    )
+    canonical_setting_identity = derive_irreptables_standard_setting_identity(
+        irrep_table, subspace_sg_number,
+    )
     label_to_bilbao_kp: dict[str, str] = {}
     for irrep in irrep_table.irreps:
         label_to_bilbao_kp[irrep.label] = irrep.kpoint_label
@@ -647,6 +653,7 @@ def build_auto_canonical_reduced_ebr_table(
         "auto_canonical": True,
         "bilbao_to_valleyscope_hsp": dict(bilbao_to_valleyscope),
         "sampled_bilbao_hsps": sorted(sampled_bilbao_hsps),
+        "standard_setting_identity": dict(canonical_setting_identity),
     }
     if dropped_source_rows:
         provenance["dropped_source_rows"] = dropped_source_rows
