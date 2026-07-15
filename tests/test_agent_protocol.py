@@ -9,7 +9,7 @@ from scripts.check_agent_protocol import (
 def test_handoff_requires_commit_tests_and_remote_branch_statement():
     good = """
 Branch: cc/example
-Commit: 2af8f26 Fix example
+Commit: 705a7a2 Fix example
 Remote feature branch: No
 pytest -q tests/test_io_and_workflow.py
 # 68 passed in 2.35s
@@ -24,7 +24,7 @@ Do not merge to `main`; leave the branch ready for Codex review.
 
     bad = """
 Branch: cc/example
-Commit: 2af8f26 Fix example
+Commit: 705a7a2 Fix example
 pytest -q
 """
 
@@ -75,7 +75,7 @@ def test_completed_handoff_rejects_not_yet_wired():
     """A handoff marked COMPLETED must not claim a required path is not yet wired."""
     text = """
 Branch: cc/example
-Commit: 2af8f26 Fix example
+Commit: 705a7a2 Fix example
 Remote feature branch: No
 pytest -q
 # 100 passed in 1.00s
@@ -92,7 +92,7 @@ Remaining Risks:
 def test_completed_without_not_yet_wired_is_clean():
     text = """
 Branch: cc/example
-Commit: 2af8f26 Fix example
+Commit: 705a7a2 Fix example
 Remote feature branch: No
 pytest -q
 # 100 passed in 1.00s
@@ -108,7 +108,7 @@ Remaining Risks:
 def test_placeholder_output_is_rejected():
     text = """
 Branch: cc/example
-Commit: 2af8f26 Fix example
+Commit: 705a7a2 Fix example
 Remote feature branch: No
 pytest -q tests/test_example.py
 # [targeted counts]

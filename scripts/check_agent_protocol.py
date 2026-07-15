@@ -12,7 +12,7 @@ _HASH_LINE_RE = re.compile(
     r"^(?:Commit|Reviewed HEAD)\s*:\s*(?:`)?([0-9a-f]{7,40})(?:`)?",
     re.IGNORECASE | re.MULTILINE,
 )
-_PLACEHOLDER_RE = re.compile(r"\[targeted counts\]|\[exact output\]|<placeholder")
+_PLACEHOLDER_RE = re.compile(r"#\s*\[targeted counts\]|#\s*\[exact output\]|#\s*<placeholder")
 
 
 def _head_hash() -> str:
