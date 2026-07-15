@@ -25,6 +25,7 @@ from valleyscope.analysis.ebr_problem_instances import (
 )
 from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
 from valleyscope.irreps.tables import load_standard_irrep_table
+
 from tests.reduced_ebr_promo_helpers import (
     real_primitive_certificate_identity,
     real_primitive_certificate_dict,
@@ -423,4 +424,190 @@ def test_attach_real_certificate_contract_fixture_solves():
     assert export is not None
     assert "setting_identity" not in table["provenance"]
     r = build_reduced_ebr_mapping(ebr_export_bundle=export, table=table)
+    assert r["status"] == "solved_exact"
+
+
+# ---------------------------------------------------------------------------
+# E1: P321 parent ops with P3 subgroup → validated
+# ---------------------------------------------------------------------------
+
+def test_p321_parent_p3_subgroup_passes():
+    """Full generic P321 parent operations with selected P3 subgroup validate."""
+    import spglib
+    sym = spglib.get_symmetry_from_database(439)  # P321
+    ops = [{"operation_id": i, "rotation_frac": np.asarray(r, float).tolist(),
+            "translation_frac": np.asarray(t, float).tolist()}
+           for i, (r, t) in enumerate(zip(sym["rotations"], sym["translations"]))]
+    # P321 parent ops with P3 subgroup IDs [0,1,2]: use P3 Hall 430
+    # for the selected subgroup standard match.
+    table = load_standard_irrep_table(143, spinor=False)
+    _, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.0, 0.0, 0.0]),
+        table=table,
+        standard_match={"number": 143, "international_short": "P3",
+                        "hall_number": 430, "hall_symbol": "P 3",
+                        "operation_ids": [0, 1, 2]},
+        detected_operations=ops,
+        parent_to_standard_direct_transform=np.eye(3),
+    )
+    assert blocker is None
+    cert = prov["standard_setting_certificate"]
+    assert cert["validation_status"] == "validated"
+
+
+# ---------------------------------------------------------------------------
+# E2: Extra non-required parent operations do not block subgroup validation
+# ---------------------------------------------------------------------------
+
+def test_extra_non_required_ops_do_not_block():
+    """Extra parent operations outside the required ID set are silently filtered."""
+    ident = {"operation_id": 0, "rotation_frac": np.eye(3).tolist(),
+             "translation_frac": [0., 0., 0.]}
+    extra = {"operation_id": 99, "rotation_frac": [[1, 0, 0], [0, -1, 0], [0, 0, -1]],
+             "translation_frac": [0.3, 0.3, 0.0]}
+    ops = [ident, extra]
+    _, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.0, 0.0, 0.0]),
+        table=load_standard_irrep_table(1, spinor=False),
+        standard_match={"number": 1, "international_short": "P1",
+                        "hall_number": 1, "hall_symbol": "P 1",
+                        "operation_ids": [0]},
+        detected_operations=ops,
+    )
+    assert blocker is None
+    assert prov["standard_setting_certificate"]["validation_status"] == "validated"
+
+
+# ---------------------------------------------------------------------------
+# E3-4: Closure failure blocks at resolver level (not only promotion)
+# ---------------------------------------------------------------------------
+
+def test_closure_failure_blocks_resolver_hsp_label():
+    """A non-closed parent operation set must not return a trusted HSP label."""
+    ops = [
+        {"operation_id": 0, "rotation_frac": np.eye(3).tolist(),
+         "translation_frac": [0., 0., 0.]},
+        {"operation_id": 1, "rotation_frac": [[0, -1, 0], [1, -1, 0], [0, 0, 1]],
+         "translation_frac": [0., 0., 0.]},
+        # Missing inverse of op 1 (op 2) → not closed.
+    ]
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.0, 0.0, 0.0]),
+        table=load_standard_irrep_table(143, spinor=False),
+        standard_match={"number": 143, "international_short": "P3",
+                        "hall_number": 430, "hall_symbol": "P 3",
+                        "operation_ids": [0, 1]},
+        detected_operations=ops,
+    )
+    assert label is None
+    assert blocker is not None
+    assert ("affine_group_not_closed" in str(prov) or "parent_standard_group_order_mismatch" in str(prov))
+
+
+# ---------------------------------------------------------------------------
+# E5-6: Map-integrity negatives for promotion
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("name,patch,expected_code", [
+    ("short_map", {"affine_operation_map": {"0": 0}},
+     "primitive_affine_evidence_invalid"),
+    ("duplicate_targets", {"affine_operation_map": {"0": 0, "1": 0, "2": 0}},
+     "primitive_affine_evidence_invalid"),
+    ("missing_key", {"affine_operation_map": {"0": 0, "1": 1}},
+     "primitive_affine_evidence_invalid"),
+    ("extra_key", {"affine_operation_map": {"0": 0, "1": 1, "2": 2, "3": 0}},
+     "primitive_affine_evidence_invalid"),
+    ("out_of_range_target", {"affine_operation_map": {"0": 0, "1": 1, "2": 99}},
+     "primitive_affine_evidence_invalid"),
+    ("non_integer_target", {"affine_operation_map": {"0": 0, "1": 1, "2": "0"}},
+     "primitive_affine_evidence_invalid"),
+    ("nonempty_unmatched",
+     {"affine_operation_map": {"0": 0, "1": 1, "2": 2},
+      "affine_unmatched_parent_operations": ["anything"]},
+     "primitive_affine_evidence_invalid"),
+    ("nonempty_unused",
+     {"affine_operation_map": {"0": 0, "1": 1, "2": 2},
+      "affine_unused_standard_operation_indices": [4]},
+     "primitive_affine_evidence_invalid"),
+    ("absent_unmatched",
+     {"affine_operation_map": {"0": 0, "1": 1, "2": 2},
+      "affine_unmatched_parent_operations": None},
+     "primitive_affine_evidence_invalid"),
+    ("absent_unused",
+     {"affine_operation_map": {"0": 0, "1": 1, "2": 2},
+      "affine_unused_standard_operation_indices": None},
+     "primitive_affine_evidence_invalid"),
+])
+def test_map_integrity_blocks_promotion(name, patch, expected_code):
+    base = real_primitive_certificate_identity(143, "P3")
+    cert = copy.deepcopy(base)
+    for key, val in patch.items():
+        if isinstance(val, dict):
+            cert[key] = dict(val)
+        else:
+            cert[key] = val
+    out = _promote(_bundle(cert=cert), _table())
+    assert out["promoted"] is False, name
+    assert expected_code in _codes(out)
+
+
+# ---------------------------------------------------------------------------
+# E7: Real P3 and P4 identity promotes with exact map keys/values
+# ---------------------------------------------------------------------------
+
+def test_real_p3_identity_has_exact_map():
+    ci = real_primitive_certificate_identity(143, "P3")
+    assert ci is not None
+    assert ci["affine_operation_map"] == {"0": 0, "1": 1, "2": 2}
+    assert ci["affine_unmatched_parent_operations"] == []
+    assert ci["affine_unused_standard_operation_indices"] == []
+    out = _promote(_bundle(cert=ci), _table())
+    assert out["promoted"] is True
+
+
+def test_real_p4_identity_promotes():
+    ci = real_primitive_certificate_identity(75, "P4", spinor=True)
+    assert ci is not None
+    assert len(ci["affine_operation_map"]) == 4  # P4 has 4 ops
+    out = _promote(_bundle(sg_number=75, symbol="P4", spinful=True, cert=ci),
+                   _table(sg_number=75, symbol="P4", spinful=True))
+    assert out["promoted"] is True
+
+
+# ---------------------------------------------------------------------------
+# E8: Certificate-injection test accurately labelled (lower-level plumbing)
+# ---------------------------------------------------------------------------
+
+def test_injected_certificate_to_solve_is_plumbing_not_production():
+    """A certificate built by the real resolver, injected at candidate level,
+    reaches solved_exact.  This is a lower-level plumbing integration test,
+    not a full production workflow test (the real workflow currently
+    produces an unresolved certificate; Phase E)."""
+    from valleyscope.analysis.ebr_problem_instances import (
+        build_ebr_problem_instances,
+    )
+    from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
+    cert = real_primitive_certificate_dict(143, "P3")
+    assert cert is not None
+
+    def _prov():
+        return {"standard_setting_hsp_mapping": {
+                    "standard_setting_certificate": dict(cert)},
+                "source_table_spinor": False}
+
+    ssg = {"candidate_space_group_number": 143,
+           "candidate_space_group_symbol": "P3", "status": "resolved"}
+    rows = [("GammaM", "A", 2), ("KM", "A", 1), ("KM", "B", 1)]
+    candidates = [{
+        "ready_for_ebr_input": True, "valley": "K_valley",
+        "kpoint": kp, "matched_irrep": irr, "irrep_multiplicity": mult,
+        "operation_id": i, "subspace_group_candidate": "P3",
+        "subspace_space_group": dict(ssg),
+        "irrep_source_provenance": _prov(),
+    } for i, (kp, irr, mult) in enumerate(rows)]
+
+    instances = build_ebr_problem_instances(
+        ebr_input_candidates={"candidates": candidates})
+    export = build_ebr_export_bundle(ebr_problem_instances=instances)
+    r = build_reduced_ebr_mapping(ebr_export_bundle=export, table=_table())
     assert r["status"] == "solved_exact"

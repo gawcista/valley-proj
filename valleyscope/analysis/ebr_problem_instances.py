@@ -658,6 +658,14 @@ def _certificate_identity(
             if fp0.affine_operation_map is not None else None
         )
         result["affine_required_op_count"] = fp0.affine_required_op_count
+        result["affine_unmatched_parent_operations"] = (
+            list(fp0.affine_unmatched_parents)
+            if fp0.affine_unmatched_parents is not None else None
+        )
+        result["affine_unused_standard_operation_indices"] = (
+            list(fp0.affine_unused_std)
+            if fp0.affine_unused_std is not None else None
+        )
         result["operation_closure_validated"] = fp0.operation_closure_validated
         if fp0.transform_key is not None:
             result["normalized_direct_transform"] = list(

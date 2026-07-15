@@ -8,6 +8,21 @@ from pathlib import Path
 
 
 COMMIT_RE = re.compile(r"\b[0-9a-f]{7,40}\b")
+_HASH_LINE_RE = re.compile(
+    r"^(?:Commit|Reviewed HEAD)\s*:\s*(?:`)?([0-9a-f]{7,40})(?:`)?",
+    re.IGNORECASE | re.MULTILINE,
+)
+_PLACEHOLDER_RE = re.compile(r"\[targeted counts\]|\[exact output\]|<placeholder")
+
+
+def _head_hash() -> str:
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "--short=7", "HEAD"],
+            check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        ).stdout.strip()
+    except Exception:
+        return ""
 
 
 def check_handoff_text(text: str) -> list[str]:
@@ -16,6 +31,19 @@ def check_handoff_text(text: str) -> list[str]:
 
     if not COMMIT_RE.search(text):
         errors.append("handoff must include a commit hash")
+    head = _head_hash()
+    if head:
+        hash_lines = _HASH_LINE_RE.findall(text)
+        if hash_lines and head not in hash_lines:
+            errors.append(
+                f"handoff hash(es) {hash_lines} do not match current HEAD "
+                f"({head}); the handoff is stale or referencing a wrong commit"
+            )
+    if _PLACEHOLDER_RE.search(text):
+        errors.append(
+            "handoff contains placeholder test output "
+            "(e.g. [targeted counts]); all test outputs must be literal"
+        )
     if "remote feature branch: no" not in lower:
         errors.append("handoff must state 'remote feature branch: No'")
     if "pytest -q" not in text:

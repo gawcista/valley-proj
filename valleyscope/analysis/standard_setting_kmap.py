@@ -334,11 +334,14 @@ def _validate_affine_operation_equivalence(
     result["required_operation_id_count"] = len(required_set)
 
     # Index by ID, checking for duplicates and malformed entries.
+    # Operations outside the required valley-preserving subset are silently
+    # excluded (valley-changing parent operations are expected and must not
+    # block the selected subgroup validation).
     by_id: dict[int, dict[str, object]] = {}
     duplicate_ids: list[int] = []
-    unexpected_ids: list[object] = []
     missing_required: list[int] = []
     malformed: list[dict[str, object]] = []
+    excluded_extra: list[int] = []
     for op in vp_operations:
         if not isinstance(op, dict):
             continue
@@ -357,7 +360,7 @@ def _validate_affine_operation_equivalence(
                               "reason": "missing_rotation_or_translation"})
             continue
         if oid not in required_set:
-            unexpected_ids.append(oid)
+            excluded_extra.append(oid)
             continue
         if oid in by_id:
             duplicate_ids.append(oid)
@@ -368,14 +371,12 @@ def _validate_affine_operation_equivalence(
         if rid not in by_id:
             missing_required.append(rid)
 
+    if excluded_extra:
+        result["excluded_parent_operation_ids"] = excluded_extra
     if duplicate_ids:
         result["status"] = "failed"
         result["missing_ingredients"].append("duplicate_detected_operation_id")
         result["duplicate_detected_operation_ids"] = duplicate_ids
-    if unexpected_ids:
-        result["status"] = "failed"
-        result["missing_ingredients"].append("unexpected_operation_ids")
-        result["unexpected_operation_ids"] = unexpected_ids
     if malformed:
         result["missing_ingredients"].append("malformed_detected_operations")
         result["malformed_detected_operations"] = malformed
@@ -484,9 +485,8 @@ def _validate_affine_operation_equivalence(
     centering_vectors = _centering_cosets(hall_symbol) or [np.array([0.0, 0.0, 0.0])]
 
     # ---- D. Build one-to-one parent-to-standard bijection ----
-    # For each parent op, record which standard op(s) it could match.
-    candidates: list[list[int]] = []
-    unmatched_parents: list[dict[str, object]] = []
+    # ID-keyed candidate graph:  parent_operation_id -> list[std_indices].
+    candidate_graph: dict[int, list[int]] = {}
     for op in ops_with_translations:
         r_p = np.asarray(op["rotation_frac"], dtype=float)
         t_p = np.asarray(op["translation_frac"], dtype=float)
@@ -501,77 +501,90 @@ def _validate_affine_operation_equivalence(
             if not np.allclose(r_transformed, r_s, atol=tolerance):
                 continue
             t_diff = t_transformed - t_s
-            match_count = 0
             for cv in centering_vectors:
                 d = t_diff - cv
                 d_mod = d - np.rint(d)
                 if np.linalg.norm(d_mod) <= tolerance:
                     matched_indices.append(j)
-                    match_count += 1
                     break  # one centering vector match suffices
-        if matched_indices:
-            candidates.append(matched_indices)
-        else:
-            unmatched_parents.append({
-                "operation_id": op.get("operation_id"),
-                "parent_translation_frac": t_p.tolist(),
-                "transformed_translation": t_transformed.tolist(),
-            })
-
-    # Find a perfect bijection (each parent → unique std op) by greedy
-    # assignment over the deterministic sorted required-ID order.
-    used_std: list[int] = []
-    used = [False] * std_op_count
-    op_map: dict[int, int] = {}  # parent operation_id -> std index
-    ambiguous = False
-    for op, cand_list in zip(ops_with_translations, candidates):
-        free = [j for j in cand_list if not used[j]]
-        if len(free) == 0:
-            unmatched_parents.append({
-                "operation_id": op.get("operation_id"),
-                "parent_translation_frac": op.get("translation_frac"),
-                "reason": "all_standard_operations_already_used",
-            })
-            continue
-        if len(free) > 1:
-            ambiguous = True
-        # Take the first free standard operation (deterministic order).
-        j = free[0]
-        used[j] = True
-        used_std.append(j)
         oid = op.get("operation_id")
-        if oid is not None:
-            op_map[int(oid)] = j
+        if oid is not None and matched_indices:
+            candidate_graph[int(oid)] = matched_indices
 
-    unmatched_count = len(unmatched_parents)
-    unused_std = sorted(set(range(std_op_count)) - set(used_std))
+    # Deterministic augmenting-path bipartite matching (Hopcroft-Karp style,
+    # single-path DFS for simplicity).  Required IDs are processed in sorted
+    # order for deterministic output.
+    parent_match: dict[int, int] = {}   # parent_id -> std_index
+    std_match: dict[int, int] = {}       # std_index -> parent_id
+    parent_candidates = list(by_id.keys())
+    parent_candidates.sort()
+
+    # Build adjacency for augmenting-path.
+    adj: dict[int, list[int]] = {
+        pid: list(candidate_graph.get(pid, [])) for pid in parent_candidates
+    }
+
+    def _dfs_augment(u: int, visited: set[int]) -> bool:
+        for v in adj.get(u, []):
+            if v in visited:
+                continue
+            visited.add(v)
+            if v not in std_match or _dfs_augment(std_match[v], visited):
+                parent_match[u] = v
+                std_match[v] = u
+                return True
+        return False
+
+    # Match in sorted parent order for deterministic result.
+    for pid in parent_candidates:
+        _dfs_augment(pid, set())
+
+    # Build result maps from the matching.
+    op_map = dict(parent_match)
+    unmatched_parents: list[dict[str, object]] = []
+    for pid in parent_candidates:
+        if pid not in parent_match:
+            op_data = by_id.get(pid, {})
+            unmatched_parents.append({
+                "operation_id": pid,
+                "parent_translation_frac":
+                    op_data.get("translation_frac"),
+            })
+
+    unused_std = sorted(
+        set(range(std_op_count)) - set(std_match.keys())
+    )
     result["operation_map"] = {str(k): int(v) for k, v in op_map.items()}
     if unmatched_parents:
         result["unmatched_parent_operations"] = unmatched_parents
     if unused_std:
         result["unused_standard_operation_indices"] = unused_std
 
-    result["matched_affine_operations"] = len(used_std)
+    result["matched_affine_operations"] = len(op_map)
     result["total_parent_operations"] = parent_op_count
 
     # ---- E. Determine status ----
-    if unmatched_parents:
-        result["mismatched_translation_count"] = unmatched_count
-        result["mismatched_translations"] = unmatched_parents[:3]
+    if unmatched_parents or unused_std:
+        result["mismatched_translation_count"] = max(
+            len(unmatched_parents), len(unused_std),
+        )
+        if unmatched_parents:
+            result["mismatched_translations"] = unmatched_parents[:3]
         if result["status"] not in ("failed",):
             result["status"] = "failed"
-    elif ambiguous:
-        # Ambiguous mapping (multiple possible bijections): unresolved for
-        # automated primitive-path (human review would be needed).
-        result["mismatched_translation_count"] = 0
-        result["status"] = "unresolved"
-        result["missing_ingredients"].append("ambiguous_affine_operation_map")
     else:
         result["mismatched_translation_count"] = 0
-        result["status"] = "passed"
+        if result["status"] not in ("failed",):
+            result["status"] = "passed"
 
-    # ---- F. Affine group closure of the complete detected parent set ----
+    # ---- F. Affine group closure of the selected subgroup ----
+    # Closure failure must override a prior passed status so a trusted HSP
+    # label is never emitted on a non-closed set.
     _validate_affine_group_closure(by_id, result)
+    if result.get("operation_closure_validated") is not True:
+        if result["status"] == "passed":
+            result["status"] = "failed"
+            result["missing_ingredients"].append("affine_group_not_closed")
 
     return result
 
@@ -684,7 +697,7 @@ def _apply_affine_validation_to_certificate(
         "missing_ingredients", []
     )
     cert.mismatched_translation_count = affine_result.get(
-        "mismatched_translation_count", 0
+        "mismatched_translation_count"
     )
     cert.mismatched_translations = affine_result.get(
         "mismatched_translations", []

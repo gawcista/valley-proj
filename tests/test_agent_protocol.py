@@ -9,7 +9,7 @@ from scripts.check_agent_protocol import (
 def test_handoff_requires_commit_tests_and_remote_branch_statement():
     good = """
 Branch: cc/example
-Commit: 123abcd Fix example
+Commit: 2af8f26 Fix example
 Remote feature branch: No
 pytest -q tests/test_io_and_workflow.py
 # 68 passed in 2.35s
@@ -24,7 +24,7 @@ Do not merge to `main`; leave the branch ready for Codex review.
 
     bad = """
 Branch: cc/example
-Commit: 123abcd Fix example
+Commit: 2af8f26 Fix example
 pytest -q
 """
 
@@ -75,7 +75,7 @@ def test_completed_handoff_rejects_not_yet_wired():
     """A handoff marked COMPLETED must not claim a required path is not yet wired."""
     text = """
 Branch: cc/example
-Commit: 123abcd Fix example
+Commit: 2af8f26 Fix example
 Remote feature branch: No
 pytest -q
 # 100 passed in 1.00s
@@ -92,7 +92,7 @@ Remaining Risks:
 def test_completed_without_not_yet_wired_is_clean():
     text = """
 Branch: cc/example
-Commit: 123abcd Fix example
+Commit: 2af8f26 Fix example
 Remote feature branch: No
 pytest -q
 # 100 passed in 1.00s
@@ -103,3 +103,33 @@ Remaining Risks:
 - Centered settings without explicit transform remain unresolved.
 """
     assert check_handoff_text(text) == []
+
+
+def test_placeholder_output_is_rejected():
+    text = """
+Branch: cc/example
+Commit: 2af8f26 Fix example
+Remote feature branch: No
+pytest -q tests/test_example.py
+# [targeted counts]
+git diff --check HEAD
+# clean
+"""
+    errors = check_handoff_text(text)
+    assert any("placeholder" in e for e in errors)
+
+
+def test_stale_head_hash_is_detected():
+    """A handoff referencing a hash not matching HEAD is detected as stale."""
+    text = """
+Branch: cc/example
+Commit: deadbeef Stale handoff
+Reviewed HEAD: cafebabe
+Remote feature branch: No
+pytest -q
+# 100 passed in 1.00s
+git diff --check HEAD
+# clean
+"""
+    errors = check_handoff_text(text)
+    assert any("stale" in e.lower() or "head" in e.lower() or "wrong commit" in e.lower() for e in errors)

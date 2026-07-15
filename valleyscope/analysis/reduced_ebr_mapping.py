@@ -545,6 +545,50 @@ def _finite_nonsingular_3x3(m: object) -> bool:
     return abs(det) > 1e-9
 
 
+def _validate_operation_map_structure(op_map: dict, req_op_count,
+                                      std_op_count, cert_id,
+                                      reasons: list[str]):
+    """Independently verify the claimed bijection structure."""
+    if req_op_count is None or req_op_count <= 0:
+        reasons.append(f"affine_operation_map_untestable(req_op={req_op_count!r})")
+        return
+    if std_op_count is None or std_op_count <= 0:
+        reasons.append(f"affine_operation_map_untestable(std_op={std_op_count!r})")
+        return
+    r = int(req_op_count); s = int(std_op_count)
+    # Keys: must be nonnegative integer strings, count == required.
+    try:
+        keys = [int(k) for k in op_map]
+    except (ValueError, TypeError):
+        reasons.append("affine_operation_map_keys_non_integer")
+        return
+    if len(keys) != r:
+        reasons.append(f"affine_operation_map_cardinality({len(keys)}!={r})")
+        return
+    if sorted(keys) != list(range(r)):
+        reasons.append("affine_operation_map_keys_not_sorted_required")
+        return
+    # Values: unique, within range, non-bool integers.
+    values = list(op_map.values())
+    if len(set(values)) != len(values):
+        reasons.append("affine_operation_map_duplicate_targets")
+        return
+    for v in values:
+        if not isinstance(v, int) or isinstance(v, bool):
+            reasons.append(f"affine_operation_map_value_non_integer({v!r})")
+            return
+        if v < 0 or v >= s:
+            reasons.append(f"affine_operation_map_target_out_of_range({v},0..{s-1})")
+            return
+    # Audit collections: absent is unknown (block), explicit empty is required.
+    unmatched = cert_id.get("affine_unmatched_parent_operations")
+    if unmatched is None or (isinstance(unmatched, list) and unmatched):
+        reasons.append(f"affine_unmatched_parent_operations={unmatched!r}")
+    unused = cert_id.get("affine_unused_standard_operation_indices")
+    if unused is None or (isinstance(unused, list) and unused):
+        reasons.append(f"affine_unused_std_indices={unused!r}")
+
+
 def _validate_primitive_affine_setting(cert_id, validation_status, relation,
                                        blockers, report):
     """A primitive direct-coordinate match is trusted only with a complete
@@ -599,6 +643,10 @@ def _validate_primitive_affine_setting(cert_id, validation_status, relation,
         reasons.append(f"missing_ingredients={missing!r}")
     if not isinstance(op_map, dict) or not op_map:
         reasons.append("affine_operation_map_missing_or_empty")
+    else:
+        _validate_operation_map_structure(
+            op_map, r, s, cert_id, reasons)
+
     if closure is not True:
         reasons.append(f"operation_closure_validated={closure!r}")
 

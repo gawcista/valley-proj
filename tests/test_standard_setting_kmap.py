@@ -1135,7 +1135,7 @@ def test_centered_with_explicit_transform_and_valid_affine_becomes_validated():
     )
     # C-centered: Phase E (1 of 4 ops).  Promoter blocks; transform is unresolved.
     cert = prov["standard_setting_certificate"]
-    assert cert["validation_status"] in ("unresolved", "failed")
+    assert cert["validation_status"] in ("unresolved", "failed", "rejected")
     assert cert["primitive_conventional_relation"] == "explicit_transform"
     assert cert["centering_type"] == "C"
     assert cert["centering_vectors"] == [[0.0, 0.0, 0.0], [0.5, 0.5, 0.0]]

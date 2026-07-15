@@ -1128,10 +1128,12 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     # Standard summary uses compact valley_resolved_irreps, not raw matching.
     resolved = summary["valley_resolved_irreps"]
     assert resolved["status"] == "ok"
-    # Toy H5 does not supply the complete detected {R|tau} operations needed
-    # for the affine gate — the irrep matching is legitimately empty.
-    # Phase E: once real operations are wired, matched_count >= 1 recovers.
-    assert resolved["matched_count"] >= 0
+    # Toy H5 supplies real spglib P3 operations (via symmetry_payload);
+    # the matched count is determined by the affine gate.
+    assert resolved["matched_count"] >= 1
+    gm = resolved["rows"][0]
+    assert gm["matching_status"] == "matched"
+    assert gm["matching_strategy"] == "bilbao_restricted_character"
     assert "C2_like" not in json.dumps(resolved)
     # Public output contract: representation_records use physical subspace-space-group.
     vpr = summary.get("valley_projected_representations")
