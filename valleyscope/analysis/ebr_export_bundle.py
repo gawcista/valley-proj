@@ -15,7 +15,7 @@ State model (see ebr_problem_instances.py):
 from __future__ import annotations
 
 
-_SCHEMA_VERSION = "1.0.0"
+_SCHEMA_VERSION = "1.1.0"
 
 
 def build_ebr_export_bundle(

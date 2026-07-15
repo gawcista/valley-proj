@@ -505,6 +505,44 @@ def test_rotation_generator_filter_keeps_one_cyclic_generator():
     assert operations[1]["candidate_rejection_reason"] == "power_of_rotation_generator"
 
 
+@pytest.mark.parametrize(
+    "malformed_id",
+    [0.5, "0", False, np.float64(0.0)],
+    ids=["float", "string", "boolean", "numpy_float"],
+)
+def test_rotation_generator_rejects_malformed_operation_id(malformed_id):
+    operations = [{
+        "operation_id": malformed_id,
+        "rotation_frac": np.diag([-1, -1, 1]),
+        "order": 2,
+        "candidate_rotation": True,
+    }]
+
+    with pytest.raises(ValueError, match="operation_id"):
+        mark_rotation_generators(operations)
+
+
+def test_rotation_generator_rejects_malformed_power_operation_id():
+    c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]])
+    operations = [
+        {
+            "operation_id": 4,
+            "rotation_frac": c3,
+            "order": 3,
+            "candidate_rotation": True,
+        },
+        {
+            "operation_id": "5",
+            "rotation_frac": c3 @ c3,
+            "order": 3,
+            "candidate_rotation": True,
+        },
+    ]
+
+    with pytest.raises(ValueError, match="operation_id"):
+        mark_rotation_generators(operations)
+
+
 def test_nearest_root_of_unity_diagnostic():
     index, root, deviation = nearest_root_of_unity(1.001 * np.exp(2.0j * np.pi / 3.0), order=3)
 

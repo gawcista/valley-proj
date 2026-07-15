@@ -355,7 +355,7 @@ def test_write_analysis_outputs_plumbs_hsp_star_reports_to_summary(tmp_path):
     }
     ebr_export_bundle = {
         "status": "ready_for_external_solver",
-        "schema_version": "1.0.0",
+        "schema_version": "1.1.0",
         "bundle_count": 1,
         "excluded_count": 0,
         "reduced_ebr_decomposition_status": "not_implemented",

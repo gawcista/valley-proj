@@ -305,10 +305,12 @@ def _validate_affine_operation_equivalence(
     """Validate affine operation-group bijection.
 
     Builds a one-to-one parent-to-standard operation map under the basis
-    transform T, requiring that every required valley-preserving parent
-    operation maps to a distinct standard operation and every primitive
-    standard operation is used exactly once.  Then validates affine group
-    closure of the complete detected parent operation set.
+    transform T for the complete valley-preserving operation set that defines
+    the valley-projected subspace space group.  Every required operation must
+    map to a distinct standard operation and every primitive standard
+    operation must be used exactly once.  Closure is checked only on that
+    complete selected set, never on the full parent moire operation set or an
+    HSP-local ``G_k^(a)`` representation subset.
 
     Returns a status dict with ``status`` (``"passed"``, ``"failed"``, or
     ``"unresolved"``), bijection evidence (operation map, unmatched/unused
@@ -363,12 +365,8 @@ def _validate_affine_operation_equivalence(
     for op in vp_operations:
         if not isinstance(op, dict):
             continue
-        oid_raw = op.get("operation_id")
-        if oid_raw is None:
-            continue
-        try:
-            oid = int(oid_raw)
-        except (TypeError, ValueError):
+        oid = op.get("operation_id")
+        if not _is_exact_operation_id(oid):
             continue
         if oid not in required_set:
             excluded_extra.append(oid)
@@ -402,6 +400,10 @@ def _validate_affine_operation_equivalence(
         result["status"] = "failed"
         result["missing_ingredients"].append("missing_required_operation_ids")
         result["missing_required_operation_ids"] = missing_required
+
+    if result["status"] == "failed":
+        result["mismatched_translation_count"] = 0
+        return result
 
     # Derive the ordered list that bijection analysis consumes.
     ops_with_translations: list[dict[str, object]] = [
@@ -526,8 +528,8 @@ def _validate_affine_operation_equivalence(
                     matched_indices.append(j)
                     break  # one centering vector match suffices
         oid = op.get("operation_id")
-        if oid is not None and matched_indices:
-            candidate_graph[int(oid)] = matched_indices
+        if _is_exact_operation_id(oid) and matched_indices:
+            candidate_graph[oid] = matched_indices
 
     # Deterministic augmenting-path bipartite matching (Hopcroft-Karp style,
     # single-path DFS for simplicity).  Required IDs are processed in sorted
@@ -1454,11 +1456,19 @@ def resolve_standard_setting_hsp_label(
     return None, blocker, prov
 
 
-def _operation_ids_list(sm: dict[str, object]) -> list[int]:
-    v = sm.get("operation_ids", [])
-    if isinstance(v, (list, tuple)):
-        return [int(x) for x in v if isinstance(x, (int, float))]
-    return []
+def _is_exact_operation_id(value: object) -> bool:
+    """Return whether value is a trusted opaque Python integer ID."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _operation_ids_list(sm: dict[str, object]) -> list[int] | None:
+    """Return exact operation IDs, preserving malformed input as unknown."""
+    value = sm.get("operation_ids")
+    if not isinstance(value, list):
+        return None
+    if any(not _is_exact_operation_id(item) for item in value):
+        return None
+    return list(value)
 
 
 def _hall_centering_symbol(hall_symbol: str) -> str:
@@ -1621,21 +1631,20 @@ def _validate_explicit_transform(
 
     # Operation-basis verification (when VP ops available).
     if vp_operations is not None:
-        vp_ids = {
-            int(op_id)
-            for op_id in standard_match.get("operation_ids", [])
-            if isinstance(op_id, (int, float))
-        }
+        vp_id_list = _operation_ids_list(standard_match)
+        if vp_id_list is None:
+            result["status"] = "rejected"
+            result["rejection_reason"] = (
+                "standard group match operation_ids are malformed"
+            )
+            return result
+        vp_ids = set(vp_id_list)
         parent_rotations: list[np.ndarray] = []
         for op in vp_operations:
             if not isinstance(op, dict):
                 continue
-            oid_raw = op.get("operation_id")
-            if oid_raw is None:
-                continue
-            try:
-                oid = int(oid_raw)
-            except (TypeError, ValueError):
+            oid = op.get("operation_id")
+            if not _is_exact_operation_id(oid):
                 continue
             if oid not in vp_ids:
                 continue
@@ -1746,20 +1755,18 @@ def _reconstruct_subgroup_standard_cell(
     std_rotations = [np.asarray(r, dtype=float) for r in std_sym["rotations"]]
 
     # 2. Collect VP rotation matrices and match by order/type.
-    vp_ids = {
-        int(op_id) for op_id in standard_match.get("operation_ids", [])
-        if isinstance(op_id, (int, float))
-    }
+    vp_id_list = _operation_ids_list(standard_match)
+    if vp_id_list is None:
+        result["status"] = "unavailable"
+        result["reason"] = "standard group match operation_ids are malformed"
+        return result
+    vp_ids = set(vp_id_list)
     parent_by_id: dict[int, dict[str, object]] = {}
     for op in vp_operations:
         if not isinstance(op, dict):
             continue
-        oid_raw = op.get("operation_id")
-        if oid_raw is None:
-            continue
-        try:
-            oid = int(oid_raw)
-        except (TypeError, ValueError):
+        oid = op.get("operation_id")
+        if not _is_exact_operation_id(oid):
             continue
         if oid in vp_ids:
             parent_by_id[oid] = op
@@ -2018,8 +2025,12 @@ def _compute_standard_setting_basis_transform(
         )
         return result
 
-    vp_op_ids = standard_match.get("operation_ids", [])
-    if not isinstance(vp_op_ids, (list, tuple)) or len(vp_op_ids) < 2:
+    vp_op_ids = _operation_ids_list(standard_match)
+    if vp_op_ids is None:
+        result["status"] = "unavailable"
+        result["reason"] = "standard group match operation_ids are malformed"
+        return result
+    if len(vp_op_ids) < 2:
         result["status"] = "unavailable"
         result["reason"] = (
             "fewer than two valley-preserving operations "
@@ -2038,17 +2049,13 @@ def _compute_standard_setting_basis_transform(
         return result
 
     # Extract non-identity VP rotation matrices to verify orientation.
-    vp_set = set(int(op) for op in vp_op_ids if isinstance(op, (int, float)))
+    vp_set = set(vp_op_ids)
     vp_rotations: list[tuple[int, np.ndarray]] = []
     for op in vp_operations:
         if not isinstance(op, dict):
             continue
-        op_id_raw = op.get("operation_id")
-        if op_id_raw is None:
-            continue
-        try:
-            op_id = int(op_id_raw)
-        except (TypeError, ValueError):
+        op_id = op.get("operation_id")
+        if not _is_exact_operation_id(op_id):
             continue
         if op_id not in vp_set:
             continue
@@ -2174,7 +2181,7 @@ def _attempt_setting_transform(
 def _derive_transform_candidate(
     *,
     vp_operations: list[dict[str, object]],
-    vp_operation_ids: list[int],
+    vp_operation_ids: object,
     standard_match: dict[str, object],
     tolerance: float = 1e-6,
 ) -> dict[str, object]:
@@ -2194,17 +2201,19 @@ def _derive_transform_candidate(
         "missing_ingredients": [],
     }
 
+    if not isinstance(vp_operation_ids, list) or any(
+        not _is_exact_operation_id(item) for item in vp_operation_ids
+    ):
+        result["status"] = "unresolved"
+        result["missing_ingredients"].append("malformed_required_operation_ids")
+        return result
     vp_id_set = set(vp_operation_ids)
     parent_ops: list[dict[str, object]] = []
     for op in vp_operations:
         if not isinstance(op, dict):
             continue
-        oid_raw = op.get("operation_id")
-        if oid_raw is None:
-            continue
-        try:
-            oid = int(oid_raw)
-        except (TypeError, ValueError):
+        oid = op.get("operation_id")
+        if not _is_exact_operation_id(oid):
             continue
         if oid not in vp_id_set:
             continue

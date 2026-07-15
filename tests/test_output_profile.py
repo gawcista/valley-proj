@@ -354,7 +354,7 @@ def test_standard_profile_ebr_export_bundle_present_when_payload_exists():
         config = load_config(config_path)
 
         ebr_bundle = {"status": "ready_for_external_solver", "bundle_count": 1,
-                      "excluded_count": 0, "schema_version": "1.0.0",
+                      "excluded_count": 0, "schema_version": "1.1.0",
                       "reduced_ebr_decomposition_status": "not_implemented",
                       "bundles": [], "excluded_instances": []}
         outputs = write_analysis_outputs(

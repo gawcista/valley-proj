@@ -66,11 +66,16 @@ def mark_rotation_generators(operations: list[dict[str, object]]) -> None:
     for operation in operations:
         if not operation.get("candidate_rotation", False):
             continue
+        operation_id = operation.get("operation_id")
+        if not isinstance(operation_id, int) or isinstance(operation_id, bool):
+            raise ValueError(
+                "candidate rotation operation_id must be an exact "
+                "non-Boolean Python integer"
+            )
         rotation = np.asarray(operation["rotation_frac"], dtype=int)
         order = int(operation["order"])
         subgroup_key = _cyclic_subgroup_key(rotation, order)
         if subgroup_key not in generators:
-            operation_id = int(operation["operation_id"])
             generators[subgroup_key] = operation_id
             generator_matrices[operation_id] = rotation
             operation["rotation_generator_operation_id"] = operation_id

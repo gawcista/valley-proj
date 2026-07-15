@@ -234,6 +234,23 @@ def test_dense_map_keys_rejected_for_noncontiguous_required_operation_ids():
     assert "keys_do_not_match_required_ids" in blockers[0]["detail"]
 
 
+def test_legacy_export_without_required_operation_ids_remains_fail_closed():
+    cert_id = _identity()
+    cert_id.pop("affine_required_operation_ids")
+    legacy_export = {
+        "schema_version": "1.0.0",
+        "bundles": [_bundle(cert=cert_id)],
+    }
+    result = build_reduced_ebr_mapping(
+        ebr_export_bundle=legacy_export,
+        table=_table(),
+    )
+    assert result["mapping_status"] == "not_evaluated"
+    assert result["solutions"] == []
+    assert len(result["excluded_bundles"]) == 1
+    assert "primitive_affine_evidence_invalid" in result["excluded_bundles"][0]["reason"]
+
+
 # ---------------------------------------------------------------------------
 # Positive promotion from real affine evidence (no mutation)
 # ---------------------------------------------------------------------------

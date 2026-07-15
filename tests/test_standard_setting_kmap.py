@@ -1417,7 +1417,7 @@ def test_primitive_direct_match_resolves_label_in_resolver():
 
 
 def test_malformed_nonrequired_operation_is_ignored_before_affine_validation():
-    """Parent operations outside G_k^(a) do not enter affine field checks."""
+    """Operations outside the complete subspace group do not enter its affine check."""
     detected = _detected_std_ops(1, [0])
     detected.append({
         "operation_id": 99,
@@ -1560,3 +1560,116 @@ def test_malformed_required_operation_id_collection_is_unknown(required_ids):
     assert result["status"] == "failed"
     assert result["required_operation_ids"] is None
     assert result["missing_ingredients"] == ["malformed_required_operation_ids"]
+
+
+@pytest.mark.parametrize(
+    "malformed_id",
+    [0.5, "0", False, np.float64(0.0)],
+    ids=["float", "string", "boolean", "numpy_float"],
+)
+def test_malformed_detected_operation_id_cannot_impersonate_required_integer(
+    malformed_id,
+):
+    from valleyscope.analysis.standard_setting_kmap import (
+        _validate_affine_operation_equivalence,
+    )
+    result = _validate_affine_operation_equivalence(
+        vp_operations=[{
+            "operation_id": malformed_id,
+            "rotation_frac": np.eye(3).tolist(),
+            "translation_frac": [0.0, 0.0, 0.0],
+        }],
+        vp_operation_ids=[0],
+        standard_match={
+            "number": 1, "hall_number": 1, "hall_symbol": "P 1",
+        },
+        parent_to_standard_direct_transform=np.eye(3),
+    )
+    assert result["status"] == "failed"
+    assert result["required_operation_ids"] == [0]
+    assert result["missing_required_operation_ids"] == [0]
+    assert result["missing_ingredients"] == ["missing_required_operation_ids"]
+    assert result["operation_map"] is None
+
+
+@pytest.mark.parametrize(
+    "malformed_id",
+    [0.5, "0", False, np.float64(0.0)],
+    ids=["float", "string", "boolean", "numpy_float"],
+)
+def test_malformed_nonselected_id_is_harmless_when_required_integer_is_present(
+    malformed_id,
+):
+    from valleyscope.analysis.standard_setting_kmap import (
+        _validate_affine_operation_equivalence,
+    )
+    valid_identity = _detected_std_ops(1, [0])[0]
+    result = _validate_affine_operation_equivalence(
+        vp_operations=[
+            valid_identity,
+            {
+                "operation_id": malformed_id,
+                "rotation_frac": np.eye(3).tolist(),
+                "translation_frac": [0.0, 0.0, 0.0],
+            },
+        ],
+        vp_operation_ids=[0],
+        standard_match={
+            "number": 1, "hall_number": 1, "hall_symbol": "P 1",
+        },
+        parent_to_standard_direct_transform=np.eye(3),
+    )
+    assert result["status"] == "passed"
+    assert result["required_operation_ids"] == [0]
+    assert result["missing_ingredients"] == []
+    assert result["operation_map"] == {"0": 0}
+
+
+@pytest.mark.parametrize(
+    "malformed_required_ids",
+    [[0.5], ["0"], [False], [np.float64(0.0)]],
+    ids=["float", "string", "boolean", "numpy_float"],
+)
+def test_resolver_rejects_malformed_standard_match_operation_ids(
+    malformed_required_ids,
+):
+    label, blocker, prov = resolve_standard_setting_hsp_label(
+        k_frac=np.zeros(3),
+        table=_FakeTable(labels={"GM": (0.0, 0.0, 0.0)}),
+        standard_match={
+            "number": 1,
+            "international_short": "P1",
+            "hall_number": 1,
+            "hall_symbol": "P 1",
+            "operation_ids": malformed_required_ids,
+        },
+        detected_operations=_detected_std_ops(1, [0]),
+    )
+    assert label is None
+    assert blocker is not None
+    aff = prov["affine_validation"]
+    assert aff["status"] == "failed"
+    assert aff["required_operation_ids"] is None
+    assert aff["missing_ingredients"] == ["malformed_required_operation_ids"]
+    cert = prov["standard_setting_certificate"]
+    assert cert["validation_status"] == "rejected"
+    assert cert.get("parent_basis_operation_ids") is None
+
+
+def test_signed_opaque_operation_id_preserved_by_affine_bijection():
+    from valleyscope.analysis.standard_setting_kmap import (
+        _validate_affine_operation_equivalence,
+    )
+    operation = _detected_std_ops(1, [0])[0]
+    operation["operation_id"] = -3
+    result = _validate_affine_operation_equivalence(
+        vp_operations=[operation],
+        vp_operation_ids=[-3],
+        standard_match={
+            "number": 1, "hall_number": 1, "hall_symbol": "P 1",
+        },
+        parent_to_standard_direct_transform=np.eye(3),
+    )
+    assert result["status"] == "passed"
+    assert result["required_operation_ids"] == [-3]
+    assert result["operation_map"] == {"-3": 0}
