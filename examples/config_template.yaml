@@ -23,6 +23,10 @@ analysis:
   # VASP band indices. Also accepts {start: 101, end: 120} or "101-120".
   iband: [101, 102]
   subspace_energy_tol_meV: 1.0
+  # Explicit evidence that the parent calculation is time-reversal symmetric.
+  # Default is false; never inferred from material names or spinor inputs.
+  time_reversal:
+    enabled: false
   # Optional explicit crystallographic convention certificate for mapping
   # parent moire k coordinates to Bilbao/irreptables standard-setting HSPs.
   # standard_setting:

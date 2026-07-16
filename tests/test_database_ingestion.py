@@ -813,6 +813,60 @@ def test_reduced_ebr_records_pick_up_table_provenance():
     assert "auto_canonical" not in r
 
 
+def test_reduced_ebr_records_preserve_joint_valley_orbit_identity():
+    """Compact ingestion keeps the physical identity of a joint TR problem."""
+    time_reversal = {
+        "theta_square": -1,
+        "time_reversal_valley_mapping": {
+            "valley_a": "valley_b",
+            "valley_b": "valley_a",
+        },
+    }
+    unitary_valley_irreps = {
+        "valley_a": {"K": {"rho_a": 1}},
+        "valley_b": {"K": {"rho_b": 1}},
+    }
+    mapping = {
+        "status": "no_exact_solution",
+        "table_status": "loaded",
+        "solutions": [{
+            "bundle_id": "b_orbit",
+            "valley": "",
+            "problem_kind": "valley_orbit_reduced_ebr",
+            "valley_orbit": ["valley_a", "valley_b"],
+            "unitary_valley_irreps": unitary_valley_irreps,
+            "time_reversal": time_reversal,
+            "subspace_group_candidate": "P1",
+            "status": "no_exact_solution",
+            "classification": "in_integer_span_no_nonnegative_witness",
+            "integer_span_status": "in_integer_span",
+            "nonnegative_solution_status": "no_nonnegative_solution",
+            "irrep_vector": [1],
+        }],
+    }
+
+    record = build_database_ingestion_record(
+        valley_summary={"target_kpoints": ["K"], "iband": [1], "input": {}},
+        valley_reduced_ebr_mapping=mapping,
+    )
+
+    assert record["reduced_ebr_records"] == [{
+        "bundle_id": "b_orbit",
+        "valley": "",
+        "problem_kind": "valley_orbit_reduced_ebr",
+        "valley_orbit": ["valley_a", "valley_b"],
+        "unitary_valley_irreps": unitary_valley_irreps,
+        "time_reversal": time_reversal,
+        "subspace_group_candidate": "P1",
+        "subspace_space_group": {},
+        "status": "no_exact_solution",
+        "classification": "in_integer_span_no_nonnegative_witness",
+        "integer_span_status": "in_integer_span",
+        "nonnegative_solution_status": "no_nonnegative_solution",
+        "irrep_vector": [1],
+    }]
+
+
 def test_reduced_ebr_records_no_table_provenance_still_works():
     """Records without table_provenance work (backward compat)."""
     mapping = {
@@ -875,7 +929,7 @@ def test_reduced_ebr_records_from_directory_with_table_provenance(tmp_path):
 
 
 def test_tmote2_ingestion_compact_reduced_ebr_records():
-    """tMoTe2 fixture: two compact P3 records with the sampled HSP basis."""
+    """tMoTe2 fixture: one compact joint TR valley-orbit P3 record."""
     ing = load_database_ingestion_record_from_directory(
         Path(__file__).parent.parent / "real_tests" / "tMoTe2" / "output"
         / "valley_analysis_wave",
@@ -884,16 +938,23 @@ def test_tmote2_ingestion_compact_reduced_ebr_records():
     if not recs:
         pytest.skip("tMoTe2 fixture output not found or no reduced EBR records")
 
-    assert len(recs) == 2
-    for r in recs:
-        assert r["subspace_group_candidate"] == "P3"
-        assert r["classification"] == "atomic-compatible-candidate"
-        assert r["table_source"] == "auto_canonical"
-        assert r["data_source"] == "irreptables"
-        assert r["space_group_number"] == 143
-        assert r["spinful"] is True
-        assert r["expected_hsps"] == ["GammaM", "KM", "MM"]
-        assert r["valleyscope_reduction"] == "sampled_hsp_valley_preserving"
-        assert r["source_basis_count"] > r["reduction_basis_count"] > 0
-        assert r["table_status"] == "loaded"
-        assert "dropped_source_rows" not in r
+    assert len(recs) == 1
+    r = recs[0]
+    assert r["problem_kind"] == "valley_orbit_reduced_ebr"
+    assert r["valley_orbit"] == ["K_valley", "Kp_valley"]
+    assert set(r["unitary_valley_irreps"]) == {"K_valley", "Kp_valley"}
+    assert r["time_reversal"]["time_reversal_valley_mapping"] == {
+        "K_valley": "Kp_valley",
+        "Kp_valley": "K_valley",
+    }
+    assert r["subspace_group_candidate"] == "P3"
+    assert r["classification"] == "in_integer_span_no_nonnegative_witness"
+    assert r["table_source"] == "auto_time_reversal_grey"
+    assert r["data_source"] == "irreptables"
+    assert r["space_group_number"] == 143
+    assert r["spinful"] is True
+    assert r["expected_hsps"] == ["GM", "K", "M"]
+    assert r["valleyscope_reduction"] == "sampled_hsp_valley_preserving"
+    assert r["source_basis_count"] > r["reduction_basis_count"] > 0
+    assert r["table_status"] == "loaded"
+    assert "dropped_source_rows" not in r

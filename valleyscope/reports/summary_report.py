@@ -1763,6 +1763,26 @@ def _render_projected_hsp_coverage(
                 lines.append(
                     f"missing guidance ({valley}): " + "; ".join(guidance)
                 )
+    time_reversal = report.get("time_reversal")
+    if isinstance(time_reversal, dict):
+        lines.append(
+            "time reversal: "
+            f"status={time_reversal.get('status', 'blocked')}, "
+            f"theta^2={time_reversal.get('theta_square')}, "
+            "valley mapping="
+            f"{time_reversal.get('time_reversal_valley_mapping', {})}"
+        )
+        for orbit in time_reversal.get("valley_orbits", []):
+            if not isinstance(orbit, dict):
+                continue
+            lines.append(
+                "  valley orbit "
+                f"{orbit.get('members', [])}: status={orbit.get('status')}, "
+                "independent HSPs="
+                f"{orbit.get('independent_time_reversal_hsp_labels', [])}, "
+                f"grey BNS={orbit.get('grey_bns_number')}, "
+                f"blockers={orbit.get('blockers', [])}"
+            )
     lines.append("")
 
 
@@ -1783,7 +1803,7 @@ def _render_ebr_problem_instances(
         for inst in instances:
             rows.append([
                 inst.get("instance_id", ""),
-                inst.get("valley", ""),
+                inst.get("valley_orbit") or inst.get("valley", ""),
                 _canonical_sg_display(inst),
                 inst.get("status", ""),
                 str(inst.get("ready_for_ebr_decomposition", "")),
@@ -1795,7 +1815,7 @@ def _render_ebr_problem_instances(
             ])
         lines.extend(
             _table(
-                ["id", "valley", "group", "status", "ready",
+                ["id", "valley/orbit", "group", "status", "ready",
                  "blocked_by", "sampled_hsp", "source_required",
                  "source_covered", "source_missing"],
                 rows,
@@ -1823,7 +1843,7 @@ def _render_ebr_export_bundle(
         for b in bundles:
             rows.append([
                 b.get("bundle_id", ""),
-                b.get("valley", ""),
+                b.get("valley_orbit") or b.get("valley", ""),
                 _canonical_sg_display(b),
                 b.get("workflow_path", ""),
                 _short_list(b.get("expected_hsps", [])),
@@ -1833,7 +1853,7 @@ def _render_ebr_export_bundle(
             ])
         lines.extend(
             _table(
-                ["bundle_id", "valley", "group", "path",
+                ["bundle_id", "valley/orbit", "group", "path",
                  "expected_hsp", "optional_hsp", "missing_opt",
                  "ext_solver_ready"],
                 rows,

@@ -36,8 +36,18 @@ from valleyscope.analysis.projected_hsp_coverage import (
     classify_projected_subspace_kpoint,
     derive_projected_subspace_source_hsp_basis,
 )
+from valleyscope.analysis.time_reversal_orbits import (
+    build_time_reversal_valley_orbit_report,
+    derive_time_reversal_valley_mapping,
+)
 from valleyscope.irreps.tables import load_standard_irrep_table
 from valleyscope.irreps.ebr_data_adapter import load_ebr_source_data
+from valleyscope.irreps.time_reversal_ebr import (
+    validate_grey_group_time_reversal_source,
+)
+from valleyscope.irreps.time_reversal_source import (
+    derive_time_reversal_source_irrep_orbits,
+)
 from valleyscope.irreps.source_payload import (
     build_source_payload_for_projected_hsp_matching,
 )
@@ -553,6 +563,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     ebr_export_bundle: dict[str, object] | None = None
     reduced_ebr_mapping: dict[str, object] | None = None
     projected_hsp_coverage: dict[str, object] | None = None
+    time_reversal_orbit_report: dict[str, object] | None = None
     if config.symmetry_adapted_valley.enabled:
         irrep_workflow_decisions = build_irrep_workflow_decisions(
             projector_symmetry_report=projector_symmetry_report,
@@ -574,6 +585,9 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     generic_source_classification_rows: list[dict[str, Any]] = []
     projected_hsp_classifications: list[dict[str, Any]] = []
     source_hsp_basis_by_valley: dict[str, dict[str, object]] = {}
+    source_table_by_valley: dict[str, object] = {}
+    source_ebr_data_by_valley: dict[str, dict[str, object]] = {}
+    source_certificate_by_valley: dict[str, dict[str, object]] = {}
     ebr_source_basis_cache: dict[tuple[int, bool], dict[str, Any]] = {}
 
     # --- Canonical subgroup identity from per-valley standard matches ---
@@ -797,6 +811,9 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 existing_basis = source_hsp_basis_by_valley.get(v_name)
                 if existing_basis is None:
                     source_hsp_basis_by_valley[v_name] = source_basis
+                    source_table_by_valley[v_name] = table
+                    source_ebr_data_by_valley[v_name] = ebr_source_data
+                    source_certificate_by_valley[v_name] = certificate
                 elif (
                     existing_basis.get("required_source_hsp_labels")
                     != source_basis.get("required_source_hsp_labels")
@@ -870,6 +887,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     projected_hsp_classification=classification,
                     detected_operations=symmetry_payload.get("detected_operations", []),
                     valley_preserving_operation_ids=list(vp_ids),
+                    source_hsp_basis=source_basis,
                     tol=tol,
                 )
                 if payload.get("operation_mapping_evaluated") is True:
@@ -1020,9 +1038,75 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         valley_irrep_matching=valley_irrep_matching,
         symmetry_adapted_valley_report=symmetry_adapted_valley_report,
     )
+    valley_mapping_report = derive_time_reversal_valley_mapping(
+        enabled=config.time_reversal.enabled,
+        centers=config.valley_centers,
+        valley_subspaces=config.valley_subspaces,
+        spinor=spinor_wf,
+    )
+    if config.time_reversal.enabled:
+        source_orbits_by_valley: dict[str, dict[str, object]] = {}
+        grey_source_by_valley: dict[str, dict[str, object]] = {}
+        for valley, basis in source_hsp_basis_by_valley.items():
+            reviewed_by_label = basis.get(
+                "_reviewed_source_irreps_by_label", {}
+            )
+            if not isinstance(reviewed_by_label, dict):
+                continue
+            reviewed_rows = list(reviewed_by_label.values())
+            certificate = source_certificate_by_valley.get(valley, {})
+            centering_vectors = certificate.get(
+                "normalized_centering_vectors",
+                certificate.get("centering_vectors", []),
+            )
+            if not isinstance(centering_vectors, list):
+                centering_vectors = []
+            full_source_orbits = derive_time_reversal_source_irrep_orbits(
+                reviewed_rows=reviewed_rows,
+                centering_vectors=centering_vectors,
+            )
+            required_hsps = set(
+                basis.get("required_source_hsp_labels", [])
+            )
+            in_plane_rows = [
+                row for row in reviewed_rows
+                if getattr(row, "kpoint_label", None) in required_hsps
+            ]
+            source_orbits_by_valley[valley] = (
+                derive_time_reversal_source_irrep_orbits(
+                    reviewed_rows=in_plane_rows,
+                    centering_vectors=centering_vectors,
+                )
+            )
+            table = source_table_by_valley.get(valley)
+            source_data = source_ebr_data_by_valley.get(valley)
+            if table is not None and isinstance(source_data, dict):
+                grey_source_by_valley[valley] = (
+                    validate_grey_group_time_reversal_source(
+                        unitary_table=table,
+                        reviewed_rows=reviewed_rows,
+                        unitary_source_data=source_data,
+                        irrep_partner_by_label=full_source_orbits.get(
+                            "irrep_partner_by_label", {}
+                        ),
+                        centering_vectors=centering_vectors,
+                    )
+                )
+        time_reversal_orbit_report = (
+            build_time_reversal_valley_orbit_report(
+                valley_mapping_report=valley_mapping_report,
+                source_irrep_orbits_by_valley=source_orbits_by_valley,
+                grey_source_by_valley=grey_source_by_valley,
+                ebr_input_candidates=ebr_input_candidates,
+            )
+        )
+        projected_hsp_coverage["time_reversal"] = (
+            time_reversal_orbit_report
+        )
     ebr_problem_instances = build_ebr_problem_instances(
         ebr_input_candidates=ebr_input_candidates,
         projected_hsp_coverage=projected_hsp_coverage,
+        time_reversal_orbit_report=time_reversal_orbit_report,
     )
     ebr_export_bundle = build_ebr_export_bundle(
         ebr_problem_instances=ebr_problem_instances,
@@ -2891,6 +2975,7 @@ def _build_auto_canonical_mapping(
 
     from valleyscope.analysis.irreptables_runtime_table_builder import (
         build_auto_canonical_reduced_ebr_table,
+        build_auto_time_reversal_reduced_ebr_table,
     )
     from valleyscope.analysis.reduced_ebr_mapping import (
         build_reduced_ebr_mapping as _solve_mapping,
@@ -2900,6 +2985,7 @@ def _build_auto_canonical_mapping(
     all_excluded: list[dict[str, object]] = []
     per_bundle_statuses: list[dict[str, object]] = []
     ready_count = 0
+    time_reversal_ready_count = 0
 
     for b in bundles:
         if not isinstance(b, dict):
@@ -2990,14 +3076,37 @@ def _build_auto_canonical_mapping(
         # standard-setting evidence is derived independently by the promotion
         # validator (spglib); it is never copied from the bundle certificate.
         try:
-            table = build_auto_canonical_reduced_ebr_table(
-                subspace_sg_number=sg_num,
-                spinor=spinor_wf,
-                bundle_irreps_by_kpoint=irreps_by_kp,
-                expected_hsps=expected_hsps,
-                subspace_group_candidate=sg_candidate,
-                subspace_space_group=ssg if isinstance(ssg, dict) else None,
-            )
+            if b.get("problem_kind") == "valley_orbit_reduced_ebr":
+                time_reversal_ready_count += 1
+                time_reversal = b.get("time_reversal", {})
+                grey_bns_number = (
+                    time_reversal.get("grey_bns_number")
+                    if isinstance(time_reversal, dict) else None
+                )
+                if not isinstance(grey_bns_number, str) or not grey_bns_number:
+                    raise ValueError(
+                        "valley-orbit bundle has no reviewed grey BNS number"
+                    )
+                table = build_auto_time_reversal_reduced_ebr_table(
+                    unitary_space_group_number=sg_num,
+                    grey_bns_number=grey_bns_number,
+                    spinor=spinor_wf,
+                    bundle_irreps_by_kpoint=irreps_by_kp,
+                    expected_hsps=expected_hsps,
+                    subspace_group_candidate=sg_candidate,
+                    subspace_space_group=(
+                        ssg if isinstance(ssg, dict) else None
+                    ),
+                )
+            else:
+                table = build_auto_canonical_reduced_ebr_table(
+                    subspace_sg_number=sg_num,
+                    spinor=spinor_wf,
+                    bundle_irreps_by_kpoint=irreps_by_kp,
+                    expected_hsps=expected_hsps,
+                    subspace_group_candidate=sg_candidate,
+                    subspace_space_group=ssg if isinstance(ssg, dict) else None,
+                )
         except Exception as exc:
             all_excluded.append({
                 "bundle_id": bundle_id,
@@ -3024,9 +3133,16 @@ def _build_auto_canonical_mapping(
         # reduction; reduction_basis_count = after sampled-HSP k-vector filtering.
         source_basis = int(prov.get("source_basis_count", num_irreps))
         reduction_basis = int(prov.get("reduction_basis_count", num_irreps))
+        is_time_reversal = (
+            b.get("problem_kind") == "valley_orbit_reduced_ebr"
+        )
         bundle_input: dict[str, object] = {
-            "source": "auto_canonical",
-            "auto_canonical": True,
+            "source": (
+                "auto_time_reversal_grey"
+                if is_time_reversal else "auto_canonical"
+            ),
+            "auto_canonical": not is_time_reversal,
+            "auto_time_reversal": is_time_reversal,
             "subspace_group_candidate": table.get("subspace_group_candidate", ""),
             "space_group_number": prov.get("space_group_number", sg_num),
             "spinful": prov.get("spinful", spinor_wf),
@@ -3038,6 +3154,13 @@ def _build_auto_canonical_mapping(
             "source_basis_count": source_basis,
             "reduction_basis_count": reduction_basis,
         }
+        if is_time_reversal:
+            bundle_input["time_reversal_grey_bns_number"] = prov.get(
+                "time_reversal_grey_bns_number"
+            )
+            bundle_input["time_reversal_source"] = prov.get(
+                "time_reversal_source"
+            )
         zero_ebrs = prov.get("filtered_zero_vector_ebrs")
         zero_count = prov.get("filtered_zero_vector_ebr_count")
         if isinstance(zero_ebrs, list) and zero_ebrs:
@@ -3137,8 +3260,13 @@ def _build_auto_canonical_mapping(
             "from irreptables source data."
         ),
         "reduced_ebr_input": {
-            "source": "auto_canonical",
-            "auto_canonical": True,
+            "source": (
+                "auto_time_reversal_grey"
+                if time_reversal_ready_count == ready_count
+                else "auto_canonical"
+            ),
+            "auto_canonical": time_reversal_ready_count == 0,
+            "auto_time_reversal": time_reversal_ready_count > 0,
             "spinful": spinor_wf,
             "ready_bundle_count": ready_count,
             "solved_count": len(all_solutions),

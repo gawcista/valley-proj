@@ -433,7 +433,7 @@ def test_missing_ebr_source_irrep_label_blocks_basis_derivation():
     assert "compatible auxiliary source tables=[]" in basis["blocker"]
 
 
-def test_compatible_auxiliary_source_table_validates_noncanonical_ebr_rows():
+def test_compatible_auxiliary_source_rows_share_reviewed_in_plane_model():
     table = load_standard_irrep_table(143, spinor=True)
     source = load_ebr_source_data(143, True)
     basis = derive_projected_subspace_source_hsp_basis(
@@ -449,16 +449,102 @@ def test_compatible_auxiliary_source_table_validates_noncanonical_ebr_rows():
     )
 
     assert basis["status"] == "validated"
-    assert basis["required_source_hsp_labels"] == ["GM", "K", "M"]
-    excluded = basis["provenance"][
-        "excluded_noncanonical_ebr_source_rows"
+    assert basis["required_source_hsp_labels"] == ["GM", "K", "KA", "M"]
+    reviewed = basis["provenance"]["reviewed_source_rows"]
+    assert [row["label"] for row in reviewed if row["in_parent_plane"]] == [
+        "-GM4", "-GM5", "-GM6",
+        "-K4", "-K5", "-K6",
+        "-KA4", "-KA5", "-KA6",
+        "-M2",
     ]
-    assert [row["label"] for row in excluded] == [
+    auxiliary = [
+        row for row in reviewed
+        if row["source_table_status"] == "compatible_auxiliary"
+    ]
+    assert [row["label"] for row in auxiliary] == [
         "-HA4", "-HA5", "-HA6", "-KA4", "-KA5", "-KA6"
     ]
-    assert {row["source_table"] for row in excluded} == {
+    assert {row["source_table"] for row in auxiliary} == {
         "irreps-SG=143.1-spin.dat"
     }
+
+    ka = next(
+        row for row in basis["source_hsps"]
+        if row["source_hsp_label"] == "KA"
+    )
+    operation_ids = ka["standard_little_group_operation_ids"]
+    payload = build_source_payload_for_projected_hsp_matching(
+        table=table,
+        projected_hsp_classification={
+            "classification": "representative",
+            "source_hsp_label": "KA",
+            "source_irrep_labels": ka["source_irrep_labels"],
+            "representation_transport_status": "validated",
+            "standard_little_group_operation_ids": operation_ids,
+        },
+        detected_operations=[{
+            "operation_id": index,
+            "rotation_frac": table.operation_by_index(index).rotation_frac,
+            "translation_frac": table.operation_by_index(index).translation_frac,
+        } for index in operation_ids],
+        valley_preserving_operation_ids=operation_ids,
+        source_hsp_basis=basis,
+    )
+    assert payload["status"] == "ok"
+    assert set(payload["source_irrep_characters"]) == {
+        "-KA4", "-KA5", "-KA6",
+    }
+    assert payload["provenance"]["source_irrep_model"] == (
+        "reviewed_source_rows"
+    )
+
+
+def test_projected_source_payload_blocks_incomplete_reviewed_irrep_model():
+    table = load_standard_irrep_table(143, spinor=True)
+    source = load_ebr_source_data(143, True)
+    basis = derive_projected_subspace_source_hsp_basis(
+        table=table,
+        ebr_source_basis_labels=source["source_basis_labels"],
+        standard_setting_certificate=_certificate(
+            sg_number=143,
+            sg_symbol="P3",
+            hall_number=430,
+            hall_symbol="P 3",
+        ),
+        use_2d_momentum_only=True,
+    )
+    reviewed = dict(basis["_reviewed_source_irreps_by_label"])
+    reviewed.pop("-KA6")
+    basis["_reviewed_source_irreps_by_label"] = reviewed
+    ka = next(
+        row for row in basis["source_hsps"]
+        if row["source_hsp_label"] == "KA"
+    )
+    operation_ids = ka["standard_little_group_operation_ids"]
+
+    payload = build_source_payload_for_projected_hsp_matching(
+        table=table,
+        projected_hsp_classification={
+            "classification": "representative",
+            "source_hsp_label": "KA",
+            "source_irrep_labels": ka["source_irrep_labels"],
+            "representation_transport_status": "validated",
+            "standard_little_group_operation_ids": operation_ids,
+        },
+        detected_operations=[{
+            "operation_id": index,
+            "rotation_frac": table.operation_by_index(index).rotation_frac,
+            "translation_frac": table.operation_by_index(index).translation_frac,
+        } for index in operation_ids],
+        valley_preserving_operation_ids=operation_ids,
+        source_hsp_basis=basis,
+    )
+
+    assert payload["status"] == "blocked"
+    assert payload["blocker_reasons"] == [
+        "incomplete_reviewed_source_irrep_model: missing reviewed source "
+        "irreps ['-KA6'] for HSP 'KA'"
+    ]
 
 
 def test_non_material_synthetic_star_transports_full_little_group_characters():
@@ -525,6 +611,7 @@ def test_non_material_synthetic_star_transports_full_little_group_characters():
             },
         ],
         valley_preserving_operation_ids=[10, 11],
+        source_hsp_basis=basis,
     )
 
     assert payload["status"] == "ok"
@@ -616,6 +703,7 @@ def test_spinful_star_transport_applies_double_group_lift_factor():
             },
         ],
         valley_preserving_operation_ids=[10, 11],
+        source_hsp_basis=basis,
     )
 
     assert payload["status"] == "ok"
@@ -627,6 +715,12 @@ def test_spinful_star_transport_applies_double_group_lift_factor():
 
 def test_star_character_transport_with_lattice_phase_fails_closed():
     table = _centered_c2_table()
+    basis = derive_projected_subspace_source_hsp_basis(
+        table=table,
+        ebr_source_basis_labels=["-V2"],
+        standard_setting_certificate=_certificate(),
+        use_2d_momentum_only=True,
+    )
     payload = build_source_payload_for_projected_hsp_matching(
         table=table,
         projected_hsp_classification={
@@ -647,6 +741,7 @@ def test_star_character_transport_with_lattice_phase_fails_closed():
             "translation_frac": table.operation_by_index(1).translation_frac,
         }],
         valley_preserving_operation_ids=[10],
+        source_hsp_basis=basis,
     )
 
     assert payload["status"] == "blocked"

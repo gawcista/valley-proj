@@ -201,7 +201,7 @@ def test_schema_fields():
             "excluded_instances", "interpretation"}
     assert keys <= set(r)
     assert r["reduced_ebr_decomposition_status"] == "not_implemented"
-    assert r["schema_version"] == "1.3.0"
+    assert r["schema_version"] == "1.4.0"
     b = r["bundles"][0]
     for k in ["bundle_id", "source_instance_id", "valley",
               "irreps_by_kpoint", "operations_by_kpoint",
@@ -243,7 +243,7 @@ def test_source_hsp_coverage_fields_are_exported_without_loss():
 def test_schema_doc_covers_centered_export_and_ingestion_versions():
     schema = Path("docs/schema.md").read_text(encoding="utf-8")
     normalized_schema = " ".join(schema.split())
-    assert 'Schema version `"1.3.0"`' in schema
+    assert 'Schema version `"1.4.0"`' in schema
     assert 'Current ingestion-record schema version: `"1.4.0"`' in schema
     assert "centered_affine_operation_map" in schema
     assert "centering_coset_index" in schema
@@ -264,7 +264,7 @@ def test_schema_1_2_preserves_required_operation_ids_in_certificate_identity():
         ebr_problem_instances={"instances": [instance]},
     )
 
-    assert report["schema_version"] == "1.3.0"
+    assert report["schema_version"] == "1.4.0"
     exported_identity = report["bundles"][0]["certificate_identity"]
     assert exported_identity["affine_required_operation_ids"] == [-3, 4]
 
@@ -308,7 +308,7 @@ def test_schema_1_2_preserves_centered_expansion_identity_without_loss():
         ebr_problem_instances={"instances": [instance]},
     )
 
-    assert report["schema_version"] == "1.3.0"
+    assert report["schema_version"] == "1.4.0"
     assert report["bundles"][0]["certificate_identity"] == certificate_identity
 
 

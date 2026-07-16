@@ -21,6 +21,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 
 from valleyscope.irreps.tables import (
+    ReviewedSourceIrrep,
     StandardIrrepTable,
     StandardTableOperation,
     resolve_ebr_source_irrep_label_evidence,
@@ -66,39 +67,29 @@ def derive_projected_subspace_source_hsp_basis(
             "are missing from the standard-setting certificate"
         )
 
-    irreps_by_label = {irrep.label: irrep for irrep in table.irreps}
     source_label_evidence = resolve_ebr_source_irrep_label_evidence(
         table=table,
         source_basis_labels=[str(x) for x in ebr_source_basis_labels],
     )
     if source_label_evidence.get("status") != "validated":
         return _blocked_basis(str(source_label_evidence.get("blocker", "")))
-    evidence_by_label = source_label_evidence.get("by_label", {})
+    reviewed_rows = source_label_evidence.get("reviewed_rows", [])
+    if (
+        not isinstance(reviewed_rows, list)
+        or len(reviewed_rows) != len(ebr_source_basis_labels)
+        or not all(isinstance(row, ReviewedSourceIrrep) for row in reviewed_rows)
+    ):
+        return _blocked_basis(
+            "reviewed_source_irrep_model_incomplete_or_malformed"
+        )
     records_by_hsp: dict[str, dict[str, object]] = {}
     ordered_hsps: list[str] = []
-    excluded_noncanonical_source_rows: list[dict[str, object]] = []
     out_of_plane_source_labels: list[str] = []
+    reviewed_source_rows_provenance: list[dict[str, object]] = []
     plane_result_by_k: dict[tuple[float, float, float], object] = {}
 
-    for raw_label in ebr_source_basis_labels:
-        label = str(raw_label)
-        label_evidence = (
-            evidence_by_label.get(label, {})
-            if isinstance(evidence_by_label, Mapping) else {}
-        )
-        if (
-            isinstance(label_evidence, Mapping)
-            and label_evidence.get("status")
-            == "validated_noncanonical_ebr_source_row"
-        ):
-            excluded_noncanonical_source_rows.append(dict(label_evidence))
-            continue
-        irrep = irreps_by_label.get(label)
-        if irrep is None:
-            return _blocked_basis(
-                "ebr_source_irrep_labels_missing_from_standard_table: "
-                f"[{label!r}]"
-            )
+    for irrep in reviewed_rows:
+        label = irrep.label
         k_key = tuple(round(float(value), 12) for value in irrep.k_frac)
         if k_key not in plane_result_by_k:
             try:
@@ -113,6 +104,21 @@ def derive_projected_subspace_source_hsp_basis(
                     f"irrep={label}: {exc}"
                 )
         plane_result = plane_result_by_k[k_key]
+        reviewed_source_rows_provenance.append({
+            "label": label,
+            "source_hsp_label": irrep.kpoint_label,
+            "standard_k_frac": _vector(irrep.k_frac),
+            "dimension": irrep.dimension,
+            "operation_indices": list(irrep.operation_indices),
+            "operation_inventory_identity": (
+                irrep.operation_inventory_identity
+            ),
+            "spin_convention": irrep.spin_convention,
+            "source_table": irrep.source_table,
+            "source_table_status": irrep.source_table_status,
+            "source_provenance": irrep.source_provenance,
+            "in_parent_plane": plane_result is not None,
+        })
         if plane_result is None:
             out_of_plane_source_labels.append(label)
             continue
@@ -135,10 +141,17 @@ def derive_projected_subspace_source_hsp_basis(
                     "inverse_reciprocal_shift"
                 ],
                 "standard_little_group_operation_ids": (
-                    table.operation_indices_for_kpoint(hsp)
+                    list(irrep.operation_indices)
                 ),
                 "source_irrep_labels": [],
             }
+        operation_ids = records_by_hsp[hsp][
+            "standard_little_group_operation_ids"
+        ]
+        if isinstance(operation_ids, list):
+            records_by_hsp[hsp]["standard_little_group_operation_ids"] = (
+                sorted(set(operation_ids) | set(irrep.operation_indices))
+            )
         labels = records_by_hsp[hsp]["source_irrep_labels"]
         if isinstance(labels, list) and label not in labels:
             labels.append(label)
@@ -161,6 +174,9 @@ def derive_projected_subspace_source_hsp_basis(
         ],
         "parent_plane_definition": "parent reciprocal fractional k3 = 0",
         "projected_subspace_space_group": space_group_identity,
+        "_reviewed_source_irreps_by_label": {
+            row.label: row for row in reviewed_rows
+        },
         "provenance": {
             "source": (
                 "irreptables StandardIrrepTable + irreptables EBR source basis"
@@ -170,9 +186,7 @@ def derive_projected_subspace_source_hsp_basis(
             "source_table_name": table.name,
             "source_table_spinor": table.spinor,
             "source_ebr_basis_labels": [str(x) for x in ebr_source_basis_labels],
-            "excluded_noncanonical_ebr_source_rows": (
-                excluded_noncanonical_source_rows
-            ),
+            "reviewed_source_rows": reviewed_source_rows_provenance,
             "auxiliary_source_table": source_label_evidence.get(
                 "auxiliary_source_table"
             ),

@@ -56,6 +56,29 @@ def test_config_loader_parses_core_schema(tmp_path):
     assert config.symmetry.filters.allowed_orders == [2, 3, 4, 6]
     assert config.symmetry.filters.rotation_order == "auto"
     assert config.valley_subspaces[0].name == "K_valley"
+    assert config.time_reversal.enabled is False
+
+
+def test_config_loader_requires_explicit_boolean_time_reversal_evidence(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, tmp_path / "out")
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["analysis"]["time_reversal"] = {"enabled": True}
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    assert load_config(config_path).time_reversal.enabled is True
+
+    raw["analysis"]["time_reversal"] = {"enabled": "true"}
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="time_reversal.enabled"):
+        load_config(config_path)
+
+    raw["analysis"]["time_reversal"] = True
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="time_reversal must be a mapping"):
+        load_config(config_path)
 
 
 def test_config_loader_accepts_iband_range_forms(tmp_path):

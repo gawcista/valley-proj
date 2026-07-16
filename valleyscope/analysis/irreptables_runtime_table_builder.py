@@ -682,6 +682,111 @@ def build_auto_canonical_reduced_ebr_table(
     return table
 
 
+def build_auto_time_reversal_reduced_ebr_table(
+    *,
+    unitary_space_group_number: int,
+    grey_bns_number: str,
+    spinor: bool,
+    bundle_irreps_by_kpoint: Mapping[str, Sequence[str]],
+    expected_hsps: Sequence[str],
+    subspace_group_candidate: str,
+    subspace_space_group: Mapping[str, object] | None = None,
+    source_loader: Callable[[int | str, bool], Mapping[str, object]] | None = None,
+) -> dict[str, Any]:
+    """Build a reduced table from explicit type-II grey-group source rows."""
+    from valleyscope.analysis.standard_setting_kmap import (
+        derive_irreptables_standard_setting_identity,
+    )
+    from valleyscope.irreps.ebr_data_adapter import load_ebr_source_data
+    from valleyscope.irreps.tables import (
+        load_magnetic_irrep_table,
+        load_standard_irrep_table,
+    )
+
+    _validate_expected_hsps(expected_hsps)
+    if set(bundle_irreps_by_kpoint) != set(expected_hsps):
+        raise ValueError(
+            "time-reversal bundle HSP keys do not match expected_hsps"
+        )
+    grey_table = load_magnetic_irrep_table(
+        grey_bns_number,
+        unitary_spacegroup_number=unitary_space_group_number,
+        spinor=spinor,
+    )
+    resolved_source_loader = source_loader
+    if source_loader is None:
+        source_data = load_ebr_source_data(grey_bns_number, spinor)
+        source_basis = source_data["source_basis_labels"]
+    else:
+        raw_source_data = source_loader(grey_bns_number, spinor)
+        source_basis = _extract_ebr_basis_labels(raw_source_data)
+
+        def _cached_source_loader(
+            _space_group_number: int | str,
+            _spinful: bool,
+        ) -> Mapping[str, object]:
+            return raw_source_data
+
+        resolved_source_loader = _cached_source_loader
+    rows_by_label = {row.label: row for row in grey_table.irreps}
+    missing = [label for label in source_basis if label not in rows_by_label]
+    if missing:
+        raise ValueError(
+            f"grey EBR source rows missing from magnetic table: {missing}"
+        )
+    source_hsp_by_irrep = {
+        label: rows_by_label[label].kpoint_label for label in source_basis
+    }
+    allowed_labels = [
+        label for label in source_basis
+        if source_hsp_by_irrep[label] in expected_hsps
+    ]
+    allowed_keys = [
+        f"{source_hsp_by_irrep[label]}:{label}"
+        for label in allowed_labels
+    ]
+    declared_labels = {
+        str(label)
+        for labels in bundle_irreps_by_kpoint.values()
+        for label in labels
+    }
+    if not declared_labels.issubset(set(allowed_labels)):
+        raise ValueError(
+            "time-reversal bundle contains unresolved grey irreps: "
+            f"{sorted(declared_labels - set(allowed_labels))}"
+        )
+
+    unitary_table = load_standard_irrep_table(
+        unitary_space_group_number, spinor=spinor
+    )
+    standard_setting = derive_irreptables_standard_setting_identity(
+        unitary_table, unitary_space_group_number
+    )
+    table = build_reduced_table_from_irreptables(
+        space_group_number=grey_bns_number,
+        spinful=spinor,
+        source_hsp_by_irrep=source_hsp_by_irrep,
+        valleyscope_irrep_multiplicity_by_source_irrep={
+            label: {f"{source_hsp_by_irrep[label]}:{label}": 1}
+            for label in source_basis
+        },
+        expected_hsps=expected_hsps,
+        allowed_irrep_keys=allowed_keys,
+        subspace_group_candidate=subspace_group_candidate,
+        source_loader=resolved_source_loader,
+        provenance={
+            "space_group_number": unitary_space_group_number,
+            "unitary_space_group_number": unitary_space_group_number,
+            "time_reversal_grey_bns_number": grey_bns_number,
+            "time_reversal_source": "irreptables_type_ii_grey_group",
+            "standard_setting_identity": standard_setting,
+            "valleyscope_reduction": "sampled_hsp_valley_preserving",
+        },
+        subspace_space_group=subspace_space_group,
+    )
+    return table
+
+
 def _extract_ebr_basis_labels(ebr_data: Mapping[str, object]) -> list[str]:
     """Extract basis irrep labels from irreptables EBR data dict."""
     if not isinstance(ebr_data, Mapping):

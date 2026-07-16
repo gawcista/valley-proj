@@ -158,13 +158,13 @@ def search_nonnegative_bounded(
     bounds: list[int],
 ) -> list[int] | None:
     """Bounded search returning the first nonnegative solution (or None)."""
-    witnesses = _search_nonnegative_witnesses(
+    witnesses = search_nonnegative_witnesses(
         target, ebr_vectors, bounds, max_witnesses=1,
     )
     return witnesses[0] if witnesses else None
 
 
-def _search_nonnegative_witnesses(
+def search_nonnegative_witnesses(
     target: list[int],
     ebr_vectors: list[list[int]],
     bounds: list[int],
@@ -259,7 +259,7 @@ def classify_bundle(
         for b in bounds
     ]
 
-    witnesses = _search_nonnegative_witnesses(
+    witnesses = search_nonnegative_witnesses(
         target, ebr_vectors, effective_bounds, max_witnesses=2,
     )
 

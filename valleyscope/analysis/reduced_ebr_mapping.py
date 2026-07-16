@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from valleyscope.irreps.magnetic_groups import derive_type_ii_bns_number
+
 _REQUIRED_TABLE_KEYS = {"schema_version", "subspace_group_candidate",
                          "expected_hsps", "irreps", "ebrs"}
 _SOLVER_NAME = "smith_normal_form_plus_bounded_nonnegative_search"
@@ -149,6 +151,7 @@ def promote_bundle_for_solve(*, bundle: dict, table: dict) -> dict:
         "affine_setting_check": "not_attempted",
         "hall_setting_check": "not_attempted",
         "spin_convention_check": "not_attempted",
+        "problem_kind_check": "not_attempted",
         "hsp_basis_check": "not_attempted",
         "irrep_basis_check": "not_attempted",
     }
@@ -189,6 +192,15 @@ def promote_bundle_for_solve(*, bundle: dict, table: dict) -> dict:
             f"{valleyscope_reduction!r}"))
         prov_ok = False
     report["table_provenance_check"] = "passed" if prov_ok else "failed"
+
+    _validate_problem_kind_compatibility(
+        bundle=bundle,
+        provenance=prov,
+        table_space_group_number=table_sg_num,
+        table_spinful=table_spinful,
+        blockers=blockers,
+        report=report,
+    )
 
     # ---- A2. Independent table standard-setting evidence (spglib) ----
     table_setting = (
@@ -343,6 +355,13 @@ def promote_bundle_for_solve(*, bundle: dict, table: dict) -> dict:
         "space_group_number": table_sg_num,
         "spinful": table_spinful,
         "valleyscope_reduction": valleyscope_reduction,
+        "unitary_space_group_number": prov.get(
+            "unitary_space_group_number"
+        ),
+        "time_reversal_grey_bns_number": prov.get(
+            "time_reversal_grey_bns_number"
+        ),
+        "time_reversal_source": prov.get("time_reversal_source"),
         "independent_setting_identity": dict(table_setting) if table_setting else None,
         "setting_source": (
             table_setting.get("canonical_setting_source")
@@ -388,6 +407,200 @@ def _normalized_hsp_set(value: object) -> set[str] | None:
     if len(set(labels)) != len(labels):
         return None
     return set(labels)
+
+
+def _validate_problem_kind_compatibility(
+    *,
+    bundle: dict,
+    provenance: dict,
+    table_space_group_number: object,
+    table_spinful: object,
+    blockers: list[dict[str, str]],
+    report: dict[str, object],
+) -> None:
+    """Keep unitary and type-II grey reduced problems physically distinct."""
+    unitary_kind = "unitary_valley_reduced_ebr"
+    orbit_kind = "valley_orbit_reduced_ebr"
+    problem_kind = bundle.get("problem_kind", unitary_kind)
+    grey_source = provenance.get("time_reversal_source")
+    grey_bns_number = provenance.get("time_reversal_grey_bns_number")
+    grey_unitary_sg = provenance.get("unitary_space_group_number")
+
+    if problem_kind == unitary_kind:
+        if grey_source is not None or grey_bns_number is not None:
+            blockers.append(_blocker(
+                "unitary_problem_rejects_grey_table",
+                "unitary valley problems cannot be promoted with type-II "
+                "grey-group table provenance",
+            ))
+            report["problem_kind_check"] = "failed"
+        else:
+            report["problem_kind_check"] = "passed"
+        return
+
+    if problem_kind != orbit_kind:
+        blockers.append(_blocker(
+            "problem_kind_invalid",
+            f"unsupported reduced EBR problem_kind {problem_kind!r}",
+        ))
+        report["problem_kind_check"] = "failed"
+        return
+
+    table_provenance_complete = (
+        grey_source == "irreptables_type_ii_grey_group"
+        and isinstance(grey_bns_number, str)
+        and bool(grey_bns_number)
+        and _is_positive_int(grey_unitary_sg)
+    )
+    if not table_provenance_complete:
+        blockers.append(_blocker(
+            "time_reversal_table_provenance_missing",
+            "valley-orbit problems require irreptables type-II grey-group "
+            "source, BNS number, and unitary space-group provenance",
+        ))
+
+    expected_bns_number: str | None = None
+    if _is_positive_int(table_space_group_number):
+        try:
+            expected_bns_number = derive_type_ii_bns_number(
+                int(table_space_group_number)
+            )
+        except Exception as exc:
+            blockers.append(_blocker(
+                "time_reversal_grey_bns_unresolved",
+                "could not independently derive the type-II BNS number: "
+                f"{type(exc).__name__}: {exc}",
+            ))
+    if (
+        expected_bns_number is not None
+        and grey_bns_number != expected_bns_number
+    ):
+        blockers.append(_blocker(
+            "time_reversal_grey_bns_mismatch",
+            f"table grey BNS {grey_bns_number!r} does not match the "
+            f"independently derived type-II group {expected_bns_number!r}",
+        ))
+    if (
+        _is_positive_int(grey_unitary_sg)
+        and _is_positive_int(table_space_group_number)
+        and int(grey_unitary_sg) != int(table_space_group_number)
+    ):
+        blockers.append(_blocker(
+            "time_reversal_unitary_sg_mismatch",
+            f"grey table unitary SG {grey_unitary_sg!r} does not match "
+            f"table SG {table_space_group_number!r}",
+        ))
+
+    if not _joint_bundle_time_reversal_evidence_valid(
+        bundle=bundle,
+        table_spinful=table_spinful,
+        expected_bns_number=expected_bns_number,
+    ):
+        blockers.append(_blocker(
+            "time_reversal_bundle_evidence_invalid",
+            "valley-orbit bundle lacks a complete exchanged-valley "
+            "involution, source-irrep pairing, HSP orbits, or matching grey "
+            "BNS evidence",
+        ))
+
+    report["problem_kind_check"] = (
+        "passed"
+        if not any(
+            blocker["code"].startswith("time_reversal_")
+            for blocker in blockers
+        )
+        else "failed"
+    )
+
+
+def _joint_bundle_time_reversal_evidence_valid(
+    *,
+    bundle: dict,
+    table_spinful: object,
+    expected_bns_number: str | None,
+) -> bool:
+    if bundle.get("valley") not in (None, ""):
+        return False
+    valley_orbit = bundle.get("valley_orbit")
+    if (
+        not isinstance(valley_orbit, list)
+        or len(valley_orbit) != 2
+        or any(not isinstance(item, str) or not item for item in valley_orbit)
+        or len(set(valley_orbit)) != 2
+    ):
+        return False
+    orbit_members = set(valley_orbit)
+
+    unitary_irreps = bundle.get("unitary_valley_irreps")
+    if not isinstance(unitary_irreps, dict) or set(unitary_irreps) != orbit_members:
+        return False
+    unitary_irrep_labels: set[str] = set()
+    for component in unitary_irreps.values():
+        if not isinstance(component, dict) or not component:
+            return False
+        for hsp, counts in component.items():
+            if (
+                not isinstance(hsp, str)
+                or not hsp
+                or not isinstance(counts, dict)
+                or not counts
+                or any(
+                    not isinstance(label, str)
+                    or not label
+                    or not isinstance(multiplicity, int)
+                    or isinstance(multiplicity, bool)
+                    or multiplicity <= 0
+                    for label, multiplicity in counts.items()
+                )
+            ):
+                return False
+            unitary_irrep_labels.update(counts)
+
+    evidence = bundle.get("time_reversal")
+    if not isinstance(evidence, dict):
+        return False
+    expected_theta_square = -1 if table_spinful is True else 1
+    if evidence.get("theta_square") != expected_theta_square:
+        return False
+
+    valley_mapping = evidence.get("time_reversal_valley_mapping")
+    if not isinstance(valley_mapping, dict):
+        return False
+    left, right = valley_orbit
+    if (
+        valley_mapping.get(left) != right
+        or valley_mapping.get(right) != left
+    ):
+        return False
+
+    hsp_orbits = evidence.get("time_reversal_hsp_orbits")
+    if (
+        not isinstance(hsp_orbits, list)
+        or not hsp_orbits
+        or any(not isinstance(row, dict) or not row for row in hsp_orbits)
+    ):
+        return False
+
+    irrep_pairing = evidence.get("time_reversal_irrep_pairing")
+    if not isinstance(irrep_pairing, dict) or not irrep_pairing:
+        return False
+    if any(
+        not isinstance(label, str)
+        or not label
+        or not isinstance(partner, str)
+        or not partner
+        or irrep_pairing.get(partner) != label
+        for label, partner in irrep_pairing.items()
+    ):
+        return False
+    if not unitary_irrep_labels.issubset(irrep_pairing):
+        return False
+
+    grey_bns_number = evidence.get("grey_bns_number")
+    return (
+        expected_bns_number is not None
+        and grey_bns_number == expected_bns_number
+    )
 
 
 _RECOGNIZED_CENTERINGS = frozenset({"P", "A", "B", "C", "I", "F", "R"})
@@ -1390,7 +1603,15 @@ def build_reduced_ebr_mapping(
         per_kp_prov = _build_per_kpoint_provenance(bundle)
         solution = {
             "bundle_id": bundle.get("bundle_id", ""),
+            "problem_kind": bundle.get(
+                "problem_kind", "unitary_valley_reduced_ebr"
+            ),
             "valley": bundle.get("valley", ""),
+            "valley_orbit": bundle.get("valley_orbit", []),
+            "unitary_valley_irreps": bundle.get(
+                "unitary_valley_irreps", {}
+            ),
+            "time_reversal": bundle.get("time_reversal", {}),
             "subspace_group_candidate": bundle_group,
             "subspace_space_group": bundle.get("subspace_space_group", {}),
             "irrep_vector": irrep_counts,

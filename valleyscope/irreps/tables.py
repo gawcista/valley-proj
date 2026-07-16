@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from importlib import resources
+import json
 from typing import Any
 
 import numpy as np
@@ -27,6 +29,29 @@ class StandardIrrep:
     k_frac: np.ndarray
     dimension: int
     characters: dict[int, complex]
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewedSourceIrrep:
+    """One reviewed irreptables EBR-basis row.
+
+    Canonical and compatible-auxiliary rows use the same representation.
+    ``source_table_status`` records evidence provenance; it never changes the
+    row's geometric or representation-theoretic eligibility.
+    """
+
+    label: str
+    kpoint_label: str
+    k_frac: np.ndarray
+    dimension: int
+    characters: dict[int, complex]
+    operation_indices: tuple[int, ...]
+    operation_inventory_identity: str
+    spinor: bool
+    spin_convention: str
+    source_table: str
+    source_table_status: str
+    source_provenance: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +105,32 @@ def load_standard_irrep_table(spacegroup_number: int, *, spinor: bool) -> Standa
     return _standard_table_from_raw(raw_table, number=spacegroup_number)
 
 
+def load_magnetic_irrep_table(
+    bns_number: str,
+    *,
+    unitary_spacegroup_number: int,
+    spinor: bool,
+) -> StandardIrrepTable:
+    """Load one reviewed magnetic irreptables table by BNS number."""
+    if not isinstance(bns_number, str) or not bns_number:
+        raise ValueError("bns_number must be a non-empty string")
+    from valleyscope.irreps.magnetic_groups import derive_type_ii_bns_number
+
+    expected_bns_number = derive_type_ii_bns_number(
+        unitary_spacegroup_number
+    )
+    if bns_number != expected_bns_number:
+        raise ValueError(
+            "bns_number is not the type-II grey group for unitary SG "
+            f"{unitary_spacegroup_number}: expected {expected_bns_number!r}, "
+            f"got {bns_number!r}"
+        )
+    raw_table = IrrepTable(bns_number, spinor=spinor, magnetic=True)
+    return _standard_table_from_raw(
+        raw_table, number=unitary_spacegroup_number
+    )
+
+
 def resolve_ebr_source_irrep_label_evidence(
     *,
     table: StandardIrrepTable,
@@ -94,20 +145,21 @@ def resolve_ebr_source_irrep_label_evidence(
     contains every otherwise-missing label.  No label-shape heuristic is used.
     """
     canonical = {irrep.label: irrep for irrep in table.irreps}
+    inventory_identity = _operation_inventory_identity(table)
     missing = [label for label in source_basis_labels if label not in canonical]
-    by_label: dict[str, dict[str, object]] = {
-        label: _source_irrep_evidence(
-            canonical[label],
-            status="canonical_standard_irrep",
-            source_table="standard_irrep_table",
-        )
-        for label in source_basis_labels
-        if label in canonical
-    }
     if not missing:
         return {
             "status": "validated",
-            "by_label": by_label,
+            "reviewed_rows": [
+                _reviewed_source_irrep(
+                    canonical[label],
+                    table=table,
+                    source_table="standard_irrep_table",
+                    source_table_status="canonical",
+                    operation_inventory_identity=inventory_identity,
+                )
+                for label in source_basis_labels
+            ],
             "auxiliary_source_table": None,
             "blocker": "",
         }
@@ -152,7 +204,7 @@ def resolve_ebr_source_irrep_label_evidence(
     if len(candidates) != 1:
         return {
             "status": "blocked",
-            "by_label": by_label,
+            "reviewed_rows": [],
             "auxiliary_source_table": None,
             "blocker": (
                 "ebr_source_irrep_labels_missing_from_standard_table: "
@@ -163,15 +215,23 @@ def resolve_ebr_source_irrep_label_evidence(
 
     source_name, source_table = candidates[0]
     auxiliary = {irrep.label: irrep for irrep in source_table.irreps}
-    for label in missing:
-        by_label[label] = _source_irrep_evidence(
-            auxiliary[label],
-            status="validated_noncanonical_ebr_source_row",
-            source_table=source_name,
+    reviewed_rows = [
+        _reviewed_source_irrep(
+            canonical[label] if label in canonical else auxiliary[label],
+            table=table,
+            source_table=(
+                "standard_irrep_table" if label in canonical else source_name
+            ),
+            source_table_status=(
+                "canonical" if label in canonical else "compatible_auxiliary"
+            ),
+            operation_inventory_identity=inventory_identity,
         )
+        for label in source_basis_labels
+    ]
     return {
         "status": "validated",
-        "by_label": by_label,
+        "reviewed_rows": reviewed_rows,
         "auxiliary_source_table": source_name,
         "blocker": "",
     }
@@ -214,20 +274,52 @@ def _standard_table_from_raw(
     )
 
 
-def _source_irrep_evidence(
+def _reviewed_source_irrep(
     irrep: StandardIrrep,
     *,
-    status: str,
+    table: StandardIrrepTable,
     source_table: str,
-) -> dict[str, object]:
-    return {
-        "status": status,
-        "label": irrep.label,
-        "source_hsp_label": irrep.kpoint_label,
-        "standard_k_frac": [float(value) for value in irrep.k_frac],
-        "dimension": irrep.dimension,
-        "source_table": source_table,
-    }
+    source_table_status: str,
+    operation_inventory_identity: str,
+) -> ReviewedSourceIrrep:
+    return ReviewedSourceIrrep(
+        label=irrep.label,
+        kpoint_label=irrep.kpoint_label,
+        k_frac=np.asarray(irrep.k_frac, dtype=float),
+        dimension=irrep.dimension,
+        characters=dict(irrep.characters),
+        operation_indices=tuple(sorted(irrep.characters)),
+        operation_inventory_identity=operation_inventory_identity,
+        spinor=table.spinor,
+        spin_convention=(
+            "double_group_spinor" if table.spinor else "single_group_scalar"
+        ),
+        source_table=source_table,
+        source_table_status=source_table_status,
+        source_provenance="irreptables.StandardIrrepTable",
+    )
+
+
+def _operation_inventory_identity(table: StandardIrrepTable) -> str:
+    rows: list[dict[str, object]] = []
+    for operation in table.operations:
+        rows.append({
+            "table_index": operation.table_index,
+            "rotation_frac": operation.rotation_frac.astype(int).tolist(),
+            "translation_frac": [
+                round(float(value), 12) for value in operation.translation_frac
+            ],
+            "spin_rotation": [
+                [
+                    [round(float(value.real), 12), round(float(value.imag), 12)]
+                    for value in row
+                ]
+                for row in np.asarray(operation.spin_rotation, dtype=complex)
+            ],
+            "time_reversal": operation.time_reversal,
+        })
+    payload = json.dumps(rows, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _same_operation_setting(

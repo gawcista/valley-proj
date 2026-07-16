@@ -1555,19 +1555,19 @@ def test_tmote2_ebr_mm_is_candidate():
         assert c["readiness_level"] == "trusted"
 
 
-def test_tmote2_projected_source_hsp_coverage_and_identity_path_are_complete():
+def test_tmote2_projected_source_hsp_coverage_and_tr_orbit_are_explicit():
     s = _read_fixture_summary()
     coverage = s["sampled_k_coverage"][
         "projected_subspace_hsp_coverage"
     ]
     for valley in ("K_valley", "Kp_valley"):
         row = coverage["by_valley"][valley]
-        assert row["required_source_hsp_labels"] == ["GM", "K", "M"]
+        assert row["required_source_hsp_labels"] == ["GM", "K", "KA", "M"]
         assert row["covered_source_hsp_labels"] == ["GM", "K", "M"]
-        assert row["missing_source_hsp_labels"] == []
+        assert row["missing_source_hsp_labels"] == ["KA"]
         assert row["trusted_matched_source_hsp_labels"] == ["GM", "K", "M"]
-        assert row["complete"] is True
-        assert row["ready_for_ebr_promotion"] is True
+        assert row["complete"] is False
+        assert row["ready_for_ebr_promotion"] is False
 
         decision = s["irrep_workflow_decisions"]["by_kpoint"]["MM"][valley]
         assert decision["workflow_path"] == "direct_qcut"
@@ -1577,8 +1577,27 @@ def test_tmote2_projected_source_hsp_coverage_and_identity_path_are_complete():
 
     assert s["valley_ebr_input_candidates"]["candidate_count"] == 6
     assert s["valley_ebr_input_candidates"]["blocked_count"] == 0
-    assert s["valley_ebr_export_bundle"]["bundle_count"] == 2
-    assert s["valley_ebr_export_bundle"]["schema_version"] == "1.3.0"
+    time_reversal = coverage["time_reversal"]
+    assert time_reversal["status"] == "validated"
+    assert time_reversal["theta_square"] == -1
+    assert time_reversal["time_reversal_valley_mapping"] == {
+        "K_valley": "Kp_valley", "Kp_valley": "K_valley",
+    }
+    assert len(time_reversal["valley_orbits"]) == 1
+    orbit = time_reversal["valley_orbits"][0]
+    assert orbit["members"] == ["K_valley", "Kp_valley"]
+    assert orbit["status"] == "validated"
+    assert orbit["full_unitary_source_hsp_labels"] == ["GM", "K", "KA", "M"]
+    assert orbit["independent_time_reversal_hsp_labels"] == ["GM", "K", "M"]
+    assert orbit["grey_bns_number"] == "143.2"
+
+    export = s["valley_ebr_export_bundle"]
+    assert export["bundle_count"] == 1
+    assert s["valley_ebr_export_bundle"]["schema_version"] == "1.4.0"
+    assert export["bundles"][0]["problem_kind"] == "valley_orbit_reduced_ebr"
+    assert export["bundles"][0]["valley_orbit"] == [
+        "K_valley", "Kp_valley",
+    ]
 
 
 def test_tmote2_public_output_no_cn_like_and_production_no_material_names():
@@ -1638,6 +1657,23 @@ def test_centered_fixture_projected_hsp_coverage_is_per_valley():
             for item in row["missing_source_hsp_representatives"]
         )
 
+    time_reversal = s["sampled_k_coverage"][
+        "projected_subspace_hsp_coverage"
+    ]["time_reversal"]
+    assert time_reversal["status"] == "blocked"
+    assert time_reversal["theta_square"] == -1
+    assert time_reversal["time_reversal_valley_mapping"] == {
+        "M1_valley": "M1_valley",
+        "M2_valley": "M2_valley",
+        "M3_valley": "M3_valley",
+    }
+    assert all(
+        orbit["status"] == "blocked"
+        and "antiunitary_corepresentation_required_not_proven"
+        in orbit["blockers"]
+        for orbit in time_reversal["valley_orbits"]
+    )
+
 
 def test_centered_fixture_star_and_generic_rows_do_not_become_false_blockers():
     s = _read_centered_fixture_summary()
@@ -1681,41 +1717,43 @@ def _read_fixture_reduced_ebr():
 
 
 def test_tmote2_reduced_ebr_auto_canonical_provenance():
-    """tMoTe2 reduced EBR: auto_canonical source, irreptables data, P3 subspace."""
+    """The TR valley orbit uses the reviewed type-II grey source."""
     r = _read_fixture_reduced_ebr()
 
     # Top-level status
-    assert r["mapping_status"] == "solved_exact"
+    assert r["mapping_status"] == "no_exact_solution"
     assert r["table_status"] == "loaded"
 
     # reduced_ebr_input self-auditing
     inp = r.get("reduced_ebr_input", {})
-    assert inp["source"] == "auto_canonical"
-    assert inp["auto_canonical"] is True
+    assert inp["source"] == "auto_time_reversal_grey"
+    assert inp["auto_canonical"] is False
+    assert inp["auto_time_reversal"] is True
     assert inp["spinful"] is True
-    assert inp["ready_bundle_count"] >= 2
-    assert inp["solved_count"] >= 2
+    assert inp["ready_bundle_count"] == 1
+    assert inp["solved_count"] == 1
     assert inp["blocked_count"] == 0
 
     # auto_canonical_bundles
     bundles = r.get("auto_canonical_bundles", [])
-    assert len(bundles) == 2
+    assert len(bundles) == 1
     for b in bundles:
         assert b["sg_number"] == 143
-        assert b["expected_hsps"] == ["GammaM", "KM", "MM"]
-        assert b["status"] == "solved_exact"
+        assert b["expected_hsps"] == ["GM", "K", "M"]
+        assert b["status"] == "no_exact_solution"
         assert b["table_status"] == "loaded"
 
     # Solutions
     for sol in r.get("solutions", []):
         # classification
-        assert sol["classification"] == "atomic-compatible-candidate"
-        assert sol["decomposition_uniqueness"] in ("unique", "non_unique")
-        assert len(sol["ebr_decomposition"]) >= 1
+        assert sol["problem_kind"] == "valley_orbit_reduced_ebr"
+        assert sol["valley_orbit"] == ["K_valley", "Kp_valley"]
+        assert sol["classification"] == "in_integer_span_no_nonnegative_witness"
+        assert sol["nonnegative_solution_status"] == "no_nonnegative_solution"
 
         # table_provenance injected per solution
         tp = sol.get("table_provenance", {})
-        assert tp["source"] == "auto_canonical"
+        assert tp["source"] == "auto_time_reversal_grey"
         assert tp["space_group_number"] == 143
         assert tp["spinful"] is True
         assert tp["data_source"] == "irreptables"
@@ -1725,33 +1763,24 @@ def test_tmote2_reduced_ebr_auto_canonical_provenance():
         assert tp["source_basis_count"] > 0
         assert tp["reduction_basis_count"] > 0
         assert tp["source_basis_count"] > tp["reduction_basis_count"]
-        assert tp.get("dropped_source_row_count", 0) > 0
+        assert tp["time_reversal_grey_bns_number"] == "143.2"
+        assert tp["time_reversal_source"] == (
+            "irreptables_type_ii_grey_group"
+        )
 
         # subspace group
         assert sol["subspace_group_candidate"] == "P3"
 
-        # per-kpoint provenance
-        prov = sol.get("irrep_source_provenance_by_kpoint", {})
-        assert set(prov.keys()).issubset({"GammaM", "KM", "MM"}), f"unexpected HSPs: {set(prov.keys())}"
-        for hsp_entries in prov.values():
-            for entry in hsp_entries:
-                assert entry["source_table_sg_number"] == 143
-                assert entry["source_table_spinor"] is True
-                assert entry["operation_mapping_provenance"] == "exact_spatial"
-                assert isinstance(entry["valley_preserving_operation_ids"], list)
+        assert sol["time_reversal"]["grey_bns_number"] == "143.2"
+        assert set(sol["unitary_valley_irreps"]) == {
+            "K_valley", "Kp_valley",
+        }
 
 
-def test_tmote2_reduced_ebr_mm_in_provenance():
-    """tMoTe2 reduced EBR: MM matched to -M2 enters provenance when present."""
+def test_tmote2_reduced_ebr_preserves_unitary_mm_components():
+    """The joint result retains both valley-resolved unitary M rows."""
     r = _read_fixture_reduced_ebr()
-    mm_solutions = [
-        sol for sol in r.get("solutions", [])
-        if "MM" in sol.get("irrep_source_provenance_by_kpoint", {})
-    ]
-    assert len(mm_solutions) >= 2, f"MM should appear in EBR provenance when matched, got {len(mm_solutions)}"
-    for sol in mm_solutions:
-        prov = sol.get("irrep_source_provenance_by_kpoint", {}).get("MM", [])
-        for entry in prov:
-            assert entry["matched_irrep"] == "-M2"
-            assert entry["source_hsp_label"] == "M"
-            assert entry["source_table_sg_number"] == 143
+    assert len(r.get("solutions", [])) == 1
+    components = r["solutions"][0]["unitary_valley_irreps"]
+    assert components["K_valley"]["M"] == {"-M2": 1}
+    assert components["Kp_valley"]["M"] == {"-M2": 1}

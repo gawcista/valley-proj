@@ -159,6 +159,14 @@ def build_database_ingestion_record(
                     "nonnegative_solution_status": s.get("nonnegative_solution_status", "?"),
                     "irrep_vector": s.get("irrep_vector", []),
                 }
+                if "problem_kind" in s:
+                    rec["problem_kind"] = s["problem_kind"]
+                if "valley_orbit" in s:
+                    rec["valley_orbit"] = s["valley_orbit"]
+                if "unitary_valley_irreps" in s:
+                    rec["unitary_valley_irreps"] = s["unitary_valley_irreps"]
+                if "time_reversal" in s:
+                    rec["time_reversal"] = s["time_reversal"]
                 if "ebr_decomposition" in s:
                     rec["ebr_decomposition"] = s["ebr_decomposition"]
                 if "integer_solution" in s:

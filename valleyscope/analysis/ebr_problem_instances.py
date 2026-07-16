@@ -28,6 +28,7 @@ def build_ebr_problem_instances(
     *,
     ebr_input_candidates: dict[str, object] | None,
     projected_hsp_coverage: dict[str, object] | None = None,
+    time_reversal_orbit_report: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Build EBR problem instances from trusted input candidates.
 
@@ -47,6 +48,14 @@ def build_ebr_problem_instances(
 
     if not candidates:
         return _empty_report("no trusted EBR input candidates")
+
+    if isinstance(time_reversal_orbit_report, dict) and (
+        time_reversal_orbit_report.get("enabled") is True
+    ):
+        return _build_time_reversal_problem_instances(
+            candidates=candidates,
+            time_reversal_orbit_report=time_reversal_orbit_report,
+        )
 
     # Group by certificate-aware physical identity.
     # Use the complete immutable _SettingIdentity as the key so that
@@ -270,6 +279,163 @@ def _coverage_for_valley(
         return {}
     row = by_valley.get(valley, {})
     return dict(row) if isinstance(row, dict) else {}
+
+
+def _build_time_reversal_problem_instances(
+    *,
+    candidates: list[dict[str, object]],
+    time_reversal_orbit_report: dict[str, object],
+) -> dict[str, object]:
+    """Build only joint physical EBR problems when explicit TR is enabled."""
+    raw_orbits = time_reversal_orbit_report.get("valley_orbits", [])
+    if not isinstance(raw_orbits, list):
+        raw_orbits = []
+    instances: list[dict[str, object]] = []
+    for index, raw_orbit in enumerate(raw_orbits, start=1):
+        if not isinstance(raw_orbit, dict):
+            continue
+        members = raw_orbit.get("members", [])
+        if not isinstance(members, list):
+            members = []
+        component_candidates = [
+            candidate for candidate in candidates
+            if candidate.get("valley") in members
+        ]
+        fingerprints = {
+            _certificate_fingerprint(candidate)
+            for candidate in component_candidates
+        }
+        blockers = [
+            str(value) for value in raw_orbit.get("blockers", [])
+            if isinstance(value, str)
+        ]
+        if not component_candidates:
+            blockers.append("no_trusted_unitary_valley_irrep_components")
+        if len(fingerprints) != 1:
+            blockers.append(
+                "time_reversal_component_standard_setting_mismatch"
+            )
+        spin_values = {
+            provenance.get("source_table_spinor")
+            for candidate in component_candidates
+            if isinstance(
+                provenance := candidate.get("irrep_source_provenance"), dict
+            )
+            and isinstance(provenance.get("source_table_spinor"), bool)
+        }
+        if len(spin_values) != 1:
+            blockers.append("time_reversal_component_spin_evidence_mismatch")
+        ssg = _first_subspace_space_group(component_candidates)
+        sg_number = ssg.get("candidate_space_group_number")
+        sg_symbol = ssg.get("candidate_space_group_symbol")
+        irreps_by_kpoint = raw_orbit.get("irreps_by_kpoint", {})
+        expected_hsps = raw_orbit.get("expected_hsps", [])
+        if not isinstance(irreps_by_kpoint, dict) or not irreps_by_kpoint:
+            blockers.append("time_reversal_grey_irrep_target_missing")
+            irreps_by_kpoint = {}
+        if not isinstance(expected_hsps, list) or set(irreps_by_kpoint) != set(
+            expected_hsps
+        ):
+            blockers.append("time_reversal_independent_hsp_basis_mismatch")
+            expected_hsps = []
+        validated = raw_orbit.get("status") == "validated" and not blockers
+        instance_id = f"ebr_instance_{index:03d}"
+        instances.append({
+            "instance_id": instance_id,
+            "problem_kind": "valley_orbit_reduced_ebr",
+            "valley": "",
+            "valley_orbit": list(members),
+            "subspace_group_candidate": sg_symbol or "",
+            "subspace_sg_number": sg_number,
+            "subspace_space_group": dict(ssg),
+            "spinor": next(iter(spin_values), None),
+            "certificate_identity": _certificate_identity(
+                component_candidates
+            ),
+            "workflow_path": "time_reversal_valley_orbit",
+            "workflow_paths": sorted({
+                str(candidate.get("workflow_path", ""))
+                for candidate in component_candidates
+                if candidate.get("workflow_path")
+            }),
+            "readiness_level": "trusted" if validated else "blocked",
+            "readiness_evidence": [
+                "trusted_unitary_valley_irreps",
+                "validated_time_reversal_valley_orbit",
+                "reviewed_grey_group_source",
+            ] if validated else [],
+            "irreps_by_kpoint": dict(irreps_by_kpoint),
+            "operations_by_kpoint": {},
+            "irrep_records_by_kpoint": {},
+            "candidate_count": len(component_candidates),
+            "status": "sampled_basis" if validated else "blocked",
+            "ready_for_reduced_table_validation": validated,
+            "ready_for_ebr_decomposition": False,
+            "blocked_by": _deduplicate_strings(blockers),
+            "expected_hsps": list(expected_hsps),
+            "expected_hsp_policy_source": (
+                "validated_time_reversal_hsp_orbits"
+            ),
+            "hsp_basis_status": "sampled_basis" if validated else "blocked",
+            "optional_hsps": [],
+            "actual_hsps": list(irreps_by_kpoint),
+            "missing_optional_hsps": [],
+            "required_source_hsp_labels": raw_orbit.get(
+                "full_unitary_source_hsp_labels", []
+            ),
+            "covered_source_hsp_labels": raw_orbit.get(
+                "full_unitary_source_hsp_labels", []
+            ) if validated else [],
+            "missing_source_hsp_labels": [],
+            "trusted_matched_source_hsp_labels": raw_orbit.get(
+                "full_unitary_source_hsp_labels", []
+            ) if validated else [],
+            "trusted_missing_source_hsp_labels": [],
+            "source_hsp_to_sampled_kpoint": {},
+            "source_hsp_coverage_complete": validated,
+            "source_hsp_coverage_provenance": {
+                "source": "time_reversal_valley_orbit_completion",
+            },
+            "unitary_valley_irreps": raw_orbit.get(
+                "unitary_valley_irreps", {}
+            ),
+            "time_reversal": {
+                "theta_square": time_reversal_orbit_report.get(
+                    "theta_square"
+                ),
+                "time_reversal_valley_mapping": (
+                    time_reversal_orbit_report.get(
+                        "time_reversal_valley_mapping", {}
+                    )
+                ),
+                "time_reversal_hsp_orbits": raw_orbit.get(
+                    "time_reversal_hsp_orbits", []
+                ),
+                "time_reversal_irrep_pairing": raw_orbit.get(
+                    "time_reversal_irrep_pairing", {}
+                ),
+                "grey_bns_number": raw_orbit.get("grey_bns_number"),
+            },
+        })
+    return {
+        "status": "has_instances" if instances else "no_instances",
+        "instance_count": len(instances),
+        "reduced_ebr_decomposition_status": "not_implemented",
+        "interpretation": (
+            "Joint time-reversal valley-orbit EBR problem instances. "
+            "Valley-resolved unitary irreps remain identifiable as components; "
+            "no independent one-valley physical EBR problem is produced."
+        ),
+        "instances": instances,
+    }
+
+
+def _deduplicate_strings(values: list[str]) -> list[str]:
+    out: list[str] = []
+    for value in values:
+        if value not in out:
+            out.append(value)
+    return out
 
 
 def _string_list(value: object) -> list[str]:

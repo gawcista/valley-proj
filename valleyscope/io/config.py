@@ -134,6 +134,13 @@ class ReducedEbrConfig:
 
 
 @dataclass(frozen=True)
+class TimeReversalConfig:
+    """Explicit evidence that the parent calculation is time-reversal symmetric."""
+
+    enabled: bool = False
+
+
+@dataclass(frozen=True)
 class GenericIrrepSourceConfig:
     """Generic Bilbao/irreptables irrep source matching config.
 
@@ -199,6 +206,7 @@ class AppConfig:
     rotation: RotationConfig = field(default_factory=RotationConfig)
     symmetry_adapted_valley: SymmetryAdaptedValleyConfig = field(default_factory=SymmetryAdaptedValleyConfig)
     reduced_ebr: ReducedEbrConfig = field(default_factory=ReducedEbrConfig)
+    time_reversal: TimeReversalConfig = field(default_factory=TimeReversalConfig)
     generic_irrep_source: GenericIrrepSourceConfig = field(default_factory=GenericIrrepSourceConfig)
     standard_setting: StandardSettingConfig = field(default_factory=StandardSettingConfig)
     monolayer_lattices: dict[str, np.ndarray] = field(default_factory=dict)
@@ -683,6 +691,22 @@ def _parse_reduced_ebr_config(base: Path, raw: dict[str, Any]) -> ReducedEbrConf
     )
 
 
+def _parse_time_reversal_config(raw: object) -> TimeReversalConfig:
+    if raw is None:
+        return TimeReversalConfig()
+    if not isinstance(raw, dict):
+        raise ValueError("analysis.time_reversal must be a mapping")
+    unknown = sorted(set(raw) - {"enabled"})
+    if unknown:
+        raise ValueError(
+            f"Unsupported analysis.time_reversal keys: {unknown}"
+        )
+    enabled = raw.get("enabled", False)
+    if not isinstance(enabled, bool):
+        raise ValueError("analysis.time_reversal.enabled must be a boolean")
+    return TimeReversalConfig(enabled=enabled)
+
+
 
 
 def _parse_generic_irrep_source_config(raw: dict[str, Any]) -> GenericIrrepSourceConfig:
@@ -886,6 +910,9 @@ def load_config(path: str | Path) -> AppConfig:
             analysis_raw.get("symmetry_adapted_valley", {})
         ),
         reduced_ebr=_parse_reduced_ebr_config(base, analysis_raw.get("reduced_ebr", {})),
+        time_reversal=_parse_time_reversal_config(
+            analysis_raw.get("time_reversal", {})
+        ),
         generic_irrep_source=_parse_generic_irrep_source_config(
             analysis_raw.get("generic_irrep_source", {}),
         ),

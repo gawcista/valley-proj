@@ -6,9 +6,10 @@ k-point classification.  It does not add a standalone output file.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Mapping
 
 from valleyscope.irreps.tables import (
+    ReviewedSourceIrrep,
     StandardIrrepTable,
     match_table_operations,
 )
@@ -179,6 +180,7 @@ def build_source_payload_for_projected_hsp_matching(
     projected_hsp_classification: dict[str, Any],
     detected_operations: list[dict[str, Any]],
     valley_preserving_operation_ids: list[int],
+    source_hsp_basis: Mapping[str, object] | None = None,
     tol: float = 5e-5,
 ) -> dict[str, Any]:
     """Build a source payload for a representative or validated star arm.
@@ -296,15 +298,44 @@ def build_source_payload_for_projected_hsp_matching(
             "classification has no reviewed EBR source irrep labels",
             source_operation_map,
         )
-    source_label_set = set(source_irrep_labels)
-    irreps = tuple(
-        irrep for irrep in table.irreps_by_kpoint(source_hsp)
-        if irrep.label in source_label_set
+    reviewed_by_label = (
+        source_hsp_basis.get("_reviewed_source_irreps_by_label", {})
+        if isinstance(source_hsp_basis, Mapping) else {}
     )
-    if not irreps:
+    if not isinstance(reviewed_by_label, Mapping) or not reviewed_by_label:
         return _blocked_after_operation_mapping(
-            "no_source_irreps_for_hsp",
-            f"source HSP {source_hsp!r} has no irreps in the table",
+            "reviewed_source_irrep_model_missing",
+            "projected-HSP matching requires the reviewed EBR source-row "
+            "model",
+            source_operation_map,
+        )
+    if len(set(source_irrep_labels)) != len(source_irrep_labels):
+        return _blocked_after_operation_mapping(
+            "duplicate_reviewed_source_irrep_labels",
+            f"source HSP {source_hsp!r} contains duplicate irrep labels",
+            source_operation_map,
+        )
+    missing_or_malformed = [
+        label for label in source_irrep_labels
+        if not isinstance(reviewed_by_label.get(label), ReviewedSourceIrrep)
+        or reviewed_by_label[label].kpoint_label != source_hsp
+    ]
+    if missing_or_malformed:
+        return _blocked_after_operation_mapping(
+            "incomplete_reviewed_source_irrep_model",
+            "missing reviewed source irreps "
+            f"{missing_or_malformed} for HSP {source_hsp!r}",
+            source_operation_map,
+        )
+    irreps = tuple(reviewed_by_label[label] for label in source_irrep_labels)
+    if (
+        len({row.operation_inventory_identity for row in irreps}) != 1
+        or len({row.spin_convention for row in irreps}) != 1
+    ):
+        return _blocked_after_operation_mapping(
+            "inconsistent_reviewed_source_irrep_model",
+            f"source HSP {source_hsp!r} rows disagree on operation or spin "
+            "inventory",
             source_operation_map,
         )
     transport_by_target: dict[int, tuple[int, int]] = {}
@@ -397,6 +428,7 @@ def build_source_payload_for_projected_hsp_matching(
             "table_spinor": table.spinor,
             "source_hsp_label": source_hsp,
             "source_irrep_labels": list(source_irrep_labels),
+            "source_irrep_model": "reviewed_source_rows",
             "source_hsp_classification": classification,
             "valley_preserving_operation_ids": vp_ids,
             "source_table_operation_indices": expected_table_ids,
