@@ -225,8 +225,8 @@ def test_basis_transform_no_lattice_returns_unavailable():
     assert "lattice" in result.get("reason", "")
 
 
-def test_basis_transform_centered_setting_requires_explicit_cell_transform():
-    """Centered settings cannot be accepted from rotation axes alone."""
+def test_basis_transform_centered_setting_requires_complete_affine_subgroup():
+    """Centered settings stay blocked when the affine subgroup is incomplete."""
     from valleyscope.analysis.standard_setting_kmap import (
         _compute_standard_setting_basis_transform,
     )
@@ -243,7 +243,7 @@ def test_basis_transform_centered_setting_requires_explicit_cell_transform():
     assert result["status"] == "unavailable"
     assert "transform_matrix" not in result
     assert result["operation_basis_verification"]["status"] == "not_attempted"
-    assert "rotation matrices alone" in result["reason"]
+    assert "complete valley-preserving affine operation data" in result["reason"]
 
 
 def test_resolver_includes_basis_transform_in_provenance():
@@ -263,8 +263,8 @@ def test_resolver_includes_basis_transform_in_provenance():
     assert "reason" in bt
 
 
-def test_hexagonal_lattice_subgroup_reconstruction_requires_verification():
-    """Centered subgroup mapping stays blocked without an explicit cell transform."""
+def test_centered_subgroup_reconstruction_requires_complete_affine_evidence():
+    """Centered subgroup mapping stays blocked with incomplete affine evidence."""
     from valleyscope.analysis.standard_setting_kmap import (
         _compute_standard_setting_basis_transform,
     )
@@ -282,7 +282,9 @@ def test_hexagonal_lattice_subgroup_reconstruction_requires_verification():
     )
     assert result["status"] == "unavailable"
     assert result["operation_basis_verification"]["status"] == "not_attempted"
-    assert "centered" in result["operation_basis_verification"]["reason"]
+    assert "complete affine subgroup evidence" in (
+        result["operation_basis_verification"]["reason"]
+    )
 
 
 def test_operation_basis_verification_does_not_round_away_shear():
@@ -1714,6 +1716,17 @@ _CENTERED_CASES = [
     ),
 ]
 
+_CENTERED_STANDARD_LATTICES = {
+    "C": np.array([[4.0, 0.0, 0.0],
+                   [0.0, 5.0, 0.0],
+                   [1.2, 0.0, 6.0]]),
+    "I": np.diag([4.0, 4.0, 6.0]),
+    "F": np.diag([4.0, 5.0, 6.0]),
+    "R": np.array([[4.0, 0.0, 0.0],
+                   [-2.0, 2.0 * np.sqrt(3.0), 0.0],
+                   [0.0, 0.0, 10.0]]),
+}
+
 
 def _primitive_parent_ops_from_irreptables(sg_number, transform, operation_ids):
     from valleyscope.irreps.tables import load_standard_irrep_table
@@ -1774,6 +1787,91 @@ def _resolved_centered_certificate_fixture(
     }
     identity = _certificate_identity([candidate])
     return table, detected, certificate, identity
+
+
+@pytest.mark.parametrize(
+    "sg_number,hall_number,hall_symbol,centering,operation_ids,index",
+    _CENTERED_CASES,
+)
+def test_generic_centered_resolver_derives_affine_standardization(
+    sg_number, hall_number, hall_symbol, centering, operation_ids, index,
+):
+    """Complete parent affine data derives C/I/F/R standard settings."""
+    transform = _CENTERED_TRANSFORMS[centering]
+    table, detected = _primitive_parent_ops_from_irreptables(
+        sg_number, transform, operation_ids,
+    )
+    parent_lattice = transform.T @ _CENTERED_STANDARD_LATTICES[centering]
+
+    label, blocker, provenance = resolve_standard_setting_hsp_label(
+        k_frac=np.zeros(3),
+        table=table,
+        standard_match={
+            "number": sg_number,
+            "international_short": table.name,
+            "hall_number": hall_number,
+            "hall_symbol": hall_symbol,
+            "operation_ids": operation_ids,
+        },
+        lattice_direct_cart=parent_lattice,
+        detected_operations=detected,
+    )
+
+    assert label == "GM"
+    assert blocker is None
+    basis = provenance["basis_transform"]
+    assert basis["status"] == "accepted"
+    assert basis["transform_provenance"] == "spglib_affine_subgroup_standardization"
+    assert basis["affine_validation"]["status"] == "passed"
+    cert = provenance["standard_setting_certificate"]
+    assert cert["validation_status"] == "validated"
+    assert cert["transform_provenance"] == "spglib_affine_subgroup_standardization"
+    assert cert["primitive_conventional_index"] == index
+    assert cert["matched_expanded_operations"] == len(operation_ids) * index
+    assert cert["unmatched_centered_operation_pairs"] == []
+    assert cert["unused_standard_operation_indices"] == []
+
+
+def test_validated_centered_transform_is_preserved_without_source_hsp_label():
+    """A missing table HSP label must not erase a validated C-cell mapping."""
+    sg_number, hall_number, hall_symbol, centering, operation_ids, _ = (
+        _CENTERED_CASES[0]
+    )
+    transform = _CENTERED_TRANSFORMS[centering]
+    table, detected = _primitive_parent_ops_from_irreptables(
+        sg_number, transform, operation_ids,
+    )
+    parent_lattice = transform.T @ _CENTERED_STANDARD_LATTICES[centering]
+
+    label, blocker, provenance = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.123, 0.234, 0.345]),
+        table=table,
+        standard_match={
+            "number": sg_number,
+            "international_short": table.name,
+            "hall_number": hall_number,
+            "hall_symbol": hall_symbol,
+            "operation_ids": operation_ids,
+        },
+        lattice_direct_cart=parent_lattice,
+        detected_operations=detected,
+    )
+
+    assert label is None
+    assert blocker is not None
+    assert "source HSP label" in blocker
+    assert "no unique standard-setting k-coordinate transform" not in blocker
+    assert provenance["basis_transform"]["status"] == "accepted"
+    assert provenance["transformed_k_frac"] == pytest.approx(
+        (np.array([0.123, 0.234, 0.345]) @ np.linalg.inv(
+            np.asarray(provenance["basis_transform"]["transform_matrix"])
+        ).T).tolist()
+    )
+    certificate = provenance["standard_setting_certificate"]
+    assert certificate["validation_status"] == "validated"
+    assert certificate["translation_validation_status"] == "passed"
+    assert certificate["unmatched_centered_operation_pairs"] == []
+    assert certificate.get("resolved_hsp_label") is None
 
 
 @pytest.mark.parametrize(

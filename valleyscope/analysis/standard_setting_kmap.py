@@ -1585,6 +1585,21 @@ def resolve_standard_setting_hsp_label(
         and basis_result.get("transform_matrix") is not None
     ):
         T = np.asarray(basis_result["transform_matrix"], dtype=float)
+        derived_origin = basis_result.get("origin_shift_fractional")
+        basis_origin_shift = (
+            np.asarray(origin_shift_fractional, dtype=float)
+            if origin_shift_fractional is not None
+            else (
+                np.asarray(derived_origin, dtype=float)
+                if derived_origin is not None
+                else None
+            )
+        )
+        basis_provenance = str(
+            basis_result.get(
+                "transform_provenance", "operation_basis_reconstruction",
+            )
+        )
         # Transform k_frac from parent reciprocal basis to standard setting.
         # The reciprocal transform is the transpose of the inverse of the
         # direct-lattice transform: k_std = T^(-T) * k_parent.
@@ -1596,120 +1611,126 @@ def resolve_standard_setting_hsp_label(
                 table, transformed_k, tolerance=tolerance,
                 standard_match=standard_match,
             )
-            if transformed_label is not None:
-                aff = None
-                if isinstance(standard_match, dict) and detected_operations:
-                    vp_ids = _operation_ids_list(standard_match)
-                    aff = _validate_affine_operation_equivalence(
-                        vp_operations=list(detected_operations),
-                        vp_operation_ids=vp_ids,
-                        standard_match=standard_match,
-                        parent_to_standard_direct_transform=T,
-                            origin_shift_fractional=origin_shift_fractional,
+            aff = None
+            if isinstance(standard_match, dict) and detected_operations:
+                vp_ids = _operation_ids_list(standard_match)
+                aff = _validate_affine_operation_equivalence(
+                    vp_operations=list(detected_operations),
+                    vp_operation_ids=vp_ids,
+                    standard_match=standard_match,
+                    parent_to_standard_direct_transform=T,
+                    origin_shift_fractional=basis_origin_shift,
+                )
+                if aff.get("status") == "failed":
+                    prov["affine_validation"] = aff
+                    blocker = _affine_failure_blocker(
+                        aff, source="operation-basis reconstruction"
                     )
-                    if aff.get("status") == "failed":
-                        prov["affine_validation"] = aff
-                        blocker = _affine_failure_blocker(
-                            aff, source="operation-basis reconstruction"
-                        )
-                        cert = build_standard_setting_certificate(
-                            standard_match=standard_match,
-                            validation_status="rejected",
-                            unresolved_reason=blocker,
-                            parent_basis_operation_ids=(
-                                _operation_ids_list(standard_match)
-                                if isinstance(standard_match, dict) else None
-                            ),
-                            parent_to_standard_direct_transform=T,
-                            origin_shift_fractional=origin_shift_fractional,
-                            transform_provenance="operation_basis_reconstruction",
-                            parent_k_frac=k_frac,
-                        )
-                        cert.standard_setting_source = (
-                            "operation_basis_reconstruction"
-                        )
-                        cert.primitive_conventional_relation = (
-                            "operation_basis_reconstruction"
-                        )
-                        cert.operation_mapping_status = (
-                            "operation_basis_verification_passed"
-                        )
-                        _apply_affine_validation_to_certificate(cert, aff)
-                        candidate = _build_transform_candidate(
-                            standard_match=standard_match,
-                            parent_to_standard_direct_transform=T,
-                            origin_shift_fractional=origin_shift_fractional,
-                            transform_provenance="operation_basis_reconstruction",
-                            operation_mapping_status=cert.operation_mapping_status,
-                            affine_result=aff,
-                            unresolved_reason=blocker,
-                        )
-                        _attach_transform_candidate(
-                            provenance=prov,
-                            certificate=cert,
-                            candidate=candidate,
-                        )
-                        prov["standard_setting_certificate"] = cert.to_dict()
-                        return None, blocker, prov
-                if canonical_blocker is not None:
                     cert = build_standard_setting_certificate(
                         standard_match=standard_match,
-                        validation_status="unresolved",
-                        unresolved_reason=canonical_blocker,
-                        parent_basis_operation_ids=_operation_ids_list(standard_match),
+                        validation_status="rejected",
+                        unresolved_reason=blocker,
+                        parent_basis_operation_ids=(
+                            _operation_ids_list(standard_match)
+                            if isinstance(standard_match, dict) else None
+                        ),
                         parent_to_standard_direct_transform=T,
-                        origin_shift_fractional=origin_shift_fractional,
-                        transform_provenance="operation_basis_reconstruction",
+                        origin_shift_fractional=basis_origin_shift,
+                        transform_provenance=basis_provenance,
                         parent_k_frac=k_frac,
                     )
-                    cert.primitive_conventional_relation = (
-                        "operation_basis_reconstruction"
+                    cert.standard_setting_source = basis_provenance
+                    cert.primitive_conventional_relation = basis_provenance
+                    cert.operation_mapping_status = (
+                        "operation_basis_verification_passed"
                     )
-                    if aff is not None:
-                        _apply_affine_validation_to_certificate(cert, aff)
-                    prov["standard_setting_certificate"] = cert.to_dict()
-                    return None, canonical_blocker, prov
-                prov["basis_transformed_match_succeeded"] = True
-                prov["transformed_hsp_label"] = transformed_label
-                cert = build_standard_setting_certificate(
-                    standard_match=standard_match,
-                    validation_status="validated",
-                    parent_basis_operation_ids=(
-                        _operation_ids_list(standard_match)
-                        if isinstance(standard_match, dict) else None
-                    ),
-                    parent_to_standard_direct_transform=T,
-                    origin_shift_fractional=origin_shift_fractional,
-                    transform_provenance="operation_basis_reconstruction",
-                    parent_k_frac=k_frac,
-                    resolved_hsp_label=transformed_label,
-                )
-                cert.standard_setting_source = "operation_basis_reconstruction"
-                cert.primitive_conventional_relation = (
-                    "operation_basis_reconstruction"
-                )
-                cert.operation_mapping_status = (
-                    "operation_basis_verification_passed"
-                )
-                if aff is not None:
                     _apply_affine_validation_to_certificate(cert, aff)
-                    if aff.get("primitive_conventional_index", 1) > 1:
-                        cert.centering_status = "centered_affine_validated"
                     candidate = _build_transform_candidate(
                         standard_match=standard_match,
                         parent_to_standard_direct_transform=T,
-                        origin_shift_fractional=origin_shift_fractional,
-                        transform_provenance="operation_basis_reconstruction",
+                        origin_shift_fractional=basis_origin_shift,
+                        transform_provenance=basis_provenance,
                         operation_mapping_status=cert.operation_mapping_status,
                         affine_result=aff,
+                        unresolved_reason=blocker,
                     )
                     _attach_transform_candidate(
                         provenance=prov,
                         certificate=cert,
                         candidate=candidate,
                     )
+                    prov["standard_setting_certificate"] = cert.to_dict()
+                    return None, blocker, prov
+            if canonical_blocker is not None:
+                cert = build_standard_setting_certificate(
+                    standard_match=standard_match,
+                    validation_status="unresolved",
+                    unresolved_reason=canonical_blocker,
+                    parent_basis_operation_ids=_operation_ids_list(standard_match),
+                    parent_to_standard_direct_transform=T,
+                    origin_shift_fractional=basis_origin_shift,
+                    transform_provenance=basis_provenance,
+                    parent_k_frac=k_frac,
+                )
+                cert.primitive_conventional_relation = basis_provenance
+                if aff is not None:
+                    _apply_affine_validation_to_certificate(cert, aff)
+                prov["standard_setting_certificate"] = cert.to_dict()
+                return None, canonical_blocker, prov
+
+            cert = build_standard_setting_certificate(
+                standard_match=standard_match,
+                validation_status="validated",
+                parent_basis_operation_ids=(
+                    _operation_ids_list(standard_match)
+                    if isinstance(standard_match, dict) else None
+                ),
+                parent_to_standard_direct_transform=T,
+                origin_shift_fractional=basis_origin_shift,
+                transform_provenance=basis_provenance,
+                parent_k_frac=k_frac,
+                resolved_hsp_label=transformed_label,
+            )
+            cert.standard_setting_source = basis_provenance
+            cert.primitive_conventional_relation = basis_provenance
+            cert.operation_mapping_status = (
+                "operation_basis_verification_passed"
+            )
+            if aff is not None:
+                _apply_affine_validation_to_certificate(cert, aff)
+                if aff.get("primitive_conventional_index", 1) > 1:
+                    cert.centering_status = "centered_affine_validated"
+                candidate = _build_transform_candidate(
+                    standard_match=standard_match,
+                    parent_to_standard_direct_transform=T,
+                    origin_shift_fractional=basis_origin_shift,
+                    transform_provenance=basis_provenance,
+                    operation_mapping_status=cert.operation_mapping_status,
+                    affine_result=aff,
+                )
+                _attach_transform_candidate(
+                    provenance=prov,
+                    certificate=cert,
+                    candidate=candidate,
+                )
+
+            if transformed_label is not None:
+                prov["basis_transformed_match_succeeded"] = True
+                prov["transformed_hsp_label"] = transformed_label
                 prov["standard_setting_certificate"] = cert.to_dict()
                 return transformed_label, None, prov
+
+            prov["basis_transformed_match_succeeded"] = False
+            prov["standard_setting_certificate"] = cert.to_dict()
+            blocker = (
+                "standard_setting_hsp_label_unavailable: validated "
+                "standard-setting transformation maps parent k-point "
+                f"{k_frac.tolist()} to standard k-point "
+                f"{transformed_k.tolist()}, but no source HSP label matches "
+                f"for valley-projected subspace SG {sg_symbol} "
+                f"(No. {sg_number})"
+            )
+            return None, blocker, prov
         except np.linalg.LinAlgError:
             prov["basis_transform_error"] = "singular transformation matrix"
 
@@ -2394,21 +2415,12 @@ def _reconstruct_subgroup_standard_cell(
     hall_symbol = str(standard_match.get("hall_symbol") or "").strip()
     centering = _hall_centering_symbol(hall_symbol)
     if centering in {"A", "B", "C", "F", "I", "R"}:
-        result["status"] = "unavailable"
-        result["operation_basis_verification"] = {
-            "status": "not_attempted",
-            "reason": (
-                "centered/rhombohedral standard setting requires an explicit "
-                "parent-to-standard direct-lattice transformation, including "
-                "centering; rotation-axis alignment alone is underdetermined"
-            ),
-        }
-        result["reason"] = (
-            "standard-setting basis transform is unavailable: "
-            "centered/rhombohedral conventional reciprocal coordinates cannot "
-            "be reconstructed from valley-preserving rotation matrices alone"
+        return _standardize_affine_subgroup_cell(
+            lattice_direct_cart=lattice_direct_cart,
+            vp_operations=vp_operations,
+            standard_match=standard_match,
+            tolerance=tolerance,
         )
-        return result
 
     # 1. Load standard-setting operations from spglib database.
     try:
@@ -2550,6 +2562,166 @@ def _reconstruct_subgroup_standard_cell(
 
     result["status"] = "accepted"
     result["transform_matrix"] = T.tolist()
+    return result
+
+
+def _standardize_affine_subgroup_cell(
+    *,
+    lattice_direct_cart: np.ndarray,
+    vp_operations: list[dict[str, object]],
+    standard_match: dict[str, object],
+    tolerance: float = 1e-6,
+) -> dict[str, object]:
+    """Derive a centered standard cell from complete affine subgroup data."""
+    result: dict[str, object] = {
+        "status": "unavailable",
+        "transform_provenance": "spglib_affine_subgroup_standardization",
+        "operation_basis_verification": {
+            "status": "not_attempted",
+            "reason": "complete affine subgroup evidence is not yet validated",
+        },
+    }
+    required_ids = _operation_ids_list(standard_match)
+    if required_ids is None or not required_ids:
+        result["reason"] = "standard group match operation_ids are malformed"
+        return result
+
+    operations_by_id: dict[int, dict[str, object]] = {}
+    for operation in vp_operations:
+        if not isinstance(operation, dict):
+            continue
+        operation_id = operation.get("operation_id")
+        if not _is_exact_operation_id(operation_id) or operation_id not in required_ids:
+            continue
+        rotation = operation.get("rotation_frac")
+        translation = operation.get("translation_frac")
+        if rotation is None or translation is None:
+            continue
+        operations_by_id[operation_id] = operation
+    if set(operations_by_id) != set(required_ids):
+        result["reason"] = (
+            "complete valley-preserving affine operation data are required "
+            "for subgroup standardization"
+        )
+        return result
+    subgroup_operations = [operations_by_id[operation_id] for operation_id in required_ids]
+
+    seeds = (
+        np.array([0.137, 0.271, 0.389]),
+        np.array([0.219, 0.413, 0.173]),
+        np.array([0.347, 0.119, 0.283]),
+    )
+    positions: list[np.ndarray] = []
+    atom_types: list[int] = []
+    for atom_type, seed in enumerate(seeds, start=1):
+        orbit: list[np.ndarray] = []
+        for operation in subgroup_operations:
+            rotation = np.asarray(operation["rotation_frac"], dtype=float)
+            translation = np.asarray(operation["translation_frac"], dtype=float)
+            if rotation.shape != (3, 3) or translation.shape != (3,):
+                result["reason"] = "malformed valley-preserving affine operation"
+                return result
+            position = np.mod(rotation @ seed + translation, 1.0)
+            if not any(
+                _mod1_norm(position - existing) <= tolerance
+                for existing in orbit
+            ):
+                orbit.append(position)
+        if len(orbit) != len(required_ids):
+            result["reason"] = (
+                "deterministic generic subgroup orbit has a nontrivial site "
+                "stabilizer; standard-setting transform remains unresolved"
+            )
+            return result
+        positions.extend(orbit)
+        atom_types.extend([atom_type] * len(orbit))
+
+    hall_number = standard_match.get("hall_number")
+    sg_number = standard_match.get("number")
+    if not _is_exact_operation_id(hall_number) or not _is_exact_operation_id(sg_number):
+        result["reason"] = "Hall and space-group numbers are required"
+        return result
+    symprec = standard_match.get("symprec", tolerance)
+    try:
+        symprec_value = float(symprec)
+    except (TypeError, ValueError):
+        symprec_value = tolerance
+    if not np.isfinite(symprec_value) or symprec_value <= 0.0:
+        symprec_value = tolerance
+
+    try:
+        import spglib
+
+        dataset = spglib.get_symmetry_dataset(
+            (
+                np.asarray(lattice_direct_cart, dtype=float),
+                np.asarray(positions, dtype=float),
+                np.asarray(atom_types, dtype=int),
+            ),
+            symprec=symprec_value,
+            angle_tolerance=-1.0,
+            hall_number=int(hall_number),
+        )
+    except Exception as exc:
+        result["reason"] = f"spglib affine subgroup standardization failed: {exc}"
+        return result
+    if dataset is None:
+        result["reason"] = "spglib affine subgroup standardization returned no dataset"
+        return result
+    if int(dataset.number) != int(sg_number) or int(dataset.hall_number) != int(hall_number):
+        result["reason"] = (
+            "spglib affine subgroup standardization disagrees with the "
+            "canonical space-group or Hall identity"
+        )
+        return result
+    if len(dataset.rotations) != len(required_ids):
+        result["reason"] = (
+            "constructed generic orbit has unexpected additional or missing "
+            "input-basis symmetry operations"
+        )
+        return result
+
+    transform = np.asarray(dataset.transformation_matrix, dtype=float)
+    origin_shift = np.asarray(dataset.origin_shift, dtype=float)
+    affine = _validate_affine_operation_equivalence(
+        vp_operations=vp_operations,
+        vp_operation_ids=required_ids,
+        standard_match=standard_match,
+        parent_to_standard_direct_transform=transform,
+        origin_shift_fractional=origin_shift,
+        tolerance=tolerance,
+    )
+    result["affine_validation"] = affine
+    result["spglib_dataset"] = {
+        "space_group_number": int(dataset.number),
+        "hall_number": int(dataset.hall_number),
+        "input_basis_operation_count": len(dataset.rotations),
+        "constructed_orbit_count": len(seeds),
+        "constructed_position_count": len(positions),
+    }
+    if affine.get("status") != "passed":
+        result["status"] = (
+            "rejected" if affine.get("status") == "failed" else "unavailable"
+        )
+        result["reason"] = (
+            "spglib-derived subgroup standardization did not pass complete "
+            "affine operation equivalence"
+        )
+        result["operation_basis_verification"] = {
+            "status": "failed" if affine.get("status") == "failed" else "not_attempted",
+            "reason": result["reason"],
+        }
+        return result
+
+    result.update({
+        "status": "accepted",
+        "transform_matrix": transform.tolist(),
+        "origin_shift_fractional": origin_shift.tolist(),
+        "operation_basis_verification": {
+            "status": "passed",
+            "source": "complete_affine_operation_bijection",
+        },
+    })
     return result
 
 
@@ -2737,17 +2909,15 @@ def _compute_standard_setting_basis_transform(
             continue
         if op_id not in vp_set:
             continue
-        order_raw = op.get("order")
-        try:
-            order = int(order_raw) if order_raw is not None else 0
-        except (TypeError, ValueError):
-            order = 0
-        if order <= 1:
-            continue  # skip identity
         rot = op.get("rotation_frac")
         if rot is None:
             continue
-        vp_rotations.append((op_id, np.asarray(rot, dtype=float)))
+        rotation = np.asarray(rot, dtype=float)
+        if rotation.shape != (3, 3) or np.allclose(
+            rotation, np.eye(3), atol=1e-8,
+        ):
+            continue
+        vp_rotations.append((op_id, rotation))
 
     # 0. Diagnostic affine transform derivation from parent VP operations.
     #    Searches small-integer trial matrices T with det=±1 that map

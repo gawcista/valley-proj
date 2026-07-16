@@ -1585,10 +1585,10 @@ def test_tmote2_reduced_ebr_auto_canonical_provenance():
 
     # auto_canonical_bundles
     bundles = r.get("auto_canonical_bundles", [])
-    assert len(bundles) in (2, 4)  # 2 or 4 depending on MM matching
+    assert len(bundles) == 2
     for b in bundles:
         assert b["sg_number"] == 143
-        assert b["expected_hsps"] in (["GammaM", "KM"], ["MM"])
+        assert b["expected_hsps"] == ["GammaM", "KM", "MM"]
         assert b["status"] == "solved_exact"
         assert b["table_status"] == "loaded"
 
