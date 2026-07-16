@@ -342,7 +342,7 @@ def test_build_decisions_blocked_toy():
     assert d["readiness_level"] == READINESS_BLOCKED
 
 
-def test_non_little_group_closure_rows_do_not_block_identity_only_subspace():
+def test_identity_only_uses_algebraic_seed_and_closure_not_out_of_group_rows():
     result = build_irrep_workflow_decisions(
         projector_symmetry_report={
             "by_kpoint": {
@@ -386,11 +386,77 @@ def test_non_little_group_closure_rows_do_not_block_identity_only_subspace():
         valley_names=["M1"],
     )
     d = result["by_kpoint"]["MM"]["M1"]
-    assert d["workflow_path"] == PATH_SYMMETRY_ADAPTED
+    assert d["workflow_path"] == PATH_DIRECT_QCUT
     assert d["readiness_level"] == READINESS_USABLE_WITH_CAUTION
-    assert "closure blocked" not in d["reason"]
+    assert d["uses_symmetry_adapted_projector"] is False
+    assert d["identity_readiness_evidence"] == {
+        "seed_projector_symmetry": "algebraic_identity",
+        "target_subspace_closure": "algebraic_identity",
+        "local_representation_dimension": "available",
+    }
     assert "identity operation" in d["reason"]
-    assert "spinor convention" in d["reason"]
+
+
+def test_identity_only_seed_path_stays_direct_qcut_without_nonidentity_phase():
+    result = build_irrep_workflow_decisions(
+        projector_symmetry_report={
+            "by_kpoint": {
+                "MM": {
+                    "seed_projector_symmetry": [{
+                        "operation_id": 0,
+                        "source_valley": "K",
+                        "mapped_valley": "K",
+                        "epsilon_seed": 0.0,
+                        "status": "passed",
+                    }],
+                },
+            },
+        },
+        target_subspace_closure_report={
+            "by_kpoint": {
+                "MM": [{
+                    "operation_id": 0,
+                    "little_group_passed": True,
+                    "closure_quality": "clean",
+                    "raw_unitarity_error": 0.0,
+                    "max_closure_residual": 0.0,
+                }],
+            },
+        },
+        symmetry_adapted_valley_report={
+            "by_kpoint": {
+                "MM": {
+                    "valley_preserving_subspaces": [{
+                        "orbit": ["K"],
+                        "local_irrep_ready": True,
+                        "diagnostic_only": False,
+                        "hsp_preserving_operation_ids": [0],
+                        "subspace_group": {
+                            "valley_preserving_operation_ids": [0],
+                        },
+                        "symmetry_adapted_projectors": {
+                            "status": "not_evaluated",
+                            "seed_overlap": {},
+                        },
+                        "valley_preserving_character_diagnostics": {
+                            "per_valley": {"K": [{"operation_id": 0}]},
+                        },
+                    }],
+                },
+            },
+        },
+        symmetry_rows=[],
+        valley_names=["K"],
+        spinor_convention_verified=True,
+    )
+
+    decision = result["by_kpoint"]["MM"]["K"]
+    assert decision["workflow_path"] == PATH_DIRECT_QCUT
+    assert decision["readiness_level"] == READINESS_TRUSTED
+    assert decision["uses_symmetry_adapted_projector"] is False
+    assert decision["direct_qcut_allowed"] is True
+    assert decision["identity_only_valley_preserving_subgroup"] is True
+    assert "non-identity eigenphase not required" in decision["reason"]
 
 
 # -----------------------------------------------------------------------

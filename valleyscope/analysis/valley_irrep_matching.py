@@ -42,6 +42,7 @@ def build_valley_irrep_matching_report(
         Mapping[str, Mapping[str, Mapping[str, Any]]] | None
     ) = None,
     source_payload_blocked_rows: list[Mapping[str, Any]] | None = None,
+    source_payload_classification_rows: list[Mapping[str, Any]] | None = None,
     resolved_subspace_groups: (
         Mapping[str, Mapping[str, Mapping[str, object]]] | None
     ) = None,
@@ -62,6 +63,10 @@ def build_valley_irrep_matching_report(
         or source_operation_maps is not None
         or source_payload_provenance is not None
         or (source_payload_blocked_rows is not None and len(source_payload_blocked_rows) > 0)
+        or (
+            source_payload_classification_rows is not None
+            and len(source_payload_classification_rows) > 0
+        )
     )
 
     if irrep_workflow_decisions is None:
@@ -289,6 +294,61 @@ def build_valley_irrep_matching_report(
                 "source_payload_provenance": provenance,
                 **({"subspace_space_group": dict(ssg)}
                    if isinstance(ssg, Mapping) else {}),
+                **({
+                    "projected_hsp_classification": dict(
+                        row["projected_hsp_classification"]
+                    ),
+                    "source_hsp_membership": bool(
+                        row["projected_hsp_classification"].get(
+                            "source_hsp_membership", False
+                        )
+                    ),
+                } if isinstance(
+                    row.get("projected_hsp_classification"), Mapping
+                ) else {}),
+            }
+
+    # --- Valid local rows outside the reviewed source-HSP basis ---
+    if source_payload_classification_rows:
+        for row in source_payload_classification_rows:
+            if not isinstance(row, Mapping):
+                continue
+            kp_name = row.get("kpoint")
+            v_name = row.get("valley")
+            classification = row.get("projected_hsp_classification")
+            if (
+                not isinstance(kp_name, str)
+                or not isinstance(v_name, str)
+                or not isinstance(classification, Mapping)
+                or classification.get("classification") != "generic"
+                or classification.get("validation_status") != "validated"
+            ):
+                continue
+            decision = (
+                decisions_by_kp.get(kp_name, {}).get(v_name, {})
+                if isinstance(decisions_by_kp.get(kp_name, {}), dict)
+                else {}
+            )
+            ssg = row.get("subspace_space_group", {})
+            generic_matches.setdefault(kp_name, {})[v_name] = {
+                "matching_status": "not_applicable",
+                "matching_strategy": "bilbao_restricted_character",
+                "irrep_multiplicities": {},
+                "source_operation_map": {},
+                "valley_preserving_operation_ids": _operation_ids_from_value(
+                    row.get("valley_preserving_operation_ids", [])
+                ),
+                "hsp_little_group_operation_ids": _operation_ids_from_value(
+                    row.get("hsp_little_group_operation_ids", [])
+                ),
+                "diagnostic_only": False,
+                "reason": "generic_projected_subspace_k",
+                "workflow_path": str(decision.get("workflow_path", "")),
+                "readiness_level": str(decision.get("readiness_level", "")),
+                "subspace_space_group": dict(ssg)
+                if isinstance(ssg, Mapping) else {},
+                "projected_hsp_classification": dict(classification),
+                "source_hsp_membership": False,
             }
 
     # --- Rows with operation maps but no source characters ---
@@ -401,6 +461,12 @@ def _source_payload_provenance_fields(
     op_mapping = provenance.get("operation_mapping_provenance")
     if isinstance(op_mapping, str) and op_mapping:
         out["operation_mapping_provenance"] = op_mapping
+    classification = provenance.get("projected_hsp_classification")
+    if isinstance(classification, Mapping):
+        out["projected_hsp_classification"] = dict(classification)
+        out["source_hsp_membership"] = bool(
+            classification.get("source_hsp_membership", False)
+        )
     return out
 
 

@@ -1374,6 +1374,25 @@ def test_summary_valley_resolved_irreps():
                     "diagnostic_only": True,
                     "reason": "spinor_convention_unverified",
                 },
+                "generic_valley": {
+                    "matching_status": "not_applicable",
+                    "matching_strategy": "bilbao_restricted_character",
+                    "irrep_multiplicities": {},
+                    "subspace_space_group": {
+                        "candidate_space_group_symbol": "P3"
+                    },
+                    "valley_preserving_operation_ids": [0],
+                    "hsp_little_group_operation_ids": [0],
+                    "readiness_level": "trusted",
+                    "workflow_path": "direct_qcut",
+                    "diagnostic_only": False,
+                    "source_hsp_membership": False,
+                    "projected_hsp_classification": {
+                        "classification": "generic",
+                        "source_hsp_membership": False,
+                    },
+                    "reason": "generic_projected_subspace_k",
+                },
             },
         },
     }
@@ -1381,6 +1400,7 @@ def test_summary_valley_resolved_irreps():
     assert r["status"] == "ok"
     assert r["matched_count"] == 1
     assert r["diagnostic_count"] == 1
+    assert r["non_source_count"] == 1
     assert r["rows"][0]["subspace_space_group"] == "P3"
     assert r["rows"][0]["subspace_hsp_little_group_operation_ids"] == [0, 1, 2]
     assert r["rows"][0]["hsp_little_group_operation_ids"] == [0, 1, 2]
@@ -1392,6 +1412,9 @@ def test_summary_valley_resolved_irreps():
     assert r["rows"][1]["valley_preserving_operation_ids"] == [0]
     assert r["rows"][1]["diagnostic_only"] is True
     assert r["rows"][1]["reason"] == "spinor_convention_unverified"
+    assert r["rows"][2]["matching_status"] == "not_applicable"
+    assert r["rows"][2]["source_hsp_membership"] is False
+    assert r["rows"][2]["projected_hsp_classification"] == "generic"
     assert "C2_like" not in json.dumps(r)
     assert "C3_like" not in json.dumps(r)
 
@@ -1532,6 +1555,32 @@ def test_tmote2_ebr_mm_is_candidate():
         assert c["readiness_level"] == "trusted"
 
 
+def test_tmote2_projected_source_hsp_coverage_and_identity_path_are_complete():
+    s = _read_fixture_summary()
+    coverage = s["sampled_k_coverage"][
+        "projected_subspace_hsp_coverage"
+    ]
+    for valley in ("K_valley", "Kp_valley"):
+        row = coverage["by_valley"][valley]
+        assert row["required_source_hsp_labels"] == ["GM", "K", "M"]
+        assert row["covered_source_hsp_labels"] == ["GM", "K", "M"]
+        assert row["missing_source_hsp_labels"] == []
+        assert row["trusted_matched_source_hsp_labels"] == ["GM", "K", "M"]
+        assert row["complete"] is True
+        assert row["ready_for_ebr_promotion"] is True
+
+        decision = s["irrep_workflow_decisions"]["by_kpoint"]["MM"][valley]
+        assert decision["workflow_path"] == "direct_qcut"
+        assert decision["readiness_level"] == "trusted"
+        assert decision["uses_symmetry_adapted_projector"] is False
+        assert decision["direct_qcut_allowed"] is True
+
+    assert s["valley_ebr_input_candidates"]["candidate_count"] == 6
+    assert s["valley_ebr_input_candidates"]["blocked_count"] == 0
+    assert s["valley_ebr_export_bundle"]["bundle_count"] == 2
+    assert s["valley_ebr_export_bundle"]["schema_version"] == "1.3.0"
+
+
 def test_tmote2_public_output_no_cn_like_and_production_no_material_names():
     """tMoTe2 public summary avoids Cn-like labels; production code has no material branch."""
     s = _read_fixture_summary()
@@ -1548,6 +1597,71 @@ def test_tmote2_public_output_no_cn_like_and_production_no_material_names():
     )
     for material in ("tMoTe2", "tZrSe2"):
         assert material not in production_text
+
+
+_CENTERED_FIXTURE_SUMMARY = Path(
+    __file__
+).parent.parent / "real_tests" / "tZrSe2" / "output" / "valley_analysis" / "valley_summary.json"
+
+
+def _read_centered_fixture_summary():
+    if not _CENTERED_FIXTURE_SUMMARY.exists():
+        pytest.skip(
+            f"centered fixture output not found at {_CENTERED_FIXTURE_SUMMARY}"
+        )
+    return json.loads(_CENTERED_FIXTURE_SUMMARY.read_text(encoding="utf-8"))
+
+
+def test_centered_fixture_projected_hsp_coverage_is_per_valley():
+    s = _read_centered_fixture_summary()
+    coverage = s["sampled_k_coverage"][
+        "projected_subspace_hsp_coverage"
+    ]["by_valley"]
+    expected = {
+        "M1_valley": (["GM", "V"], ["Y"]),
+        "M2_valley": (["GM", "V"], ["Y"]),
+        "M3_valley": (["GM", "Y"], ["V"]),
+    }
+    for valley, (covered, missing) in expected.items():
+        row = coverage[valley]
+        assert row["required_source_hsp_labels"] == ["GM", "V", "Y"]
+        assert row["covered_source_hsp_labels"] == covered
+        assert row["missing_source_hsp_labels"] == missing
+        assert row["complete"] is False
+        assert row["ready_for_ebr_promotion"] is False
+        assert [
+            item["source_hsp_label"]
+            for item in row["missing_source_hsp_representatives"]
+        ] == missing
+        assert all(
+            len(item["inverse_parent_k_frac"]) == 3
+            for item in row["missing_source_hsp_representatives"]
+        )
+
+
+def test_centered_fixture_star_and_generic_rows_do_not_become_false_blockers():
+    s = _read_centered_fixture_summary()
+    matches = s["valley_irrep_matching"]["generic_matches_by_kpoint"]
+
+    m1 = matches["MM"]["M1_valley"]["projected_hsp_classification"]
+    assert m1["classification"] == "star_equivalent"
+    assert m1["source_hsp_label"] == "V"
+    assert m1["standard_operation_witness"]["table_index"] == 2
+    assert m1["representation_transport_status"] == "validated"
+
+    for valley in ("M1_valley", "M2_valley", "M3_valley"):
+        generic = matches["KM"][valley]
+        assert generic["matching_status"] == "not_applicable"
+        assert generic["diagnostic_only"] is False
+        assert generic["reason"] == "generic_projected_subspace_k"
+        assert generic["projected_hsp_classification"]["classification"] == "generic"
+
+    candidates = s["valley_ebr_input_candidates"]
+    assert candidates["candidate_count"] == 0
+    assert candidates["blocked_count"] == 6
+    assert candidates["non_source_count"] == 3
+    assert len(candidates["non_source_rows"]) == 3
+    assert s["valley_ebr_export_bundle"]["bundle_count"] == 0
 
 
 # ---------------------------------------------------------------------------

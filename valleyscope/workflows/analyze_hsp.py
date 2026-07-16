@@ -31,9 +31,15 @@ from valleyscope.analysis.ebr_problem_instances import (
 from valleyscope.analysis.ebr_export_bundle import (
     build_ebr_export_bundle,
 )
+from valleyscope.analysis.projected_hsp_coverage import (
+    build_projected_hsp_coverage_report,
+    classify_projected_subspace_kpoint,
+    derive_projected_subspace_source_hsp_basis,
+)
 from valleyscope.irreps.tables import load_standard_irrep_table
+from valleyscope.irreps.ebr_data_adapter import load_ebr_source_data
 from valleyscope.irreps.source_payload import (
-    build_source_payload_for_generic_matching,
+    build_source_payload_for_projected_hsp_matching,
 )
 from valleyscope.analysis.valley_projected_representation import (
     build_valley_projected_representation_report,
@@ -546,6 +552,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     ebr_problem_instances: dict[str, object] | None = None
     ebr_export_bundle: dict[str, object] | None = None
     reduced_ebr_mapping: dict[str, object] | None = None
+    projected_hsp_coverage: dict[str, object] | None = None
     if config.symmetry_adapted_valley.enabled:
         irrep_workflow_decisions = build_irrep_workflow_decisions(
             projector_symmetry_report=projector_symmetry_report,
@@ -564,6 +571,10 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     # diagnostic-only with explicit provenance.
     generic_source_payloads: dict[str, Any] | None = None
     generic_source_blocked_rows: list[dict[str, Any]] = []
+    generic_source_classification_rows: list[dict[str, Any]] = []
+    projected_hsp_classifications: list[dict[str, Any]] = []
+    source_hsp_basis_by_valley: dict[str, dict[str, object]] = {}
+    ebr_source_basis_cache: dict[tuple[int, bool], dict[str, Any]] = {}
 
     # --- Canonical subgroup identity from per-valley standard matches ---
     subgroup_report = symmetry_payload.get(
@@ -686,7 +697,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     else None
                 )
                 ss_cfg = config.standard_setting
-                src_hsp, hsp_blocker, hsp_provenance = (
+                _src_hsp, hsp_blocker, hsp_provenance = (
                     _resolve_generic_irrep_hsp_label_with_provenance(
                         table=table,
                         k_frac=(
@@ -722,69 +733,159 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                         transform_provenance=ss_cfg.transform_provenance,
                     )
                 )
-                if hsp_blocker is not None:
-                    # Standard-setting HSP mapping unresolved.
-                    # Preserve the detailed blocker and provenance
-                    # from the kmap resolver.
-                    ssg_context = _resolved_subspace_group_context(
-                        standard_match=(
-                            standard_match
-                            if isinstance(standard_match, dict)
-                            else {}
+                # --- Projected 2D source basis and sampled-k classification ---
+                # The legacy resolver is retained as the certificate producer.
+                # A direct-label miss is not itself a blocker: the new layer
+                # still checks star membership before classifying the point as
+                # generic.
+                ssg_context = _resolved_subspace_group_context(
+                    standard_match=(
+                        standard_match
+                        if isinstance(standard_match, dict)
+                        else {}
+                    ),
+                    local_gka_operation_ids=list(vp_ids),
+                )
+                certificate = (
+                    hsp_provenance.get("standard_setting_certificate", {})
+                    if isinstance(hsp_provenance, dict) else {}
+                )
+                if not isinstance(certificate, dict):
+                    certificate = {}
+
+                source_key = (sg_number, spinor_flag)
+                if source_key not in ebr_source_basis_cache:
+                    try:
+                        ebr_source_basis_cache[source_key] = (
+                            load_ebr_source_data(sg_number, spinor_flag)
+                        )
+                    except Exception as exc:
+                        generic_source_blocked_rows.append({
+                            "kpoint": kp_name,
+                            "valley": v_name,
+                            "reason": (
+                                "irreptables_ebr_source_basis_unavailable: "
+                                f"{type(exc).__name__}: {exc}"
+                            ),
+                            "subspace_space_group": ssg_context,
+                            "valley_preserving_operation_ids": list(vp_ids),
+                            "hsp_little_group_operation_ids": list(vp_ids),
+                            "standard_setting_hsp_mapping": dict(
+                                hsp_provenance
+                            ) if isinstance(hsp_provenance, dict) else {},
+                        })
+                        continue
+                ebr_source_data = ebr_source_basis_cache[source_key]
+                source_basis = derive_projected_subspace_source_hsp_basis(
+                    table=table,
+                    ebr_source_basis_labels=ebr_source_data.get(
+                        "source_basis_labels", []
+                    ),
+                    standard_setting_certificate=certificate,
+                    use_2d_momentum_only=(
+                        config.projection.use_2d_momentum_only
+                    ),
+                )
+                source_basis_provenance = source_basis.get("provenance", {})
+                if isinstance(source_basis_provenance, dict):
+                    source_basis_provenance.update({
+                        "ebr_data_source": ebr_source_data.get("data_source"),
+                        "ebr_source_basis_count": ebr_source_data.get(
+                            "source_basis_count"
                         ),
-                        local_gka_operation_ids=list(vp_ids),
+                    })
+                existing_basis = source_hsp_basis_by_valley.get(v_name)
+                if existing_basis is None:
+                    source_hsp_basis_by_valley[v_name] = source_basis
+                elif (
+                    existing_basis.get("required_source_hsp_labels")
+                    != source_basis.get("required_source_hsp_labels")
+                    or existing_basis.get("standard_plane_basis")
+                    != source_basis.get("standard_plane_basis")
+                    or existing_basis.get(
+                        "projected_subspace_space_group"
+                    ) != source_basis.get(
+                        "projected_subspace_space_group"
                     )
-                    kmap_prov = dict(hsp_provenance)
-                    kmap_prov.setdefault(
-                        "subspace_sg_number",
-                        ssg_context.get("candidate_space_group_number"),
-                    )
-                    kmap_prov.setdefault(
-                        "subspace_sg_symbol",
-                        ssg_context.get("candidate_space_group_symbol"),
-                    )
-                    if isinstance(ssg_context.get("hall_number"), int):
-                        kmap_prov.setdefault(
-                            "hall_number",
-                            ssg_context["hall_number"],
-                        )
-                    if ssg_context.get("hall_symbol"):
-                        kmap_prov.setdefault(
-                            "hall_symbol",
-                            ssg_context["hall_symbol"],
-                        )
+                ):
                     generic_source_blocked_rows.append({
                         "kpoint": kp_name,
                         "valley": v_name,
-                        "reason": hsp_blocker,
+                        "reason": (
+                            "per_valley_source_hsp_basis_inconsistent_across_"
+                            "sampled_kpoints"
+                        ),
                         "subspace_space_group": ssg_context,
                         "valley_preserving_operation_ids": list(vp_ids),
                         "hsp_little_group_operation_ids": list(vp_ids),
-                        "parent_k_frac": (
-                            list(k_frac_raw)
-                            if k_frac_raw is not None else None
-                        ),
-                        "source_table_sg_number": int(
-                            getattr(table, "number", 0) or 0),
-                        "source_table_name": str(getattr(table, "name", "")),
-                        "source_table_spinor": bool(
-                            getattr(table, "spinor", False)),
-                        "standard_setting_hsp_mapping": kmap_prov,
                     })
                     continue
 
-                # --- Build source payload ---
+                classification = classify_projected_subspace_kpoint(
+                    parent_k_frac=k_frac_raw,
+                    table=table,
+                    source_hsp_basis=source_basis,
+                    standard_setting_certificate=certificate,
+                    override_source_hsp_label=override_label,
+                    kpoint=kp_name,
+                    valley=v_name,
+                )
+
+                if classification.get("classification") == "generic":
+                    projected_hsp_classifications.append(classification)
+                    generic_source_classification_rows.append({
+                        "kpoint": kp_name,
+                        "valley": v_name,
+                        "subspace_space_group": ssg_context,
+                        "valley_preserving_operation_ids": list(vp_ids),
+                        "hsp_little_group_operation_ids": list(vp_ids),
+                        "projected_hsp_classification": classification,
+                    })
+                    continue
+                if classification.get("classification") == "unresolved":
+                    projected_hsp_classifications.append(classification)
+                    generic_source_blocked_rows.append({
+                        "kpoint": kp_name,
+                        "valley": v_name,
+                        "reason": classification.get("blocker")
+                        or hsp_blocker
+                        or "projected-subspace HSP classification unresolved",
+                        "subspace_space_group": ssg_context,
+                        "valley_preserving_operation_ids": list(vp_ids),
+                        "hsp_little_group_operation_ids": list(vp_ids),
+                        "projected_hsp_classification": classification,
+                        "standard_setting_hsp_mapping": dict(
+                            hsp_provenance
+                        ) if isinstance(hsp_provenance, dict) else {},
+                    })
+                    continue
+
+                # --- Build representative/star-aware source payload ---
                 tol = float(
                     config.generic_irrep_source.operation_match_tol
                     if config.generic_irrep_source.enabled else 5e-5
                 )
-                payload = build_source_payload_for_generic_matching(
+                payload = build_source_payload_for_projected_hsp_matching(
                     table=table,
-                    source_hsp_label=str(src_hsp),
+                    projected_hsp_classification=classification,
                     detected_operations=symmetry_payload.get("detected_operations", []),
                     valley_preserving_operation_ids=list(vp_ids),
                     tol=tol,
                 )
+                if payload.get("operation_mapping_evaluated") is True:
+                    classification = classify_projected_subspace_kpoint(
+                        parent_k_frac=k_frac_raw,
+                        table=table,
+                        source_hsp_basis=source_basis,
+                        standard_setting_certificate=certificate,
+                        mapped_standard_little_group_operation_ids=list(
+                            payload["source_operation_map"].values()
+                        ),
+                        override_source_hsp_label=override_label,
+                        kpoint=kp_name,
+                        valley=v_name,
+                    )
+                projected_hsp_classifications.append(classification)
                 payload_provenance = dict(
                     payload.get("provenance", {})
                     if isinstance(payload.get("provenance", {}), dict)
@@ -794,7 +895,17 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     payload_provenance["standard_setting_hsp_mapping"] = (
                         dict(hsp_provenance)
                     )
-                if payload["status"] == "ok":
+                payload_provenance["projected_hsp_classification"] = dict(
+                    classification
+                )
+                if (
+                    payload["status"] == "ok"
+                    and classification.get("classification")
+                    in ("representative", "star_equivalent")
+                    and classification.get("validation_status") == "validated"
+                    and classification.get("representation_transport_status")
+                    == "validated"
+                ):
                     src_chars.setdefault(kp_name, {})[v_name] = (
                         payload["source_irrep_characters"]
                     )
@@ -808,7 +919,9 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     generic_source_blocked_rows.append({
                         "kpoint": kp_name,
                         "valley": v_name,
-                        "source_hsp_label": src_hsp,
+                        "source_hsp_label": classification.get(
+                            "source_hsp_label"
+                        ),
                         "table_sg_number": table.number,
                         "table_name": table.name,
                         "table_spinor": table.spinor,
@@ -818,7 +931,14 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                             else list(vp_ids)
                         ),
                         "provenance": payload_provenance,
-                        "blocker_reasons": payload["blocker_reasons"],
+                        "projected_hsp_classification": classification,
+                        "blocker_reasons": (
+                            payload["blocker_reasons"]
+                            if payload["status"] != "ok"
+                            else [classification.get("blocker")
+                                  or classification.get("matching_blocker")
+                                  or "source-HSP validation blocked"]
+                        ),
                     })
 
     # --- Build resolved canonical subgroup contexts ---
@@ -875,11 +995,25 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             if generic_source_payloads else None
         ),
         source_payload_blocked_rows=generic_source_blocked_rows,
+        source_payload_classification_rows=generic_source_classification_rows,
         resolved_subspace_groups=(
             resolved_subspace_groups if resolved_subspace_groups else None
         ),
     )
 
+
+    projected_hsp_coverage = build_projected_hsp_coverage_report(
+        source_hsp_basis_by_valley=source_hsp_basis_by_valley,
+        classifications=projected_hsp_classifications,
+        matching_by_kpoint=(
+            valley_irrep_matching.get("generic_matches_by_kpoint", {})
+            if isinstance(valley_irrep_matching, dict) else {}
+        ),
+        workflow_decisions_by_kpoint=(
+            irrep_workflow_decisions.get("by_kpoint", {})
+            if isinstance(irrep_workflow_decisions, dict) else {}
+        ),
+    )
 
     ebr_input_candidates = build_ebr_input_candidates(
         irrep_workflow_decisions=irrep_workflow_decisions,
@@ -888,6 +1022,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     )
     ebr_problem_instances = build_ebr_problem_instances(
         ebr_input_candidates=ebr_input_candidates,
+        projected_hsp_coverage=projected_hsp_coverage,
     )
     ebr_export_bundle = build_ebr_export_bundle(
         ebr_problem_instances=ebr_problem_instances,
@@ -960,6 +1095,10 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         kpoint_names=config.analysis.kpoints,
         kpoint_frac_by_name=kpoint_frac_by_name,
     )
+    if projected_hsp_coverage is not None:
+        sampled_k_coverage["projected_subspace_hsp_coverage"] = (
+            projected_hsp_coverage
+        )
     # --- Warn when fixed_center projector has large k-center mismatch ---
     if config.projection.projector_mode == "fixed_center":
         _warn_fixed_center_distance(

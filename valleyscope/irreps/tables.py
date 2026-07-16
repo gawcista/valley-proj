@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib import resources
 from typing import Any
 
 import numpy as np
@@ -76,6 +77,111 @@ class OperationMappingReport:
 
 def load_standard_irrep_table(spacegroup_number: int, *, spinor: bool) -> StandardIrrepTable:
     raw_table = IrrepTable(str(spacegroup_number), spinor=spinor)
+    return _standard_table_from_raw(raw_table, number=spacegroup_number)
+
+
+def resolve_ebr_source_irrep_label_evidence(
+    *,
+    table: StandardIrrepTable,
+    source_basis_labels: list[str],
+) -> dict[str, object]:
+    """Resolve EBR labels against canonical and compatible package tables.
+
+    The primary irreptables irrep table may intentionally contain only
+    canonical k-vector representatives while the EBR basis contains further
+    source rows.  Such rows are accepted as noncanonical only when a unique
+    irreptables correptable has the same affine/spin operation inventory and
+    contains every otherwise-missing label.  No label-shape heuristic is used.
+    """
+    canonical = {irrep.label: irrep for irrep in table.irreps}
+    missing = [label for label in source_basis_labels if label not in canonical]
+    by_label: dict[str, dict[str, object]] = {
+        label: _source_irrep_evidence(
+            canonical[label],
+            status="canonical_standard_irrep",
+            source_table="standard_irrep_table",
+        )
+        for label in source_basis_labels
+        if label in canonical
+    }
+    if not missing:
+        return {
+            "status": "validated",
+            "by_label": by_label,
+            "auxiliary_source_table": None,
+            "blocker": "",
+        }
+
+    suffix = "spin.dat" if table.spinor else "scal.dat"
+    prefix = f"irreps-SG={table.number}."
+    candidates: list[tuple[str, StandardIrrepTable]] = []
+    try:
+        directory = resources.files("irreptables").joinpath(
+            "data", "correptables"
+        )
+        resource_rows = sorted(
+            (
+                row for row in directory.iterdir()
+                if row.name.startswith(prefix)
+                and row.name.endswith(f"-{suffix}")
+            ),
+            key=lambda row: row.name,
+        )
+        for resource in resource_rows:
+            table_token = resource.name[len("irreps-SG="):-len(f"-{suffix}")]
+            try:
+                with resources.as_file(resource) as resource_path:
+                    raw = IrrepTable(
+                        table_token,
+                        spinor=table.spinor,
+                        name=str(resource_path),
+                    )
+                candidate = _standard_table_from_raw(
+                    raw, number=table.number
+                )
+            except (AssertionError, OSError, TypeError, ValueError):
+                continue
+            if not _same_operation_setting(table, candidate):
+                continue
+            candidate_labels = {irrep.label for irrep in candidate.irreps}
+            if all(label in candidate_labels for label in missing):
+                candidates.append((resource.name, candidate))
+    except (ModuleNotFoundError, OSError):
+        candidates = []
+
+    if len(candidates) != 1:
+        return {
+            "status": "blocked",
+            "by_label": by_label,
+            "auxiliary_source_table": None,
+            "blocker": (
+                "ebr_source_irrep_labels_missing_from_standard_table: "
+                f"{missing}; compatible auxiliary source tables="
+                f"{[name for name, _ in candidates]}"
+            ),
+        }
+
+    source_name, source_table = candidates[0]
+    auxiliary = {irrep.label: irrep for irrep in source_table.irreps}
+    for label in missing:
+        by_label[label] = _source_irrep_evidence(
+            auxiliary[label],
+            status="validated_noncanonical_ebr_source_row",
+            source_table=source_name,
+        )
+    return {
+        "status": "validated",
+        "by_label": by_label,
+        "auxiliary_source_table": source_name,
+        "blocker": "",
+    }
+
+
+def _standard_table_from_raw(
+    raw_table: object,
+    *,
+    number: int,
+) -> StandardIrrepTable:
     operations = tuple(
         StandardTableOperation(
             table_index=index,
@@ -99,16 +205,56 @@ def load_standard_irrep_table(spacegroup_number: int, *, spinor: bool) -> Standa
         )
         for irrep in raw_table.irreps
     )
-    number_raw = getattr(raw_table, "number_str", None)
-    if number_raw is None:
-        number_raw = raw_table.number  # irreptables < 3.0
     return StandardIrrepTable(
-        number=int(number_raw),
+        number=int(number),
         name=str(raw_table.name).strip(),
         spinor=bool(raw_table.spinor),
         operations=operations,
         irreps=irreps,
     )
+
+
+def _source_irrep_evidence(
+    irrep: StandardIrrep,
+    *,
+    status: str,
+    source_table: str,
+) -> dict[str, object]:
+    return {
+        "status": status,
+        "label": irrep.label,
+        "source_hsp_label": irrep.kpoint_label,
+        "standard_k_frac": [float(value) for value in irrep.k_frac],
+        "dimension": irrep.dimension,
+        "source_table": source_table,
+    }
+
+
+def _same_operation_setting(
+    primary: StandardIrrepTable,
+    auxiliary: StandardIrrepTable,
+) -> bool:
+    if (
+        primary.number != auxiliary.number
+        or primary.spinor != auxiliary.spinor
+        or len(primary.operations) != len(auxiliary.operations)
+    ):
+        return False
+    for left, right in zip(primary.operations, auxiliary.operations):
+        if (
+            left.table_index != right.table_index
+            or not np.array_equal(left.rotation_frac, right.rotation_frac)
+            or left.time_reversal != right.time_reversal
+        ):
+            return False
+        translation_delta = left.translation_frac - right.translation_frac
+        if np.linalg.norm(
+            translation_delta - np.rint(translation_delta)
+        ) > 5e-6:
+            return False
+        if np.linalg.norm(left.spin_rotation - right.spin_rotation) > 5e-5:
+            return False
+    return True
 
 
 def match_table_operations(

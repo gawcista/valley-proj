@@ -502,6 +502,14 @@ def render_summary_text(summary: dict[str, Any]) -> str:
     if isinstance(projected_reps, dict):
         _render_valley_projected_representations(lines, projected_reps)
 
+    sampled_coverage = summary.get("sampled_k_coverage")
+    if isinstance(sampled_coverage, dict):
+        projected_coverage = sampled_coverage.get(
+            "projected_subspace_hsp_coverage"
+        )
+        if isinstance(projected_coverage, dict):
+            _render_projected_hsp_coverage(lines, projected_coverage)
+
     ebr_candidates = summary.get("valley_ebr_input_candidates")
     if isinstance(ebr_candidates, dict):
         _render_ebr_input_candidates(lines, ebr_candidates)
@@ -1439,6 +1447,7 @@ def _build_valley_resolved_irreps(
             "matched_count": 0,
             "blocked_count": 0,
             "diagnostic_count": 0,
+            "non_source_count": 0,
             "rows": [],
         }
 
@@ -1446,6 +1455,7 @@ def _build_valley_resolved_irreps(
     matched = 0
     blocked = 0
     diagnostic = 0
+    non_source = 0
     identity_only = 0
 
     for kp_name in sorted(generic_by_kp):
@@ -1461,6 +1471,7 @@ def _build_valley_resolved_irreps(
             ssg = gm.get("subspace_space_group", {})
             vp_ids = gm.get("valley_preserving_operation_ids", [])
             subspace_hsp_ids = vp_ids
+            classification = gm.get("projected_hsp_classification", {})
 
             row: dict[str, Any] = {
                 "kpoint": kp_name,
@@ -1476,6 +1487,17 @@ def _build_valley_resolved_irreps(
                 "readiness_level": gm.get("readiness_level"),
                 "workflow_path": gm.get("workflow_path"),
                 "diagnostic_only": bool(gm.get("diagnostic_only", False)),
+                "projected_hsp_classification": (
+                    classification.get("classification")
+                    if isinstance(classification, dict) else None
+                ),
+                "source_hsp_label": (
+                    classification.get("source_hsp_label")
+                    if isinstance(classification, dict) else None
+                ),
+                "source_hsp_membership": gm.get(
+                    "source_hsp_membership"
+                ),
                 "reason": str(gm.get("reason", ""))[:120] if gm.get("reason") else "",
             }
             rows.append(row)
@@ -1485,6 +1507,11 @@ def _build_valley_resolved_irreps(
                 identity_only += 1
             elif status == "blocked":
                 blocked += 1
+            elif (
+                status == "not_applicable"
+                and gm.get("source_hsp_membership") is False
+            ):
+                non_source += 1
             else:
                 diagnostic += 1
 
@@ -1494,6 +1521,7 @@ def _build_valley_resolved_irreps(
         "matched_count": matched,
         "blocked_count": blocked,
         "diagnostic_count": diagnostic,
+        "non_source_count": non_source,
         "identity_only_count": identity_only,
         "rows": rows,
     }
@@ -1508,6 +1536,7 @@ def _render_valley_resolved_irreps(
     lines.append(f"matched: {report.get('matched_count', 0)}")
     lines.append(f"blocked: {report.get('blocked_count', 0)}")
     lines.append(f"diagnostic-only: {report.get('diagnostic_count', 0)}")
+    lines.append(f"generic/non-source: {report.get('non_source_count', 0)}")
     rows = report.get("rows", [])
     if not rows:
         lines.append("(no generic irrep data)")
@@ -1645,6 +1674,10 @@ def _render_ebr_input_candidates(
     lines.append(f"candidates: {report.get('candidate_count', 0)}")
     lines.append(f"blocked: {report.get('blocked_count', 0)}")
     lines.append(
+        "generic/non-source rows: "
+        f"{report.get('non_source_count', 0)}"
+    )
+    lines.append(
         f"reduced EBR decomposition: "
         f"{report.get('reduced_ebr_decomposition_status', 'not_implemented')}"
     )
@@ -1676,6 +1709,63 @@ def _render_ebr_input_candidates(
     lines.append("")
 
 
+def _render_projected_hsp_coverage(
+    lines: list[str],
+    report: dict[str, Any],
+) -> None:
+    _section(lines, "Projected-subspace HSP coverage")
+    lines.append(
+        "basis: reviewed irreptables source HSPs in the certified parent "
+        "2D reciprocal plane; coverage is evaluated independently per valley"
+    )
+    by_valley = report.get("by_valley", {})
+    rows: list[list[Any]] = []
+    if isinstance(by_valley, dict):
+        for valley, row in by_valley.items():
+            if not isinstance(row, dict):
+                continue
+            rows.append([
+                valley,
+                _short_list(row.get("required_source_hsp_labels", [])),
+                _short_list(row.get("covered_source_hsp_labels", [])),
+                _short_list(row.get("missing_source_hsp_labels", [])),
+                _short_list(
+                    row.get("trusted_matched_source_hsp_labels", [])
+                ),
+                len(row.get("generic_sampled_rows", [])),
+                row.get("complete", False),
+                row.get("ready_for_ebr_promotion", False),
+            ])
+    if rows:
+        lines.extend(_table(
+            [
+                "valley", "required", "covered", "missing",
+                "trusted", "generic", "complete", "ebr_promotion",
+            ],
+            rows,
+        ))
+    else:
+        lines.append("(no projected-subspace HSP coverage data)")
+    if isinstance(by_valley, dict):
+        for valley, row in by_valley.items():
+            if not isinstance(row, dict):
+                continue
+            missing = row.get("missing_source_hsp_representatives", [])
+            if not isinstance(missing, list) or not missing:
+                continue
+            guidance = [
+                f"{entry.get('source_hsp_label')} -> "
+                f"parent k={entry.get('inverse_parent_k_frac')}"
+                for entry in missing
+                if isinstance(entry, dict)
+            ]
+            if guidance:
+                lines.append(
+                    f"missing guidance ({valley}): " + "; ".join(guidance)
+                )
+    lines.append("")
+
+
 def _render_ebr_problem_instances(
     lines: list[str],
     report: dict[str, Any],
@@ -1699,13 +1789,15 @@ def _render_ebr_problem_instances(
                 str(inst.get("ready_for_ebr_decomposition", "")),
                 _short_list(inst.get("blocked_by", [])),
                 _short_list(inst.get("expected_hsps", [])),
-                _short_list(inst.get("missing_optional_hsps", [])),
-                _short_list(inst.get("actual_hsps", [])),
+                _short_list(inst.get("required_source_hsp_labels", [])),
+                _short_list(inst.get("covered_source_hsp_labels", [])),
+                _short_list(inst.get("missing_source_hsp_labels", [])),
             ])
         lines.extend(
             _table(
                 ["id", "valley", "group", "status", "ready",
-                 "blocked_by", "expected_hsp", "missing_optional", "actual_hsp"],
+                 "blocked_by", "sampled_hsp", "source_required",
+                 "source_covered", "source_missing"],
                 rows,
             )
         )

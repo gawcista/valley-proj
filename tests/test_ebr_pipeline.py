@@ -114,6 +114,54 @@ def test_ebr_input_candidates_excludes_blocked_path():
     assert report["status"] == "no_candidates"
 
 
+def test_generic_projected_subspace_k_is_excluded_without_becoming_blocker():
+    workflow = {
+        "by_kpoint": {
+            "KM": {
+                "M1_valley": {
+                    "readiness_level": "trusted",
+                    "workflow_path": "direct_qcut",
+                },
+            },
+        },
+    }
+    matching = {
+        "matching_mode": "generic",
+        "generic_matches_by_kpoint": {
+            "KM": {
+                "M1_valley": {
+                    "matching_status": "not_applicable",
+                    "matching_strategy": "bilbao_restricted_character",
+                    "irrep_multiplicities": {},
+                    "diagnostic_only": False,
+                    "reason": "generic_projected_subspace_k",
+                    "source_hsp_membership": False,
+                    "projected_hsp_classification": {
+                        "classification": "generic",
+                        "validation_status": "validated",
+                    },
+                    "subspace_space_group": {
+                        "status": "resolved",
+                        "candidate_space_group_number": 5,
+                        "candidate_space_group_symbol": "C2",
+                    },
+                },
+            },
+        },
+    }
+
+    report = build_ebr_input_candidates(
+        irrep_workflow_decisions=workflow,
+        valley_irrep_matching=matching,
+    )
+
+    assert report["candidate_count"] == 0
+    assert report["blocked_count"] == 0
+    assert report["non_source_count"] == 1
+    assert report["non_source_rows"][0]["kpoint"] == "KM"
+    assert report["non_source_rows"][0]["local_representation_ready"] is True
+
+
 def test_ebr_problem_instances_ready_from_actual():
     """Table-authoritative: ready from actual irreps, not hard-coded policy."""
     from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
@@ -161,6 +209,54 @@ def test_ebr_problem_instances_complete_hsp_is_ready():
     inst = report["instances"][0]
     assert inst["ready_for_reduced_table_validation"] is True; assert inst["ready_for_ebr_decomposition"] is False
     assert inst["status"] == "sampled_basis"
+
+
+def test_incomplete_per_valley_source_hsp_coverage_blocks_ebr_promotion():
+    candidates = {
+        "status": "has_candidates",
+        "candidates": [{
+            "kpoint": "GammaM",
+            "valley": "K_valley",
+            "subspace_group_candidate": "P3",
+            "workflow_path": "direct_qcut",
+            "readiness_level": "trusted",
+            "matched_irrep": "-GM4",
+            "irrep_multiplicity": 1,
+            "irrep_source_provenance": {"source_hsp_label": "GM"},
+            "ready_for_ebr_input": True,
+        }],
+    }
+    coverage = {
+        "by_valley": {
+            "K_valley": {
+                "required_source_hsp_labels": ["GM", "K"],
+                "covered_source_hsp_labels": ["GM"],
+                "missing_source_hsp_labels": ["K"],
+                "trusted_matched_source_hsp_labels": ["GM"],
+                "trusted_missing_source_hsp_labels": ["K"],
+                "source_hsp_to_sampled_kpoint": {"GM": "GammaM"},
+                "complete": False,
+                "trusted_matching_complete": False,
+                "ready_for_ebr_promotion": False,
+                "source_basis_provenance": {"source": "irreptables"},
+            },
+        },
+    }
+
+    report = build_ebr_problem_instances(
+        ebr_input_candidates=candidates,
+        projected_hsp_coverage=coverage,
+    )
+
+    instance = report["instances"][0]
+    assert instance["status"] == "incomplete_source_hsp_coverage"
+    assert instance["hsp_basis_status"] == "incomplete_source_hsp_coverage"
+    assert instance["ready_for_reduced_table_validation"] is False
+    assert instance["ready_for_ebr_decomposition"] is False
+    assert instance["required_source_hsp_labels"] == ["GM", "K"]
+    assert instance["covered_source_hsp_labels"] == ["GM"]
+    assert instance["missing_source_hsp_labels"] == ["K"]
+    assert "missing trusted source HSPs: ['K']" in instance["blocked_by"]
 
 
 def test_ebr_export_bundle_preserves_hsp_and_irrep_fields():

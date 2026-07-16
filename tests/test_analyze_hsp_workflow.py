@@ -1040,7 +1040,7 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         workflow_mod,
-        "build_source_payload_for_generic_matching",
+        "build_source_payload_for_projected_hsp_matching",
         lambda **_: {
             "status": "ok",
             "source_irrep_characters": source_chars,
@@ -1152,12 +1152,16 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     assert summary["valley_ebr_input_candidates"]["candidate_count"] == 2
     assert summary["valley_ebr_problem_instances"]["instance_count"] == 1
     inst = summary["valley_ebr_problem_instances"]["instances"][0]
-    assert inst["ready_for_reduced_table_validation"] is True; assert inst["ready_for_ebr_decomposition"] is False
+    assert inst["ready_for_reduced_table_validation"] is False
+    assert inst["ready_for_ebr_decomposition"] is False
     assert inst["subspace_group_candidate"] == "P2"
     assert inst["expected_hsps"] == ["GammaM"]
-    assert summary["valley_ebr_export_bundle"]["bundle_count"] == 1
-    b = summary["valley_ebr_export_bundle"]["bundles"][0]
-    assert b["ready_for_external_solver"] is False  # sampled_basis
+    assert inst["required_source_hsp_labels"] == ["GM", "A", "B", "Y"]
+    assert inst["covered_source_hsp_labels"] == ["GM"]
+    assert inst["missing_source_hsp_labels"] == ["A", "B", "Y"]
+    assert inst["hsp_basis_status"] == "incomplete_source_hsp_coverage"
+    assert summary["valley_ebr_export_bundle"]["bundle_count"] == 0
+    assert summary["valley_ebr_export_bundle"]["excluded_count"] == 1
     result = summary["valley_reduced_ebr_mapping"]
     # Workflow bundles carry an unresolved standard-setting certificate
     # (Phase E incomplete), so promotion is fail-closed: not_evaluated.
@@ -1176,8 +1180,9 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     )
     bad_mapping = bad_summary["valley_reduced_ebr_mapping"]
     assert bad_mapping["mapping_status"] == "not_evaluated"
-    assert bad_mapping["excluded_bundles"]
-    assert "expected_hsps mismatch" in bad_mapping["excluded_bundles"][0]["reason"]
+    assert bad_mapping["solutions"] == []
+    bad_instance = bad_summary["valley_ebr_problem_instances"]["instances"][0]
+    assert bad_instance["hsp_basis_status"] == "incomplete_source_hsp_coverage"
 
 
 def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
@@ -1356,11 +1361,62 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
         )(),
     )
     monkeypatch.setattr(
-        workflow_mod, "build_source_payload_for_generic_matching",
+        workflow_mod, "build_source_payload_for_projected_hsp_matching",
         lambda **_: {
             "status": "ok",
             "source_irrep_characters": source_chars,
             "source_operation_map": {0: 1, 4: 2},
+        },
+    )
+    monkeypatch.setattr(
+        workflow_mod,
+        "load_ebr_source_data",
+        lambda *_: {
+            "source_basis_labels": ["A", "B"],
+            "source_basis_count": 2,
+            "data_source": "test",
+        },
+    )
+    monkeypatch.setattr(
+        workflow_mod,
+        "derive_projected_subspace_source_hsp_basis",
+        lambda **_: {
+            "status": "validated",
+            "required_source_hsp_labels": ["GM"],
+            "source_hsps": [{
+                "source_hsp_label": "GM",
+                "standard_representative_k_frac": [0.0, 0.0, 0.0],
+                "inverse_parent_k_frac": [0.0, 0.0, 0.0],
+            }],
+            "standard_plane_basis": [
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ],
+            "projected_subspace_space_group": {
+                "number": 75,
+                "symbol": "P4",
+                "hall_number": 349,
+                "hall_symbol": "P 4",
+            },
+            "provenance": {"source": "test"},
+            "blocker": "",
+        },
+    )
+    monkeypatch.setattr(
+        workflow_mod,
+        "classify_projected_subspace_kpoint",
+        lambda **kwargs: {
+            "kpoint": kwargs.get("kpoint"),
+            "valley": kwargs.get("valley"),
+            "classification": "representative",
+            "geometric_classification": "representative",
+            "source_hsp_label": "GM",
+            "source_irrep_labels": ["A", "B"],
+            "source_hsp_membership": True,
+            "standard_k_frac": [0.0, 0.0, 0.0],
+            "reciprocal_shift": [0, 0, 0],
+            "validation_status": "validated",
+            "representation_transport_status": "validated",
         },
     )
 

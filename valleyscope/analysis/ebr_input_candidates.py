@@ -37,6 +37,7 @@ def build_ebr_input_candidates(
     """
     candidates: list[dict[str, object]] = []
     blocked: list[dict[str, object]] = []
+    non_source_rows: list[dict[str, object]] = []
 
     if irrep_workflow_decisions is None or valley_irrep_matching is None:
         return _empty_report("missing input reports")
@@ -88,6 +89,29 @@ def build_ebr_input_candidates(
                     and subspace_group_candidate != "None"
                 )
 
+                classification = gm.get("projected_hsp_classification", {})
+                is_valid_generic_non_source = (
+                    gm.get("source_hsp_membership") is False
+                    and isinstance(classification, dict)
+                    and classification.get("classification") == "generic"
+                    and classification.get("validation_status") == "validated"
+                )
+                if is_valid_generic_non_source:
+                    non_source_rows.append({
+                        "kpoint": kp_name,
+                        "valley": v_name,
+                        "readiness_level": readiness,
+                        "workflow_path": path,
+                        "matching_status": match_status,
+                        "source_hsp_membership": False,
+                        "local_representation_ready": (
+                            readiness != "blocked" and path != "blocked"
+                        ),
+                        "reason": "generic_projected_subspace_k",
+                        "ready_for_ebr_input": False,
+                    })
+                    continue
+
                 # Candidate gate
                 if (
                     sg_resolved
@@ -112,6 +136,11 @@ def build_ebr_input_candidates(
                             "valley_preserving_operation_ids": _list_or_empty(vp_ids),
                             "source_operation_map": dict(op_map) if isinstance(op_map, dict) else {},
                             "irrep_source_provenance": _build_irrep_source_provenance(gm),
+                            "projected_hsp_classification": dict(
+                                gm.get("projected_hsp_classification", {})
+                            ) if isinstance(
+                                gm.get("projected_hsp_classification", {}), dict
+                            ) else {},
                             "source": f"valley_irrep_matching/generic/{kp_name}/{v_name}",
                             "ready_for_ebr_input": True,
                         })
@@ -155,6 +184,7 @@ def build_ebr_input_candidates(
         "status": status,
         "candidate_count": len(candidates),
         "blocked_count": len(blocked),
+        "non_source_count": len(non_source_rows),
         "reduced_ebr_decomposition_status": "not_implemented",
         "interpretation": (
             "Trusted matched valley-preserving irreps collected as EBR input "
@@ -166,6 +196,7 @@ def build_ebr_input_candidates(
         "by_kpoint": by_kpoint,
         "candidates": candidates,
         "blocked": blocked,
+        "non_source_rows": non_source_rows,
     }
 
 
@@ -266,9 +297,11 @@ def _empty_report(reason: str) -> dict[str, object]:
         "status": "no_candidates",
         "candidate_count": 0,
         "blocked_count": 0,
+        "non_source_count": 0,
         "reduced_ebr_decomposition_status": "not_implemented",
         "interpretation": reason,
         "by_kpoint": {},
         "candidates": [],
         "blocked": [],
+        "non_source_rows": [],
     }

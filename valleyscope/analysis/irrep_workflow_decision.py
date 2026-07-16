@@ -329,68 +329,37 @@ def build_irrep_workflow_decisions(
             is_identity_only_vp = bool(
                 vp_ops and len(vp_ops) == 1 and 0 in vp_ops
             )
+            # Identity-only is a little-group property, not a workflow path.
+            # It removes only the non-identity eigenphase requirement.  Seed
+            # symmetry, closure, spinor, and actual projector-use evidence
+            # still choose direct_qcut / symmetry_adapted / blocked below.
+            has_identity_character = False
             if is_identity_only_vp:
-                # Identity-only: the only operation is the identity.
-                # The local representation dimension may be extractable
-                # from character diagnostics even when the SA report
-                # marks local_irrep_ready=False (no non-identity ops).
-                sa = sa_by_kp.get(kp_name, {}).get(v, {})
-                has_char_diag = sa.get("local_irrep_ready", False) and not sa.get("diagnostic_only", True)
-                # Also check raw character diagnostics for identity eigenphases.
-                if not has_char_diag and isinstance(symmetry_adapted_valley_report, dict):
+                sa_identity = sa_by_kp.get(kp_name, {}).get(v, {})
+                has_identity_character = bool(
+                    sa_identity.get("local_irrep_ready", False)
+                    and not sa_identity.get("diagnostic_only", True)
+                )
+                if (
+                    not has_identity_character
+                    and isinstance(symmetry_adapted_valley_report, dict)
+                ):
                     vp_subspaces = (
                         symmetry_adapted_valley_report.get("by_kpoint", {})
-                        .get(kp_name, {}).get("valley_preserving_subspaces", [])
+                        .get(kp_name, {}).get(
+                            "valley_preserving_subspaces", []
+                        )
                     )
-                    for vs in vp_subspaces if isinstance(vp_subspaces, list) else []:
-                        char_diag = vs.get("valley_preserving_character_diagnostics", {})
+                    for vs in (
+                        vp_subspaces if isinstance(vp_subspaces, list) else []
+                    ):
+                        char_diag = vs.get(
+                            "valley_preserving_character_diagnostics", {}
+                        )
                         pv = char_diag.get("per_valley", {}).get(v, [])
                         if isinstance(pv, list) and pv:
-                            has_char_diag = True
+                            has_identity_character = True
                             break
-                if has_char_diag and (
-                    spinor_convention_verified or not spinor_wavefunction
-                ):
-                    spinor_reason = (
-                        "scalar wavefunction; spinor convention gate not applicable"
-                        if not spinor_wavefunction
-                        else "spinor convention verified"
-                    )
-                    kp_decisions[v] = _decision(
-                        workflow_path=PATH_SYMMETRY_ADAPTED,
-                        readiness=READINESS_TRUSTED,
-                        reason=(
-                            "G_k^(a) contains only the identity operation; "
-                            f"local identity character available, {spinor_reason}"
-                        ),
-                        uses_symmetry_adapted_projector=False,
-                        direct_qcut_allowed=False,
-                    )
-                elif has_char_diag:
-                    kp_decisions[v] = _decision(
-                        workflow_path=PATH_SYMMETRY_ADAPTED,
-                        readiness=READINESS_USABLE_WITH_CAUTION,
-                        reason=(
-                            "G_k^(a) contains only the identity operation; "
-                            "local identity character available, but "
-                            "spinor convention unverified"
-                        ),
-                        required_followup="verify spinor convention against benchmark",
-                        uses_symmetry_adapted_projector=False,
-                        direct_qcut_allowed=False,
-                    )
-                else:
-                    kp_decisions[v] = _decision(
-                        workflow_path=PATH_SYMMETRY_ADAPTED,
-                        readiness=READINESS_USABLE_WITH_CAUTION,
-                        reason=(
-                            "G_k^(a) contains only the identity operation; "
-                            "local representation dimension may not be available"
-                        ),
-                        uses_symmetry_adapted_projector=False,
-                        direct_qcut_allowed=False,
-                    )
-                continue
             # Seed projector symmetry
             seed_rows = seed_by_kp.get(kp_name, {}).get(v, [])
             seed_failed = sum(1 for r in seed_rows if r.get("status") in ("failed",))
@@ -400,6 +369,11 @@ def build_irrep_workflow_decisions(
                 else "warn" if seed_warn > 0
                 else "passed" if seed_rows else "not_evaluated"
             )
+            if is_identity_only_vp and not seed_rows:
+                # Projector covariance under E is algebraic: I P I = P.
+                # Identity rows are intentionally omitted from the seed
+                # diagnostic table, so absence is not missing evidence.
+                seed_status = "passed"
             seed_epsilons = [
                 float(r.get("epsilon_seed", 0.0)) for r in seed_rows
                 if r.get("epsilon_seed") is not None
@@ -416,6 +390,11 @@ def build_irrep_workflow_decisions(
                 if cq in closure_qualities:
                     worst_closure = cq
                     break
+            if is_identity_only_vp and not closure_rows:
+                # D_E is the identity on the target subspace.  The closure
+                # diagnostic omits E by design; out-of-little-group failures
+                # must not be imported into G_k^(a)={E}.
+                worst_closure = "clean"
             closure_unitarities = [
                 float(r.get("raw_unitarity_error", 0.0)) for r in closure_rows
                 if r.get("raw_unitarity_error") is not None
@@ -429,6 +408,10 @@ def build_irrep_workflow_decisions(
 
             # Q-cut eigenvalue readiness
             qcut = qcut_ready.get(kp_name, {}).get(v, {"ready": 0, "total": 0})
+            if is_identity_only_vp and has_identity_character:
+                # The identity character supplies the local representation
+                # dimension.  There is deliberately no non-identity phase row.
+                qcut = {"ready": 1, "total": 1}
 
             # Symmetry-adapted diagnostics
             sa = sa_by_kp.get(kp_name, {}).get(v, {})
@@ -450,6 +433,20 @@ def build_irrep_workflow_decisions(
                 spinor_convention_verified=spinor_convention_verified,
                 spinor_wavefunction=spinor_wavefunction,
             )
+            if is_identity_only_vp:
+                decision["identity_only_valley_preserving_subgroup"] = True
+                decision["identity_readiness_evidence"] = {
+                    "seed_projector_symmetry": "algebraic_identity",
+                    "target_subspace_closure": "algebraic_identity",
+                    "local_representation_dimension": (
+                        "available" if has_identity_character else "missing"
+                    ),
+                }
+                decision["reason"] = (
+                    f"{decision['reason']}; G_k^(a) contains only the "
+                    "identity operation; algebraic identity projector/closure; "
+                    "non-identity eigenphase not required"
+                )
             kp_decisions[v] = decision
         if kp_decisions:
             by_kpoint[kp_name] = kp_decisions

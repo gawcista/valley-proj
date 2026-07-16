@@ -15,7 +15,7 @@ State model (see ebr_problem_instances.py):
 from __future__ import annotations
 
 
-_SCHEMA_VERSION = "1.2.0"
+_SCHEMA_VERSION = "1.3.0"
 
 
 def build_ebr_export_bundle(
@@ -74,6 +74,27 @@ def build_ebr_export_bundle(
                 "expected_hsps": inst.get("expected_hsps", []),
                 "optional_hsps": inst.get("optional_hsps", []),
                 "missing_optional_hsps": inst.get("missing_optional_hsps", []),
+                "required_source_hsp_labels": inst.get(
+                    "required_source_hsp_labels", []
+                ),
+                "covered_source_hsp_labels": inst.get(
+                    "covered_source_hsp_labels", []
+                ),
+                "missing_source_hsp_labels": inst.get(
+                    "missing_source_hsp_labels", []
+                ),
+                "trusted_matched_source_hsp_labels": inst.get(
+                    "trusted_matched_source_hsp_labels", []
+                ),
+                "source_hsp_to_sampled_kpoint": inst.get(
+                    "source_hsp_to_sampled_kpoint", {}
+                ),
+                "source_hsp_coverage_complete": inst.get(
+                    "source_hsp_coverage_complete", False
+                ),
+                "source_hsp_coverage_provenance": inst.get(
+                    "source_hsp_coverage_provenance", {}
+                ),
                 "hsp_basis_status": hsp_status,
                 "ready_for_reduced_table_validation": ready_for_validation,
                 "ready_for_external_solver": ready_for_solver,
@@ -91,6 +112,15 @@ def build_ebr_export_bundle(
             "subspace_group_candidate": inst.get("subspace_group_candidate", ""),
             "subspace_space_group": inst.get("subspace_space_group", {}),
             "hsp_basis_status": inst.get("hsp_basis_status", ""),
+            "required_source_hsp_labels": inst.get(
+                "required_source_hsp_labels", []
+            ),
+            "covered_source_hsp_labels": inst.get(
+                "covered_source_hsp_labels", []
+            ),
+            "missing_source_hsp_labels": inst.get(
+                "missing_source_hsp_labels", []
+            ),
             "ready_for_reduced_table_validation": ready_for_validation,
             "ready_for_ebr_decomposition": ready_for_decomp,
             "exclusion_reasons": reasons,

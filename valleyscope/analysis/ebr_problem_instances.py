@@ -27,6 +27,7 @@ import numpy as np
 def build_ebr_problem_instances(
     *,
     ebr_input_candidates: dict[str, object] | None,
+    projected_hsp_coverage: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Build EBR problem instances from trusted input candidates.
 
@@ -131,6 +132,7 @@ def build_ebr_problem_instances(
                 "valley_preserving_operation_ids",
                 "source_operation_map",
                 "irrep_source_provenance",
+                "projected_hsp_classification",
             ):
                 if key in c:
                     record[key] = c[key]
@@ -141,11 +143,59 @@ def build_ebr_problem_instances(
         expected_hsps = list(actual_hsps)
         optional_hsps: list[str] = []
 
+        coverage = _coverage_for_valley(projected_hsp_coverage, valley)
+        required_source_hsps = _string_list(
+            coverage.get("required_source_hsp_labels", [])
+        )
+        covered_source_hsps = _string_list(
+            coverage.get("covered_source_hsp_labels", [])
+        )
+        missing_source_hsps = _string_list(
+            coverage.get("missing_source_hsp_labels", [])
+        )
+        trusted_source_hsps = _string_list(
+            coverage.get("trusted_matched_source_hsp_labels", [])
+        )
+        trusted_missing_source_hsps = _string_list(
+            coverage.get("trusted_missing_source_hsp_labels", [])
+        )
+        source_to_sampled = (
+            dict(coverage.get("source_hsp_to_sampled_kpoint", {}))
+            if isinstance(
+                coverage.get("source_hsp_to_sampled_kpoint", {}), dict
+            )
+            else {}
+        )
+        coverage_present = bool(coverage)
+        coverage_complete = bool(
+            coverage.get("complete", False)
+        ) if coverage_present else True
+        coverage_ready = bool(
+            coverage.get("ready_for_ebr_promotion", False)
+        ) if coverage_present else True
+        if coverage_present and coverage_complete:
+            mapped_expected = [
+                source_to_sampled.get(label)
+                for label in required_source_hsps
+            ]
+            if all(isinstance(label, str) and label for label in mapped_expected):
+                expected_hsps = [str(label) for label in mapped_expected]
+
         has_hsps = bool(actual_hsps)
         # State 1 (sampled_basis): trusted irrep rows collected, not yet
         # validated against a reviewed reduced table.
-        hsp_basis_status = "sampled_basis" if has_hsps else "no_data"
-        status = "sampled_basis" if has_hsps else "no_data"
+        if has_hsps and coverage_present and not coverage_ready:
+            hsp_basis_status = "incomplete_source_hsp_coverage"
+            status = "incomplete_source_hsp_coverage"
+        else:
+            hsp_basis_status = "sampled_basis" if has_hsps else "no_data"
+            status = "sampled_basis" if has_hsps else "no_data"
+        ready_for_validation = has_hsps and coverage_ready
+        blocked_by = []
+        if coverage_present and trusted_missing_source_hsps:
+            blocked_by.append(
+                f"missing trusted source HSPs: {trusted_missing_source_hsps}"
+            )
 
         instances.append({
             "instance_id": instance_id,
@@ -169,15 +219,25 @@ def build_ebr_problem_instances(
             },
             "candidate_count": len(cands),
             "status": status,
-            "ready_for_reduced_table_validation": has_hsps,
+            "ready_for_reduced_table_validation": ready_for_validation,
             "ready_for_ebr_decomposition": False,
-            "blocked_by": [],
+            "blocked_by": blocked_by,
             "expected_hsps": expected_hsps,
             "expected_hsp_policy_source": "sampled_irrep_basis",
             "hsp_basis_status": hsp_basis_status,
             "optional_hsps": optional_hsps,
             "actual_hsps": actual_hsps,
             "missing_optional_hsps": [],
+            "required_source_hsp_labels": required_source_hsps,
+            "covered_source_hsp_labels": covered_source_hsps,
+            "missing_source_hsp_labels": missing_source_hsps,
+            "trusted_matched_source_hsp_labels": trusted_source_hsps,
+            "trusted_missing_source_hsp_labels": trusted_missing_source_hsps,
+            "source_hsp_to_sampled_kpoint": source_to_sampled,
+            "source_hsp_coverage_complete": coverage_complete,
+            "source_hsp_coverage_provenance": coverage.get(
+                "source_basis_provenance", {}
+            ),
         })
 
     overall_status = "has_instances" if instances else "no_instances"
@@ -197,6 +257,25 @@ def build_ebr_problem_instances(
         ),
         "instances": instances,
     }
+
+
+def _coverage_for_valley(
+    report: dict[str, object] | None,
+    valley: str,
+) -> dict[str, object]:
+    if not isinstance(report, dict):
+        return {}
+    by_valley = report.get("by_valley", {})
+    if not isinstance(by_valley, dict):
+        return {}
+    row = by_valley.get(valley, {})
+    return dict(row) if isinstance(row, dict) else {}
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str) and item]
 
 
 # ---------------------------------------------------------------------------

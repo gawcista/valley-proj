@@ -201,7 +201,7 @@ def test_schema_fields():
             "excluded_instances", "interpretation"}
     assert keys <= set(r)
     assert r["reduced_ebr_decomposition_status"] == "not_implemented"
-    assert r["schema_version"] == "1.2.0"
+    assert r["schema_version"] == "1.3.0"
     b = r["bundles"][0]
     for k in ["bundle_id", "source_instance_id", "valley",
               "irreps_by_kpoint", "operations_by_kpoint",
@@ -212,10 +212,38 @@ def test_schema_fields():
     assert "certificate_identity" in b
 
 
+def test_source_hsp_coverage_fields_are_exported_without_loss():
+    instance = dict(_SAMPLED_BASIS_INSTANCE["instances"][0])
+    instance.update({
+        "required_source_hsp_labels": ["GM", "K"],
+        "covered_source_hsp_labels": ["GM", "K"],
+        "missing_source_hsp_labels": [],
+        "trusted_matched_source_hsp_labels": ["GM", "K"],
+        "source_hsp_to_sampled_kpoint": {"GM": "GammaM", "K": "KM"},
+        "source_hsp_coverage_complete": True,
+        "source_hsp_coverage_provenance": {"source": "irreptables"},
+    })
+
+    bundle = build_ebr_export_bundle(
+        ebr_problem_instances={"instances": [instance]},
+    )["bundles"][0]
+
+    assert bundle["required_source_hsp_labels"] == ["GM", "K"]
+    assert bundle["covered_source_hsp_labels"] == ["GM", "K"]
+    assert bundle["missing_source_hsp_labels"] == []
+    assert bundle["source_hsp_to_sampled_kpoint"] == {
+        "GM": "GammaM", "K": "KM",
+    }
+    assert bundle["source_hsp_coverage_complete"] is True
+    assert bundle["source_hsp_coverage_provenance"] == {
+        "source": "irreptables",
+    }
+
+
 def test_schema_doc_covers_centered_export_and_ingestion_versions():
     schema = Path("docs/schema.md").read_text(encoding="utf-8")
     normalized_schema = " ".join(schema.split())
-    assert 'Schema version `"1.2.0"`' in schema
+    assert 'Schema version `"1.3.0"`' in schema
     assert 'Current ingestion-record schema version: `"1.4.0"`' in schema
     assert "centered_affine_operation_map" in schema
     assert "centering_coset_index" in schema
@@ -236,7 +264,7 @@ def test_schema_1_2_preserves_required_operation_ids_in_certificate_identity():
         ebr_problem_instances={"instances": [instance]},
     )
 
-    assert report["schema_version"] == "1.2.0"
+    assert report["schema_version"] == "1.3.0"
     exported_identity = report["bundles"][0]["certificate_identity"]
     assert exported_identity["affine_required_operation_ids"] == [-3, 4]
 
@@ -280,7 +308,7 @@ def test_schema_1_2_preserves_centered_expansion_identity_without_loss():
         ebr_problem_instances={"instances": [instance]},
     )
 
-    assert report["schema_version"] == "1.2.0"
+    assert report["schema_version"] == "1.3.0"
     assert report["bundles"][0]["certificate_identity"] == certificate_identity
 
 
