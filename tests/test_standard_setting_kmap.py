@@ -360,6 +360,44 @@ def test_explicit_transform_resolves_nonmatching_parent_kpoint():
     )
 
 
+def test_nonsymmetric_centered_reciprocal_transform_maps_to_y_little_group():
+    """A C-centered transform preserves the reciprocal dual-basis convention."""
+    transform = np.array([
+        [0.5, -1.0, 0.0],
+        [-0.5, 0.0, 0.0],
+        [0.0, 0.0, -1.0],
+    ])
+    operation_ids = [-3, 4]
+    table, detected = _primitive_parent_ops_from_irreptables(
+        5, transform, operation_ids,
+    )
+
+    label, blocker, provenance = resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.5, 0.0, 0.0]),
+        table=table,
+        standard_match={
+            "number": 5,
+            "international_short": table.name,
+            "hall_number": 9,
+            "hall_symbol": "C 2y",
+            "operation_ids": operation_ids,
+        },
+        detected_operations=detected,
+        parent_to_standard_direct_transform=transform,
+        origin_shift_fractional=np.zeros(3),
+        transform_provenance="reviewed_nonsymmetric_test",
+    )
+
+    assert blocker is None
+    assert label == "Y"
+    assert provenance["transformed_k_frac"] == pytest.approx([0.0, -1.0, 0.0])
+    assert table.operation_indices_for_kpoint(label) == [1, 2]
+    assert len(table.operation_indices_for_kpoint(label)) == len(operation_ids)
+    certificate = provenance["standard_setting_certificate"]
+    assert certificate["validation_status"] == "validated"
+    assert certificate["translation_validation_status"] == "passed"
+
+
 def test_explicit_transform_success_records_transform_candidate():
     """Accepted explicit transform carries transform_candidate provenance."""
     T = np.diag([0.5, 1.0, 1.0])
@@ -1862,10 +1900,11 @@ def test_validated_centered_transform_is_preserved_without_source_hsp_label():
     assert "source HSP label" in blocker
     assert "no unique standard-setting k-coordinate transform" not in blocker
     assert provenance["basis_transform"]["status"] == "accepted"
-    assert provenance["transformed_k_frac"] == pytest.approx(
-        (np.array([0.123, 0.234, 0.345]) @ np.linalg.inv(
-            np.asarray(provenance["basis_transform"]["transform_matrix"])
-        ).T).tolist()
+    transformed_k = np.asarray(provenance["transformed_k_frac"])
+    transform = np.asarray(provenance["basis_transform"]["transform_matrix"])
+    np.testing.assert_allclose(
+        transformed_k @ transform,
+        np.array([0.123, 0.234, 0.345]),
     )
     certificate = provenance["standard_setting_certificate"]
     assert certificate["validation_status"] == "validated"

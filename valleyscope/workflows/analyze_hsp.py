@@ -92,7 +92,10 @@ from valleyscope.projection.folded_center import (
     build_folded_center_report,
     folded_center_report_to_dict,
 )
-from valleyscope.reports.analysis_outputs import write_analysis_outputs
+from valleyscope.reports.analysis_outputs import (
+    prepare_analysis_output_directory,
+    write_analysis_outputs,
+)
 from valleyscope.reports.csv_report import weight_row
 from valleyscope.subspace.valley_basis import (
     build_two_valley_adapted_basis,
@@ -245,7 +248,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     config = load_config(config_path)
     wavefunctions = read_wavefunction_h5(config.input.wavefunction_h5)
     output_dir = config.output.directory
-    output_dir.mkdir(parents=True, exist_ok=True)
+    prepare_analysis_output_directory(config)
     monolayer_recip = config.default_monolayer_reciprocal()
     qcut = _resolve_qcut(config, wavefunctions.metadata.lattice.reciprocal_cart, monolayer_recip)
 

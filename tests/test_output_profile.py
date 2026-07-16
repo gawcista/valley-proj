@@ -274,6 +274,130 @@ _DEBUG_ONLY_FILES = frozenset({
 })
 
 
+def _write_minimal_outputs(config, **payloads):
+    return write_analysis_outputs(
+        config=config,
+        qcut=0.1,
+        weight_rows=[],
+        sector_names=[],
+        subspace_payload={},
+        symmetry_payload={},
+        symmetry_rows=[],
+        projectors_by_kpoint={},
+        qcut_scan_payload={},
+        symmetry_representation_payload={},
+        basis_transforms={},
+        **payloads,
+    )
+
+
+def test_standard_rerun_removes_stale_debug_artifacts(tmp_path):
+    """A debug-to-standard rerun leaves no managed debug/detail files."""
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+
+    analyze_hsp(config_path)
+    assert (out_dir / "diagnostics.h5").exists()
+    assert (out_dir / "valley_subspace.json").exists()
+
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["output"]["profile"] = "standard"
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    analyze_hsp(config_path)
+
+    assert not ({path.name for path in out_dir.iterdir()} & _DEBUG_ONLY_FILES)
+
+
+def test_optional_public_outputs_removed_when_payload_becomes_absent(tmp_path):
+    """Disabled/absent EBR payloads remove files produced by the prior run."""
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["output"]["profile"] = "standard"
+    raw["analysis"]["reduced_ebr"] = {"enabled": True}
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    _write_minimal_outputs(
+        load_config(config_path),
+        ebr_export_bundle={"status": "has_bundles"},
+        reduced_ebr_mapping={"status": "solved_exact"},
+    )
+    assert (out_dir / "valley_ebr_export_bundle.json").exists()
+    assert (out_dir / "valley_reduced_ebr_mapping.json").exists()
+
+    raw["analysis"]["reduced_ebr"] = {"enabled": False}
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    _write_minimal_outputs(load_config(config_path))
+
+    assert not (out_dir / "valley_ebr_export_bundle.json").exists()
+    assert not (out_dir / "valley_reduced_ebr_mapping.json").exists()
+
+
+def test_managed_output_cleanup_preserves_unrelated_user_file(tmp_path):
+    """Cleanup is allowlisted and never removes an unrelated user file."""
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["output"]["profile"] = "standard"
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    out_dir.mkdir()
+    user_file = out_dir / "user-notes.txt"
+    user_file.write_text("preserve me", encoding="utf-8")
+
+    _write_minimal_outputs(load_config(config_path))
+
+    assert user_file.read_text(encoding="utf-8") == "preserve me"
+
+
+def test_managed_output_cleanup_preserves_configured_input_file(tmp_path):
+    """A managed-looking filename is never removed when it is an input path."""
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    h5_path = out_dir / "diagnostics.h5"
+    config_path = tmp_path / "config.yaml"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["output"]["profile"] = "standard"
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    analyze_hsp(config_path)
+
+    assert h5_path.exists()
+
+
+def test_summary_output_files_match_current_managed_files_after_rerun(tmp_path):
+    """Summary paths describe every and only managed file from the current run."""
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    analyze_hsp(config_path)
+
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["output"]["profile"] = "standard"
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    outputs = analyze_hsp(config_path)
+
+    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    declared = {Path(path).name for path in summary["output_files"].values()}
+    managed = {
+        path.name for path in out_dir.iterdir()
+        if path.name in _STANDARD_PUBLIC_FILES | _DEBUG_ONLY_FILES
+    }
+    assert declared == managed
+
+
 def test_standard_profile_output_files_are_only_public_set(tmp_path):
     """Standard profile writes only the contracted public output files."""
     h5_path = tmp_path / "wf.h5"

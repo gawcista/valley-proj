@@ -19,6 +19,59 @@ from valleyscope.reports.summary_report import (
 )
 
 
+_MANAGED_ANALYSIS_OUTPUT_FILENAMES = frozenset({
+    "valley_summary.txt",
+    "valley_summary.json",
+    "valley_weights.csv",
+    "valley_ebr_export_bundle.json",
+    "valley_reduced_ebr_mapping.json",
+    "valley_subspace.json",
+    "symmetry_report.json",
+    "symmetry_eigenvalues.csv",
+    "diagnostics.h5",
+    "valley_basis_transform.h5",
+    "projector_symmetry_report.json",
+    "symmetry_adapted_valley_analysis.json",
+    "target_subspace_closure.json",
+    "hsp_star_conjugation.json",
+    "hsp_star_derived_characters.json",
+    "subspace_representation_quality.json",
+    "irrep_workflow_decisions.json",
+    "valley_irrep_matching.json",
+    "valley_ebr_input_candidates.json",
+    "valley_ebr_problem_instances.json",
+    "folded_center_report.json",
+    "sampled_k_coverage.json",
+})
+
+
+def _configured_analysis_input_paths(config: AppConfig) -> set[Path]:
+    paths = {
+        config.input.wavefunction_h5,
+        *config.input.monolayer_poscars.values(),
+    }
+    if config.symmetry.operations.structure_file is not None:
+        paths.add(config.symmetry.operations.structure_file)
+    if config.reduced_ebr.table_file is not None:
+        paths.add(config.reduced_ebr.table_file)
+    if config.reduced_ebr.spec_file is not None:
+        paths.add(config.reduced_ebr.spec_file)
+    return {path.resolve() for path in paths}
+
+
+def prepare_analysis_output_directory(config: AppConfig) -> None:
+    """Remove stale ValleyScope artifacts while preserving inputs and user files."""
+    output_dir = config.output.directory
+    output_dir.mkdir(parents=True, exist_ok=True)
+    protected_paths = _configured_analysis_input_paths(config)
+    for filename in _MANAGED_ANALYSIS_OUTPUT_FILENAMES:
+        path = output_dir / filename
+        if path.resolve() in protected_paths:
+            continue
+        if path.is_file() or path.is_symlink():
+            path.unlink()
+
+
 def write_analysis_outputs(
     *,
     config: AppConfig,
@@ -49,7 +102,7 @@ def write_analysis_outputs(
     sampled_k_coverage: dict[str, object] | None = None,
 ) -> dict[str, object]:
     output_dir = config.output.directory
-    output_dir.mkdir(parents=True, exist_ok=True)
+    prepare_analysis_output_directory(config)
     outputs: dict[str, object] = {}
     is_debug = config.output.profile == "debug"
 

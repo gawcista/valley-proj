@@ -1098,6 +1098,25 @@ def _match_table_kpoint_label(
     return None
 
 
+def _transform_reciprocal_k_to_standard(
+    *,
+    k_parent_frac: np.ndarray,
+    parent_to_standard_direct_transform: np.ndarray,
+) -> np.ndarray:
+    """Map reciprocal coordinates under ``x_std = T x_parent``.
+
+    Fractional k coordinates are represented by one-dimensional NumPy arrays
+    but interpreted as column vectors.  Therefore
+    ``k_std = T^(-T) k_parent``; solving the transposed direct transform keeps
+    that convention explicit without constructing an inverse.
+    """
+    transform = np.asarray(parent_to_standard_direct_transform, dtype=float)
+    k_parent = np.asarray(k_parent_frac, dtype=float)
+    if transform.shape != (3, 3) or k_parent.shape != (3,):
+        raise ValueError("reciprocal k transform requires a 3x3 T and length-3 k")
+    return np.linalg.solve(transform.T, k_parent)
+
+
 def resolve_standard_setting_hsp_label(
     *,
     k_frac: np.ndarray,
@@ -1384,8 +1403,10 @@ def resolve_standard_setting_hsp_label(
                     if transform_provenance
                     else "explicit_user_input"
                 )
-                T_inv = np.linalg.inv(T)
-                transformed_k = k_frac @ T_inv.T
+                transformed_k = _transform_reciprocal_k_to_standard(
+                    k_parent_frac=k_frac,
+                    parent_to_standard_direct_transform=T,
+                )
                 prov["transformed_k_frac"] = transformed_k.tolist()
                 label = _match_table_kpoint_label(
                     table, transformed_k, tolerance=tolerance,
@@ -1604,8 +1625,10 @@ def resolve_standard_setting_hsp_label(
         # The reciprocal transform is the transpose of the inverse of the
         # direct-lattice transform: k_std = T^(-T) * k_parent.
         try:
-            T_inv = np.linalg.inv(T)
-            transformed_k = k_frac @ T_inv.T
+            transformed_k = _transform_reciprocal_k_to_standard(
+                k_parent_frac=k_frac,
+                parent_to_standard_direct_transform=T,
+            )
             prov["transformed_k_frac"] = transformed_k.tolist()
             transformed_label = _match_table_kpoint_label(
                 table, transformed_k, tolerance=tolerance,
