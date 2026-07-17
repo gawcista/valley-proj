@@ -1605,6 +1605,28 @@ def test_tmote2_projected_source_hsp_coverage_and_tr_orbit_are_explicit():
     assert rows["MM"]["mapping_miss_count"] == 0
     assert rows["GammaM"]["theta_square_residual"] < 2e-7
     assert rows["MM"]["theta_square_residual"] < 3e-8
+    for row in rows.values():
+        for covariance in row["projector_covariance"].values():
+            source = covariance["source_projector_provenance"]
+            target = covariance["target_projector_provenance"]
+            assert {
+                key: source[key]
+                for key in ("workflow_path", "projector_kind")
+            } == {
+                "workflow_path": "direct_qcut",
+                "projector_kind": "fixed_center_seed",
+            }
+            assert {
+                key: target[key]
+                for key in ("workflow_path", "projector_kind")
+            } == {
+                "workflow_path": "direct_qcut",
+                "projector_kind": "fixed_center_seed",
+            }
+            assert source["projector_shape"] == [2, 2]
+            assert target["projector_shape"] == [2, 2]
+            assert source["projector_fingerprint"].startswith("sha256:")
+            assert target["projector_fingerprint"].startswith("sha256:")
 
     export = s["valley_ebr_export_bundle"]
     assert export["bundle_count"] == 1
@@ -1696,10 +1718,12 @@ def test_centered_fixture_projected_hsp_coverage_is_per_valley():
     assert "ambiguous_time_reversal_kpoint_partner:KM:[]" in sewing[
         "blockers"
     ]
-    assert any(
-        blocker.startswith("time_reversal_projector_covariance_failed:")
-        for blocker in sewing["blockers"]
-    )
+    assert "trusted_projector_workflow_blocked:GammaM:M1_valley" in sewing[
+        "blockers"
+    ]
+    assert "time_reversal_trusted_projectors_missing:GammaM:GammaM" in sewing[
+        "blockers"
+    ]
 
 
 def test_centered_fixture_star_and_generic_rows_do_not_become_false_blockers():

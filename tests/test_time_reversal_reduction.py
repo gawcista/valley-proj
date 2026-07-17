@@ -10,7 +10,10 @@ from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instanc
 from valleyscope.analysis.irreptables_runtime_table_builder import (
     build_auto_time_reversal_reduced_ebr_table,
 )
-from valleyscope.analysis.reduced_ebr_mapping import promote_bundle_for_solve
+from valleyscope.analysis.reduced_ebr_mapping import (
+    _joint_bundle_time_reversal_evidence_valid,
+    promote_bundle_for_solve,
+)
 
 from valleyscope.analysis.time_reversal_orbits import (
     _decompose_grey_counts,
@@ -392,6 +395,16 @@ def _blocker_codes(promotion):
     return {row["code"] for row in promotion["blocker_reasons"]}
 
 
+def _projector_provenance_from_sewing(report):
+    return {
+        row["source_kpoint"]: {
+            valley: dict(entry["source_projector_provenance"])
+            for valley, entry in row["projector_covariance"].items()
+        }
+        for row in report["rows"]
+    }
+
+
 def test_joint_problem_promotion_requires_matching_type_ii_grey_provenance():
     bundle, table = _reviewed_joint_bundle_and_table()
 
@@ -500,13 +513,177 @@ def test_self_mapped_joint_problem_requires_serialized_sewing_evidence():
         coefficients_by_kpoint={"GM": coefficients},
         band_indices_by_kpoint={"GM": np.asarray([1, 2])},
         valley_projectors_by_kpoint={"GM": {"v": np.eye(2)}},
+        valley_projector_provenance_by_kpoint={
+            "GM": {"v": {
+                "workflow_path": "direct_qcut",
+                "projector_kind": "fixed_center_seed",
+            }},
+        },
+        projector_selection_blockers=[],
         time_reversal_valley_mapping={"v": "v"},
         spinor=True,
         spinor_convention_verified=True,
     )
     self_mapped["time_reversal"]["antiunitary_sewing_evidence"] = sewing
+    self_mapped["time_reversal"][
+        "projector_workflow_by_sampled_kpoint"
+    ] = {"GM": {"v": "direct_qcut"}}
+    self_mapped["time_reversal"][
+        "projector_provenance_by_sampled_kpoint"
+    ] = _projector_provenance_from_sewing(sewing)
+    self_mapped["time_reversal"][
+        "source_hsp_binding_by_sampled_kpoint"
+    ] = {"GM": {"v": {
+        "source_hsp_label": "GM",
+        "classification": "representative",
+        "validation_status": "validated",
+        "parent_k_frac": [0.0, 0.0, 0.0],
+        "standard_k_frac": [0.0, 0.0, 0.0],
+        "source_hsp_representative_k_frac": [0.0, 0.0, 0.0],
+        "standard_operation_index": None,
+    }}}
 
     assert promote_bundle_for_solve(bundle=self_mapped, table=table)["promoted"]
+
+    copied_row = deepcopy(self_mapped)
+    copied_row["source_hsp_to_sampled_kpoint"] = {"GM": "other"}
+    copied_time_reversal = copied_row["time_reversal"]
+    copied_time_reversal["projector_workflow_by_sampled_kpoint"] = {
+        "other": copied_time_reversal[
+            "projector_workflow_by_sampled_kpoint"
+        ]["GM"]
+    }
+    copied_time_reversal["projector_provenance_by_sampled_kpoint"] = {
+        "other": copied_time_reversal[
+            "projector_provenance_by_sampled_kpoint"
+        ]["GM"]
+    }
+    copied_binding = deepcopy(
+        copied_time_reversal["source_hsp_binding_by_sampled_kpoint"]["GM"]
+    )
+    for binding in copied_binding.values():
+        binding["parent_k_frac"] = [0.5, 0.0, 0.0]
+        binding["standard_k_frac"] = [0.5, 0.0, 0.0]
+        binding["source_hsp_representative_k_frac"] = [0.5, 0.0, 0.0]
+    copied_time_reversal["source_hsp_binding_by_sampled_kpoint"] = {
+        "other": copied_binding
+    }
+    copied_sewing = copied_time_reversal["antiunitary_sewing_evidence"]
+    copied_sewing["time_reversal_kpoint_mapping"]["other"] = "other"
+    copied_sewing["reciprocal_shifts_by_kpoint"]["other"] = [1, 0, 0]
+    copied_sewing["sampled_kpoint_frac_by_name"]["other"] = [0.5, 0.0, 0.0]
+    copied_sewing_row = deepcopy(copied_sewing["rows"][0])
+    copied_sewing_row.update({
+        "source_kpoint": "other",
+        "target_kpoint": "other",
+        "reciprocal_shift": [1, 0, 0],
+    })
+    copied_sewing["rows"].append(copied_sewing_row)
+    assert "time_reversal_bundle_evidence_invalid" in _blocker_codes(
+        promote_bundle_for_solve(bundle=copied_row, table=table)
+    )
+
+    for location in (
+        "projector_provenance_by_sampled_kpoint",
+        "covariance_projector_provenance",
+        "source_hsp_binding_by_sampled_kpoint",
+    ):
+        leaked = deepcopy(self_mapped)
+        leaked_time_reversal = leaked["time_reversal"]
+        if location == "projector_provenance_by_sampled_kpoint":
+            target = leaked_time_reversal[location]["GM"]["v"]
+        elif location == "covariance_projector_provenance":
+            target = leaked_time_reversal["antiunitary_sewing_evidence"][
+                "rows"
+            ][0]["projector_covariance"]["v"][
+                "source_projector_provenance"
+            ]
+        else:
+            target = leaked_time_reversal[location]["GM"]["v"]
+        target["raw_projector"] = [[1.0, 0.0], [0.0, 1.0]]
+        assert "time_reversal_bundle_evidence_invalid" in _blocker_codes(
+            promote_bundle_for_solve(bundle=leaked, table=table)
+        )
+
+    scoped = deepcopy(self_mapped)
+    scoped_evidence = scoped["time_reversal"]["antiunitary_sewing_evidence"]
+    scoped_evidence["status"] = "blocked"
+    scoped_evidence["blockers"] = ["unrelated_sample_failed"]
+    scoped_evidence["time_reversal_kpoint_mapping"]["other"] = "other"
+    scoped_evidence["reciprocal_shifts_by_kpoint"]["other"] = [1, 0, 0]
+    unrelated_row = deepcopy(scoped_evidence["rows"][0])
+    unrelated_row.update({
+        "source_kpoint": "other",
+        "target_kpoint": "other",
+        "reciprocal_shift": [1, 0, 0],
+        "status": "blocked",
+        "blockers": ["unrelated_sample_failed"],
+        "target_subspace_closure_residual": 9.0,
+    })
+    scoped_evidence["rows"].append(unrelated_row)
+    assert promote_bundle_for_solve(bundle=scoped, table=table)["promoted"]
+
+    substituted_seed = deepcopy(self_mapped)
+    substituted_seed["time_reversal"][
+        "projector_workflow_by_sampled_kpoint"
+    ] = {"GM": {"v": "symmetry_adapted"}}
+    assert "time_reversal_bundle_evidence_invalid" in _blocker_codes(
+        promote_bundle_for_solve(bundle=substituted_seed, table=table)
+    )
+
+    adapted = deepcopy(substituted_seed)
+    covariance = adapted["time_reversal"]["antiunitary_sewing_evidence"][
+        "rows"
+    ][0]["projector_covariance"]["v"]
+    for field in ("source_projector_provenance", "target_projector_provenance"):
+        covariance[field] = {
+            "workflow_path": "symmetry_adapted",
+            "projector_kind": "symmetry_adapted",
+        }
+    assert "time_reversal_bundle_evidence_invalid" in _blocker_codes(
+        promote_bundle_for_solve(bundle=adapted, table=table)
+    )
+
+    adapted_sewing = build_time_reversal_sewing_report(
+        kpoint_frac_by_name={"GM": np.zeros(3)},
+        g_vectors_frac_by_kpoint={"GM": np.zeros((1, 3), dtype=int)},
+        coefficients_by_kpoint={"GM": coefficients},
+        band_indices_by_kpoint={"GM": np.asarray([1, 2])},
+        valley_projectors_by_kpoint={"GM": {"v": np.zeros((2, 2))}},
+        valley_projector_provenance_by_kpoint={
+            "GM": {"v": {
+                "workflow_path": "symmetry_adapted",
+                "projector_kind": "symmetry_adapted",
+            }},
+        },
+        projector_selection_blockers=[],
+        time_reversal_valley_mapping={"v": "v"},
+        spinor=True,
+        spinor_convention_verified=True,
+    )
+    adapted_exact = deepcopy(self_mapped)
+    adapted_exact["time_reversal"][
+        "antiunitary_sewing_evidence"
+    ] = adapted_sewing
+    adapted_exact["time_reversal"][
+        "projector_workflow_by_sampled_kpoint"
+    ] = {"GM": {"v": "symmetry_adapted"}}
+    adapted_exact["time_reversal"][
+        "projector_provenance_by_sampled_kpoint"
+    ] = _projector_provenance_from_sewing(adapted_sewing)
+    assert promote_bundle_for_solve(
+        bundle=adapted_exact, table=table
+    )["promoted"]
+
+    tampered = deepcopy(adapted_exact)
+    tampered["time_reversal"]["antiunitary_sewing_evidence"]["rows"][0][
+        "projector_covariance"
+    ]["v"]["source_projector_provenance"][
+        "projector_fingerprint"
+    ] = "sha256:" + "0" * 64
+    assert "time_reversal_bundle_evidence_invalid" in _blocker_codes(
+        promote_bundle_for_solve(bundle=tampered, table=table)
+    )
 
     unrelated = deepcopy(self_mapped)
     unrelated["source_hsp_to_sampled_kpoint"] = {"GM": "other"}
@@ -614,7 +791,17 @@ def _self_mapped_candidates(*, multiplicity: int):
         "matched_irrep": "g",
         "irrep_multiplicity": multiplicity,
         "irrep_source_provenance": {"source_hsp_label": "G"},
+        "projected_hsp_classification": {
+            "source_hsp_label": "G",
+            "classification": "representative",
+            "source_hsp_membership": True,
+            "validation_status": "validated",
+            "parent_k_frac": [0.0, 0.0, 0.0],
+            "standard_k_frac": [0.0, 0.0, 0.0],
+            "source_hsp_representative_k_frac": [0.0, 0.0, 0.0],
+        },
         "kpoint": "G",
+        "workflow_path": "direct_qcut",
         "ready_for_ebr_input": True,
     }]}
 
@@ -626,6 +813,13 @@ def _scalar_self_mapped_sewing_report():
         coefficients_by_kpoint={"G": np.asarray([[[1.0 + 0.0j]]])},
         band_indices_by_kpoint={"G": np.asarray([1])},
         valley_projectors_by_kpoint={"G": {"v": np.eye(1)}},
+        valley_projector_provenance_by_kpoint={
+            "G": {"v": {
+                "workflow_path": "direct_qcut",
+                "projector_kind": "fixed_center_seed",
+            }},
+        },
+        projector_selection_blockers=[],
         time_reversal_valley_mapping={"v": "v"},
         spinor=False,
         spinor_convention_verified=True,
@@ -635,6 +829,7 @@ def _scalar_self_mapped_sewing_report():
 def test_self_mapped_valley_promotes_only_with_numerical_antiunitary_evidence():
     source = _self_mapped_source_report()
     grey = _self_mapped_grey_report(multiplicity=1)
+    sewing = _scalar_self_mapped_sewing_report()
 
     report = build_time_reversal_valley_orbit_report(
         valley_mapping_report={
@@ -650,7 +845,10 @@ def test_self_mapped_valley_promotes_only_with_numerical_antiunitary_evidence():
         source_irrep_orbits_by_valley={"v": source},
         grey_source_by_valley={"v": grey},
         ebr_input_candidates=_self_mapped_candidates(multiplicity=1),
-        antiunitary_sewing_report=_scalar_self_mapped_sewing_report(),
+        antiunitary_sewing_report=sewing,
+        trusted_projector_provenance_by_kpoint=(
+            _projector_provenance_from_sewing(sewing)
+        ),
     )
 
     assert report["status"] == "validated"
@@ -672,6 +870,13 @@ def test_self_mapped_valley_rejects_malformed_or_blocked_sewing_evidence():
         },
         band_indices_by_kpoint={"G": np.asarray([1])},
         valley_projectors_by_kpoint={"G": {"v": np.eye(1)}},
+        valley_projector_provenance_by_kpoint={
+            "G": {"v": {
+                "workflow_path": "direct_qcut",
+                "projector_kind": "fixed_center_seed",
+            }},
+        },
+        projector_selection_blockers=[],
         time_reversal_valley_mapping={"v": "v"},
         spinor=True,
         spinor_convention_verified=True,
@@ -692,12 +897,276 @@ def test_self_mapped_valley_rejects_malformed_or_blocked_sewing_evidence():
         grey_source_by_valley={"v": grey},
         ebr_input_candidates=_self_mapped_candidates(multiplicity=2),
         antiunitary_sewing_report=blocked_sewing,
+        trusted_projector_provenance_by_kpoint=(
+            _projector_provenance_from_sewing(blocked_sewing)
+        ),
     )
 
     assert report["status"] == "blocked"
     assert "antiunitary_corepresentation_sewing_not_validated" in report[
         "blockers"
     ]
+
+
+def _self_mapped_nontrim_source_report():
+    return {
+        "status": "validated",
+        "time_reversal_hsp_mapping": {"Q": "QA", "QA": "Q"},
+        "time_reversal_hsp_orbits": [{
+            "representative": "Q",
+            "members": ["Q", "QA"],
+            "self_mapped": False,
+        }],
+        "independent_hsp_labels": ["Q"],
+        "irrep_partner_by_label": {"q": "qa", "qa": "q"},
+    }
+
+
+def _self_mapped_nontrim_grey_report():
+    return {
+        "status": "validated",
+        "grey_bns_number": "1.2",
+        "grey_unitary_restriction_by_irrep": {
+            "q_corep": {"q": 1},
+            "qa_corep": {"qa": 1},
+        },
+        "grey_source_hsp_by_irrep": {
+            "q_corep": "Q", "qa_corep": "QA",
+        },
+        "unitary_source_hsp_by_irrep": {"q": "Q", "qa": "QA"},
+    }
+
+
+def _self_mapped_nontrim_sewing_report():
+    coefficients = np.asarray([[[1.0 + 0.0j]]])
+    return build_time_reversal_sewing_report(
+        kpoint_frac_by_name={
+            "Q_sample": np.asarray([0.25, 0.0, 0.0]),
+            "QA_sample": np.asarray([0.75, 0.0, 0.0]),
+        },
+        g_vectors_frac_by_kpoint={
+            "Q_sample": np.asarray([[0, 0, 0]]),
+            "QA_sample": np.asarray([[-1, 0, 0]]),
+        },
+        coefficients_by_kpoint={
+            "Q_sample": coefficients, "QA_sample": coefficients,
+        },
+        band_indices_by_kpoint={
+            "Q_sample": np.asarray([1]), "QA_sample": np.asarray([1]),
+        },
+        valley_projectors_by_kpoint={
+            name: {"v": np.eye(1)} for name in ("Q_sample", "QA_sample")
+        },
+        valley_projector_provenance_by_kpoint={
+            name: {"v": {
+                "workflow_path": "direct_qcut",
+                "projector_kind": "fixed_center_seed",
+            }}
+            for name in ("Q_sample", "QA_sample")
+        },
+        projector_selection_blockers=[],
+        time_reversal_valley_mapping={"v": "v"},
+        spinor=False,
+        spinor_convention_verified=True,
+    )
+
+
+def _self_mapped_nontrim_reviewed_source_model():
+    return {
+        "source_hsp_representative_k_frac_by_label": {
+            "Q": [0.25, 0.0, 0.0],
+            "QA": [0.75, 0.0, 0.0],
+        },
+        "standard_operation_rotation_frac_by_index": {
+            1: np.eye(3, dtype=int).tolist(),
+            2: np.diag([-1, 1, 1]).tolist(),
+        },
+        "normalized_centering_vectors": [[0.0, 0.0, 0.0]],
+    }
+
+
+def test_redundant_dependent_hsp_candidate_is_checked_but_not_independent_map():
+    candidates = {"candidates": [
+        {
+            "valley": "v",
+            "matched_irrep": "q",
+            "irrep_multiplicity": 1,
+            "irrep_source_provenance": {"source_hsp_label": "Q"},
+            "projected_hsp_classification": {
+                "source_hsp_label": "Q",
+                "classification": "representative",
+                "source_hsp_membership": True,
+                "validation_status": "validated",
+                "parent_k_frac": [0.25, 0.0, 0.0],
+                "standard_k_frac": [0.25, 0.0, 0.0],
+                "source_hsp_representative_k_frac": [0.25, 0.0, 0.0],
+            },
+            "kpoint": "Q_sample",
+            "workflow_path": "direct_qcut",
+            "ready_for_ebr_input": True,
+        },
+        {
+            "valley": "v",
+            "matched_irrep": "qa",
+            "irrep_multiplicity": 1,
+            "irrep_source_provenance": {"source_hsp_label": "QA"},
+            "projected_hsp_classification": {
+                "source_hsp_label": "QA",
+                "classification": "representative",
+                "source_hsp_membership": True,
+                "validation_status": "validated",
+                "parent_k_frac": [0.75, 0.0, 0.0],
+                "standard_k_frac": [0.75, 0.0, 0.0],
+                "source_hsp_representative_k_frac": [0.75, 0.0, 0.0],
+            },
+            "kpoint": "QA_sample",
+            "workflow_path": "direct_qcut",
+            "ready_for_ebr_input": True,
+        },
+    ]}
+    kwargs = {
+        "valley_mapping_report": {
+            "status": "validated",
+            "theta_square": 1,
+            "time_reversal_valley_mapping": {"v": "v"},
+            "valley_orbits": [{
+                "representative": "v",
+                "members": ["v"],
+                "mapping_type": "self_mapped",
+            }],
+        },
+        "source_irrep_orbits_by_valley": {
+            "v": _self_mapped_nontrim_source_report(),
+        },
+        "grey_source_by_valley": {"v": _self_mapped_nontrim_grey_report()},
+        "antiunitary_sewing_report": _self_mapped_nontrim_sewing_report(),
+    }
+    kwargs["trusted_projector_provenance_by_kpoint"] = (
+        _projector_provenance_from_sewing(
+            kwargs["antiunitary_sewing_report"]
+        )
+    )
+
+    report = build_time_reversal_valley_orbit_report(
+        ebr_input_candidates=candidates,
+        **kwargs,
+    )
+
+    assert report["status"] == "validated"
+    orbit = report["valley_orbits"][0]
+    assert orbit["source_hsp_to_sampled_kpoint"] == {"Q": "Q_sample"}
+    assert orbit["projector_workflow_by_sampled_kpoint"] == {
+        "Q_sample": {"v": "direct_qcut"},
+        "QA_sample": {"v": "direct_qcut"},
+    }
+    bundle = {
+        "valley": "",
+        "valley_orbit": ["v"],
+        "unitary_valley_irreps": orbit["unitary_valley_irreps"],
+        "expected_hsps": ["Q"],
+        "irreps_by_kpoint": {"Q": ["q_corep"]},
+        "source_hsp_to_sampled_kpoint": {"Q": "Q_sample"},
+        "time_reversal": {
+            "theta_square": 1,
+            "time_reversal_valley_mapping": {"v": "v"},
+            "time_reversal_hsp_orbits": orbit["time_reversal_hsp_orbits"],
+            "full_unitary_source_hsp_labels": ["Q", "QA"],
+            "time_reversal_irrep_pairing": orbit[
+                "time_reversal_irrep_pairing"
+            ],
+            "projector_workflow_by_sampled_kpoint": orbit[
+                "projector_workflow_by_sampled_kpoint"
+            ],
+            "projector_provenance_by_sampled_kpoint": orbit[
+                "projector_provenance_by_sampled_kpoint"
+            ],
+            "source_hsp_binding_by_sampled_kpoint": orbit[
+                "source_hsp_binding_by_sampled_kpoint"
+            ],
+            "antiunitary_sewing_evidence": kwargs[
+                "antiunitary_sewing_report"
+            ],
+            "grey_bns_number": "1.2",
+        },
+    }
+    assert _joint_bundle_time_reversal_evidence_valid(
+        bundle=bundle,
+        table_spinful=False,
+        expected_bns_number="1.2",
+        reviewed_source_model=_self_mapped_nontrim_reviewed_source_model(),
+    )
+
+    star_equivalent = deepcopy(bundle)
+    star_binding = star_equivalent["time_reversal"][
+        "source_hsp_binding_by_sampled_kpoint"
+    ]["QA_sample"]["v"]
+    star_binding["classification"] = "star_equivalent"
+    star_binding["standard_k_frac"] = [0.25, 0.0, 0.0]
+    star_binding["standard_operation_index"] = 2
+    assert _joint_bundle_time_reversal_evidence_valid(
+        bundle=star_equivalent,
+        table_spinful=False,
+        expected_bns_number="1.2",
+        reviewed_source_model=_self_mapped_nontrim_reviewed_source_model(),
+    )
+    star_binding["standard_operation_index"] = 1
+    assert not _joint_bundle_time_reversal_evidence_valid(
+        bundle=star_equivalent,
+        table_spinful=False,
+        expected_bns_number="1.2",
+        reviewed_source_model=_self_mapped_nontrim_reviewed_source_model(),
+    )
+
+    dependent_misbound = deepcopy(bundle)
+    dependent_misbound["time_reversal"][
+        "source_hsp_binding_by_sampled_kpoint"
+    ]["QA_sample"]["v"]["source_hsp_label"] = "Q"
+    assert not _joint_bundle_time_reversal_evidence_valid(
+        bundle=dependent_misbound,
+        table_spinful=False,
+        expected_bns_number="1.2",
+        reviewed_source_model=_self_mapped_nontrim_reviewed_source_model(),
+    )
+
+    dependent_missing = deepcopy(bundle)
+    dependent_missing["time_reversal"][
+        "source_hsp_binding_by_sampled_kpoint"
+    ].pop("QA_sample")
+    assert not _joint_bundle_time_reversal_evidence_valid(
+        bundle=dependent_missing,
+        table_spinful=False,
+        expected_bns_number="1.2",
+        reviewed_source_model=_self_mapped_nontrim_reviewed_source_model(),
+    )
+
+    misbound = deepcopy(bundle)
+    misbound["source_hsp_to_sampled_kpoint"] = {"Q": "QA_sample"}
+    assert not _joint_bundle_time_reversal_evidence_valid(
+        bundle=misbound,
+        table_spinful=False,
+        expected_bns_number="1.2",
+        reviewed_source_model=_self_mapped_nontrim_reviewed_source_model(),
+    )
+
+    conflicting = deepcopy(candidates)
+    conflicting["candidates"][1]["matched_irrep"] = "q"
+    blocked = build_time_reversal_valley_orbit_report(
+        ebr_input_candidates=conflicting,
+        **kwargs,
+    )
+    assert blocked["status"] == "blocked"
+    assert any(
+        value.startswith("time_reversal_multiplicity_or_irrep_mismatch")
+        for value in blocked["blockers"]
+    )
+    conflicting_bundle = deepcopy(bundle)
+    conflicting_bundle["unitary_valley_irreps"]["v"]["QA"] = {"q": 1}
+    assert not _joint_bundle_time_reversal_evidence_valid(
+        bundle=conflicting_bundle,
+        table_spinful=False,
+        expected_bns_number="1.2",
+        reviewed_source_model=_self_mapped_nontrim_reviewed_source_model(),
+    )
 
 
 def _orbit_candidates(*, mismatched_g: bool = False):

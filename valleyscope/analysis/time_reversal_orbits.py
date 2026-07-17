@@ -169,6 +169,9 @@ def build_time_reversal_valley_orbit_report(
     grey_source_by_valley: Mapping[str, Mapping[str, object]],
     ebr_input_candidates: Mapping[str, object] | None,
     antiunitary_sewing_report: Mapping[str, object] | None = None,
+    trusted_projector_provenance_by_kpoint: Mapping[
+        str, Mapping[str, Mapping[str, object]]
+    ] | None = None,
 ) -> dict[str, object]:
     """Complete trusted sampled rows on exchanged or self-mapped TR orbits."""
     if valley_mapping_report.get("status") != "validated":
@@ -256,9 +259,38 @@ def build_time_reversal_valley_orbit_report(
 
         actual = _candidate_unitary_counts(candidates, members)
         source_to_sampled, source_mapping_blockers = (
-            _candidate_source_hsp_to_sampled_kpoint(candidates, members)
+            _candidate_source_hsp_to_sampled_kpoint(
+                candidates,
+                members,
+                independent_hsps=independent_hsps,
+            )
         )
+        projector_workflows: dict[str, dict[str, str]] = {}
+        projector_provenance: dict[
+            str, dict[str, dict[str, object]]
+        ] = {}
+        source_hsp_bindings: dict[
+            str, dict[str, dict[str, object]]
+        ] = {}
         if mapping_type == "self_mapped":
+            (
+                projector_workflows,
+                projector_workflow_blockers,
+            ) = _candidate_projector_workflows(candidates, members)
+            source_mapping_blockers.extend(projector_workflow_blockers)
+            (
+                projector_provenance,
+                projector_provenance_blockers,
+            ) = _candidate_projector_provenance(
+                projector_workflows,
+                trusted_projector_provenance_by_kpoint,
+            )
+            source_mapping_blockers.extend(projector_provenance_blockers)
+            (
+                source_hsp_bindings,
+                source_hsp_binding_blockers,
+            ) = _candidate_source_hsp_bindings(candidates, members)
+            source_mapping_blockers.extend(source_hsp_binding_blockers)
             if set(source_to_sampled) != set(independent_hsps):
                 source_mapping_blockers.append(
                     "antiunitary_source_hsp_sampled_kpoint_mapping_incomplete"
@@ -269,6 +301,8 @@ def build_time_reversal_valley_orbit_report(
                 valley_members=members,
                 theta_square=valley_mapping_report.get("theta_square"),
                 required_kpoints=list(source_to_sampled.values()),
+                required_projector_workflows=projector_workflows,
+                required_projector_provenance=projector_provenance,
             ):
                 blockers.append(
                     "antiunitary_corepresentation_sewing_not_validated"
@@ -397,6 +431,9 @@ def build_time_reversal_valley_orbit_report(
             "full_unitary_source_hsp_labels": full_hsps,
             "independent_time_reversal_hsp_labels": independent_hsps,
             "source_hsp_to_sampled_kpoint": source_to_sampled,
+            "projector_workflow_by_sampled_kpoint": projector_workflows,
+            "projector_provenance_by_sampled_kpoint": projector_provenance,
+            "source_hsp_binding_by_sampled_kpoint": source_hsp_bindings,
             "grey_bns_number": grey_report.get("grey_bns_number"),
             "grey_irrep_multiplicities_by_hsp": grey_counts,
             "irreps_by_kpoint": irreps_by_kpoint,
@@ -468,7 +505,13 @@ def _candidate_unitary_counts(
 def _candidate_source_hsp_to_sampled_kpoint(
     candidates: Sequence[object],
     members: Sequence[str],
+    *,
+    independent_hsps: Sequence[object],
 ) -> tuple[dict[str, str], list[str]]:
+    independent = {
+        str(value) for value in independent_hsps
+        if isinstance(value, str) and value
+    }
     sampled_by_source: dict[str, str] = {}
     blockers: list[str] = []
     for raw in candidates:
@@ -490,6 +533,8 @@ def _candidate_source_hsp_to_sampled_kpoint(
         sampled = raw.get("kpoint")
         if not isinstance(source_hsp, str) or not source_hsp:
             continue
+        if source_hsp not in independent:
+            continue
         if not isinstance(sampled, str) or not sampled:
             blockers.append(
                 f"antiunitary_sampled_kpoint_missing:{source_hsp}"
@@ -502,6 +547,179 @@ def _candidate_source_hsp_to_sampled_kpoint(
                 f"{source_hsp}:{previous}:{sampled}"
             )
     return sampled_by_source, _deduplicate(blockers)
+
+
+def _candidate_projector_workflows(
+    candidates: Sequence[object],
+    members: Sequence[str],
+) -> tuple[dict[str, dict[str, str]], list[str]]:
+    workflows: dict[str, dict[str, str]] = {}
+    blockers: list[str] = []
+    for raw in candidates:
+        if (
+            not isinstance(raw, Mapping)
+            or raw.get("valley") not in members
+            or raw.get("ready_for_ebr_input") is not True
+        ):
+            continue
+        valley = raw.get("valley")
+        sampled = raw.get("kpoint")
+        workflow_path = raw.get("workflow_path")
+        if not isinstance(sampled, str) or not sampled:
+            blockers.append(
+                f"antiunitary_candidate_sampled_kpoint_missing:{valley}"
+            )
+            continue
+        if workflow_path not in ("direct_qcut", "symmetry_adapted"):
+            blockers.append(
+                "antiunitary_candidate_projector_workflow_invalid:"
+                f"{sampled}:{valley}:{workflow_path}"
+            )
+            continue
+        by_valley = workflows.setdefault(sampled, {})
+        previous = by_valley.setdefault(str(valley), str(workflow_path))
+        if previous != workflow_path:
+            blockers.append(
+                "antiunitary_candidate_projector_workflow_ambiguous:"
+                f"{sampled}:{valley}:{previous}:{workflow_path}"
+            )
+    return workflows, _deduplicate(blockers)
+
+
+def _candidate_projector_provenance(
+    workflows: Mapping[str, Mapping[str, str]],
+    trusted: Mapping[
+        str, Mapping[str, Mapping[str, object]]
+    ] | None,
+) -> tuple[dict[str, dict[str, dict[str, object]]], list[str]]:
+    result: dict[str, dict[str, dict[str, object]]] = {}
+    blockers: list[str] = []
+    if not isinstance(trusted, Mapping):
+        return {}, ["antiunitary_trusted_projector_provenance_missing"]
+    for sampled, by_valley in workflows.items():
+        trusted_by_valley = trusted.get(sampled)
+        if not isinstance(trusted_by_valley, Mapping):
+            blockers.append(
+                f"antiunitary_trusted_projector_provenance_missing:{sampled}"
+            )
+            continue
+        for valley, workflow_path in by_valley.items():
+            raw = trusted_by_valley.get(valley)
+            if (
+                not isinstance(raw, Mapping)
+                or raw.get("workflow_path") != workflow_path
+            ):
+                blockers.append(
+                    "antiunitary_trusted_projector_provenance_mismatch:"
+                    f"{sampled}:{valley}:{workflow_path}"
+                )
+                continue
+            result.setdefault(sampled, {})[valley] = dict(raw)
+    return result, _deduplicate(blockers)
+
+
+def _candidate_source_hsp_bindings(
+    candidates: Sequence[object],
+    members: Sequence[str],
+) -> tuple[dict[str, dict[str, dict[str, object]]], list[str]]:
+    result: dict[str, dict[str, dict[str, object]]] = {}
+    blockers: list[str] = []
+    for raw in candidates:
+        if (
+            not isinstance(raw, Mapping)
+            or raw.get("valley") not in members
+            or raw.get("ready_for_ebr_input") is not True
+        ):
+            continue
+        sampled = raw.get("kpoint")
+        valley = raw.get("valley")
+        classification = raw.get("projected_hsp_classification")
+        if (
+            not isinstance(sampled, str)
+            or not sampled
+            or not isinstance(valley, str)
+            or not isinstance(classification, Mapping)
+        ):
+            blockers.append(
+                f"antiunitary_source_hsp_binding_missing:{sampled}:{valley}"
+            )
+            continue
+        source_hsp = classification.get("source_hsp_label")
+        parent_k = _finite_vector3(classification.get("parent_k_frac"))
+        standard_k = _finite_vector3(classification.get("standard_k_frac"))
+        representative_k = _finite_vector3(
+            classification.get("source_hsp_representative_k_frac")
+        )
+        witness = classification.get("standard_operation_witness")
+        standard_operation_index: int | None = None
+        if classification.get("classification") == "star_equivalent":
+            if not isinstance(witness, Mapping):
+                blockers.append(
+                    "antiunitary_source_hsp_binding_not_validated:"
+                    f"{sampled}:{valley}:{source_hsp}"
+                )
+                continue
+            raw_operation_index = witness.get("table_index")
+            if (
+                not isinstance(raw_operation_index, int)
+                or isinstance(raw_operation_index, bool)
+                or raw_operation_index <= 0
+            ):
+                blockers.append(
+                    "antiunitary_source_hsp_binding_not_validated:"
+                    f"{sampled}:{valley}:{source_hsp}"
+                )
+                continue
+            standard_operation_index = raw_operation_index
+        elif witness is not None:
+            blockers.append(
+                "antiunitary_source_hsp_binding_not_validated:"
+                f"{sampled}:{valley}:{source_hsp}"
+            )
+            continue
+        if (
+            not isinstance(source_hsp, str)
+            or not source_hsp
+            or classification.get("classification")
+            not in ("representative", "star_equivalent")
+            or classification.get("source_hsp_membership") is not True
+            or classification.get("validation_status") != "validated"
+            or parent_k is None
+            or standard_k is None
+            or representative_k is None
+        ):
+            blockers.append(
+                "antiunitary_source_hsp_binding_not_validated:"
+                f"{sampled}:{valley}:{source_hsp}"
+            )
+            continue
+        binding = {
+            "source_hsp_label": source_hsp,
+            "classification": str(classification.get("classification")),
+            "validation_status": "validated",
+            "parent_k_frac": parent_k,
+            "standard_k_frac": standard_k,
+            "source_hsp_representative_k_frac": representative_k,
+            "standard_operation_index": standard_operation_index,
+        }
+        by_valley = result.setdefault(sampled, {})
+        previous = by_valley.setdefault(valley, binding)
+        if previous != binding:
+            blockers.append(
+                "antiunitary_source_hsp_binding_ambiguous:"
+                f"{sampled}:{valley}"
+            )
+    return result, _deduplicate(blockers)
+
+
+def _finite_vector3(value: object) -> list[float] | None:
+    try:
+        vector = np.asarray(value, dtype=float)
+    except (TypeError, ValueError):
+        return None
+    if vector.shape != (3,) or not np.all(np.isfinite(vector)):
+        return None
+    return [float(item) for item in vector]
 
 
 def _decompose_grey_counts(

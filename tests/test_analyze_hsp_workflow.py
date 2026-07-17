@@ -2495,3 +2495,48 @@ def test_spinful_unverified_spinor_convention_blocks_trusted_irrep():
     # Spinful + unverified: readiness must be gated.
     assert "spinor convention" in d.get("reason", "")
     assert d["readiness_level"] != "trusted"
+
+
+def test_local_symmetry_adapted_projector_is_preserved_for_runtime_sewing(
+    monkeypatch,
+):
+    import valleyscope.workflows.analyze_hsp as workflow_mod
+
+    seed = np.diag([1.0, 0.0])
+    adapted = np.diag([0.0, 1.0])
+    monkeypatch.setattr(
+        workflow_mod,
+        "build_symmetry_adapted_valley_report",
+        lambda **_: {
+            "_internal_raw_eigenvectors": {"v": np.eye(2)},
+            "_internal_raw_projectors": {"v": adapted},
+        },
+    )
+    monkeypatch.setattr(
+        workflow_mod,
+        "summarize_symmetry_adapted_valley_report",
+        lambda _: {"orbit": ["v"], "ebr_mapping_input": {}},
+    )
+    monkeypatch.setattr(
+        workflow_mod,
+        "build_subspace_representation_quality_report",
+        lambda **_: {},
+    )
+    runtime_projectors: dict[str, np.ndarray] = {}
+
+    reports = workflow_mod._build_valley_preserving_subspace_reports(
+        kpoint_name="G",
+        valley_matrices={"v": seed},
+        d_g_dict={0: np.eye(2)},
+        valley_mappings_dict={0: {"v": "v"}},
+        valley_names=["v"],
+        unitarity_tol=1e-3,
+        modulus_tol=1e-3,
+        spinor_wavefunction=False,
+        spinor_convention_verified=True,
+        operation_orders_by_id={0: 1},
+        runtime_projectors=runtime_projectors,
+    )
+
+    assert runtime_projectors["v"] is adapted
+    assert "_internal_raw_projectors" not in reports[0]

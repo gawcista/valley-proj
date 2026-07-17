@@ -419,6 +419,15 @@ def _build_time_reversal_problem_instances(
                 "time_reversal_irrep_pairing": raw_orbit.get(
                     "time_reversal_irrep_pairing", {}
                 ),
+                "projector_workflow_by_sampled_kpoint": raw_orbit.get(
+                    "projector_workflow_by_sampled_kpoint", {}
+                ),
+                "projector_provenance_by_sampled_kpoint": raw_orbit.get(
+                    "projector_provenance_by_sampled_kpoint", {}
+                ),
+                "source_hsp_binding_by_sampled_kpoint": raw_orbit.get(
+                    "source_hsp_binding_by_sampled_kpoint", {}
+                ),
                 "antiunitary_sewing_evidence": (
                     time_reversal_orbit_report.get(
                         "antiunitary_sewing_evidence", {}

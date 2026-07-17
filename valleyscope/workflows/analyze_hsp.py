@@ -42,6 +42,7 @@ from valleyscope.analysis.time_reversal_orbits import (
 )
 from valleyscope.analysis.time_reversal_sewing import (
     build_time_reversal_sewing_report,
+    select_trusted_valley_projectors,
 )
 from valleyscope.irreps.tables import load_standard_irrep_table
 from valleyscope.irreps.ebr_data_adapter import load_ebr_source_data
@@ -534,6 +535,9 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
 
     # --- Formal symmetry-adapted valley report ---
     symmetry_adapted_valley_report: dict[str, object] | None = None
+    symmetry_adapted_projectors_by_kpoint: dict[
+        str, dict[str, np.ndarray]
+    ] = {}
     hsp_star_conjugation_report: dict[str, object] | None = None
     hsp_star_derived_characters: dict[str, object] | None = None
     if config.symmetry_adapted_valley.enabled:
@@ -544,6 +548,9 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             config=config,
             target_subspace_closure_report=target_subspace_closure_report,
             target_subspace_closure_blockers=target_subspace_closure_blockers,
+            runtime_projectors_by_kpoint=(
+                symmetry_adapted_projectors_by_kpoint
+            ),
         )
         # Build HSP-star conjugation and derived characters
         hsp_star_conjugation_report, hsp_star_derived_characters = (
@@ -1056,12 +1063,29 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         spinor=spinor_wf,
     )
     if config.time_reversal.enabled:
+        (
+            trusted_valley_projectors_by_kpoint,
+            trusted_projector_provenance_by_kpoint,
+            trusted_projector_blockers,
+        ) = select_trusted_valley_projectors(
+            workflow_decisions=irrep_workflow_decisions,
+            seed_projectors_by_kpoint=valley_matrices_by_kpoint,
+            symmetry_adapted_projectors_by_kpoint=(
+                symmetry_adapted_projectors_by_kpoint
+            ),
+        )
         antiunitary_sewing_report = build_time_reversal_sewing_report(
             kpoint_frac_by_name=kpoint_frac_by_name,
             g_vectors_frac_by_kpoint=g_vectors_frac_by_kpoint,
             coefficients_by_kpoint=coefficients_by_kpoint,
             band_indices_by_kpoint=band_indices_by_kpoint,
-            valley_projectors_by_kpoint=valley_matrices_by_kpoint,
+            valley_projectors_by_kpoint=(
+                trusted_valley_projectors_by_kpoint
+            ),
+            valley_projector_provenance_by_kpoint=(
+                trusted_projector_provenance_by_kpoint
+            ),
+            projector_selection_blockers=trusted_projector_blockers,
             time_reversal_valley_mapping=valley_mapping_report.get(
                 "time_reversal_valley_mapping", {}
             ),
@@ -1122,6 +1146,9 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 grey_source_by_valley=grey_source_by_valley,
                 ebr_input_candidates=ebr_input_candidates,
                 antiunitary_sewing_report=antiunitary_sewing_report,
+                trusted_projector_provenance_by_kpoint=(
+                    trusted_projector_provenance_by_kpoint
+                ),
             )
         )
         projected_hsp_coverage["time_reversal"] = (
@@ -1741,6 +1768,9 @@ def _build_symmetry_adapted_valley_report(
     config: object,
     target_subspace_closure_report: dict[str, object] | None = None,
     target_subspace_closure_blockers: list[str] | None = None,
+    runtime_projectors_by_kpoint: dict[
+        str, dict[str, np.ndarray]
+    ] | None = None,
 ) -> dict[str, object]:
     """Build per-kpoint symmetry-adapted valley analysis.
 
@@ -1904,6 +1934,10 @@ def _build_symmetry_adapted_valley_report(
             target_subspace_closure_blockers=closure_blockers,
             target_subspace_closure_report=target_subspace_closure_report,
             per_valley_standard_matches=_extract_per_valley_matches(symmetry_payload),
+            runtime_projectors=(
+                runtime_projectors_by_kpoint.setdefault(kpoint_name, {})
+                if runtime_projectors_by_kpoint is not None else None
+            ),
         )
 
         by_kpoint[kpoint_name] = _aggregate_symmetry_adapted_kpoint(
@@ -1940,6 +1974,7 @@ def _build_valley_preserving_subspace_reports(
     target_subspace_closure_blockers: list[str] | None = None,
     target_subspace_closure_report: dict[str, object] | None = None,
     per_valley_standard_matches: dict[str, Any] | None = None,
+    runtime_projectors: dict[str, np.ndarray] | None = None,
 ) -> list[dict[str, object]]:
     """Build singleton reports for per-valley preserving-subgroup analysis.
 
@@ -2015,6 +2050,8 @@ def _build_valley_preserving_subspace_reports(
             raw_eigenvectors = {}
         if not isinstance(raw_projectors, dict):
             raw_projectors = {}
+        if runtime_projectors is not None and valley in raw_projectors:
+            runtime_projectors[str(valley)] = raw_projectors[valley]
         quality_report = build_subspace_representation_quality_report(
             valley_bases=raw_eigenvectors,
             projectors=raw_projectors,

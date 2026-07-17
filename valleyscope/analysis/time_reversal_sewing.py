@@ -2,13 +2,145 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+import hashlib
 
 import numpy as np
 
 
 _TOL = 1e-3
 _K_TOL = 5e-6
+
+
+_PROJECTOR_KIND_BY_WORKFLOW = {
+    "direct_qcut": "fixed_center_seed",
+    "symmetry_adapted": "symmetry_adapted",
+}
+
+_PROJECTOR_PROVENANCE_KEYS = frozenset({
+    "workflow_path",
+    "projector_kind",
+    "projector_shape",
+    "projector_fingerprint",
+})
+
+_PROJECTOR_COVARIANCE_KEYS = frozenset({
+    "partner_valley",
+    "status",
+    "covariance_residual",
+    "source_projector_provenance",
+    "target_projector_provenance",
+})
+
+
+def select_trusted_valley_projectors(
+    *,
+    workflow_decisions: Mapping[str, object] | None,
+    seed_projectors_by_kpoint: Mapping[str, Mapping[str, np.ndarray]],
+    symmetry_adapted_projectors_by_kpoint: Mapping[
+        str, Mapping[str, np.ndarray]
+    ],
+) -> tuple[
+    dict[str, dict[str, np.ndarray]],
+    dict[str, dict[str, dict[str, object]]],
+    list[str],
+]:
+    """Select the exact trusted projector named by each workflow decision."""
+    selected: dict[str, dict[str, np.ndarray]] = {}
+    provenance: dict[str, dict[str, dict[str, object]]] = {}
+    blockers: list[str] = []
+    by_kpoint = (
+        workflow_decisions.get("by_kpoint", {})
+        if isinstance(workflow_decisions, Mapping) else {}
+    )
+    if not isinstance(by_kpoint, Mapping):
+        return {}, {}, ["trusted_projector_workflow_decisions_malformed"]
+
+    for kpoint, raw_by_valley in by_kpoint.items():
+        if not isinstance(kpoint, str) or not kpoint or not isinstance(
+            raw_by_valley, Mapping
+        ):
+            blockers.append("trusted_projector_workflow_decisions_malformed")
+            continue
+        for valley, raw_decision in raw_by_valley.items():
+            if not isinstance(valley, str) or not valley or not isinstance(
+                raw_decision, Mapping
+            ):
+                blockers.append(
+                    f"trusted_projector_workflow_decision_malformed:{kpoint}"
+                )
+                continue
+            workflow_path = raw_decision.get("workflow_path")
+            if (
+                raw_decision.get("readiness_level") != "trusted"
+                or not isinstance(workflow_path, str)
+                or workflow_path not in _PROJECTOR_KIND_BY_WORKFLOW
+            ):
+                blockers.append(
+                    f"trusted_projector_workflow_blocked:{kpoint}:{valley}"
+                )
+                continue
+            source_map = (
+                seed_projectors_by_kpoint
+                if workflow_path == "direct_qcut"
+                else symmetry_adapted_projectors_by_kpoint
+            )
+            projectors_at_kpoint = source_map.get(kpoint, {})
+            raw_projector = (
+                projectors_at_kpoint.get(valley)
+                if isinstance(projectors_at_kpoint, Mapping) else None
+            )
+            if raw_projector is None:
+                blockers.append(
+                    f"trusted_projector_missing:{kpoint}:{valley}:"
+                    f"{workflow_path}"
+                )
+                continue
+            try:
+                projector = np.asarray(raw_projector, dtype=complex)
+            except (TypeError, ValueError):
+                projector = np.asarray([])
+            if (
+                projector.ndim != 2
+                or projector.shape[0] != projector.shape[1]
+                or not np.all(np.isfinite(projector))
+            ):
+                blockers.append(
+                    f"trusted_projector_malformed:{kpoint}:{valley}:"
+                    f"{workflow_path}"
+                )
+                continue
+            selected.setdefault(kpoint, {})[valley] = raw_projector
+            provenance.setdefault(kpoint, {})[valley] = (
+                build_projector_provenance(
+                    workflow_path=workflow_path,
+                    projector=projector,
+                )
+            )
+    return selected, provenance, _deduplicate(blockers)
+
+
+def build_projector_provenance(
+    *,
+    workflow_path: str,
+    projector: object,
+) -> dict[str, object]:
+    """Return compact provenance bound to canonical projector bytes."""
+    if (
+        not isinstance(workflow_path, str)
+        or workflow_path not in _PROJECTOR_KIND_BY_WORKFLOW
+    ):
+        raise ValueError(f"unsupported projector workflow: {workflow_path}")
+    identity = _projector_identity(projector)
+    if identity is None:
+        raise ValueError("projector must be a finite square matrix")
+    shape, fingerprint = identity
+    return {
+        "workflow_path": workflow_path,
+        "projector_kind": _PROJECTOR_KIND_BY_WORKFLOW[workflow_path],
+        "projector_shape": shape,
+        "projector_fingerprint": fingerprint,
+    }
 
 
 def build_time_reversal_sewing_report(
@@ -20,6 +152,10 @@ def build_time_reversal_sewing_report(
     valley_projectors_by_kpoint: Mapping[
         str, Mapping[str, np.ndarray]
     ],
+    valley_projector_provenance_by_kpoint: Mapping[
+        str, Mapping[str, Mapping[str, object]]
+    ],
+    projector_selection_blockers: Sequence[str],
     time_reversal_valley_mapping: Mapping[str, str],
     spinor: bool,
     spinor_convention_verified: bool,
@@ -35,7 +171,10 @@ def build_time_reversal_sewing_report(
         raise ValueError("tolerance must be positive")
 
     names = list(kpoint_frac_by_name)
-    blockers: list[str] = []
+    blockers = [
+        str(value) for value in projector_selection_blockers
+        if isinstance(value, str) and value
+    ]
     if not names or len(set(names)) != len(names):
         blockers.append("time_reversal_kpoint_inventory_missing_or_duplicate")
     required_maps = (
@@ -159,19 +298,28 @@ def build_time_reversal_sewing_report(
                 )
         row["theta_square"] = theta_square
         row["theta_square_residual"] = theta_square_residual
+        numerical_blockers = _deduplicate(row_blockers)
+        covariance_blockers: list[str] = []
         row["projector_covariance"] = _projector_covariance(
             name=name,
             partner=partner,
             sewing=sewing,
             source_projectors=valley_projectors_by_kpoint.get(name),
             partner_projectors=valley_projectors_by_kpoint.get(partner),
+            source_provenance=(
+                valley_projector_provenance_by_kpoint.get(name)
+            ),
+            partner_provenance=(
+                valley_projector_provenance_by_kpoint.get(partner)
+            ),
             valley_mapping=time_reversal_valley_mapping,
             tolerance=tolerance,
-            blockers=row_blockers,
+            blockers=covariance_blockers,
         )
-        row["blockers"] = _deduplicate(row_blockers)
+        row["blockers"] = numerical_blockers
         row["status"] = "validated" if not row["blockers"] else "blocked"
         blockers.extend(row["blockers"])
+        blockers.extend(covariance_blockers)
         rows.append(row)
 
     blockers = _deduplicate(blockers)
@@ -183,6 +331,11 @@ def build_time_reversal_sewing_report(
         ),
         "spinor_convention_verified": bool(spinor_convention_verified),
         "time_reversal_kpoint_mapping": kpoint_mapping,
+        "sampled_kpoint_frac_by_name": {
+            name: vector.tolist()
+            for name in names
+            if (vector := _vector3(kpoint_frac_by_name.get(name))) is not None
+        },
         "reciprocal_shifts_by_kpoint": reciprocal_shifts,
         "rows": rows,
         "blockers": blockers,
@@ -195,11 +348,18 @@ def validate_time_reversal_sewing_report(
     valley_members: list[str],
     theta_square: object,
     required_kpoints: list[str] | None = None,
+    required_projector_workflows: Mapping[
+        str, Mapping[str, str]
+    ] | None = None,
+    required_projector_provenance: Mapping[
+        str, Mapping[str, Mapping[str, object]]
+    ] | None = None,
 ) -> bool:
-    """Validate serialized sewing evidence before readiness promotion."""
-    if (
-        not isinstance(evidence, Mapping)
-        or evidence.get("status") != "validated"
+    """Validate serialized sewing evidence on the smallest TR-closed scope."""
+    if not isinstance(evidence, Mapping):
+        return False
+    if required_kpoints is None and (
+        evidence.get("status") != "validated"
         or evidence.get("blockers") != []
     ):
         return False
@@ -226,52 +386,108 @@ def validate_time_reversal_sewing_report(
         for source, target in kpoint_mapping.items()
     ):
         return False
-    if set(kpoint_mapping) != set(kpoint_mapping.values()) or any(
-        kpoint_mapping.get(kpoint_mapping.get(name, "")) != name
-        for name in kpoint_mapping
-    ):
-        return False
-    if required_kpoints is not None and (
-        not required_kpoints
-        or len(set(required_kpoints)) != len(required_kpoints)
-        or set(kpoint_mapping) != set(required_kpoints)
+    if required_kpoints is None:
+        scope = set(kpoint_mapping)
+    else:
+        if (
+            not required_kpoints
+            or any(not isinstance(name, str) or not name for name in required_kpoints)
+            or len(set(required_kpoints)) != len(required_kpoints)
+        ):
+            return False
+        scope = set(required_kpoints)
+        for source in required_kpoints:
+            target = kpoint_mapping.get(source)
+            if not isinstance(target, str) or not target:
+                return False
+            scope.add(target)
+    if (
+        not scope
+        or any(source not in kpoint_mapping for source in scope)
+        or {kpoint_mapping[source] for source in scope} != scope
+        or any(
+            kpoint_mapping.get(kpoint_mapping[source]) != source
+            for source in scope
+        )
     ):
         return False
     reciprocal_shifts = evidence.get("reciprocal_shifts_by_kpoint")
-    if not isinstance(reciprocal_shifts, Mapping) or set(
-        reciprocal_shifts
-    ) != set(kpoint_mapping):
+    if not isinstance(reciprocal_shifts, Mapping) or any(
+        source not in reciprocal_shifts for source in scope
+    ):
         return False
     if any(
-        not _is_integer_list(shift, length=3)
-        for shift in reciprocal_shifts.values()
+        not _is_integer_list(reciprocal_shifts[source], length=3)
+        for source in scope
     ):
         return False
     if any(
         reciprocal_shifts[source] != reciprocal_shifts[target]
-        for source, target in kpoint_mapping.items()
+        for source in scope
+        for target in [kpoint_mapping[source]]
+    ):
+        return False
+    sampled_kpoints = evidence.get("sampled_kpoint_frac_by_name")
+    if not isinstance(sampled_kpoints, Mapping):
+        return False
+    sampled_vectors = {
+        source: _vector3(sampled_kpoints.get(source)) for source in scope
+    }
+    if any(vector is None for vector in sampled_vectors.values()):
+        return False
+    if any(
+        np.linalg.norm(
+            sampled_vectors[source]
+            + sampled_vectors[kpoint_mapping[source]]
+            - np.asarray(reciprocal_shifts[source], dtype=float)
+        ) > _K_TOL
+        for source in scope
     ):
         return False
     rows = evidence.get("rows")
-    if not isinstance(rows, list) or len(rows) != len(kpoint_mapping):
+    if not isinstance(rows, list):
         return False
-    rows_by_source = {
-        row.get("source_kpoint"): row
-        for row in rows if isinstance(row, Mapping)
-    }
-    if len(rows_by_source) != len(rows) or set(rows_by_source) != set(
-        kpoint_mapping
+    scoped_rows = [
+        row for row in rows
+        if isinstance(row, Mapping)
+        and isinstance(row.get("source_kpoint"), str)
+        and row.get("source_kpoint") in scope
+    ]
+    rows_by_source = {row.get("source_kpoint"): row for row in scoped_rows}
+    if len(rows_by_source) != len(scoped_rows) or set(rows_by_source) != scope:
+        return False
+    if required_projector_workflows is not None and (
+        not isinstance(required_projector_workflows, Mapping)
+        or not set(required_projector_workflows).issubset(scope)
+        or (
+            required_kpoints is not None
+            and not set(required_kpoints).issubset(
+                required_projector_workflows
+            )
+        )
     ):
         return False
-    for source, target in kpoint_mapping.items():
+    if required_projector_provenance is not None and (
+        not isinstance(required_projector_provenance, Mapping)
+        or not set(required_projector_provenance).issubset(scope)
+        or (
+            required_kpoints is not None
+            and not set(required_kpoints).issubset(
+                required_projector_provenance
+            )
+        )
+    ):
+        return False
+    for source in scope:
+        target = kpoint_mapping[source]
         row = rows_by_source[source]
         if (
             row.get("status") != "validated"
+            or row.get("blockers") != []
             or row.get("target_kpoint") != target
             or row.get("reciprocal_shift") != reciprocal_shifts[source]
             or row.get("mapping_miss_count") != 0
             or row.get("theta_square") != theta_square
-            or row.get("blockers") != []
         ):
             return False
         source_bands = row.get("source_band_indices_vasp")
@@ -314,18 +530,135 @@ def validate_time_reversal_sewing_report(
         ):
             return False
         covariance = row.get("projector_covariance")
-        if not isinstance(covariance, Mapping):
+        if (
+            not isinstance(covariance, Mapping)
+            or set(covariance) != set(valley_members)
+        ):
             return False
         for valley in valley_members:
             entry = covariance.get(valley)
             if (
                 not isinstance(entry, Mapping)
+                or set(entry) != _PROJECTOR_COVARIANCE_KEYS
                 or entry.get("status") != "validated"
                 or entry.get("partner_valley") != valley
                 or not _is_residual(entry.get("covariance_residual"))
             ):
                 return False
+            expected_source_workflow = _expected_projector_workflow(
+                required_projector_workflows, source, valley
+            )
+            expected_target_workflow = _expected_projector_workflow(
+                required_projector_workflows, target, valley
+            )
+            if required_projector_workflows is not None and (
+                (source in required_projector_workflows
+                 and expected_source_workflow is None)
+                or (target in required_projector_workflows
+                    and expected_target_workflow is None)
+            ):
+                return False
+            if not _valid_projector_provenance(
+                entry.get("source_projector_provenance"),
+                expected_workflow=expected_source_workflow,
+            ) or not _valid_projector_provenance(
+                entry.get("target_projector_provenance"),
+                expected_workflow=expected_target_workflow,
+            ):
+                return False
+            expected_source_provenance = _expected_projector_provenance(
+                required_projector_provenance, source, valley
+            )
+            expected_target_provenance = _expected_projector_provenance(
+                required_projector_provenance, target, valley
+            )
+            if required_projector_provenance is not None and (
+                (source in required_projector_provenance
+                 and expected_source_provenance is None)
+                or (target in required_projector_provenance
+                    and expected_target_provenance is None)
+            ):
+                return False
+            if (
+                expected_source_provenance is not None
+                and _compact_projector_provenance(
+                    entry.get("source_projector_provenance")
+                ) != expected_source_provenance
+            ) or (
+                expected_target_provenance is not None
+                and _compact_projector_provenance(
+                    entry.get("target_projector_provenance")
+                ) != expected_target_provenance
+            ):
+                return False
+            reverse_covariance = rows_by_source[target].get(
+                "projector_covariance"
+            )
+            reverse_entry = (
+                reverse_covariance.get(valley)
+                if isinstance(reverse_covariance, Mapping) else None
+            )
+            if not isinstance(reverse_entry, Mapping) or (
+                _compact_projector_provenance(
+                    entry.get("source_projector_provenance")
+                )
+                != _compact_projector_provenance(
+                    reverse_entry.get("target_projector_provenance")
+                )
+                or _compact_projector_provenance(
+                    entry.get("target_projector_provenance")
+                )
+                != _compact_projector_provenance(
+                    reverse_entry.get("source_projector_provenance")
+                )
+            ):
+                return False
     return True
+
+
+def _expected_projector_workflow(
+    expected: Mapping[str, Mapping[str, str]] | None,
+    kpoint: str,
+    valley: str,
+) -> str | None:
+    if expected is None:
+        return None
+    by_valley = expected.get(kpoint)
+    if not isinstance(by_valley, Mapping):
+        return None
+    value = by_valley.get(valley)
+    return (
+        value
+        if isinstance(value, str) and value in _PROJECTOR_KIND_BY_WORKFLOW
+        else None
+    )
+
+
+def _valid_projector_provenance(
+    value: object,
+    *,
+    expected_workflow: str | None,
+) -> bool:
+    compact = _compact_projector_provenance(value)
+    return compact is not None and (
+        expected_workflow is None
+        or compact["workflow_path"] == expected_workflow
+    )
+
+
+def _expected_projector_provenance(
+    expected: Mapping[
+        str, Mapping[str, Mapping[str, object]]
+    ] | None,
+    kpoint: str,
+    valley: str,
+) -> dict[str, object] | None:
+    if expected is None:
+        return None
+    by_valley = expected.get(kpoint)
+    if not isinstance(by_valley, Mapping):
+        return None
+    return _compact_projector_provenance(by_valley.get(valley))
 
 
 def _is_integer_list(
@@ -529,6 +862,8 @@ def _projector_covariance(
     sewing: np.ndarray | None,
     source_projectors: object,
     partner_projectors: object,
+    source_provenance: object,
+    partner_provenance: object,
     valley_mapping: Mapping[str, str],
     tolerance: float,
     blockers: list[str],
@@ -536,21 +871,38 @@ def _projector_covariance(
     if sewing is None:
         blockers.append(f"time_reversal_projector_covariance_not_evaluated:{name}")
         return {}
-    if not isinstance(source_projectors, Mapping) or not isinstance(
-        partner_projectors, Mapping
+    if (
+        not isinstance(source_projectors, Mapping)
+        or not isinstance(partner_projectors, Mapping)
+        or not isinstance(source_provenance, Mapping)
+        or not isinstance(partner_provenance, Mapping)
     ):
-        blockers.append(f"time_reversal_seed_projectors_missing:{name}:{partner}")
+        blockers.append(f"time_reversal_trusted_projectors_missing:{name}:{partner}")
         return {}
     result: dict[str, dict[str, object]] = {}
     for valley, partner_valley in valley_mapping.items():
         source = source_projectors.get(valley)
         target = partner_projectors.get(partner_valley)
+        source_projector_provenance = source_provenance.get(valley)
+        target_projector_provenance = partner_provenance.get(partner_valley)
         try:
             source_matrix = np.asarray(source, dtype=complex)
             target_matrix = np.asarray(target, dtype=complex)
         except (TypeError, ValueError):
             source_matrix = np.asarray([])
             target_matrix = np.asarray([])
+        compact_source = _compact_projector_provenance(
+            source_projector_provenance,
+            projector=source_matrix,
+        )
+        compact_target = _compact_projector_provenance(
+            target_projector_provenance,
+            projector=target_matrix,
+        )
+        if compact_source is None or compact_target is None:
+            blockers.append(
+                f"time_reversal_projector_provenance_missing:{name}:{valley}"
+            )
         if (
             source_matrix.shape != (sewing.shape[1], sewing.shape[1])
             or target_matrix.shape != (sewing.shape[0], sewing.shape[0])
@@ -562,6 +914,8 @@ def _projector_covariance(
                 "partner_valley": partner_valley,
                 "status": "blocked",
                 "covariance_residual": None,
+                "source_projector_provenance": compact_source,
+                "target_projector_provenance": compact_target,
             }
             continue
         transformed = sewing @ source_matrix.conj() @ sewing.conj().T
@@ -569,8 +923,14 @@ def _projector_covariance(
             np.linalg.norm(transformed - target_matrix)
             / max(float(np.linalg.norm(target_matrix)), 1e-30)
         )
-        status = "validated" if residual <= tolerance else "blocked"
-        if status == "blocked":
+        status = (
+            "validated"
+            if residual <= tolerance
+            and compact_source is not None
+            and compact_target is not None
+            else "blocked"
+        )
+        if residual > tolerance:
             blockers.append(
                 f"time_reversal_projector_covariance_failed:{name}:{valley}:"
                 f"{residual:.6e}"
@@ -579,8 +939,97 @@ def _projector_covariance(
             "partner_valley": partner_valley,
             "status": status,
             "covariance_residual": residual,
+            "source_projector_provenance": compact_source,
+            "target_projector_provenance": compact_target,
         }
     return result
+
+
+def _compact_projector_provenance(
+    value: object,
+    *,
+    projector: object | None = None,
+) -> dict[str, object] | None:
+    if not isinstance(value, Mapping):
+        return None
+    keys = set(value)
+    if keys - _PROJECTOR_PROVENANCE_KEYS or (
+        projector is None and keys != _PROJECTOR_PROVENANCE_KEYS
+    ):
+        return None
+    workflow_path = value.get("workflow_path")
+    projector_kind = value.get("projector_kind")
+    if (
+        not isinstance(workflow_path, str)
+        or workflow_path not in _PROJECTOR_KIND_BY_WORKFLOW
+        or projector_kind != _PROJECTOR_KIND_BY_WORKFLOW[workflow_path]
+    ):
+        return None
+    identity = _projector_identity(projector) if projector is not None else None
+    declared_shape = value.get("projector_shape")
+    declared_fingerprint = value.get("projector_fingerprint")
+    if identity is not None:
+        shape, fingerprint = identity
+        if declared_shape is not None and (
+            not isinstance(declared_shape, list)
+            or declared_shape != shape
+        ):
+            return None
+        if (
+            declared_fingerprint is not None
+            and declared_fingerprint != fingerprint
+        ):
+            return None
+    else:
+        shape = declared_shape
+        fingerprint = declared_fingerprint
+    if (
+        not isinstance(shape, list)
+        or len(shape) != 2
+        or any(
+            not isinstance(item, int)
+            or isinstance(item, bool)
+            or item <= 0
+            for item in shape
+        )
+        or shape[0] != shape[1]
+        or not isinstance(fingerprint, str)
+        or not fingerprint.startswith("sha256:")
+        or len(fingerprint) != 71
+        or any(
+            character not in "0123456789abcdef"
+            for character in fingerprint[7:]
+        )
+    ):
+        return None
+    return {
+        "workflow_path": str(workflow_path),
+        "projector_kind": str(projector_kind),
+        "projector_shape": list(shape),
+        "projector_fingerprint": fingerprint,
+    }
+
+
+def _projector_identity(
+    projector: object,
+) -> tuple[list[int], str] | None:
+    try:
+        matrix = np.ascontiguousarray(
+            np.asarray(projector, dtype=np.dtype("<c16"))
+        )
+    except (TypeError, ValueError):
+        return None
+    if (
+        matrix.ndim != 2
+        or matrix.shape[0] != matrix.shape[1]
+        or matrix.shape[0] <= 0
+        or not np.all(np.isfinite(matrix))
+    ):
+        return None
+    shape = [int(value) for value in matrix.shape]
+    shape_bytes = np.asarray(shape, dtype=np.dtype("<i8")).tobytes()
+    digest = hashlib.sha256(shape_bytes + matrix.tobytes(order="C")).hexdigest()
+    return shape, f"sha256:{digest}"
 
 
 def _vector3(value: object) -> np.ndarray | None:

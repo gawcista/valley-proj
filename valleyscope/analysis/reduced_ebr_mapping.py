@@ -11,7 +11,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
+
 from valleyscope.irreps.magnetic_groups import derive_type_ii_bns_number
+from valleyscope.irreps.time_reversal_geometry import (
+    centered_k_equivalent,
+    normalize_centering_vectors,
+)
 from valleyscope.analysis.time_reversal_sewing import (
     validate_time_reversal_sewing_report,
 )
@@ -498,6 +504,7 @@ def _validate_problem_kind_compatibility(
         bundle=bundle,
         table_spinful=table_spinful,
         expected_bns_number=expected_bns_number,
+        table_space_group_number=table_space_group_number,
     ):
         blockers.append(_blocker(
             "time_reversal_bundle_evidence_invalid",
@@ -521,6 +528,8 @@ def _joint_bundle_time_reversal_evidence_valid(
     bundle: dict,
     table_spinful: object,
     expected_bns_number: str | None,
+    table_space_group_number: object = None,
+    reviewed_source_model: dict[str, object] | None = None,
 ) -> bool:
     if bundle.get("valley") not in (None, ""):
         return False
@@ -598,6 +607,7 @@ def _joint_bundle_time_reversal_evidence_valid(
         return False
     declared_hsps: set[str] = set()
     representative_hsps: set[str] = set()
+    hsp_mapping: dict[str, str] = {}
     for row in hsp_orbits:
         members = row.get("members")
         representative = row.get("representative")
@@ -615,6 +625,11 @@ def _joint_bundle_time_reversal_evidence_valid(
             return False
         declared_hsps.update(members)
         representative_hsps.add(representative)
+        if len(members) == 1:
+            hsp_mapping[members[0]] = members[0]
+        else:
+            hsp_mapping[members[0]] = members[1]
+            hsp_mapping[members[1]] = members[0]
     full_hsp_labels = evidence.get("full_unitary_source_hsp_labels")
     if (
         not isinstance(full_hsp_labels, list)
@@ -634,7 +649,7 @@ def _joint_bundle_time_reversal_evidence_valid(
         or not isinstance(irreps_by_kpoint, dict)
         or set(irreps_by_kpoint) != set(expected_hsps)
         or any(
-            component_hsps != set(expected_hsps)
+            not set(expected_hsps).issubset(component_hsps)
             or not component_hsps.issubset(declared_hsps)
             for component_hsps in component_hsp_sets
         )
@@ -658,9 +673,23 @@ def _joint_bundle_time_reversal_evidence_valid(
         return False
     if not unitary_irrep_labels.issubset(irrep_pairing):
         return False
+    if not _unitary_components_match_time_reversal(
+        unitary_irreps=unitary_irreps,
+        valley_mapping=valley_mapping,
+        hsp_mapping=hsp_mapping,
+        irrep_pairing=irrep_pairing,
+    ):
+        return False
 
     if len(valley_orbit) == 1:
         source_to_sampled = bundle.get("source_hsp_to_sampled_kpoint")
+        source_model = reviewed_source_model
+        if source_model is None:
+            source_model = _derive_reviewed_source_validation_model(
+                space_group_number=table_space_group_number,
+                spinful=table_spinful,
+                source_irrep_labels=unitary_irrep_labels,
+            )
         if (
             not isinstance(source_to_sampled, dict)
             or set(source_to_sampled) != set(expected_hsps)
@@ -669,6 +698,21 @@ def _joint_bundle_time_reversal_evidence_valid(
                 for sampled in source_to_sampled.values()
             )
             or len(set(source_to_sampled.values())) != len(source_to_sampled)
+            or not _source_hsp_bindings_valid(
+                bindings=evidence.get(
+                    "source_hsp_binding_by_sampled_kpoint"
+                ),
+                source_to_sampled=source_to_sampled,
+                valley_orbit=valley_orbit,
+                full_hsp_labels=set(full_hsp_labels),
+                hsp_mapping=hsp_mapping,
+                valley_mapping=valley_mapping,
+                unitary_irreps=unitary_irreps,
+                sewing_evidence=evidence.get(
+                    "antiunitary_sewing_evidence"
+                ),
+                reviewed_source_model=source_model,
+            )
             or not validate_time_reversal_sewing_report(
                 evidence.get("antiunitary_sewing_evidence"),
                 valley_members=valley_orbit,
@@ -676,6 +720,12 @@ def _joint_bundle_time_reversal_evidence_valid(
                 required_kpoints=[
                     source_to_sampled[hsp] for hsp in expected_hsps
                 ],
+                required_projector_workflows=evidence.get(
+                    "projector_workflow_by_sampled_kpoint"
+                ),
+                required_projector_provenance=evidence.get(
+                    "projector_provenance_by_sampled_kpoint"
+                ),
             )
         ):
             return False
@@ -685,6 +735,301 @@ def _joint_bundle_time_reversal_evidence_valid(
         expected_bns_number is not None
         and grey_bns_number == expected_bns_number
     )
+
+
+def _unitary_components_match_time_reversal(
+    *,
+    unitary_irreps: dict[str, object],
+    valley_mapping: dict[str, object],
+    hsp_mapping: dict[str, str],
+    irrep_pairing: dict[str, object],
+) -> bool:
+    for valley, raw_component in unitary_irreps.items():
+        if not isinstance(raw_component, dict):
+            return False
+        target_valley = valley_mapping.get(valley)
+        target_component = unitary_irreps.get(target_valley)
+        if not isinstance(target_component, dict):
+            return False
+        for hsp, raw_counts in raw_component.items():
+            if not isinstance(raw_counts, dict) or hsp not in hsp_mapping:
+                return False
+            inferred: dict[str, int] = {}
+            for irrep, multiplicity in raw_counts.items():
+                partner_irrep = irrep_pairing.get(irrep)
+                if not isinstance(partner_irrep, str):
+                    return False
+                inferred[partner_irrep] = (
+                    inferred.get(partner_irrep, 0) + multiplicity
+                )
+            actual_target = target_component.get(hsp_mapping[hsp])
+            if actual_target is not None and actual_target != inferred:
+                return False
+    return True
+
+
+def _source_hsp_bindings_valid(
+    *,
+    bindings: object,
+    source_to_sampled: dict[str, object],
+    valley_orbit: list[str],
+    full_hsp_labels: set[str],
+    hsp_mapping: dict[str, str],
+    valley_mapping: dict[str, object],
+    unitary_irreps: dict[str, object],
+    sewing_evidence: object,
+    reviewed_source_model: object,
+) -> bool:
+    if not isinstance(bindings, dict) or not isinstance(
+        sewing_evidence, dict
+    ):
+        return False
+    kpoint_mapping = sewing_evidence.get("time_reversal_kpoint_mapping")
+    sampled_kpoints = sewing_evidence.get("sampled_kpoint_frac_by_name")
+    if not isinstance(kpoint_mapping, dict) or not isinstance(
+        sampled_kpoints, dict
+    ):
+        return False
+    if not isinstance(reviewed_source_model, dict):
+        return False
+    trusted_coordinates = reviewed_source_model.get(
+        "source_hsp_representative_k_frac_by_label"
+    )
+    trusted_rotations = reviewed_source_model.get(
+        "standard_operation_rotation_frac_by_index"
+    )
+    centering_vectors = normalize_centering_vectors(
+        reviewed_source_model.get("normalized_centering_vectors", [])
+    )
+    if (
+        not isinstance(trusted_coordinates, dict)
+        or not isinstance(trusted_rotations, dict)
+        or centering_vectors is None
+    ):
+        return False
+    expected_source_by_sampled = {
+        sampled: source_hsp for source_hsp, sampled in source_to_sampled.items()
+    }
+    required_samples = set(expected_source_by_sampled)
+    scope = set(required_samples)
+    for source_hsp, sampled in source_to_sampled.items():
+        partner = kpoint_mapping.get(sampled)
+        if not isinstance(partner, str) or not partner:
+            return False
+        scope.add(partner)
+        partner_hsp = hsp_mapping.get(source_hsp)
+        if not isinstance(partner_hsp, str) or not partner_hsp:
+            return False
+        for valley in valley_orbit:
+            partner_valley = valley_mapping.get(valley)
+            partner_component = unitary_irreps.get(partner_valley)
+            if not isinstance(partner_component, dict):
+                return False
+            if partner_hsp in partner_component:
+                previous = expected_source_by_sampled.setdefault(
+                    partner, partner_hsp
+                )
+                if previous != partner_hsp:
+                    return False
+    required_samples = set(expected_source_by_sampled)
+    if set(bindings) != required_samples or not required_samples.issubset(scope):
+        return False
+    binding_keys = {
+        "source_hsp_label",
+        "classification",
+        "validation_status",
+        "parent_k_frac",
+        "standard_k_frac",
+        "source_hsp_representative_k_frac",
+        "standard_operation_index",
+    }
+    for sampled, raw_by_valley in bindings.items():
+        if not isinstance(raw_by_valley, dict) or set(raw_by_valley) != set(
+            valley_orbit
+        ):
+            return False
+        sampled_vector = _finite_vector3(sampled_kpoints.get(sampled))
+        if sampled_vector is None:
+            return False
+        for raw_binding in raw_by_valley.values():
+            if (
+                not isinstance(raw_binding, dict)
+                or set(raw_binding) != binding_keys
+            ):
+                return False
+            source_hsp = raw_binding.get("source_hsp_label")
+            parent_k = _finite_vector3(raw_binding.get("parent_k_frac"))
+            standard_k = _finite_vector3(raw_binding.get("standard_k_frac"))
+            representative_k = _finite_vector3(
+                raw_binding.get("source_hsp_representative_k_frac")
+            )
+            classification = raw_binding.get("classification")
+            operation_index = raw_binding.get("standard_operation_index")
+            trusted_representative = _finite_vector3(
+                trusted_coordinates.get(source_hsp)
+                if isinstance(source_hsp, str) else None
+            )
+            if (
+                not isinstance(source_hsp, str)
+                or source_hsp not in full_hsp_labels
+                or classification not in ("representative", "star_equivalent")
+                or raw_binding.get("validation_status") != "validated"
+                or parent_k is None
+                or standard_k is None
+                or representative_k is None
+                or trusted_representative is None
+                or np.linalg.norm(
+                    parent_k - sampled_vector
+                    - np.rint(parent_k - sampled_vector)
+                ) > 5e-6
+                or not centered_k_equivalent(
+                    representative_k,
+                    trusted_representative,
+                    centering_vectors,
+                    tolerance=5e-6,
+                )
+                or source_hsp != expected_source_by_sampled[sampled]
+            ):
+                return False
+            if classification == "representative":
+                if operation_index is not None or not centered_k_equivalent(
+                    standard_k,
+                    trusted_representative,
+                    centering_vectors,
+                    tolerance=5e-6,
+                ):
+                    return False
+                continue
+            if (
+                not isinstance(operation_index, int)
+                or isinstance(operation_index, bool)
+                or operation_index <= 0
+            ):
+                return False
+            rotation = _integer_matrix3(trusted_rotations.get(operation_index))
+            if rotation is None:
+                return False
+            try:
+                arm = np.linalg.inv(rotation).T @ trusted_representative
+            except np.linalg.LinAlgError:
+                return False
+            if centered_k_equivalent(
+                standard_k,
+                trusted_representative,
+                centering_vectors,
+                tolerance=5e-6,
+            ) or not centered_k_equivalent(
+                standard_k,
+                arm,
+                centering_vectors,
+                tolerance=5e-6,
+            ):
+                return False
+    return True
+
+
+@functools.lru_cache(maxsize=None)
+def _derive_reviewed_source_validation_model_cached(
+    space_group_number: int,
+    spinful: bool,
+    source_irrep_labels: tuple[str, ...],
+) -> dict[str, object] | None:
+    """Load independent reviewed HSP coordinates and standard operations."""
+    try:
+        from valleyscope.irreps.tables import (
+            load_standard_irrep_table,
+            resolve_ebr_source_irrep_label_evidence,
+        )
+
+        table = load_standard_irrep_table(space_group_number, spinor=spinful)
+        evidence = resolve_ebr_source_irrep_label_evidence(
+            table=table,
+            source_basis_labels=list(source_irrep_labels),
+        )
+        setting = _derive_table_standard_setting(space_group_number, spinful)
+    except Exception:
+        return None
+    reviewed_rows = evidence.get("reviewed_rows")
+    if (
+        evidence.get("status") != "validated"
+        or not isinstance(reviewed_rows, list)
+        or len(reviewed_rows) != len(source_irrep_labels)
+        or setting is None
+    ):
+        return None
+    coordinates: dict[str, list[float]] = {}
+    for row in reviewed_rows:
+        label = getattr(row, "label", None)
+        hsp = getattr(row, "kpoint_label", None)
+        coordinate = _finite_vector3(getattr(row, "k_frac", None))
+        if (
+            not isinstance(label, str)
+            or label not in source_irrep_labels
+            or not isinstance(hsp, str)
+            or not hsp
+            or coordinate is None
+        ):
+            return None
+        previous = coordinates.setdefault(hsp, coordinate.tolist())
+        if np.linalg.norm(np.asarray(previous) - coordinate) > 5e-6:
+            return None
+    rotations = {
+        int(operation.table_index): operation.rotation_frac.astype(int).tolist()
+        for operation in table.operations
+    }
+    centering = setting.get("centering_cosets")
+    if normalize_centering_vectors(centering) is None:
+        return None
+    return {
+        "source_hsp_representative_k_frac_by_label": coordinates,
+        "standard_operation_rotation_frac_by_index": rotations,
+        "normalized_centering_vectors": [list(vector) for vector in centering],
+    }
+
+
+def _derive_reviewed_source_validation_model(
+    *,
+    space_group_number: object,
+    spinful: object,
+    source_irrep_labels: set[str],
+) -> dict[str, object] | None:
+    if (
+        not _is_positive_int(space_group_number)
+        or not isinstance(spinful, bool)
+        or not source_irrep_labels
+        or any(not isinstance(label, str) or not label for label in source_irrep_labels)
+    ):
+        return None
+    return _derive_reviewed_source_validation_model_cached(
+        int(space_group_number),
+        spinful,
+        tuple(sorted(source_irrep_labels)),
+    )
+
+
+def _finite_vector3(value: object) -> np.ndarray | None:
+    try:
+        vector = np.asarray(value, dtype=float)
+    except (TypeError, ValueError):
+        return None
+    if vector.shape != (3,) or not np.all(np.isfinite(vector)):
+        return None
+    return vector
+
+
+def _integer_matrix3(value: object) -> np.ndarray | None:
+    try:
+        matrix = np.asarray(value, dtype=float)
+    except (TypeError, ValueError):
+        return None
+    if (
+        matrix.shape != (3, 3)
+        or not np.all(np.isfinite(matrix))
+        or not np.allclose(matrix, np.rint(matrix), atol=1e-8, rtol=0.0)
+        or abs(round(float(np.linalg.det(matrix)))) != 1
+    ):
+        return None
+    return np.rint(matrix).astype(int)
 
 
 _RECOGNIZED_CENTERINGS = frozenset({"P", "A", "B", "C", "I", "F", "R"})
