@@ -220,3 +220,21 @@ git diff --check HEAD
     assert errors == [
         "handoff must state 'Updated by: Codex' or 'Updated by: cc'"
     ]
+
+
+def test_handoff_rejects_multiple_updater_identities():
+    text = """
+Updated by: Codex
+Updated by: cc
+Branch: cc/example
+Commit: deadbeef
+Remote feature branch: No
+pytest -q
+# 100 passed in 1.00s
+git diff --check HEAD
+# clean
+"""
+    errors = check_handoff_text(text)
+    assert errors == [
+        "handoff must contain exactly one 'Updated by' author line"
+    ]

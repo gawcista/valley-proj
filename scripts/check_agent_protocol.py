@@ -63,8 +63,13 @@ def check_handoff_text(
         )
     if "remote feature branch: no" not in lower:
         errors.append("handoff must state 'remote feature branch: No'")
-    if not re.search(r"^Updated by:\s*(?:Codex|cc)\s*$", text, re.MULTILINE):
+    updater_lines = re.findall(
+        r"^Updated by:\s*(Codex|cc)\s*$", text, re.MULTILINE
+    )
+    if not updater_lines:
         errors.append("handoff must state 'Updated by: Codex' or 'Updated by: cc'")
+    elif len(updater_lines) != 1:
+        errors.append("handoff must contain exactly one 'Updated by' author line")
     if "pytest -q" not in text:
         errors.append("handoff must include pytest command(s)")
     if not re.search(r"# .*?(passed|failed|skipped)", text):
