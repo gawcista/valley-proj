@@ -356,6 +356,48 @@ def test_required_trim_ignores_unrelated_failed_sample():
     )
 
 
+def test_required_valley_orbit_ignores_unrelated_valley_covariance_failure():
+    coefficients = np.asarray([[[1.0 + 0.0j]]])
+    report = build_time_reversal_sewing_report(
+        kpoint_frac_by_name={"G": np.zeros(3)},
+        g_vectors_frac_by_kpoint={"G": np.zeros((1, 3), dtype=int)},
+        coefficients_by_kpoint={"G": coefficients},
+        band_indices_by_kpoint={"G": np.asarray([1])},
+        valley_projectors_by_kpoint={"G": {"v1": np.eye(1)}},
+        valley_projector_provenance_by_kpoint={
+            "G": {"v1": {
+                "workflow_path": "direct_qcut",
+                "projector_kind": "fixed_center_seed",
+            }},
+        },
+        projector_selection_blockers=[
+            "trusted_projector_workflow_blocked:G:v2"
+        ],
+        time_reversal_valley_mapping={"v1": "v1", "v2": "v2"},
+        spinor=False,
+        spinor_convention_verified=True,
+    )
+
+    assert report["status"] == "blocked"
+    covariance = report["rows"][0]["projector_covariance"]
+    assert covariance["v1"]["status"] == "validated"
+    assert covariance["v2"]["status"] == "blocked"
+    assert validate_time_reversal_sewing_report(
+        report,
+        valley_members=["v1"],
+        theta_square=1,
+        required_kpoints=["G"],
+        required_projector_workflows={"G": {"v1": "direct_qcut"}},
+    )
+    assert not validate_time_reversal_sewing_report(
+        report,
+        valley_members=["v2"],
+        theta_square=1,
+        required_kpoints=["G"],
+        required_projector_workflows={"G": {"v2": "direct_qcut"}},
+    )
+
+
 def _nontrim_pair_report() -> dict[str, object]:
     coefficients = np.asarray([[[1.0 + 0.0j]]])
     return build_time_reversal_sewing_report(

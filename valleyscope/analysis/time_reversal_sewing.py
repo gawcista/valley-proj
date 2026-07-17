@@ -356,7 +356,16 @@ def validate_time_reversal_sewing_report(
     ] | None = None,
 ) -> bool:
     """Validate serialized sewing evidence on the smallest TR-closed scope."""
-    if not isinstance(evidence, Mapping):
+    if (
+        not isinstance(evidence, Mapping)
+        or not isinstance(valley_members, list)
+        or not valley_members
+        or len(set(valley_members)) != len(valley_members)
+        or any(
+            not isinstance(valley, str) or not valley
+            for valley in valley_members
+        )
+    ):
         return False
     if required_kpoints is None and (
         evidence.get("status") != "validated"
@@ -532,7 +541,7 @@ def validate_time_reversal_sewing_report(
         covariance = row.get("projector_covariance")
         if (
             not isinstance(covariance, Mapping)
-            or set(covariance) != set(valley_members)
+            or not set(valley_members).issubset(covariance)
         ):
             return False
         for valley in valley_members:
