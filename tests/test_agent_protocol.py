@@ -11,6 +11,7 @@ _EXPECTED_HEAD = "705a7a2f0f751abcc4f0d1f49d7c62e984f60345"
 
 def test_handoff_requires_commit_tests_and_remote_branch_statement():
     good = """
+Updated by: cc
 Branch: cc/example
 Commit: 705a7a2 Fix example
 Remote feature branch: No
@@ -26,6 +27,7 @@ Do not merge to `main`; leave the branch ready for Codex review.
     assert check_handoff_text(good, expected_head=_EXPECTED_HEAD) == []
 
     bad = """
+Updated by: cc
 Branch: cc/example
 Commit: 705a7a2 Fix example
 pytest -q
@@ -77,6 +79,7 @@ def test_tracked_markdown_empty_list_is_clean():
 def test_completed_handoff_rejects_not_yet_wired():
     """A handoff marked COMPLETED must not claim a required path is not yet wired."""
     text = """
+Updated by: cc
 Branch: cc/example
 Commit: 705a7a2 Fix example
 Remote feature branch: No
@@ -94,6 +97,7 @@ Remaining Risks:
 
 def test_completed_without_not_yet_wired_is_clean():
     text = """
+Updated by: cc
 Branch: cc/example
 Commit: 705a7a2 Fix example
 Remote feature branch: No
@@ -110,6 +114,7 @@ Remaining Risks:
 
 def test_placeholder_output_is_rejected():
     text = """
+Updated by: cc
 Branch: cc/example
 Commit: 705a7a2 Fix example
 Remote feature branch: No
@@ -125,6 +130,7 @@ git diff --check HEAD
 def test_stale_head_hash_is_detected():
     """A handoff referencing a hash not matching expected HEAD is stale."""
     text = """
+Updated by: cc
 Branch: cc/example
 Commit: deadbeef Stale handoff
 Remote feature branch: No
@@ -142,6 +148,7 @@ git diff --check HEAD
 
 def test_handoff_requires_explicit_hash_line():
     text = """
+Updated by: cc
 Branch: cc/example
 Remote feature branch: No
 pytest -q
@@ -155,6 +162,7 @@ git diff --check HEAD
 
 def test_short_and_full_matching_hashes_are_accepted():
     base = """
+Updated by: cc
 Branch: cc/example
 Remote feature branch: No
 pytest -q
@@ -170,6 +178,7 @@ git diff --check HEAD
 
 def test_conflicting_explicit_hash_lines_are_rejected():
     text = f"""
+Updated by: cc
 Branch: cc/example
 Commit: {_EXPECTED_HEAD[:7]}
 Reviewed HEAD: cafebabe
@@ -185,6 +194,7 @@ git diff --check HEAD
 
 def test_text_validation_without_expected_head_is_repository_independent():
     text = """
+Updated by: cc
 Branch: cc/example
 Commit: deadbeef
 Remote feature branch: No
@@ -194,3 +204,19 @@ git diff --check HEAD
 # clean
 """
     assert check_handoff_text(text) == []
+
+
+def test_handoff_requires_updater_identity():
+    text = """
+Branch: cc/example
+Commit: deadbeef
+Remote feature branch: No
+pytest -q
+# 100 passed in 1.00s
+git diff --check HEAD
+# clean
+"""
+    errors = check_handoff_text(text)
+    assert errors == [
+        "handoff must state 'Updated by: Codex' or 'Updated by: cc'"
+    ]
