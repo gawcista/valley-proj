@@ -1590,6 +1590,21 @@ def test_tmote2_projected_source_hsp_coverage_and_tr_orbit_are_explicit():
     assert orbit["full_unitary_source_hsp_labels"] == ["GM", "K", "KA", "M"]
     assert orbit["independent_time_reversal_hsp_labels"] == ["GM", "K", "M"]
     assert orbit["grey_bns_number"] == "143.2"
+    sewing = time_reversal["antiunitary_sewing_evidence"]
+    assert sewing["status"] == "blocked"
+    assert sewing["time_reversal_kpoint_mapping"] == {
+        "GammaM": "GammaM", "MM": "MM",
+    }
+    assert "ambiguous_time_reversal_kpoint_partner:KM:[]" in sewing[
+        "blockers"
+    ]
+    rows = {row["source_kpoint"]: row for row in sewing["rows"]}
+    assert set(rows) == {"GammaM", "MM"}
+    assert all(row["status"] == "validated" for row in rows.values())
+    assert rows["GammaM"]["mapping_miss_count"] == 0
+    assert rows["MM"]["mapping_miss_count"] == 0
+    assert rows["GammaM"]["theta_square_residual"] < 2e-7
+    assert rows["MM"]["theta_square_residual"] < 3e-8
 
     export = s["valley_ebr_export_bundle"]
     assert export["bundle_count"] == 1
@@ -1669,9 +1684,21 @@ def test_centered_fixture_projected_hsp_coverage_is_per_valley():
     }
     assert all(
         orbit["status"] == "blocked"
-        and "antiunitary_corepresentation_required_not_proven"
+        and "antiunitary_corepresentation_sewing_not_validated"
         in orbit["blockers"]
         for orbit in time_reversal["valley_orbits"]
+    )
+    sewing = time_reversal["antiunitary_sewing_evidence"]
+    assert sewing["status"] == "blocked"
+    assert "spinor_convention_unverified_for_time_reversal" in sewing[
+        "blockers"
+    ]
+    assert "ambiguous_time_reversal_kpoint_partner:KM:[]" in sewing[
+        "blockers"
+    ]
+    assert any(
+        blocker.startswith("time_reversal_projector_covariance_failed:")
+        for blocker in sewing["blockers"]
     )
 
 

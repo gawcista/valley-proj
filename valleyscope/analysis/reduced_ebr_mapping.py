@@ -12,6 +12,9 @@ import json
 from pathlib import Path
 
 from valleyscope.irreps.magnetic_groups import derive_type_ii_bns_number
+from valleyscope.analysis.time_reversal_sewing import (
+    validate_time_reversal_sewing_report,
+)
 
 _REQUIRED_TABLE_KEYS = {"schema_version", "subspace_group_candidate",
                          "expected_hsps", "irreps", "ebrs"}
@@ -524,9 +527,9 @@ def _joint_bundle_time_reversal_evidence_valid(
     valley_orbit = bundle.get("valley_orbit")
     if (
         not isinstance(valley_orbit, list)
-        or len(valley_orbit) != 2
+        or len(valley_orbit) not in (1, 2)
         or any(not isinstance(item, str) or not item for item in valley_orbit)
-        or len(set(valley_orbit)) != 2
+        or len(set(valley_orbit)) != len(valley_orbit)
     ):
         return False
     orbit_members = set(valley_orbit)
@@ -566,10 +569,21 @@ def _joint_bundle_time_reversal_evidence_valid(
     valley_mapping = evidence.get("time_reversal_valley_mapping")
     if not isinstance(valley_mapping, dict):
         return False
-    left, right = valley_orbit
     if (
-        valley_mapping.get(left) != right
-        or valley_mapping.get(right) != left
+        set(valley_mapping) != orbit_members
+        or set(valley_mapping.values()) != orbit_members
+        or any(
+            valley_mapping.get(valley_mapping.get(valley, "")) != valley
+            for valley in valley_orbit
+        )
+        or (
+            len(valley_orbit) == 1
+            and valley_mapping.get(valley_orbit[0]) != valley_orbit[0]
+        )
+        or (
+            len(valley_orbit) == 2
+            and any(valley_mapping.get(valley) == valley for valley in valley_orbit)
+        )
     ):
         return False
 
@@ -580,20 +594,55 @@ def _joint_bundle_time_reversal_evidence_valid(
         or any(not isinstance(row, dict) or not row for row in hsp_orbits)
     ):
         return False
+    declared_hsps: set[str] = set()
+    for row in hsp_orbits:
+        members = row.get("members")
+        representative = row.get("representative")
+        self_mapped = row.get("self_mapped")
+        if (
+            not isinstance(members, list)
+            or len(members) not in (1, 2)
+            or any(not isinstance(hsp, str) or not hsp for hsp in members)
+            or len(set(members)) != len(members)
+            or representative not in members
+            or not isinstance(self_mapped, bool)
+            or self_mapped != (len(members) == 1)
+            or declared_hsps.intersection(members)
+        ):
+            return False
+        declared_hsps.update(members)
+    full_hsp_labels = evidence.get("full_unitary_source_hsp_labels")
+    if (
+        not isinstance(full_hsp_labels, list)
+        or any(not isinstance(hsp, str) or not hsp for hsp in full_hsp_labels)
+        or len(set(full_hsp_labels)) != len(full_hsp_labels)
+        or declared_hsps != set(full_hsp_labels)
+    ):
+        return False
 
     irrep_pairing = evidence.get("time_reversal_irrep_pairing")
     if not isinstance(irrep_pairing, dict) or not irrep_pairing:
         return False
-    if any(
+    if (
+        set(irrep_pairing) != set(irrep_pairing.values())
+        or any(
         not isinstance(label, str)
         or not label
         or not isinstance(partner, str)
         or not partner
         or irrep_pairing.get(partner) != label
         for label, partner in irrep_pairing.items()
+        )
     ):
         return False
     if not unitary_irrep_labels.issubset(irrep_pairing):
+        return False
+
+    if len(valley_orbit) == 1 and not validate_time_reversal_sewing_report(
+        evidence.get("antiunitary_sewing_evidence"),
+        valley_members=valley_orbit,
+        theta_square=expected_theta_square,
+    ):
         return False
 
     grey_bns_number = evidence.get("grey_bns_number")

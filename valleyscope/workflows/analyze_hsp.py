@@ -40,6 +40,9 @@ from valleyscope.analysis.time_reversal_orbits import (
     build_time_reversal_valley_orbit_report,
     derive_time_reversal_valley_mapping,
 )
+from valleyscope.analysis.time_reversal_sewing import (
+    build_time_reversal_sewing_report,
+)
 from valleyscope.irreps.tables import load_standard_irrep_table
 from valleyscope.irreps.ebr_data_adapter import load_ebr_source_data
 from valleyscope.irreps.time_reversal_ebr import (
@@ -280,6 +283,8 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     symmetry_representation_payload: dict[str, object] = {}
     raw_representations_by_kpoint: dict[str, dict[object, dict[str, object]]] = {}
     coefficients_by_kpoint: dict[str, np.ndarray] = {}
+    g_vectors_frac_by_kpoint: dict[str, np.ndarray] = {}
+    band_indices_by_kpoint: dict[str, np.ndarray] = {}
     valley_matrices_by_kpoint: dict[str, dict[str, np.ndarray]] = {}
     kpoint_frac_by_name: dict[str, np.ndarray] = {}
     symmetry_payload: dict[str, object] = _prepare_symmetry_payload(config, monolayer_recip)
@@ -290,6 +295,12 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         positions = _target_band_positions(kpoint.band_indices_vasp, config.analysis.iband)
         coefficients = kpoint.coefficients[positions]
         coefficients_by_kpoint[kpoint_name] = coefficients
+        g_vectors_frac_by_kpoint[kpoint_name] = np.asarray(
+            kpoint.g_vectors_frac, dtype=int
+        )
+        band_indices_by_kpoint[kpoint_name] = np.asarray(
+            kpoint.band_indices_vasp[positions], dtype=int
+        )
         kpoint_frac_by_name[kpoint_name] = np.asarray(kpoint.frac, dtype=float)
         q_cart = kpoint.cart.reshape(1, 3) + kpoint.g_vectors_cart
         # --- Reporting projectors (may use k-dependent centers) ---
@@ -1045,6 +1056,18 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         spinor=spinor_wf,
     )
     if config.time_reversal.enabled:
+        antiunitary_sewing_report = build_time_reversal_sewing_report(
+            kpoint_frac_by_name=kpoint_frac_by_name,
+            g_vectors_frac_by_kpoint=g_vectors_frac_by_kpoint,
+            coefficients_by_kpoint=coefficients_by_kpoint,
+            band_indices_by_kpoint=band_indices_by_kpoint,
+            valley_projectors_by_kpoint=valley_matrices_by_kpoint,
+            time_reversal_valley_mapping=valley_mapping_report.get(
+                "time_reversal_valley_mapping", {}
+            ),
+            spinor=spinor_wf,
+            spinor_convention_verified=config.spinor.convention_verified,
+        )
         source_orbits_by_valley: dict[str, dict[str, object]] = {}
         grey_source_by_valley: dict[str, dict[str, object]] = {}
         for valley, basis in source_hsp_basis_by_valley.items():
@@ -1098,6 +1121,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 source_irrep_orbits_by_valley=source_orbits_by_valley,
                 grey_source_by_valley=grey_source_by_valley,
                 ebr_input_candidates=ebr_input_candidates,
+                antiunitary_sewing_report=antiunitary_sewing_report,
             )
         )
         projected_hsp_coverage["time_reversal"] = (

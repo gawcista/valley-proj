@@ -9,6 +9,9 @@ from valleyscope.analysis.reduced_ebr_solver import (
     derive_coefficient_bounds,
     search_nonnegative_witnesses,
 )
+from valleyscope.analysis.time_reversal_sewing import (
+    validate_time_reversal_sewing_report,
+)
 from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector
 
 
@@ -165,8 +168,9 @@ def build_time_reversal_valley_orbit_report(
     source_irrep_orbits_by_valley: Mapping[str, Mapping[str, object]],
     grey_source_by_valley: Mapping[str, Mapping[str, object]],
     ebr_input_candidates: Mapping[str, object] | None,
+    antiunitary_sewing_report: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    """Complete trusted sampled rows on exchanged TR valley orbits."""
+    """Complete trusted sampled rows on exchanged or self-mapped TR orbits."""
     if valley_mapping_report.get("status") != "validated":
         return _blocked_orbit_report(
             "time_reversal_valley_mapping_not_validated"
@@ -198,10 +202,24 @@ def build_time_reversal_valley_orbit_report(
             )
         blockers: list[str] = []
         mapping_type = str(raw_orbit.get("mapping_type", ""))
-        if mapping_type != "exchanged" or len(members) != 2:
-            blockers.append(
-                "antiunitary_corepresentation_required_not_proven"
-            )
+        if mapping_type == "exchanged":
+            if len(members) != 2:
+                blockers.append("malformed_exchanged_time_reversal_valley_orbit")
+        elif mapping_type == "self_mapped":
+            if len(members) != 1:
+                blockers.append(
+                    "malformed_self_mapped_time_reversal_valley_orbit"
+                )
+            if not validate_time_reversal_sewing_report(
+                antiunitary_sewing_report,
+                valley_members=members,
+                theta_square=valley_mapping_report.get("theta_square"),
+            ):
+                blockers.append(
+                    "antiunitary_corepresentation_sewing_not_validated"
+                )
+        else:
+            blockers.append("unknown_time_reversal_valley_mapping_type")
 
         source_reports = [
             source_irrep_orbits_by_valley.get(member, {})
@@ -255,8 +273,13 @@ def build_time_reversal_valley_orbit_report(
         inferred: dict[str, dict[str, dict[str, int]]] = {
             member: {} for member in members
         }
-        if len(members) == 2:
-            partner_valley = {members[0]: members[1], members[1]: members[0]}
+        if len(members) in (1, 2):
+            raw_valley_mapping = valley_mapping_report.get(
+                "time_reversal_valley_mapping", {}
+            )
+            partner_valley = {
+                member: raw_valley_mapping.get(member) for member in members
+            } if isinstance(raw_valley_mapping, Mapping) else {}
             for valley, by_hsp in actual.items():
                 for hsp, counts in by_hsp.items():
                     partner_hsp = hsp_mapping.get(hsp)
@@ -265,7 +288,13 @@ def build_time_reversal_valley_orbit_report(
                             f"missing_time_reversal_hsp_partner:{hsp}"
                         )
                         continue
-                    target = inferred[partner_valley[valley]].setdefault(
+                    target_valley = partner_valley.get(valley)
+                    if target_valley not in inferred:
+                        blockers.append(
+                            f"missing_time_reversal_valley_partner:{valley}"
+                        )
+                        continue
+                    target = inferred[target_valley].setdefault(
                         partner_hsp, {}
                     )
                     for irrep, multiplicity in counts.items():
@@ -343,6 +372,12 @@ def build_time_reversal_valley_orbit_report(
             "members": members,
             "mapping_type": mapping_type,
             "status": "validated" if not blockers else "blocked",
+            "antiunitary_corepresentation_status": (
+                "validated" if mapping_type == "self_mapped" and not blockers
+                else "not_required_for_exchanged_orbit"
+                if mapping_type == "exchanged"
+                else "blocked"
+            ),
             "unitary_valley_irreps": actual,
             "time_reversal_completed_unitary_valley_irreps": completed,
             "time_reversal_hsp_orbits": source_report.get(
@@ -368,6 +403,10 @@ def build_time_reversal_valley_orbit_report(
         "theta_square": valley_mapping_report.get("theta_square"),
         "time_reversal_valley_mapping": valley_mapping_report.get(
             "time_reversal_valley_mapping", {}
+        ),
+        "antiunitary_sewing_evidence": (
+            dict(antiunitary_sewing_report)
+            if isinstance(antiunitary_sewing_report, Mapping) else {}
         ),
         "valley_orbits": orbit_rows,
         "blockers": _deduplicate([

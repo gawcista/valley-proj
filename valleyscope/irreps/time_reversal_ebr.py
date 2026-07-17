@@ -143,9 +143,6 @@ def validate_grey_group_time_reversal_source(
         source_ebrs=[row for row in unit_ebrs if isinstance(row, Mapping)],
         irrep_partner_by_label=irrep_partner_by_label,
     )
-    if pairing["status"] == "blocked":
-        blockers.extend(str(item) for item in pairing["blockers"])
-
     try:
         bns_number = derive_type_ii_bns_number(unitary_table.number)
         grey_table = load_magnetic_irrep_table(
@@ -193,6 +190,34 @@ def validate_grey_group_time_reversal_source(
             blockers.append("invalid_or_duplicate_grey_group_ebr_source_basis")
         if not grey_ebrs or len(grey_ebrs) != len(grey_ebrs_raw):
             blockers.append("grey_group_ebr_source_columns_missing_or_malformed")
+        grey_ebr_labels: set[str] = set()
+        for index, grey_ebr in enumerate(grey_ebrs):
+            label = grey_ebr.get("ebr_label")
+            vector = grey_ebr.get("vector")
+            if (
+                not isinstance(label, str)
+                or not label
+                or label in grey_ebr_labels
+            ):
+                blockers.append(
+                    f"invalid_or_duplicate_grey_group_ebr_label:{index}"
+                )
+            else:
+                grey_ebr_labels.add(label)
+            if (
+                not isinstance(vector, Sequence)
+                or isinstance(vector, (str, bytes))
+                or len(vector) != len(grey_basis)
+                or any(
+                    not isinstance(value, int)
+                    or isinstance(value, bool)
+                    or value < 0
+                    for value in vector
+                )
+            ):
+                blockers.append(
+                    f"malformed_grey_group_ebr_vector:{label or index}"
+                )
 
     grey_by_label = {row.label: row for row in grey_table.irreps}
     missing_grey = [label for label in grey_basis if label not in grey_by_label]
@@ -209,6 +234,7 @@ def validate_grey_group_time_reversal_source(
         blockers.append("reviewed_rows_do_not_cover_complete_unitary_ebr_basis")
 
     restrictions: dict[str, dict[str, int]] = {}
+    restriction_cases: dict[str, str] = {}
     if not blockers and operation_map is not None and centering is not None:
         for grey_label in grey_basis:
             grey_row = grey_by_label[grey_label]
@@ -225,88 +251,16 @@ def validate_grey_group_time_reversal_source(
                 )
                 continue
             restrictions[grey_label] = decompositions[0]
-
-    pair_candidates_by_unit = pairing.get(
-        "partner_candidates_by_ebr_label", {}
-    )
-    unit_labels = [
-        str(row.get("ebr_label", "")) for row in unit_ebrs
-        if isinstance(row, Mapping)
-    ]
-    unit_vectors = [
-        tuple(int(value) for value in row.get("vector", []))
-        for row in unit_ebrs if isinstance(row, Mapping)
-    ]
-    unit_index = {label: index for index, label in enumerate(unit_labels)}
-    unitary_column_orbits: list[tuple[int, int]] = []
-    if isinstance(pair_candidates_by_unit, Mapping):
-        for left_label, raw_partners in pair_candidates_by_unit.items():
-            if left_label not in unit_index or not isinstance(
-                raw_partners, Sequence
-            ):
-                continue
-            for right_label in raw_partners:
-                if right_label not in unit_index:
-                    continue
-                pair = tuple(sorted((
-                    unit_index[left_label], unit_index[right_label]
-                )))
-                if pair not in unitary_column_orbits:
-                    unitary_column_orbits.append(pair)
-    unitary_column_orbits.sort()
-    grey_candidates: dict[str, list[tuple[int, int]]] = {}
-    grey_unique: dict[str, tuple[int, int]] = {}
-    if not blockers:
-        for grey_ebr in grey_ebrs:
-            label = str(grey_ebr.get("ebr_label", ""))
-            vector = grey_ebr.get("vector", [])
-            expanded = _expand_grey_vector(
-                vector=vector,
-                grey_basis=grey_basis,
-                restrictions=restrictions,
-                unit_basis=unit_basis,
+            restriction_case = _restriction_case(
+                decompositions[0], irrep_partner_by_label
             )
-            candidates: list[tuple[int, int]] = []
-            for left_label, raw_partners in (
-                pair_candidates_by_unit.items()
-                if isinstance(pair_candidates_by_unit, Mapping) else []
-            ):
-                if left_label not in unit_index or not isinstance(
-                    raw_partners, Sequence
-                ):
-                    continue
-                left_index = unit_index[left_label]
-                for right_label in raw_partners:
-                    if right_label not in unit_index:
-                        continue
-                    right_index = unit_index[right_label]
-                    pair = tuple(sorted((left_index, right_index)))
-                    if pair in candidates:
-                        continue
-                    summed = tuple(
-                        unit_vectors[pair[0]][index]
-                        + unit_vectors[pair[1]][index]
-                        for index in range(len(unit_basis))
-                    )
-                    if summed == expanded:
-                        candidates.append(pair)
-            grey_candidates[label] = candidates
-            if len(candidates) == 1:
-                grey_unique[label] = candidates[0]
-            else:
+            if restriction_case is None:
                 blockers.append(
-                    "ambiguous_or_missing_grey_ebr_unitary_columns:"
-                    f"{label}:{candidates}"
+                    "unsupported_grey_unitary_restriction_case:"
+                    f"{grey_label}:{decompositions[0]}"
                 )
-
-    expected_orbits = set(unitary_column_orbits)
-    covered_orbits = set(grey_unique.values())
-    if expected_orbits != covered_orbits:
-        blockers.append(
-            "incomplete_grey_ebr_unitary_orbit_coverage:"
-            f"missing={sorted(expected_orbits - covered_orbits)}:"
-            f"unexpected={sorted(covered_orbits - expected_orbits)}"
-        )
+            else:
+                restriction_cases[grey_label] = restriction_case
 
     status = "validated" if not blockers else "blocked"
     return {
@@ -322,12 +276,8 @@ def validate_grey_group_time_reversal_source(
         },
         "grey_source_ebrs": [dict(row) for row in grey_ebrs],
         "grey_unitary_restriction_by_irrep": restrictions,
-        "unitary_ebr_partner_candidates": pairing.get(
-            "partner_candidates_by_ebr_label", {}
-        ),
-        "unitary_ebr_column_orbits": unitary_column_orbits,
-        "grey_ebr_unitary_column_candidate_sets": grey_candidates,
-        "grey_ebr_unitary_column_candidates": grey_unique,
+        "grey_unitary_restriction_case_by_irrep": restriction_cases,
+        "unitary_ebr_column_pairing_diagnostic": pairing,
         "blockers": blockers,
     }
 
@@ -429,25 +379,31 @@ def _unitary_restriction_decompositions(
     return decompositions
 
 
-def _expand_grey_vector(
-    *,
-    vector: object,
-    grey_basis: Sequence[str],
-    restrictions: Mapping[str, Mapping[str, int]],
-    unit_basis: Sequence[str],
-) -> tuple[int, ...]:
+def _restriction_case(
+    restriction: Mapping[str, int],
+    irrep_partner_by_label: Mapping[str, str],
+) -> str | None:
+    """Classify a character-derived restriction without parsing labels."""
+    labels = list(restriction)
+    if len(labels) == 1:
+        label = labels[0]
+        multiplicity = restriction[label]
+        partner = irrep_partner_by_label.get(label)
+        if partner == label and multiplicity == 1:
+            return "real"
+        if partner == label and multiplicity == 2:
+            return "quaternionic"
+        if partner != label and partner is not None and multiplicity == 1:
+            return "exchanged_hsp_arm"
+        return None
     if (
-        not isinstance(vector, Sequence)
-        or isinstance(vector, (str, bytes))
-        or len(vector) != len(grey_basis)
+        len(labels) == 2
+        and all(restriction[label] == 1 for label in labels)
+        and irrep_partner_by_label.get(labels[0]) == labels[1]
+        and irrep_partner_by_label.get(labels[1]) == labels[0]
     ):
-        return ()
-    index = {label: position for position, label in enumerate(unit_basis)}
-    out = [0] * len(unit_basis)
-    for coefficient, grey_label in zip(vector, grey_basis):
-        for unit_label, multiplicity in restrictions[grey_label].items():
-            out[index[unit_label]] += int(coefficient) * int(multiplicity)
-    return tuple(out)
+        return "complex_paired"
+    return None
 
 
 def _blocked(
@@ -463,9 +419,7 @@ def _blocked(
         "unitary_source_hsp_by_irrep": {},
         "grey_source_ebrs": [],
         "grey_unitary_restriction_by_irrep": {},
-        "unitary_ebr_partner_candidates": {},
-        "unitary_ebr_column_orbits": [],
-        "grey_ebr_unitary_column_candidate_sets": {},
-        "grey_ebr_unitary_column_candidates": {},
+        "grey_unitary_restriction_case_by_irrep": {},
+        "unitary_ebr_column_pairing_diagnostic": {},
         "blockers": [*blockers, reason],
     }

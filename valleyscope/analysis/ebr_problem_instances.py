@@ -411,8 +411,18 @@ def _build_time_reversal_problem_instances(
                 "time_reversal_hsp_orbits": raw_orbit.get(
                     "time_reversal_hsp_orbits", []
                 ),
+                "full_unitary_source_hsp_labels": raw_orbit.get(
+                    "full_unitary_source_hsp_labels", []
+                ),
                 "time_reversal_irrep_pairing": raw_orbit.get(
                     "time_reversal_irrep_pairing", {}
+                ),
+                "antiunitary_sewing_evidence": (
+                    time_reversal_orbit_report.get(
+                        "antiunitary_sewing_evidence", {}
+                    )
+                    if raw_orbit.get("mapping_type") == "self_mapped"
+                    else {}
                 ),
                 "grey_bns_number": raw_orbit.get("grey_bns_number"),
             },

@@ -16,6 +16,9 @@ from valleyscope.analysis.time_reversal_orbits import (
     derive_time_reversal_valley_mapping,
     validate_time_reversal_valley_mapping,
 )
+from valleyscope.analysis.time_reversal_sewing import (
+    build_time_reversal_sewing_report,
+)
 from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector
 from valleyscope.irreps.tables import (
     StandardIrrep,
@@ -273,54 +276,48 @@ def test_spinful_sg143_grey_source_proves_unitary_pair_closure():
 
     assert report["status"] == "validated"
     assert report["grey_bns_number"] == "143.2"
-    assert report["unitary_ebr_partner_candidates"] == {
-        source["source_ebrs"][0]["ebr_label"]: [
-            source["source_ebrs"][1]["ebr_label"]
-        ],
-        source["source_ebrs"][1]["ebr_label"]: [
-            source["source_ebrs"][0]["ebr_label"]
-        ],
-        source["source_ebrs"][2]["ebr_label"]: [
-            source["source_ebrs"][2]["ebr_label"]
-        ],
-        source["source_ebrs"][3]["ebr_label"]: [
-            source["source_ebrs"][4]["ebr_label"]
-        ],
-        source["source_ebrs"][4]["ebr_label"]: [
-            source["source_ebrs"][3]["ebr_label"]
-        ],
-        source["source_ebrs"][5]["ebr_label"]: [
-            source["source_ebrs"][5]["ebr_label"]
-        ],
-        source["source_ebrs"][6]["ebr_label"]: [
-            source["source_ebrs"][7]["ebr_label"]
-        ],
-        source["source_ebrs"][7]["ebr_label"]: [
-            source["source_ebrs"][6]["ebr_label"]
-        ],
-        source["source_ebrs"][8]["ebr_label"]: [
-            source["source_ebrs"][8]["ebr_label"]
-        ],
+    assert report["grey_unitary_restriction_case_by_irrep"]["-GM4GM4"] == (
+        "quaternionic"
+    )
+    assert report["grey_unitary_restriction_by_irrep"]["-GM4GM4"] == {
+        "-GM4": 2,
     }
-    assert set(report["grey_ebr_unitary_column_candidates"].values()) == {
-        (0, 1), (2, 2), (3, 4), (5, 5), (6, 7), (8, 8),
-    }
-    assert set(report["unitary_ebr_column_orbits"]) == {
-        (0, 1), (2, 2), (3, 4), (5, 5), (6, 7), (8, 8),
-    }
+    assert report["unitary_ebr_column_pairing_diagnostic"]["status"] == (
+        "validated"
+    )
 
 
-def test_grey_source_must_cover_every_unitary_ebr_column_orbit():
-    table = load_standard_irrep_table(143, spinor=True)
-    source = load_ebr_source_data(143, True)
+def test_scalar_real_grey_source_restricts_once_without_column_doubling():
+    table = load_standard_irrep_table(143, spinor=False)
+    source = load_ebr_source_data(143, False)
     rows = _reviewed_rows(table, source["source_basis_labels"])
     orbits = derive_time_reversal_source_irrep_orbits(
         reviewed_rows=rows,
         centering_vectors=[[0.0, 0.0, 0.0]],
     )
-    incomplete_grey = dict(load_ebr_source_data("143.2", True))
-    incomplete_grey["source_ebrs"] = list(
-        incomplete_grey["source_ebrs"][:-1]
+    report = validate_grey_group_time_reversal_source(
+        unitary_table=table,
+        reviewed_rows=rows,
+        unitary_source_data=source,
+        irrep_partner_by_label=orbits["irrep_partner_by_label"],
+        centering_vectors=[[0.0, 0.0, 0.0]],
+    )
+
+    assert report["status"] == "validated"
+    assert report["grey_unitary_restriction_by_irrep"]["GM1"] == {"GM1": 1}
+    assert report["grey_unitary_restriction_case_by_irrep"]["GM1"] == "real"
+    assert report["unitary_ebr_column_pairing_diagnostic"]["status"] == (
+        "validated"
+    )
+
+
+def test_scalar_complex_grey_source_restricts_to_conjugate_pair():
+    table = load_standard_irrep_table(143, spinor=False)
+    source = load_ebr_source_data(143, False)
+    rows = _reviewed_rows(table, source["source_basis_labels"])
+    orbits = derive_time_reversal_source_irrep_orbits(
+        reviewed_rows=rows,
+        centering_vectors=[[0.0, 0.0, 0.0]],
     )
 
     report = validate_grey_group_time_reversal_source(
@@ -329,13 +326,15 @@ def test_grey_source_must_cover_every_unitary_ebr_column_orbit():
         unitary_source_data=source,
         irrep_partner_by_label=orbits["irrep_partner_by_label"],
         centering_vectors=[[0.0, 0.0, 0.0]],
-        grey_source_loader=lambda _number, _spinor: incomplete_grey,
     )
 
-    assert report["status"] == "blocked"
-    assert any(
-        blocker.startswith("incomplete_grey_ebr_unitary_orbit_coverage:")
-        for blocker in report["blockers"]
+    assert report["status"] == "validated"
+    assert report["grey_unitary_restriction_by_irrep"]["GM2GM3"] == {
+        "GM2": 1,
+        "GM3": 1,
+    }
+    assert report["grey_unitary_restriction_case_by_irrep"]["GM2GM3"] == (
+        "complex_paired"
     )
 
 
@@ -372,6 +371,7 @@ def _reviewed_joint_bundle_and_table():
                 "members": ["GM"],
                 "self_mapped": True,
             }],
+            "full_unitary_source_hsp_labels": ["GM"],
             "time_reversal_irrep_pairing": {"-GM4": "-GM4"},
             "grey_bns_number": "143.2",
         },
@@ -390,6 +390,29 @@ def _reviewed_joint_bundle_and_table():
     export = {"bundles": [bundle]}
     assert attach_real_certificate(export, table) is not None
     return export["bundles"][0], table
+
+
+def test_scalar_grey_reduced_table_uses_authoritative_columns_directly():
+    table = build_auto_time_reversal_reduced_ebr_table(
+        unitary_space_group_number=143,
+        grey_bns_number="143.2",
+        spinor=False,
+        bundle_irreps_by_kpoint={"GM": ["GM1"]},
+        expected_hsps=["GM"],
+        subspace_group_candidate="P3",
+        subspace_space_group={
+            "status": "resolved",
+            "candidate_space_group_number": 143,
+            "candidate_space_group_symbol": "P3",
+        },
+    )
+
+    assert table["irreps"] == ["GM:GM1", "GM:GM2GM3"]
+    scalar_real_columns = [
+        row["vector"] for row in table["ebrs"]
+        if str(row["label"]).startswith("A1")
+    ]
+    assert scalar_real_columns == [[1, 0], [1, 0], [1, 0]]
 
 
 def _blocker_codes(promotion):
@@ -447,6 +470,64 @@ def test_joint_problem_requires_complete_bundle_time_reversal_evidence():
     assert promotion["promoted"] is False
     assert "time_reversal_bundle_evidence_invalid" in _blocker_codes(
         promotion
+    )
+
+
+def test_joint_problem_rejects_incomplete_hsp_and_irrep_involutions():
+    bundle, table = _reviewed_joint_bundle_and_table()
+    malformed_hsp = dict(bundle)
+    malformed_hsp["time_reversal"] = dict(bundle["time_reversal"])
+    malformed_hsp["time_reversal"]["time_reversal_hsp_orbits"] = [{
+        "representative": "GM",
+        "members": ["GM", "GM"],
+        "self_mapped": False,
+    }]
+    assert "time_reversal_bundle_evidence_invalid" in _blocker_codes(
+        promote_bundle_for_solve(bundle=malformed_hsp, table=table)
+    )
+
+    malformed_irrep = dict(bundle)
+    malformed_irrep["time_reversal"] = dict(bundle["time_reversal"])
+    malformed_irrep["time_reversal"]["time_reversal_irrep_pairing"] = {
+        "-GM4": "missing",
+    }
+    assert "time_reversal_bundle_evidence_invalid" in _blocker_codes(
+        promote_bundle_for_solve(bundle=malformed_irrep, table=table)
+    )
+
+
+def test_self_mapped_joint_problem_requires_serialized_sewing_evidence():
+    bundle, table = _reviewed_joint_bundle_and_table()
+    self_mapped = dict(bundle)
+    self_mapped["valley_orbit"] = ["v"]
+    self_mapped["unitary_valley_irreps"] = {
+        "v": {"GM": {"-GM4": 2}},
+    }
+    self_mapped["time_reversal"] = dict(bundle["time_reversal"])
+    self_mapped["time_reversal"]["time_reversal_valley_mapping"] = {"v": "v"}
+    coefficients = np.asarray([
+        [[1.0 + 0.0j], [0.0 + 0.0j]],
+        [[0.0 + 0.0j], [1.0 + 0.0j]],
+    ])
+    sewing = build_time_reversal_sewing_report(
+        kpoint_frac_by_name={"GM": np.zeros(3)},
+        g_vectors_frac_by_kpoint={"GM": np.zeros((1, 3), dtype=int)},
+        coefficients_by_kpoint={"GM": coefficients},
+        band_indices_by_kpoint={"GM": np.asarray([1, 2])},
+        valley_projectors_by_kpoint={"GM": {"v": np.eye(2)}},
+        time_reversal_valley_mapping={"v": "v"},
+        spinor=True,
+        spinor_convention_verified=True,
+    )
+    self_mapped["time_reversal"]["antiunitary_sewing_evidence"] = sewing
+
+    assert promote_bundle_for_solve(bundle=self_mapped, table=table)["promoted"]
+
+    missing = dict(self_mapped)
+    missing["time_reversal"] = dict(self_mapped["time_reversal"])
+    missing["time_reversal"].pop("antiunitary_sewing_evidence")
+    assert "time_reversal_bundle_evidence_invalid" in _blocker_codes(
+        promote_bundle_for_solve(bundle=missing, table=table)
     )
 
     malformed_counts = dict(bundle)
@@ -508,6 +589,122 @@ def _synthetic_grey_report():
             "qa2": "QA", "m": "M",
         },
     }
+
+
+def _self_mapped_source_report():
+    return {
+        "status": "validated",
+        "time_reversal_hsp_mapping": {"G": "G"},
+        "time_reversal_hsp_orbits": [{
+            "representative": "G",
+            "members": ["G"],
+            "self_mapped": True,
+        }],
+        "independent_hsp_labels": ["G"],
+        "irrep_partner_by_label": {"g": "g"},
+    }
+
+
+def _self_mapped_grey_report(*, multiplicity: int):
+    return {
+        "status": "validated",
+        "grey_bns_number": "1.2",
+        "grey_unitary_restriction_by_irrep": {
+            "g_corep": {"g": multiplicity},
+        },
+        "grey_source_hsp_by_irrep": {"g_corep": "G"},
+        "unitary_source_hsp_by_irrep": {"g": "G"},
+    }
+
+
+def _self_mapped_candidates(*, multiplicity: int):
+    return {"candidates": [{
+        "valley": "v",
+        "matched_irrep": "g",
+        "irrep_multiplicity": multiplicity,
+        "irrep_source_provenance": {"source_hsp_label": "G"},
+        "ready_for_ebr_input": True,
+    }]}
+
+
+def _scalar_self_mapped_sewing_report():
+    return build_time_reversal_sewing_report(
+        kpoint_frac_by_name={"G": np.zeros(3)},
+        g_vectors_frac_by_kpoint={"G": np.zeros((1, 3), dtype=int)},
+        coefficients_by_kpoint={"G": np.asarray([[[1.0 + 0.0j]]])},
+        band_indices_by_kpoint={"G": np.asarray([1])},
+        valley_projectors_by_kpoint={"G": {"v": np.eye(1)}},
+        time_reversal_valley_mapping={"v": "v"},
+        spinor=False,
+        spinor_convention_verified=True,
+    )
+
+
+def test_self_mapped_valley_promotes_only_with_numerical_antiunitary_evidence():
+    source = _self_mapped_source_report()
+    grey = _self_mapped_grey_report(multiplicity=1)
+
+    report = build_time_reversal_valley_orbit_report(
+        valley_mapping_report={
+            "status": "validated",
+            "theta_square": 1,
+            "time_reversal_valley_mapping": {"v": "v"},
+            "valley_orbits": [{
+                "representative": "v",
+                "members": ["v"],
+                "mapping_type": "self_mapped",
+            }],
+        },
+        source_irrep_orbits_by_valley={"v": source},
+        grey_source_by_valley={"v": grey},
+        ebr_input_candidates=_self_mapped_candidates(multiplicity=1),
+        antiunitary_sewing_report=_scalar_self_mapped_sewing_report(),
+    )
+
+    assert report["status"] == "validated"
+    orbit = report["valley_orbits"][0]
+    assert orbit["mapping_type"] == "self_mapped"
+    assert orbit["irreps_by_kpoint"] == {"G": ["g_corep"]}
+    assert orbit["antiunitary_corepresentation_status"] == "validated"
+
+
+def test_self_mapped_valley_rejects_malformed_or_blocked_sewing_evidence():
+    source = _self_mapped_source_report()
+    grey = _self_mapped_grey_report(multiplicity=2)
+    blocked_sewing = build_time_reversal_sewing_report(
+        kpoint_frac_by_name={"G": np.zeros(3)},
+        g_vectors_frac_by_kpoint={"G": np.zeros((1, 3), dtype=int)},
+        coefficients_by_kpoint={
+            "G": np.asarray([[[1.0 + 0.0j], [0.0 + 0.0j]]]),
+        },
+        band_indices_by_kpoint={"G": np.asarray([1])},
+        valley_projectors_by_kpoint={"G": {"v": np.eye(1)}},
+        time_reversal_valley_mapping={"v": "v"},
+        spinor=True,
+        spinor_convention_verified=True,
+    )
+
+    report = build_time_reversal_valley_orbit_report(
+        valley_mapping_report={
+            "status": "validated",
+            "theta_square": -1,
+            "time_reversal_valley_mapping": {"v": "v"},
+            "valley_orbits": [{
+                "representative": "v",
+                "members": ["v"],
+                "mapping_type": "self_mapped",
+            }],
+        },
+        source_irrep_orbits_by_valley={"v": source},
+        grey_source_by_valley={"v": grey},
+        ebr_input_candidates=_self_mapped_candidates(multiplicity=2),
+        antiunitary_sewing_report=blocked_sewing,
+    )
+
+    assert report["status"] == "blocked"
+    assert "antiunitary_corepresentation_sewing_not_validated" in report[
+        "blockers"
+    ]
 
 
 def _orbit_candidates(*, mismatched_g: bool = False):

@@ -1772,6 +1772,41 @@ def _render_projected_hsp_coverage(
             "valley mapping="
             f"{time_reversal.get('time_reversal_valley_mapping', {})}"
         )
+        sewing = time_reversal.get("antiunitary_sewing_evidence")
+        if isinstance(sewing, dict):
+            lines.append(
+                "  antiunitary sewing: "
+                f"status={sewing.get('status')}, k mapping="
+                f"{sewing.get('time_reversal_kpoint_mapping', {})}, "
+                f"blockers={sewing.get('blockers', [])}"
+            )
+            for row in sewing.get("rows", []):
+                if not isinstance(row, dict):
+                    continue
+                singular_values = row.get("overlap_singular_values", [])
+                minimum_singular_value = (
+                    min(singular_values)
+                    if isinstance(singular_values, list) and singular_values
+                    else None
+                )
+                covariance = row.get("projector_covariance", {})
+                covariance_residuals = [
+                    item.get("covariance_residual")
+                    for item in covariance.values()
+                    if isinstance(item, dict)
+                    and isinstance(item.get("covariance_residual"), (int, float))
+                ] if isinstance(covariance, dict) else []
+                lines.append(
+                    f"    {row.get('source_kpoint')} -> "
+                    f"{row.get('target_kpoint')}: status={row.get('status')}, "
+                    f"G misses={row.get('mapping_miss_count')}, "
+                    f"min singular value={minimum_singular_value}, "
+                    "closure residual="
+                    f"{row.get('target_subspace_closure_residual')}, "
+                    f"theta^2 residual={row.get('theta_square_residual')}, "
+                    "max projector covariance residual="
+                    f"{max(covariance_residuals) if covariance_residuals else None}"
+                )
         for orbit in time_reversal.get("valley_orbits", []):
             if not isinstance(orbit, dict):
                 continue
