@@ -1166,7 +1166,7 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     assert result["status"] == "not_evaluated"
     assert result["solutions"] == []
     record = load_database_ingestion_record_from_directory(str(out_dir))
-    assert record["record_status"] == "no_ready_ebr_bundles"
+    assert record["record_status"] == "no_reduced_ebr_input"
     assert record["reduced_ebr_mapping_status"] == "not_evaluated"
 
     bad_out_dir = tmp_path / "bad_out"
@@ -1534,8 +1534,12 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
     rec_table = load_database_ingestion_record_from_directory(str(out_table))
     rec_spec = load_database_ingestion_record_from_directory(str(out_spec))
     # Both records have valid status; auto-canonical may differ from external.
-    assert rec_table["record_status"] == "no_ready_ebr_bundles"
-    assert rec_spec["record_status"] == "no_ready_ebr_bundles"
+    assert rec_table["record_status"] == (
+        "has_reduced_table_validation_candidates"
+    )
+    assert rec_spec["record_status"] == (
+        "has_reduced_table_validation_candidates"
+    )
     assert rec_table["reduced_ebr_input"]["source"] == "table_file"
     assert rec_spec["reduced_ebr_input"]["source"] == "spec_file"
 
@@ -2088,8 +2092,10 @@ def test_unmock_generic_source_adapter_positive_full_pipeline():
         valley_ebr_export_bundle=ebr_bundle,
         valley_reduced_ebr_mapping=result,
     )
-    assert record["record_status"] == "no_ready_ebr_bundles"
-    assert record["ready_bundle_count"] == 0
+    assert record["record_status"] == (
+        "has_reduced_table_validation_candidates"
+    )
+    assert record["final_reduced_ebr_result_count"] == 0
     assert record["reduced_ebr_mapping_status"] == "blocked"
 
 

@@ -1357,10 +1357,11 @@ def test_joint_valley_orbit_problem_and_export_replace_one_valley_claims():
     assert instance["valley_orbit"] == ["left", "right"]
     assert instance["valley"] == ""
     assert instance["canonical_hsp_vector_complete"] is True
+    assert instance["canonical_hsp_vector_ready"] is True
     assert "ready_for_reduced_table_validation" not in instance
 
     export = build_ebr_export_bundle(ebr_problem_instances=problems)
-    assert export["schema_version"] == "1.5.0"
+    assert export["schema_version"] == "1.6.0"
     assert export["bundle_count"] == 1
     assert export["bundles"][0]["problem_kind"] == (
         "valley_orbit_reduced_ebr"
@@ -1370,3 +1371,24 @@ def test_joint_valley_orbit_problem_and_export_replace_one_valley_claims():
         bundle.get("valley") in {"left", "right"}
         for bundle in export["bundles"]
     )
+
+    orbit_report["valley_orbits"][0].update({
+        "status": "blocked",
+        "blockers": ["antiunitary_corepresentation_not_validated"],
+    })
+    blocked_problems = build_ebr_problem_instances(
+        ebr_input_candidates={"candidates": candidates},
+        time_reversal_orbit_report=orbit_report,
+    )
+    blocked_instance = blocked_problems["instances"][0]
+    assert blocked_instance["status"] == (
+        "canonical_hsp_vector_complete_but_untrusted"
+    )
+    assert blocked_instance["canonical_hsp_vector_complete"] is True
+    assert blocked_instance["canonical_hsp_vector_ready"] is False
+    assert blocked_problems["status"] == (
+        "canonical_hsp_vectors_complete_but_untrusted"
+    )
+    assert build_ebr_export_bundle(
+        ebr_problem_instances=blocked_problems,
+    )["bundle_count"] == 0

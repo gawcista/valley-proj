@@ -195,12 +195,22 @@ def _collect_database_record(args) -> int:
     write_json(output_path, record)
 
     status = record.get("record_status", "?")
-    bundle_count = record.get("ready_bundle_count", 0)
+    candidate_count = record.get(
+        "reduced_table_validation_candidate_bundle_count", 0
+    )
+    final_result_count = record.get("final_reduced_ebr_result_count", 0)
+    mapping_excluded_count = record.get(
+        "final_mapping_excluded_bundle_count", 0
+    )
+    input_excluded_count = record.get("input_excluded_instance_count", 0)
     irrep_count = len(record.get("valley_irrep_records", []))
     errors = record.get("validation_errors", [])
 
     print(f"record status:          {status}")
-    print(f"ready bundles:          {bundle_count}")
+    print(f"validation candidates:  {candidate_count}")
+    print(f"final EBR results:      {final_result_count}")
+    print(f"mapping exclusions:     {mapping_excluded_count}")
+    print(f"input exclusions:       {input_excluded_count}")
     print(f"trusted irrep records:  {irrep_count}")
     if errors:
         print(f"validation errors:      {len(errors)}")
@@ -246,12 +256,32 @@ def _collect_database_index(args) -> int:
     write_json(output_path, index)
     print(f"database_index:        {output_path}")
     print(f"record count:          {index['record_count']}")
-    print(f"ready bundle total:    {index['ready_bundle_count_total']}")
-    print(f"reduced EBR total:    {index['reduced_ebr_record_count_total']}")
+    print(
+        "validation candidates: "
+        f"{index['reduced_table_validation_candidate_bundle_count_total']}"
+    )
+    print(
+        "final EBR results:     "
+        f"{index['final_reduced_ebr_result_count_total']}"
+    )
+    print(
+        "mapping exclusions:    "
+        f"{index['final_mapping_excluded_bundle_count_total']}"
+    )
+    print(
+        "input exclusions:      "
+        f"{index['input_excluded_instance_count_total']}"
+    )
     status = index["status_counts"]
-    print(f"status counts:         has_ready={status.get('has_ready_ebr_bundles')} "
-          f"no_ready={status.get('no_ready_ebr_bundles')} "
-          f"invalid={status.get('invalid_missing_summary')}")
+    print(
+        "status counts:         "
+        "final="
+        f"{status.get('has_final_reduced_ebr_results')} "
+        "candidates="
+        f"{status.get('has_reduced_table_validation_candidates')} "
+        f"no_input={status.get('no_reduced_ebr_input')} "
+        f"invalid={status.get('invalid_missing_summary')}"
+    )
     if index["validation_errors"]:
         print(f"validation errors:     {len(index['validation_errors'])}")
         for error in index["validation_errors"]:

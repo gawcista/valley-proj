@@ -340,6 +340,7 @@ def test_ready_export_bundle_maps_to_public_reduced_ebr_outputs_only(tmp_path):
                 "optional_hsps": ["MM"],
                 "missing_optional_hsps": ["MM"],
                 "canonical_hsp_vector_complete": True,
+                "canonical_hsp_vector_ready": True,
                 "status": "canonical_hsp_vector_ready",
                 "certificate_identity": real_primitive_certificate_identity(143, "P3", spinor=True),
                 "irrep_records_by_kpoint": {
@@ -477,6 +478,7 @@ def test_export_bundle_copies_irrep_records():
             "optional_hsps": [],
             "missing_optional_hsps": [],
                 "canonical_hsp_vector_complete": True,
+                "canonical_hsp_vector_ready": True,
                 "status": "canonical_hsp_vector_ready",
         }],
     }
@@ -673,7 +675,7 @@ def test_generic_irrep_full_pipeline_smoke():
     bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
     assert bundle["bundle_count"] == 1
     b = bundle["bundles"][0]
-    # State 1 (sampled_basis): exported for validation, not solver-ready.
+    # Exported for reviewed-table validation, not yet solver-ready.
     assert b["ready_for_reduced_table_validation"] is True
     assert "ready_for_external_solver" not in b
 
@@ -819,7 +821,7 @@ def test_generic_ebr_builder_e2e_p4_group_agnostic(tmp_path):
     bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
     assert bundle["bundle_count"] == 1
     b = bundle["bundles"][0]
-    # State 1 (sampled_basis): exported for validation, not solver-ready.
+    # Exported for reviewed-table validation, not yet solver-ready.
     assert b["ready_for_reduced_table_validation"] is True
     assert "ready_for_external_solver" not in b
     assert b["subspace_group_candidate"] == "P4"
@@ -1560,6 +1562,7 @@ def test_export_bundle_preserves_multi_hsp_provenance():
         "irrep_records_by_kpoint": records,
         "status": "canonical_hsp_vector_ready",
         "canonical_hsp_vector_complete": True,
+        "canonical_hsp_vector_ready": True,
     }]}
 
     report = build_ebr_export_bundle(ebr_problem_instances=problem_instances)
@@ -1769,7 +1772,7 @@ def test_public_e2e_record_chain_with_certificate_provenance():
         valley_ebr_export_bundle=bundle,
         valley_reduced_ebr_mapping=mapping_result,
     )
-    assert record["record_status"] == "has_ready_ebr_bundles"
+    assert record["record_status"] == "has_final_reduced_ebr_results"
     # Certificate provenance preserved in irrep records.
     val_records = record.get("valley_irrep_records", [])
     assert len(val_records) >= 1

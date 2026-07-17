@@ -96,9 +96,14 @@ def test_candidates_group_into_canonical_hsp_vector():
     assert inst["subspace_group_candidate"] == "P3"
     assert inst["subspace_space_group"]["candidate_space_group_symbol"] == "P3"
     assert inst["valley"] == "K_valley"
-    # State 1: sampled basis, not ready for decomposition.
+    # Structurally complete and trusted for reduced-table validation only.
     assert inst["status"] == "canonical_hsp_vector_ready"
     assert inst["canonical_hsp_vector_complete"] is True
+    assert inst["canonical_hsp_vector_ready"] is True
+    assert r["ready_instance_count"] == 1
+    assert r["structurally_complete_instance_count"] == 1
+    assert r["structurally_complete_blocked_count"] == 0
+    assert r["incomplete_instance_count"] == 0
     assert "hsp_basis_status" not in inst
     assert "ready_for_reduced_table_validation" not in inst
     assert "ready_for_ebr_decomposition" not in inst
@@ -164,9 +169,35 @@ def test_complete_but_untrusted_coverage_has_explicit_blocker():
     )
 
     inst = r["instances"][0]
-    assert inst["canonical_hsp_vector_complete"] is False
+    assert inst["status"] == "canonical_hsp_vector_complete_but_untrusted"
+    assert inst["canonical_hsp_vector_complete"] is True
+    assert inst["canonical_hsp_vector_ready"] is False
     assert "source_hsp_coverage_not_ready_for_ebr_promotion" in (
         inst["blocked_by"]
+    )
+    assert r["status"] == "canonical_hsp_vectors_complete_but_untrusted"
+    assert r["ready_instance_count"] == 0
+    assert r["structurally_complete_instance_count"] == 1
+    assert r["structurally_complete_blocked_count"] == 1
+    assert r["incomplete_instance_count"] == 0
+
+
+def test_structurally_incomplete_source_mapping_has_explicit_blocker():
+    coverage = _complete_coverage()
+    del coverage["by_valley"]["K_valley"][
+        "source_hsp_to_sampled_kpoint"
+    ]["K"]
+
+    report = build_ebr_problem_instances(
+        ebr_input_candidates=_make_c3_preserving_candidates(),
+        projected_hsp_coverage=coverage,
+    )
+
+    instance = report["instances"][0]
+    assert instance["canonical_hsp_vector_complete"] is False
+    assert instance["canonical_hsp_vector_ready"] is False
+    assert "source_hsp_mapping_incomplete_or_ambiguous" in (
+        instance["blocked_by"]
     )
 
 

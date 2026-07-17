@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-_SCHEMA_VERSION = "1.5.0"
+_SCHEMA_VERSION = "1.6.0"
 
 
 def build_database_ingestion_record(
@@ -51,6 +51,14 @@ def build_database_ingestion_record(
         "schema_version": _SCHEMA_VERSION,
         "source_files": dict(source_files) if source_files else {},
         "output_profile": output_profile,
+        "reduced_table_validation_candidate_bundle_count": 0,
+        "final_reduced_ebr_result_count": 0,
+        "final_mapping_excluded_bundle_count": 0,
+        "input_excluded_instance_count": 0,
+        "valley_irrep_records": [],
+        "reduced_ebr_records": [],
+        "input_excluded_ebr_records": [],
+        "final_mapping_excluded_records": [],
         "reduced_ebr_classification_counts": _empty_classification_counts(),
         "validation_errors": errors,
     }
@@ -74,8 +82,6 @@ def build_database_ingestion_record(
 
     # --- valley_ebr_export_bundle (optional) ---
     validation_candidate_count = 0
-    decomposition_ready_count = 0
-    excluded_count = 0
     valley_irrep_records: list[dict[str, Any]] = []
 
     if valley_ebr_export_bundle is not None:
@@ -92,16 +98,9 @@ def build_database_ingestion_record(
                     # Validation candidates contain trusted valley-preserving
                     # irreps; preserve them independently of EBR readiness.
                     _extract_irrep_records(bundle, valley_irrep_records)
-                else:
-                    excluded_count += 1
-        excluded_count += int(valley_ebr_export_bundle.get("excluded_count", 0) or 0)
-    else:
-        excluded_count = 0  # No bundle file present
-
-    record["ready_bundle_count"] = decomposition_ready_count
-    record["validation_candidate_count"] = validation_candidate_count
-    record["decomposition_ready_count"] = decomposition_ready_count
-    record["excluded_bundle_count"] = excluded_count
+    record["reduced_table_validation_candidate_bundle_count"] = (
+        validation_candidate_count
+    )
     record["valley_irrep_records"] = valley_irrep_records
 
     # --- export-bundle status and excluded EBR records ---
@@ -110,13 +109,14 @@ def build_database_ingestion_record(
         record["ebr_export_interpretation"] = valley_ebr_export_bundle.get("interpretation", "")
         excluded_instances = valley_ebr_export_bundle.get("excluded_instances", [])
         if isinstance(excluded_instances, list):
-            record["excluded_ebr_records"] = _compact_excluded_records(excluded_instances)
+            input_excluded = _compact_excluded_records(excluded_instances)
         else:
-            record["excluded_ebr_records"] = []
+            input_excluded = []
+        record["input_excluded_ebr_records"] = input_excluded
+        record["input_excluded_instance_count"] = len(input_excluded)
     else:
         record["ebr_export_status"] = "not_available"
         record["ebr_export_interpretation"] = ""
-        record["excluded_ebr_records"] = []
 
     # --- valley_reduced_ebr_mapping (optional) ---
     if valley_reduced_ebr_mapping is not None:
@@ -126,6 +126,24 @@ def build_database_ingestion_record(
         if isinstance(reduced_ebr_input, dict):
             record["reduced_ebr_input"] = dict(reduced_ebr_input)
         solutions = valley_reduced_ebr_mapping.get("solutions", [])
+        valid_solutions = (
+            [solution for solution in solutions if isinstance(solution, dict)]
+            if isinstance(solutions, list) else []
+        )
+        record["final_reduced_ebr_result_count"] = len(valid_solutions)
+        mapping_excluded = valley_reduced_ebr_mapping.get(
+            "excluded_bundles", []
+        )
+        if isinstance(mapping_excluded, list):
+            compact_mapping_excluded = _compact_mapping_exclusions(
+                mapping_excluded
+            )
+        else:
+            compact_mapping_excluded = []
+        record["final_mapping_excluded_records"] = compact_mapping_excluded
+        record["final_mapping_excluded_bundle_count"] = len(
+            compact_mapping_excluded
+        )
         if isinstance(solutions, list):
             atomic = sum(1 for s in solutions if isinstance(s, dict)
                          and s.get("classification") == "atomic-compatible-candidate")
@@ -187,6 +205,25 @@ def build_database_ingestion_record(
                     rec["source_basis_count"] = tp.get("source_basis_count")
                     rec["reduction_basis_count"] = tp.get("reduction_basis_count")
                     rec["dropped_source_row_count"] = tp.get("dropped_source_row_count")
+                    rec["dropped_source_rows"] = tp.get("dropped_source_rows", [])
+                    rec["filtered_zero_vector_ebr_count"] = tp.get(
+                        "filtered_zero_vector_ebr_count", 0
+                    )
+                    rec["filtered_zero_vector_ebrs"] = tp.get(
+                        "filtered_zero_vector_ebrs", []
+                    )
+                    rec["independent_setting_identity"] = tp.get(
+                        "independent_setting_identity"
+                    )
+                    rec["unitary_space_group_number"] = tp.get(
+                        "unitary_space_group_number"
+                    )
+                    rec["time_reversal_grey_bns_number"] = tp.get(
+                        "time_reversal_grey_bns_number"
+                    )
+                    rec["time_reversal_source"] = tp.get(
+                        "time_reversal_source"
+                    )
                 ts = s.get("table_status")
                 if ts is not None:
                     rec["table_status"] = ts
@@ -199,21 +236,15 @@ def build_database_ingestion_record(
         record["reduced_ebr_table_status"] = "not_available"
         record["reduced_ebr_records"] = []
 
-    # --- Status ---
-    # A bundle is "ready" if it was decomposition-ready in the export
-    # OR if it was promoted and solved by the auto-canonical/external path.
-    solved_count = len(
-        valley_reduced_ebr_mapping.get("solutions", [])
-    ) if isinstance(valley_reduced_ebr_mapping, dict) else 0
-    if decomposition_ready_count > 0 or solved_count > 0:
-        record["record_status"] = "has_ready_ebr_bundles"
-        # Update counts to reflect promoted-and-solved bundles.
-        record["ready_bundle_count"] = max(record["ready_bundle_count"], solved_count)
-        record["decomposition_ready_count"] = max(
-            record["decomposition_ready_count"], solved_count,
+    # --- Stage-owned status ---
+    if record["final_reduced_ebr_result_count"] > 0:
+        record["record_status"] = "has_final_reduced_ebr_results"
+    elif record["reduced_table_validation_candidate_bundle_count"] > 0:
+        record["record_status"] = (
+            "has_reduced_table_validation_candidates"
         )
     else:
-        record["record_status"] = "no_ready_ebr_bundles"
+        record["record_status"] = "no_reduced_ebr_input"
 
     return record
 
@@ -284,6 +315,7 @@ def _extract_irrep_records(
     records_by_kp = bundle.get("irrep_records_by_kpoint", {})
     if not isinstance(records_by_kp, dict):
         return
+    output_start = len(out)
 
     for kpoint, records in records_by_kp.items():
         if not isinstance(records, list):
@@ -325,6 +357,51 @@ def _extract_irrep_records(
                     entry[key] = rec[key]
             out.append(entry)
 
+    if len(out) != output_start:
+        return
+    if bundle.get("problem_kind") != "valley_orbit_reduced_ebr":
+        return
+    unitary_irreps = bundle.get("unitary_valley_irreps", {})
+    source_to_sampled = bundle.get("source_hsp_to_sampled_kpoint", {})
+    if not isinstance(unitary_irreps, dict):
+        return
+    if not isinstance(source_to_sampled, dict):
+        source_to_sampled = {}
+    for valley in sorted(unitary_irreps):
+        by_source_hsp = unitary_irreps.get(valley)
+        if not isinstance(by_source_hsp, dict):
+            continue
+        for source_hsp in sorted(by_source_hsp):
+            multiplicities = by_source_hsp.get(source_hsp)
+            if not isinstance(multiplicities, dict):
+                continue
+            for irrep in sorted(multiplicities):
+                multiplicity = multiplicities.get(irrep)
+                if (
+                    not isinstance(multiplicity, int)
+                    or isinstance(multiplicity, bool)
+                    or multiplicity <= 0
+                ):
+                    continue
+                out.append({
+                    "kpoint": source_to_sampled.get(source_hsp, source_hsp),
+                    "source_hsp_label": source_hsp,
+                    "valley": valley,
+                    "subspace_group_candidate": bundle.get(
+                        "subspace_group_candidate", ""
+                    ),
+                    "matched_irrep": irrep,
+                    "irrep_multiplicity": multiplicity,
+                    "workflow_path": bundle.get("workflow_path", ""),
+                    "readiness_level": bundle.get("readiness_level", ""),
+                    "source": "unitary_valley_irreps",
+                    "source_bundle_id": source_bundle_id,
+                    "source_instance_id": source_instance_id,
+                    "certificate_identity": bundle.get(
+                        "certificate_identity", {}
+                    ),
+                })
+
 
 def _compact_excluded_records(
     excluded_instances: list[dict[str, Any]],
@@ -343,8 +420,44 @@ def _compact_excluded_records(
             "canonical_hsp_vector_complete": exc.get(
                 "canonical_hsp_vector_complete", False
             ),
+            "canonical_hsp_vector_ready": exc.get(
+                "canonical_hsp_vector_ready", False
+            ),
             "exclusion_reasons": exc.get("exclusion_reasons", []),
         })
+    return records
+
+
+def _compact_mapping_exclusions(
+    excluded_bundles: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Preserve final-mapping blockers without mixing input exclusions."""
+    records: list[dict[str, Any]] = []
+    for excluded in excluded_bundles:
+        if not isinstance(excluded, dict):
+            continue
+        record = {
+            "bundle_id": excluded.get("bundle_id", "?"),
+            "subspace_group_candidate": excluded.get(
+                "subspace_group_candidate", "?"
+            ),
+            "subspace_space_group": excluded.get(
+                "subspace_space_group", {}
+            ),
+            "reason": excluded.get("reason", ""),
+            "blocker_reasons": excluded.get("blocker_reasons", []),
+        }
+        for key in (
+            "problem_kind",
+            "valley",
+            "valley_orbit",
+            "validation_report",
+            "certificate_identity",
+            "table_provenance",
+        ):
+            if key in excluded:
+                record[key] = excluded[key]
+        records.append(record)
     return records
 
 

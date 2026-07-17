@@ -3,6 +3,8 @@
 import json, pytest, yaml
 from pathlib import Path
 
+import valleyscope.analysis.irreptables_runtime_table_builder as table_builder
+
 from valleyscope.io.config import load_config
 from valleyscope.workflows.analyze_hsp import analyze_hsp
 from valleyscope.analysis.irreptables_runtime_table_builder import (
@@ -113,7 +115,9 @@ def test_per_bundle_aggregation(label, desc):
 def test_no_ready_bundles_not_evaluated():
     r = _bm({"bundle_id": "b", "ready_for_reduced_table_validation": False})
     assert r["status"] == "blocked"
-    assert r["reduced_ebr_input"]["ready_bundle_count"] == 0
+    assert r["reduced_ebr_input"][
+        "reduced_table_validation_candidate_bundle_count"
+    ] == 0
 
 def test_no_buildable_blocked():
     r = _bm({** _mk_bundle("b", 75, "P4", ["GammaM"], {"GammaM": ["-GM5"]}),
@@ -159,6 +163,49 @@ def test_auto_table_e2e_solve(tmp_path):
     r = build_reduced_ebr_mapping(ebr_export_bundle=eb, table=load_reduced_ebr_table(p))
     assert r["status"] == "solved_exact"
     assert r["solutions"][0]["classification"] == "atomic-compatible-candidate"
+    provenance = r["solutions"][0]["table_provenance"]
+    assert provenance["filtered_zero_vector_ebr_count"] == 1
+    assert provenance["filtered_zero_vector_ebrs"] == ["EBR_X"]
+    assert provenance["source_basis_count"] == 6
+    assert provenance["reduction_basis_count"] == 4
+    assert provenance["dropped_source_row_count"] == len(
+        provenance["dropped_source_rows"]
+    )
+
+
+def test_auto_orchestration_preserves_filtered_zero_provenance(monkeypatch):
+    table = _auto_table(
+        75,
+        ["GammaM"],
+        {"GammaM": ["-GM5", "-GM6"]},
+    )
+
+    def _build_table(**_kwargs):
+        return table
+
+    monkeypatch.setattr(
+        table_builder,
+        "build_auto_canonical_reduced_ebr_table",
+        _build_table,
+    )
+    result = build_auto_reduced_ebr_mapping(
+        ebr_export_bundle={
+            "bundles": [_mk_bundle(
+                "b",
+                75,
+                "P4",
+                ["GammaM"],
+                {"GammaM": ["-GM5", "-GM6"]},
+            )],
+        },
+        spinor=True,
+    )
+
+    assert result["status"] == "solved_exact"
+    provenance = result["solutions"][0]["table_provenance"]
+    assert provenance["source"] == "auto_canonical"
+    assert provenance["filtered_zero_vector_ebr_count"] == 1
+    assert provenance["filtered_zero_vector_ebrs"] == ["EBR_X"]
 
 def test_auto_table_hsp_mismatch(tmp_path):
     t = _auto_table(75, ["GammaM"], {"GammaM": ["-GM5"]})

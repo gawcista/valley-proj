@@ -175,34 +175,46 @@ def build_ebr_problem_instances(
         coverage_ready = bool(
             coverage.get("ready_for_ebr_promotion", False)
         ) if coverage_present else True
-        if coverage_present and coverage_complete:
-            mapped_expected = [
-                source_to_sampled.get(label)
-                for label in required_source_hsps
-            ]
-            if all(isinstance(label, str) and label for label in mapped_expected):
-                expected_hsps = [str(label) for label in mapped_expected]
+        mapped_expected = [
+            source_to_sampled.get(label)
+            for label in required_source_hsps
+        ]
+        source_mapping_complete = (
+            set(source_to_sampled) == set(required_source_hsps)
+            and bool(required_source_hsps)
+            and all(
+                isinstance(label, str) and label
+                for label in mapped_expected
+            )
+        )
+        if coverage_present and coverage_complete and source_mapping_complete:
+            expected_hsps = [str(label) for label in mapped_expected]
 
         has_hsps = bool(actual_hsps)
         canonical_hsp_vector_complete = (
             has_hsps
             and coverage_present
             and coverage_complete
-            and coverage_ready
-            and bool(required_source_hsps)
-            and len(source_to_sampled) == len(required_source_hsps)
+            and source_mapping_complete
             and actual_hsps == sorted(expected_hsps)
         )
-        status = (
-            "canonical_hsp_vector_ready"
-            if canonical_hsp_vector_complete
-            else "incomplete_canonical_hsp_vector"
+        canonical_hsp_vector_ready = (
+            canonical_hsp_vector_complete and coverage_ready
+            and not trusted_missing_source_hsps
+        )
+        status = _canonical_vector_status(
+            complete=canonical_hsp_vector_complete,
+            ready=canonical_hsp_vector_ready,
         )
         blocked_by: list[str] = []
         if not coverage_present:
             blocked_by.append("projected_hsp_coverage_missing")
         elif not coverage_complete:
             blocked_by.append("source_hsp_coverage_incomplete")
+        elif not source_mapping_complete:
+            blocked_by.append(
+                "source_hsp_mapping_incomplete_or_ambiguous"
+            )
         elif not coverage_ready:
             blocked_by.append(
                 "source_hsp_coverage_not_ready_for_ebr_promotion"
@@ -241,6 +253,7 @@ def build_ebr_problem_instances(
             "candidate_count": len(cands),
             "status": status,
             "canonical_hsp_vector_complete": canonical_hsp_vector_complete,
+            "canonical_hsp_vector_ready": canonical_hsp_vector_ready,
             "blocked_by": blocked_by,
             "expected_hsps": expected_hsps,
             "expected_hsp_policy_source": "certified_source_hsp_basis",
@@ -259,10 +272,11 @@ def build_ebr_problem_instances(
             ),
         })
 
-    overall_status = _problem_report_status(instances)
+    counts = _problem_report_counts(instances)
     return {
-        "status": overall_status,
+        "status": _problem_report_status(instances),
         "instance_count": len(instances),
+        **counts,
         "interpretation": (
             "Per-valley/per-subspace-group canonical source-HSP vectors "
             "grouped from trusted input candidates by certificate-aware "
@@ -342,7 +356,16 @@ def _build_time_reversal_problem_instances(
         ):
             blockers.append("time_reversal_independent_hsp_basis_mismatch")
             expected_hsps = []
-        validated = raw_orbit.get("status") == "validated" and not blockers
+        canonical_hsp_vector_complete = (
+            bool(irreps_by_kpoint)
+            and bool(expected_hsps)
+            and set(irreps_by_kpoint) == set(expected_hsps)
+        )
+        canonical_hsp_vector_ready = (
+            canonical_hsp_vector_complete
+            and raw_orbit.get("status") == "validated"
+            and not blockers
+        )
         instance_id = f"ebr_instance_{index:03d}"
         instances.append({
             "instance_id": instance_id,
@@ -362,21 +385,24 @@ def _build_time_reversal_problem_instances(
                 for candidate in component_candidates
                 if candidate.get("workflow_path")
             }),
-            "readiness_level": "trusted" if validated else "blocked",
+            "readiness_level": (
+                "trusted" if canonical_hsp_vector_ready else "blocked"
+            ),
             "readiness_evidence": [
                 "trusted_unitary_valley_irreps",
                 "validated_time_reversal_valley_orbit",
                 "reviewed_grey_group_source",
-            ] if validated else [],
+            ] if canonical_hsp_vector_ready else [],
             "irreps_by_kpoint": dict(irreps_by_kpoint),
             "operations_by_kpoint": {},
             "irrep_records_by_kpoint": {},
             "candidate_count": len(component_candidates),
-            "status": (
-                "canonical_hsp_vector_ready"
-                if validated else "incomplete_canonical_hsp_vector"
+            "status": _canonical_vector_status(
+                complete=canonical_hsp_vector_complete,
+                ready=canonical_hsp_vector_ready,
             ),
-            "canonical_hsp_vector_complete": validated,
+            "canonical_hsp_vector_complete": canonical_hsp_vector_complete,
+            "canonical_hsp_vector_ready": canonical_hsp_vector_ready,
             "blocked_by": _deduplicate_strings(blockers),
             "expected_hsps": list(expected_hsps),
             "expected_hsp_policy_source": (
@@ -390,16 +416,16 @@ def _build_time_reversal_problem_instances(
             ),
             "covered_source_hsp_labels": raw_orbit.get(
                 "full_unitary_source_hsp_labels", []
-            ) if validated else [],
+            ) if canonical_hsp_vector_complete else [],
             "missing_source_hsp_labels": [],
             "trusted_matched_source_hsp_labels": raw_orbit.get(
                 "full_unitary_source_hsp_labels", []
-            ) if validated else [],
+            ) if canonical_hsp_vector_ready else [],
             "trusted_missing_source_hsp_labels": [],
             "source_hsp_to_sampled_kpoint": raw_orbit.get(
                 "source_hsp_to_sampled_kpoint", {}
             ),
-            "source_hsp_coverage_complete": validated,
+            "source_hsp_coverage_complete": canonical_hsp_vector_complete,
             "source_hsp_coverage_provenance": {
                 "source": "time_reversal_valley_orbit_completion",
             },
@@ -443,9 +469,11 @@ def _build_time_reversal_problem_instances(
                 "grey_bns_number": raw_orbit.get("grey_bns_number"),
             },
         })
+    counts = _problem_report_counts(instances)
     return {
         "status": _problem_report_status(instances),
         "instance_count": len(instances),
+        **counts,
         "interpretation": (
             "Joint time-reversal valley-orbit EBR problem instances. "
             "Valley-resolved unitary irreps remain identifiable as components; "
@@ -464,15 +492,52 @@ def _deduplicate_strings(values: list[str]) -> list[str]:
 
 
 def _problem_report_status(instances: list[dict[str, object]]) -> str:
+    ready = sum(
+        instance.get("canonical_hsp_vector_ready") is True
+        for instance in instances
+    )
     complete = sum(
         instance.get("canonical_hsp_vector_complete") is True
         for instance in instances
     )
-    if not instances or complete == 0:
+    if not instances:
         return "no_canonical_hsp_vectors"
-    if complete == len(instances):
+    if ready == len(instances):
         return "canonical_hsp_vectors_ready"
-    return "partial_canonical_hsp_vectors"
+    if ready:
+        return "partial_canonical_hsp_vectors_ready"
+    if complete == len(instances):
+        return "canonical_hsp_vectors_complete_but_untrusted"
+    if complete:
+        return "canonical_hsp_vectors_blocked"
+    return "incomplete_canonical_hsp_vectors"
+
+
+def _problem_report_counts(
+    instances: list[dict[str, object]],
+) -> dict[str, int]:
+    ready = sum(
+        instance.get("canonical_hsp_vector_ready") is True
+        for instance in instances
+    )
+    complete = sum(
+        instance.get("canonical_hsp_vector_complete") is True
+        for instance in instances
+    )
+    return {
+        "ready_instance_count": ready,
+        "structurally_complete_instance_count": complete,
+        "structurally_complete_blocked_count": complete - ready,
+        "incomplete_instance_count": len(instances) - complete,
+    }
+
+
+def _canonical_vector_status(*, complete: bool, ready: bool) -> str:
+    if ready:
+        return "canonical_hsp_vector_ready"
+    if complete:
+        return "canonical_hsp_vector_complete_but_untrusted"
+    return "incomplete_canonical_hsp_vector"
 
 
 def _string_list(value: object) -> list[str]:
@@ -513,6 +578,10 @@ def _empty_report(reason: str) -> dict[str, object]:
     return {
         "status": "no_canonical_hsp_vectors",
         "instance_count": 0,
+        "ready_instance_count": 0,
+        "structurally_complete_instance_count": 0,
+        "structurally_complete_blocked_count": 0,
+        "incomplete_instance_count": 0,
         "interpretation": reason,
         "instances": [],
     }

@@ -177,7 +177,6 @@ def _bundle(*, sg_number=143, symbol="P3", spinful=False, cert=None, **over):
         "subspace_space_group": {"status": "resolved",
                                  "candidate_space_group_number": sg_number,
                                  "candidate_space_group_symbol": symbol},
-                "ready_for_reduced_table_validation": True,
         "ready_for_reduced_table_validation": True,
         "expected_hsps": ["GammaM", "KM"],
         "irreps_by_kpoint": {"GammaM": ["A", "A"], "KM": ["A", "B"]},

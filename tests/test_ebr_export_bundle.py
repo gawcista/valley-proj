@@ -23,6 +23,7 @@ _SAMPLED_BASIS_INSTANCE = {
             "readiness_level": "trusted",
             "status": "canonical_hsp_vector_ready",
             "canonical_hsp_vector_complete": True,
+            "canonical_hsp_vector_ready": True,
             "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"], "KM": ["C3_spinor_phase_+1/6"]},
             "operations_by_kpoint": {"GammaM": [1], "KM": [1]},
             "irrep_records_by_kpoint": {},
@@ -51,6 +52,7 @@ _VALIDATED_BASIS_INSTANCE = {
             "readiness_level": "trusted",
             "status": "canonical_hsp_vector_ready",
             "canonical_hsp_vector_complete": True,
+            "canonical_hsp_vector_ready": True,
             "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
             "operations_by_kpoint": {"GammaM": [1]},
             "irrep_records_by_kpoint": {},
@@ -118,6 +120,31 @@ def test_incomplete_canonical_vector_is_excluded():
     assert r["excluded_count"] == 1
 
 
+def test_complete_but_untrusted_vector_is_excluded_with_both_states():
+    instance = dict(_SAMPLED_BASIS_INSTANCE["instances"][0])
+    instance.update({
+        "status": "canonical_hsp_vector_complete_but_untrusted",
+        "canonical_hsp_vector_complete": True,
+        "canonical_hsp_vector_ready": False,
+        "blocked_by": [
+            "source_hsp_coverage_not_ready_for_ebr_promotion",
+        ],
+    })
+
+    report = build_ebr_export_bundle(
+        ebr_problem_instances={"instances": [instance]},
+    )
+
+    assert report["bundle_count"] == 0
+    assert report["excluded_count"] == 1
+    excluded = report["excluded_instances"][0]
+    assert excluded["canonical_hsp_vector_complete"] is True
+    assert excluded["canonical_hsp_vector_ready"] is False
+    assert excluded["exclusion_reasons"] == [
+        "source_hsp_coverage_not_ready_for_ebr_promotion",
+    ]
+
+
 # -----------------------------------------------------------------------
 # 4. No instances → no_bundles
 # -----------------------------------------------------------------------
@@ -176,12 +203,13 @@ def test_schema_fields():
             "excluded_instances", "interpretation"}
     assert keys <= set(r)
     assert "reduced_ebr_decomposition_status" not in r
-    assert r["schema_version"] == "1.5.0"
+    assert r["schema_version"] == "1.6.0"
     b = r["bundles"][0]
     for k in ["bundle_id", "source_instance_id", "valley",
               "irreps_by_kpoint", "operations_by_kpoint",
               "ready_for_reduced_table_validation",
-              "canonical_hsp_vector_complete"]:
+              "canonical_hsp_vector_complete",
+              "canonical_hsp_vector_ready"]:
         assert k in b, f"missing: {k}"
     assert "ready_for_external_solver" not in b
     assert "hsp_basis_status" not in b
@@ -219,8 +247,8 @@ def test_source_hsp_coverage_fields_are_exported_without_loss():
 def test_schema_doc_covers_centered_export_and_ingestion_versions():
     schema = Path("docs/schema.md").read_text(encoding="utf-8")
     normalized_schema = " ".join(schema.split())
-    assert 'Schema version `"1.5.0"`' in schema
-    assert 'Current ingestion-record schema version: `"1.5.0"`' in schema
+    assert 'Schema version `"1.6.0"`' in schema
+    assert 'Current ingestion-record schema version: `"1.6.0"`' in schema
     assert "centered_affine_operation_map" in schema
     assert "centering_coset_index" in schema
     assert (
@@ -240,7 +268,7 @@ def test_schema_1_2_preserves_required_operation_ids_in_certificate_identity():
         ebr_problem_instances={"instances": [instance]},
     )
 
-    assert report["schema_version"] == "1.5.0"
+    assert report["schema_version"] == "1.6.0"
     exported_identity = report["bundles"][0]["certificate_identity"]
     assert exported_identity["affine_required_operation_ids"] == [-3, 4]
 
@@ -284,7 +312,7 @@ def test_schema_1_2_preserves_centered_expansion_identity_without_loss():
         ebr_problem_instances={"instances": [instance]},
     )
 
-    assert report["schema_version"] == "1.5.0"
+    assert report["schema_version"] == "1.6.0"
     assert report["bundles"][0]["certificate_identity"] == certificate_identity
 
 

@@ -10,7 +10,7 @@ def test_benchmark_ingestion_record_docs():
     smoke_path = Path("docs/benchmarks/database_ingestion_record_smoke.md")
     assert smoke_path.exists()
     smoke = smoke_path.read_text(encoding="utf-8")
-    for phrase in ["collect-database-record", "has_ready_ebr_bundles", "no_ready_ebr_bundles",
+    for phrase in ["collect-database-record", "has_final_reduced_ebr_results", "no_reduced_ebr_input",
                      "P321", "P312", "tmpdir=$(mktemp -d)", "--output \"$tmpdir/"]:
         assert phrase in smoke, f"missing '{phrase}'"
     smoke_lower = smoke.lower()

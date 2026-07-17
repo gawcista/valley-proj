@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-_SCHEMA_VERSION = "1.5.0"
+_SCHEMA_VERSION = "1.6.0"
 
 
 def build_ebr_export_bundle(
@@ -28,8 +28,9 @@ def build_ebr_export_bundle(
         canonical_complete = (
             inst.get("canonical_hsp_vector_complete") is True
         )
+        canonical_ready = inst.get("canonical_hsp_vector_ready") is True
 
-        if canonical_complete:
+        if canonical_ready:
             bundles.append({
                 "bundle_id": f"bundle_{inst.get('instance_id', '?')}",
                 "source_instance_id": inst.get("instance_id", ""),
@@ -77,6 +78,7 @@ def build_ebr_export_bundle(
                     "source_hsp_coverage_provenance", {}
                 ),
                 "canonical_hsp_vector_complete": True,
+                "canonical_hsp_vector_ready": True,
                 "ready_for_reduced_table_validation": True,
             })
             continue
@@ -100,7 +102,8 @@ def build_ebr_export_bundle(
             "missing_source_hsp_labels": inst.get(
                 "missing_source_hsp_labels", []
             ),
-            "canonical_hsp_vector_complete": False,
+            "canonical_hsp_vector_complete": canonical_complete,
+            "canonical_hsp_vector_ready": canonical_ready,
             "exclusion_reasons": list(inst.get("blocked_by", [])),
         })
 

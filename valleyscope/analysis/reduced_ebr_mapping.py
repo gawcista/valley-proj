@@ -24,7 +24,7 @@ from valleyscope.analysis.time_reversal_sewing import (
 
 _REQUIRED_TABLE_KEYS = {"schema_version", "subspace_group_candidate",
                          "expected_hsps", "irreps", "ebrs"}
-_OUTPUT_SCHEMA_VERSION = "1.5.0"
+_OUTPUT_SCHEMA_VERSION = "1.6.0"
 _SOLVER_NAME = "smith_normal_form_plus_bounded_nonnegative_search"
 
 # Standard-setting certificate convention — REAL producer vocabulary.
@@ -131,7 +131,7 @@ def _derive_table_standard_setting(
 
 
 # ---------------------------------------------------------------------------
-# Production bundle promotion: sampled_basis → validated_basis
+# Production bundle promotion: validation candidate → validated table/bundle pair
 # ---------------------------------------------------------------------------
 
 def promote_bundle_for_solve(*, bundle: dict, table: dict) -> dict:
@@ -359,26 +359,10 @@ def promote_bundle_for_solve(*, bundle: dict, table: dict) -> dict:
             "bundle irreps_by_kpoint or table irreps malformed"))
         report["irrep_basis_check"] = "failed"
 
-    table_provenance = {
-        "data_source": data_source,
-        "package": package,
-        "package_version": package_version,
-        "space_group_number": table_sg_num,
-        "spinful": table_spinful,
-        "valleyscope_reduction": valleyscope_reduction,
-        "unitary_space_group_number": prov.get(
-            "unitary_space_group_number"
-        ),
-        "time_reversal_grey_bns_number": prov.get(
-            "time_reversal_grey_bns_number"
-        ),
-        "time_reversal_source": prov.get("time_reversal_source"),
-        "independent_setting_identity": dict(table_setting) if table_setting else None,
-        "setting_source": (
-            table_setting.get("canonical_setting_source")
-            if table_setting else None
-        ),
-    }
+    table_provenance = _table_provenance_for_output(
+        table,
+        independent_setting_identity=table_setting,
+    )
 
     promoted = not blockers
     state = "validated_basis" if promoted else "sampled_basis"
@@ -406,6 +390,76 @@ def promote_bundle_for_solve(*, bundle: dict, table: dict) -> dict:
 
 def _is_positive_int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def _table_provenance_for_output(
+    table: dict,
+    *,
+    independent_setting_identity: dict | None = None,
+    source: str | None = None,
+) -> dict:
+    """Return the lossless reduced-table provenance public contract."""
+    provenance = table.get("provenance", {})
+    if not isinstance(provenance, dict):
+        provenance = {}
+    result = dict(provenance)
+    table_irreps = table.get("irreps", [])
+    basis_count = len(table_irreps) if isinstance(table_irreps, list) else 0
+    filtered_zero_ebrs = provenance.get("filtered_zero_vector_ebrs", [])
+    if not isinstance(filtered_zero_ebrs, list):
+        filtered_zero_ebrs = []
+    dropped_source_rows = provenance.get("dropped_source_rows", [])
+    if not isinstance(dropped_source_rows, list):
+        dropped_source_rows = []
+    result.update({
+        "subspace_group_candidate": table.get(
+            "subspace_group_candidate", ""
+        ),
+        "expected_hsps": list(table.get("expected_hsps", [])),
+        "source_basis_count": provenance.get(
+            "source_basis_count", basis_count
+        ),
+        "reduction_basis_count": provenance.get(
+            "reduction_basis_count", basis_count
+        ),
+        "filtered_zero_vector_ebr_count": provenance.get(
+            "filtered_zero_vector_ebr_count",
+            len(filtered_zero_ebrs),
+        ),
+        "filtered_zero_vector_ebrs": list(filtered_zero_ebrs),
+        "dropped_source_row_count": provenance.get(
+            "dropped_source_row_count",
+            len(dropped_source_rows),
+        ),
+        "dropped_source_rows": list(dropped_source_rows),
+        "independent_setting_identity": (
+            dict(independent_setting_identity)
+            if isinstance(independent_setting_identity, dict)
+            else None
+        ),
+        "setting_source": (
+            independent_setting_identity.get("canonical_setting_source")
+            or independent_setting_identity.get("source")
+            if isinstance(independent_setting_identity, dict)
+            else None
+        ),
+    })
+    if source is not None:
+        result["source"] = source
+    return result
+
+
+def _merge_table_input_provenance(
+    table_provenance: dict,
+    reduced_ebr_input: dict[str, object] | None,
+) -> dict:
+    return {
+        **(
+            dict(reduced_ebr_input)
+            if isinstance(reduced_ebr_input, dict) else {}
+        ),
+        **table_provenance,
+    }
 
 
 def _normalized_hsp_set(value: object) -> set[str] | None:
@@ -1924,7 +1978,9 @@ def build_reduced_ebr_mapping(
                     "blocker_reasons": promo["blocker_reasons"],
                     "validation_report": promo["validation_report"],
                     "certificate_identity": promo["certificate_identity"],
-                    "table_provenance": promo["table_provenance"],
+                    "table_provenance": _merge_table_input_provenance(
+                        promo["table_provenance"], reduced_ebr_input
+                    ),
                 })
                 continue
         else:
@@ -1984,7 +2040,9 @@ def build_reduced_ebr_mapping(
             if isinstance(promo_prov.get("validation_report"), dict):
                 solution["validation_report"] = promo_prov["validation_report"]
             if isinstance(promo_prov.get("table_provenance"), dict):
-                solution["table_provenance"] = promo_prov["table_provenance"]
+                solution["table_provenance"] = _merge_table_input_provenance(
+                    promo_prov["table_provenance"], reduced_ebr_input
+                )
             if isinstance(promo_prov.get("certificate_identity"), dict):
                 solution["certificate_identity"] = \
                     promo_prov["certificate_identity"]
@@ -2030,7 +2088,13 @@ def build_auto_reduced_ebr_mapping(
         return _status(
             "not_evaluated",
             "no canonical HSP-vector bundles available for auto evaluation",
-            reduced_ebr_input={"source": "auto_canonical", "bundle_count": 0},
+            reduced_ebr_input={
+                "source": "auto_canonical",
+                "input_bundle_count": 0,
+                "reduced_table_validation_candidate_bundle_count": 0,
+                "final_reduced_ebr_result_count": 0,
+                "final_mapping_excluded_bundle_count": 0,
+            },
         )
 
     from valleyscope.analysis.irreptables_runtime_table_builder import (
@@ -2122,11 +2186,6 @@ def build_auto_reduced_ebr_mapping(
         for solution in bundle_result.get("solutions", []):
             if not isinstance(solution, dict):
                 continue
-            existing = solution.get("table_provenance", {})
-            solution["table_provenance"] = {
-                **table_input,
-                **(existing if isinstance(existing, dict) else {}),
-            }
             solution["table_status"] = "loaded"
             solutions.append(solution)
         excluded.extend(
@@ -2178,10 +2237,10 @@ def build_auto_reduced_ebr_mapping(
         "reduced_ebr_input": {
             "source": source,
             "spinful": bool(spinor),
-            "bundle_count": len(bundles),
-            "ready_bundle_count": ready_count,
-            "evaluated_count": len(solutions),
-            "blocked_count": len(excluded),
+            "input_bundle_count": len(bundles),
+            "reduced_table_validation_candidate_bundle_count": ready_count,
+            "final_reduced_ebr_result_count": len(solutions),
+            "final_mapping_excluded_bundle_count": len(excluded),
         },
         "auto_canonical_bundles": per_bundle,
     }
@@ -2236,46 +2295,13 @@ def _build_auto_table_for_bundle(
 
 
 def _auto_table_input(table: dict, is_time_reversal: bool) -> dict:
-    provenance = (
-        table.get("provenance", {})
-        if isinstance(table.get("provenance"), dict) else {}
-    )
-    table_irreps = table.get("irreps", [])
-    basis_count = len(table_irreps) if isinstance(table_irreps, list) else 0
-    result = {
-        "source": (
+    return _table_provenance_for_output(
+        table,
+        source=(
             "auto_time_reversal_grey"
             if is_time_reversal else "auto_canonical"
         ),
-        "subspace_group_candidate": table.get(
-            "subspace_group_candidate", ""
-        ),
-        "space_group_number": provenance.get("space_group_number"),
-        "spinful": provenance.get("spinful"),
-        "data_source": provenance.get("data_source", ""),
-        "package": provenance.get("package", ""),
-        "package_version": provenance.get("package_version", ""),
-        "expected_hsps": list(table.get("expected_hsps", [])),
-        "valleyscope_reduction": provenance.get("valleyscope_reduction", ""),
-        "source_basis_count": provenance.get("source_basis_count", basis_count),
-        "reduction_basis_count": provenance.get(
-            "reduction_basis_count", basis_count
-        ),
-    }
-    if is_time_reversal:
-        result["time_reversal_grey_bns_number"] = provenance.get(
-            "time_reversal_grey_bns_number"
-        )
-        result["time_reversal_source"] = provenance.get(
-            "time_reversal_source"
-        )
-    if provenance.get("dropped_source_rows"):
-        result["dropped_source_rows"] = provenance["dropped_source_rows"]
-        result["dropped_source_row_count"] = provenance.get(
-            "dropped_source_row_count",
-            len(provenance["dropped_source_rows"]),
-        )
-    return result
+    )
 
 
 # ---------------------------------------------------------------------------

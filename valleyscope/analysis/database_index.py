@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 
-_SCHEMA_VERSION = "1.0.0"
+_SCHEMA_VERSION = "1.1.0"
 
 
 def build_database_index(
@@ -38,13 +38,16 @@ def build_database_index(
     """
     errors: list[str] = []
     status_counts: dict[str, int] = {
-        "has_ready_ebr_bundles": 0,
-        "no_ready_ebr_bundles": 0,
+        "has_final_reduced_ebr_results": 0,
+        "has_reduced_table_validation_candidates": 0,
+        "no_reduced_ebr_input": 0,
         "invalid_missing_summary": 0,
     }
-    total_ready: int = 0
+    total_validation_candidates: int = 0
+    total_final_results: int = 0
+    total_final_mapping_excluded: int = 0
+    total_input_excluded: int = 0
     total_irrep: int = 0
-    total_reduced_ebr: int = 0
     total_classification: dict[str, int] = {
         "atomic_compatible": 0,
         "in_integer_span_no_nonnegative_witness": 0,
@@ -54,7 +57,8 @@ def build_database_index(
     runs: list[dict[str, Any]] = []
     all_irrep_records: list[dict[str, Any]] = []
     all_reduced_ebr_records: list[dict[str, Any]] = []
-    all_excluded_ebr_records: list[dict[str, Any]] = []
+    all_input_excluded_ebr_records: list[dict[str, Any]] = []
+    all_final_mapping_excluded_records: list[dict[str, Any]] = []
     ebr_export_status_counts: dict[str, int] = {}
 
     for idx, record in enumerate(records):
@@ -68,13 +72,22 @@ def build_database_index(
             "record_status": record.get("record_status", "?"),
             "space_group_international": record.get("space_group_international"),
             "space_group_number": record.get("space_group_number"),
-            "ready_bundle_count": record.get("ready_bundle_count", 0),
+            "reduced_table_validation_candidate_bundle_count": record.get(
+                "reduced_table_validation_candidate_bundle_count", 0
+            ),
+            "final_reduced_ebr_result_count": record.get(
+                "final_reduced_ebr_result_count", 0
+            ),
+            "final_mapping_excluded_bundle_count": record.get(
+                "final_mapping_excluded_bundle_count", 0
+            ),
+            "input_excluded_instance_count": record.get(
+                "input_excluded_instance_count", 0
+            ),
             "valley_irrep_record_count": len(record.get("valley_irrep_records", [])),
-            "reduced_ebr_record_count": len(record.get("reduced_ebr_records", [])),
             "reduced_ebr_mapping_status": record.get("reduced_ebr_mapping_status", "?"),
             "reduced_ebr_table_status": record.get("reduced_ebr_table_status", "?"),
             "ebr_export_status": record.get("ebr_export_status", "not_available"),
-            "excluded_ebr_record_count": len(record.get("excluded_ebr_records", [])),
         }
         if source is not None:
             run_entry["source"] = source
@@ -91,9 +104,19 @@ def build_database_index(
         if status in status_counts:
             status_counts[status] += 1
 
-        total_ready += record.get("ready_bundle_count", 0)
+        total_validation_candidates += record.get(
+            "reduced_table_validation_candidate_bundle_count", 0
+        )
+        total_final_results += record.get(
+            "final_reduced_ebr_result_count", 0
+        )
+        total_final_mapping_excluded += record.get(
+            "final_mapping_excluded_bundle_count", 0
+        )
+        total_input_excluded += record.get(
+            "input_excluded_instance_count", 0
+        )
         total_irrep += len(record.get("valley_irrep_records", []))
-        total_reduced_ebr += len(record.get("reduced_ebr_records", []))
 
         counts = record.get("reduced_ebr_classification_counts", {})
         if isinstance(counts, dict):
@@ -121,13 +144,21 @@ def build_database_index(
         ebr_status = record.get("ebr_export_status", "not_available")
         ebr_export_status_counts[ebr_status] = ebr_export_status_counts.get(ebr_status, 0) + 1
 
-        # Flatten excluded EBR records with run provenance.
-        for er in record.get("excluded_ebr_records", []):
+        # Flatten input-stage exclusions with run provenance.
+        for er in record.get("input_excluded_ebr_records", []):
             if isinstance(er, dict):
                 flat = {**er, "run_id": run_id}
                 if source is not None:
                     flat["source_record"] = source
-                all_excluded_ebr_records.append(flat)
+                all_input_excluded_ebr_records.append(flat)
+
+        # Flatten final mapping exclusions with run provenance.
+        for er in record.get("final_mapping_excluded_records", []):
+            if isinstance(er, dict):
+                flat = {**er, "run_id": run_id}
+                if source is not None:
+                    flat["source_record"] = source
+                all_final_mapping_excluded_records.append(flat)
 
         runs.append(run_entry)
 
@@ -140,16 +171,22 @@ def build_database_index(
         "record_count": len(records),
         "source_files": list(source_files) if source_files else [],
         "status_counts": status_counts,
-        "ready_bundle_count_total": total_ready,
+        "reduced_table_validation_candidate_bundle_count_total": (
+            total_validation_candidates
+        ),
+        "final_reduced_ebr_result_count_total": total_final_results,
+        "final_mapping_excluded_bundle_count_total": (
+            total_final_mapping_excluded
+        ),
+        "input_excluded_instance_count_total": total_input_excluded,
         "valley_irrep_record_count_total": total_irrep,
-        "reduced_ebr_record_count_total": total_reduced_ebr,
         "reduced_ebr_classification_counts_total": total_classification,
-        "excluded_ebr_record_count_total": len(all_excluded_ebr_records),
         "ebr_export_status_counts": ebr_export_status_counts,
         "runs": runs,
         "valley_irrep_records": all_irrep_records,
         "reduced_ebr_records": all_reduced_ebr_records,
-        "excluded_ebr_records": all_excluded_ebr_records,
+        "input_excluded_ebr_records": all_input_excluded_ebr_records,
+        "final_mapping_excluded_records": all_final_mapping_excluded_records,
         "validation_errors": errors,
     }
 

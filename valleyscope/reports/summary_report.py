@@ -11,7 +11,7 @@ import numpy as np
 from valleyscope.io.config import AppConfig
 from valleyscope.reports.json_report import _json_default
 
-_SCHEMA_VERSION = "1.5.0"
+_SCHEMA_VERSION = "1.6.0"
 
 
 def build_summary_payload(
@@ -1827,6 +1827,16 @@ def _render_ebr_problem_instances(
     _section(lines, "EBR problem instances")
     lines.append(f"status: {report.get('status', 'no_data')}")
     lines.append(f"instance count: {report.get('instance_count', 0)}")
+    lines.append(
+        "structurally complete: "
+        f"{report.get('structurally_complete_instance_count', 0)}"
+    )
+    lines.append(f"ready: {report.get('ready_instance_count', 0)}")
+    lines.append(
+        "structurally complete but blocked: "
+        f"{report.get('structurally_complete_blocked_count', 0)}"
+    )
+    lines.append(f"incomplete: {report.get('incomplete_instance_count', 0)}")
     instances = report.get("instances", [])
     if isinstance(instances, list) and instances:
         rows: list[list[Any]] = []
@@ -1837,6 +1847,7 @@ def _render_ebr_problem_instances(
                 _canonical_sg_display(inst),
                 inst.get("status", ""),
                 str(inst.get("canonical_hsp_vector_complete", "")),
+                str(inst.get("canonical_hsp_vector_ready", "")),
                 _short_list(inst.get("blocked_by", [])),
                 _short_list(inst.get("expected_hsps", [])),
                 _short_list(inst.get("required_source_hsp_labels", [])),
@@ -1845,7 +1856,7 @@ def _render_ebr_problem_instances(
             ])
         lines.extend(
             _table(
-                ["id", "valley/orbit", "group", "status", "complete",
+                ["id", "valley/orbit", "group", "status", "complete", "ready",
                  "blocked_by", "sampled_hsp", "source_required",
                  "source_covered", "source_missing"],
                 rows,

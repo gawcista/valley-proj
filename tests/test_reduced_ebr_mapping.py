@@ -163,7 +163,7 @@ def test_missing_table():
 def test_null_bundle():
     r = build_reduced_ebr_mapping(ebr_export_bundle=None)
     assert r["status"] == "not_evaluated"
-    assert r["schema_version"] == "1.5.0"
+    assert r["schema_version"] == "1.6.0"
     assert "mapping_status" not in r
     assert "reduced_ebr_decomposition_status" not in r
     assert r["solutions"] == []
@@ -199,7 +199,7 @@ def test_schema_fields():
     for k in ["status", "schema_version", "table_status",
               "solutions", "excluded_bundles", "solver"]:
         assert k in r, f"missing: {k}"
-    assert r["schema_version"] == "1.5.0"
+    assert r["schema_version"] == "1.6.0"
     assert "mapping_status" not in r
     assert "reduced_ebr_decomposition_status" not in r
 
@@ -1458,7 +1458,26 @@ def test_table_file_and_spec_file_equivalent_outputs():
         }
     )
     assert result_spec["status"] == "solved_exact"
-    assert result_table["solutions"] == result_spec["solutions"]
+    table_solution = result_table["solutions"][0]
+    spec_solution = result_spec["solutions"][0]
+    assert table_solution["table_provenance"]["source"] == "table_file"
+    assert spec_solution["table_provenance"]["source"] == "spec_file"
+    for solution in (table_solution, spec_solution):
+        provenance = solution["table_provenance"]
+        assert provenance["data_source"] == "irreptables"
+        assert provenance["filtered_zero_vector_ebr_count"] == 0
+        assert provenance["filtered_zero_vector_ebrs"] == []
+        assert provenance["dropped_source_row_count"] == 0
+        assert provenance["dropped_source_rows"] == []
+    table_physics = {
+        key: value for key, value in table_solution.items()
+        if key != "table_provenance"
+    }
+    spec_physics = {
+        key: value for key, value in spec_solution.items()
+        if key != "table_provenance"
+    }
+    assert table_physics == spec_physics
     assert result_table["status"] == result_spec["status"]
 
 

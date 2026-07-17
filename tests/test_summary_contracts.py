@@ -78,7 +78,7 @@ def test_summary_text_renders_qcut_fraction_for_relative_mode(tmp_path):
         output_paths={},
     )
 
-    assert summary["schema_version"] == "1.5.0"
+    assert summary["schema_version"] == "1.6.0"
     assert summary["qcut"]["fraction"] == pytest.approx(0.2)
     text = render_summary_text(summary)
     assert "qcut mode: relative_min_valley_distance" in text
@@ -1631,7 +1631,7 @@ def test_tmote2_projected_source_hsp_coverage_and_tr_orbit_are_explicit():
 
     export = s["valley_ebr_export_bundle"]
     assert export["bundle_count"] == 1
-    assert s["valley_ebr_export_bundle"]["schema_version"] == "1.5.0"
+    assert s["valley_ebr_export_bundle"]["schema_version"] == "1.6.0"
     assert export["bundles"][0]["problem_kind"] == "valley_orbit_reduced_ebr"
     assert export["bundles"][0]["valley_orbit"] == [
         "K_valley", "Kp_valley",
@@ -1774,16 +1774,16 @@ def test_tmote2_reduced_ebr_auto_canonical_provenance():
 
     # Top-level status
     assert r["status"] == "no_exact_solution"
-    assert r["schema_version"] == "1.5.0"
+    assert r["schema_version"] == "1.6.0"
     assert r["table_status"] == "loaded"
 
     # reduced_ebr_input self-auditing
     inp = r.get("reduced_ebr_input", {})
     assert inp["source"] == "auto_time_reversal_grey"
     assert inp["spinful"] is True
-    assert inp["ready_bundle_count"] == 1
-    assert inp["evaluated_count"] == 1
-    assert inp["blocked_count"] == 0
+    assert inp["reduced_table_validation_candidate_bundle_count"] == 1
+    assert inp["final_reduced_ebr_result_count"] == 1
+    assert inp["final_mapping_excluded_bundle_count"] == 0
 
     # auto_canonical_bundles
     bundles = r.get("auto_canonical_bundles", [])
@@ -1814,6 +1814,10 @@ def test_tmote2_reduced_ebr_auto_canonical_provenance():
         assert tp["source_basis_count"] > 0
         assert tp["reduction_basis_count"] > 0
         assert tp["source_basis_count"] > tp["reduction_basis_count"]
+        assert tp["filtered_zero_vector_ebr_count"] == 0
+        assert tp["filtered_zero_vector_ebrs"] == []
+        assert tp["dropped_source_row_count"] == 0
+        assert tp["dropped_source_rows"] == []
         assert tp["time_reversal_grey_bns_number"] == "143.2"
         assert tp["time_reversal_source"] == (
             "irreptables_type_ii_grey_group"

@@ -26,6 +26,187 @@ def test_ingestion_record_requires_summary():
     assert len(record["validation_errors"]) > 0
 
 
+def test_ingestion_uses_stage_owned_counts_and_final_result_status():
+    summary = {"target_kpoints": ["GammaM"], "iband": [1], "input": {}}
+    export = {
+        "status": "partial_export",
+        "bundles": [{
+            "bundle_id": "b_candidate",
+            "ready_for_reduced_table_validation": True,
+            "irrep_records_by_kpoint": {
+                "GammaM": [{"valley": "K", "matched_irrep": "A"}],
+            },
+        }],
+        "excluded_instances": [{
+            "source_instance_id": "i_blocked",
+            "status": "canonical_hsp_vector_complete_but_untrusted",
+            "canonical_hsp_vector_complete": True,
+            "canonical_hsp_vector_ready": False,
+            "exclusion_reasons": ["source_hsp_coverage_not_ready"],
+        }],
+    }
+    mapping = {
+        "status": "partial",
+        "table_status": "loaded",
+        "solutions": [{
+            "bundle_id": "b_candidate",
+            "status": "no_exact_solution",
+            "classification": "in_integer_span_no_nonnegative_witness",
+        }],
+        "excluded_bundles": [{
+            "bundle_id": "b_other",
+            "reason": "validation blocked",
+            "blocker_reasons": [{"code": "certificate_unresolved"}],
+        }],
+    }
+
+    record = build_database_ingestion_record(
+        valley_summary=summary,
+        valley_ebr_export_bundle=export,
+        valley_reduced_ebr_mapping=mapping,
+    )
+
+    assert record["record_status"] == "has_final_reduced_ebr_results"
+    assert record["reduced_table_validation_candidate_bundle_count"] == 1
+    assert record["final_reduced_ebr_result_count"] == 1
+    assert record["final_mapping_excluded_bundle_count"] == 1
+    assert record["input_excluded_instance_count"] == 1
+    assert len(record["valley_irrep_records"]) == 1
+    assert record["reduced_ebr_records"][0]["status"] == "no_exact_solution"
+    assert record["input_excluded_ebr_records"][0][
+        "canonical_hsp_vector_complete"
+    ] is True
+    assert record["input_excluded_ebr_records"][0][
+        "canonical_hsp_vector_ready"
+    ] is False
+    assert record["final_mapping_excluded_records"][0]["bundle_id"] == (
+        "b_other"
+    )
+    for removed in (
+        "ready_bundle_count",
+        "validation_candidate_count",
+        "decomposition_ready_count",
+        "excluded_bundle_count",
+        "excluded_ebr_records",
+    ):
+        assert removed not in record
+
+
+def test_ingestion_candidate_without_mapping_has_candidate_status():
+    record = build_database_ingestion_record(
+        valley_summary={"target_kpoints": [], "iband": [], "input": {}},
+        valley_ebr_export_bundle={
+            "bundles": [{
+                "bundle_id": "b",
+                "ready_for_reduced_table_validation": True,
+                "irrep_records_by_kpoint": {},
+            }],
+        },
+    )
+
+    assert record["record_status"] == (
+        "has_reduced_table_validation_candidates"
+    )
+    assert record["reduced_table_validation_candidate_bundle_count"] == 1
+    assert record["final_reduced_ebr_result_count"] == 0
+
+
+@pytest.mark.parametrize(
+    "solution_status", ["no_exact_solution", "indeterminate_truncated"]
+)
+def test_evaluated_nonexact_solution_is_a_final_result(solution_status):
+    record = build_database_ingestion_record(
+        valley_summary={"target_kpoints": [], "iband": [], "input": {}},
+        valley_reduced_ebr_mapping={
+            "status": solution_status,
+            "table_status": "loaded",
+            "solutions": [{
+                "bundle_id": "b",
+                "status": solution_status,
+                "classification": "in_integer_span_no_nonnegative_witness",
+            }],
+            "excluded_bundles": [],
+        },
+    )
+
+    assert record["record_status"] == "has_final_reduced_ebr_results"
+    assert record["final_reduced_ebr_result_count"] == 1
+
+
+def test_tr_validation_candidate_unitary_irreps_survive_without_mapping():
+    record = build_database_ingestion_record(
+        valley_summary={"target_kpoints": [], "iband": [], "input": {}},
+        valley_ebr_export_bundle={
+            "bundles": [{
+                "bundle_id": "tr",
+                "source_instance_id": "orbit",
+                "problem_kind": "valley_orbit_reduced_ebr",
+                "subspace_group_candidate": "P3",
+                "ready_for_reduced_table_validation": True,
+                "workflow_path": "time_reversal_valley_orbit",
+                "readiness_level": "trusted",
+                "source_hsp_to_sampled_kpoint": {
+                    "GM": "GammaM", "K": "KM",
+                },
+                "unitary_valley_irreps": {
+                    "K": {"GM": {"A": 1}, "K": {"B": 2}},
+                    "Kp": {"GM": {"A": 1}},
+                },
+                "irrep_records_by_kpoint": {},
+            }],
+        },
+    )
+
+    assert record["record_status"] == (
+        "has_reduced_table_validation_candidates"
+    )
+    assert len(record["valley_irrep_records"]) == 3
+    assert record["valley_irrep_records"] == [
+        {
+            "kpoint": "GammaM",
+            "source_hsp_label": "GM",
+            "valley": "K",
+            "subspace_group_candidate": "P3",
+            "matched_irrep": "A",
+            "irrep_multiplicity": 1,
+            "workflow_path": "time_reversal_valley_orbit",
+            "readiness_level": "trusted",
+            "source": "unitary_valley_irreps",
+            "source_bundle_id": "tr",
+            "source_instance_id": "orbit",
+            "certificate_identity": {},
+        },
+        {
+            "kpoint": "KM",
+            "source_hsp_label": "K",
+            "valley": "K",
+            "subspace_group_candidate": "P3",
+            "matched_irrep": "B",
+            "irrep_multiplicity": 2,
+            "workflow_path": "time_reversal_valley_orbit",
+            "readiness_level": "trusted",
+            "source": "unitary_valley_irreps",
+            "source_bundle_id": "tr",
+            "source_instance_id": "orbit",
+            "certificate_identity": {},
+        },
+        {
+            "kpoint": "GammaM",
+            "source_hsp_label": "GM",
+            "valley": "Kp",
+            "subspace_group_candidate": "P3",
+            "matched_irrep": "A",
+            "irrep_multiplicity": 1,
+            "workflow_path": "time_reversal_valley_orbit",
+            "readiness_level": "trusted",
+            "source": "unitary_valley_irreps",
+            "source_bundle_id": "tr",
+            "source_instance_id": "orbit",
+            "certificate_identity": {},
+        },
+    ]
+
+
 def test_ingestion_record_with_ready_bundle():
     """Ready export bundle produces trusted irrep records."""
     from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
@@ -53,9 +234,11 @@ def test_ingestion_record_with_ready_bundle():
     record = build_database_ingestion_record(
         valley_summary=summary, valley_ebr_export_bundle=bundle)
 
-    assert record["record_status"] == "no_ready_ebr_bundles"
-    assert record["ready_bundle_count"] == 0
-    assert record["validation_candidate_count"] == 1
+    assert record["record_status"] == (
+        "has_reduced_table_validation_candidates"
+    )
+    assert record["final_reduced_ebr_result_count"] == 0
+    assert record["reduced_table_validation_candidate_bundle_count"] == 1
     assert record["space_group_international"] == "P321"
     records = record["valley_irrep_records"]
     assert len(records) == 1
@@ -81,7 +264,7 @@ def test_ingestion_record_excludes_non_ready_bundles():
     }
     record = build_database_ingestion_record(
         valley_summary=summary, valley_ebr_export_bundle=bundle)
-    assert record["ready_bundle_count"] == 0
+    assert record["reduced_table_validation_candidate_bundle_count"] == 0
     assert record["valley_irrep_records"] == []
 
 
@@ -141,7 +324,7 @@ def test_ingestion_record_from_directory(tmp_path):
 
     record = load_database_ingestion_record_from_directory(str(run_dir))
     assert record["summary_status"] == "present"
-    assert record["ready_bundle_count"] == 0
+    assert record["final_reduced_ebr_result_count"] == 0
 
 
 def test_cli_collect_database_record(tmp_path, capsys):
@@ -161,7 +344,9 @@ def test_cli_collect_database_record(tmp_path, capsys):
     record = json.loads(out_path.read_text(encoding="utf-8"))
     assert record["summary_status"] == "present"
     captured = capsys.readouterr().out
-    assert "no_ready_ebr_bundles" in captured
+    assert "no_reduced_ebr_input" in captured
+    assert "validation candidates:" in captured
+    assert "final EBR results:" in captured
 
 
 def test_cli_collect_database_record_returns_nonzero_for_invalid_record(tmp_path):
@@ -295,9 +480,10 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
 
     record = load_database_ingestion_record_from_directory(run_dir)
 
-    assert record["schema_version"] == "1.5.0"
-    assert record["record_status"] == "has_ready_ebr_bundles"
-    assert record["ready_bundle_count"] == 2
+    assert record["schema_version"] == "1.6.0"
+    assert record["record_status"] == "has_final_reduced_ebr_results"
+    assert record["reduced_table_validation_candidate_bundle_count"] == 2
+    assert record["final_reduced_ebr_result_count"] == 2
     assert len(record["valley_irrep_records"]) == 8
     assert record["valley_irrep_records"][0]["valley"] == "K_valley"
     assert record["valley_irrep_records"][0]["matched_irrep"] == "C3_spinor_phase_+1/2"
@@ -343,13 +529,20 @@ def test_reduced_ebr_records_empty_when_mapping_missing():
 # Multi-run database index collector
 # -----------------------------------------------------------------------
 
-def _make_ingestion_record(status="has_ready_ebr_bundles", run_id="run_0000"):
+def _make_ingestion_record(
+    status="has_final_reduced_ebr_results", run_id="run_0000"
+):
     return {
         "schema_version": "1.3.0",
         "record_status": status,
         "space_group_international": "P321",
         "space_group_number": 150,
-        "ready_bundle_count": 2,
+        "reduced_table_validation_candidate_bundle_count": 2,
+        "final_reduced_ebr_result_count": 1,
+        "final_mapping_excluded_bundle_count": 0,
+        "input_excluded_instance_count": 0,
+        "input_excluded_ebr_records": [],
+        "final_mapping_excluded_records": [],
         "valley_irrep_records": [
             {"kpoint": "GammaM", "valley": "K_valley",
              "subspace_group_candidate": "P3"},
@@ -372,10 +565,10 @@ def _make_ingestion_record(status="has_ready_ebr_bundles", run_id="run_0000"):
 
 
 def test_database_index_builder_two_records():
-    """Pure builder with has_ready + no_ready records."""
+    """Pure builder with final-result and no-input records."""
     from valleyscope.analysis.database_index import build_database_index
-    rec1 = _make_ingestion_record("has_ready_ebr_bundles")
-    rec2 = _make_ingestion_record("no_ready_ebr_bundles")
+    rec1 = _make_ingestion_record("has_final_reduced_ebr_results")
+    rec2 = _make_ingestion_record("no_reduced_ebr_input")
     index = build_database_index(
         [rec1, rec2],
         source_files=[
@@ -384,9 +577,12 @@ def test_database_index_builder_two_records():
         ],
     )
     assert index["record_count"] == 2
-    assert index["status_counts"]["has_ready_ebr_bundles"] == 1
-    assert index["status_counts"]["no_ready_ebr_bundles"] == 1
-    assert index["ready_bundle_count_total"] == 4
+    assert index["status_counts"]["has_final_reduced_ebr_results"] == 1
+    assert index["status_counts"]["no_reduced_ebr_input"] == 1
+    assert index[
+        "reduced_table_validation_candidate_bundle_count_total"
+    ] == 4
+    assert index["final_reduced_ebr_result_count_total"] == 2
     assert index["reduced_ebr_classification_counts_total"]["atomic_compatible"] == 2
     # Flattened records have run_id provenance.
     assert index["runs"][0]["run_id"] == "run_0000"
@@ -398,16 +594,55 @@ def test_database_index_builder_two_records():
     for rr in index["reduced_ebr_records"]:
         assert "run_id" in rr
         assert "source_record" in rr
-    assert index["reduced_ebr_record_count_total"] == 2
+    assert len(index["reduced_ebr_records"]) == 2
+
+
+def test_database_index_uses_stage_owned_aggregates_only():
+    from valleyscope.analysis.database_index import build_database_index
+
+    record = {
+        "record_status": "has_final_reduced_ebr_results",
+        "reduced_table_validation_candidate_bundle_count": 2,
+        "final_reduced_ebr_result_count": 1,
+        "final_mapping_excluded_bundle_count": 1,
+        "input_excluded_instance_count": 3,
+        "valley_irrep_records": [],
+        "reduced_ebr_records": [{"bundle_id": "b"}],
+        "input_excluded_ebr_records": [{"source_instance_id": "i"}],
+        "final_mapping_excluded_records": [{"bundle_id": "blocked"}],
+        "reduced_ebr_classification_counts": {},
+        "validation_errors": [],
+    }
+
+    index = build_database_index([record])
+
+    assert index["schema_version"] == "1.1.0"
+    assert index["status_counts"]["has_final_reduced_ebr_results"] == 1
+    assert index[
+        "reduced_table_validation_candidate_bundle_count_total"
+    ] == 2
+    assert index["final_reduced_ebr_result_count_total"] == 1
+    assert index["final_mapping_excluded_bundle_count_total"] == 1
+    assert index["input_excluded_instance_count_total"] == 3
+    assert index["input_excluded_ebr_records"][0]["run_id"] == "run_0000"
+    assert index["final_mapping_excluded_records"][0]["run_id"] == (
+        "run_0000"
+    )
+    assert "ready_bundle_count_total" not in index
+    assert "excluded_ebr_records" not in index
 
 
 def test_database_index_cli_writes_json(tmp_path):
     """CLI collect-database-index writes database_index.json."""
     from valleyscope.cli import main
     rec1_path = tmp_path / "rec1.json"
-    rec1_path.write_text(json.dumps(_make_ingestion_record("has_ready_ebr_bundles")))
+    rec1_path.write_text(json.dumps(_make_ingestion_record(
+        "has_final_reduced_ebr_results"
+    )))
     rec2_path = tmp_path / "rec2.json"
-    rec2_path.write_text(json.dumps(_make_ingestion_record("no_ready_ebr_bundles")))
+    rec2_path.write_text(json.dumps(_make_ingestion_record(
+        "no_reduced_ebr_input"
+    )))
     out = tmp_path / "index.json"
     rc = main(["collect-database-index", str(rec1_path), str(rec2_path),
                "-o", str(out)])
@@ -415,14 +650,19 @@ def test_database_index_cli_writes_json(tmp_path):
     assert out.exists()
     idx = json.loads(out.read_text())
     assert idx["record_count"] == 2
-    assert idx["ready_bundle_count_total"] == 4
+    assert idx[
+        "reduced_table_validation_candidate_bundle_count_total"
+    ] == 4
+    assert idx["final_reduced_ebr_result_count_total"] == 2
 
 
 def test_database_index_cli_invalid_input(tmp_path):
     """CLI returns nonzero on missing input file."""
     from valleyscope.cli import main
     rec1_path = tmp_path / "rec1.json"
-    rec1_path.write_text(json.dumps(_make_ingestion_record("has_ready_ebr_bundles")))
+    rec1_path.write_text(json.dumps(_make_ingestion_record(
+        "has_final_reduced_ebr_results"
+    )))
     out = tmp_path / "index.json"
     rc = main(["collect-database-index", str(rec1_path), "/nonexistent/path.json",
                "-o", str(out)])
@@ -430,7 +670,7 @@ def test_database_index_cli_invalid_input(tmp_path):
     assert out.exists()
     idx = json.loads(out.read_text())
     assert idx["record_count"] == 2
-    assert idx["status_counts"]["has_ready_ebr_bundles"] == 1
+    assert idx["status_counts"]["has_final_reduced_ebr_results"] == 1
     assert idx["status_counts"]["invalid_missing_summary"] == 1
     assert idx["validation_errors"]
     assert "FileNotFoundError" in idx["validation_errors"][0]
@@ -443,8 +683,8 @@ def test_database_index_module_no_material_names():
         assert name not in src
 
 
-def test_ingestion_record_includes_excluded_ebr_records():
-    """Excluded instances from export bundle become excluded_ebr_records."""
+def test_ingestion_record_includes_input_excluded_ebr_records():
+    """Export exclusions remain distinct input-stage records."""
     from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
     summary = {"target_kpoints": [], "iband": [], "input": {}}
     bundle = {
@@ -470,7 +710,7 @@ def test_ingestion_record_includes_excluded_ebr_records():
     )
     assert record["ebr_export_status"] == "partial_export"
     assert record["ebr_export_interpretation"] == "one blocked instance"
-    exclude = record["excluded_ebr_records"]
+    exclude = record["input_excluded_ebr_records"]
     assert len(exclude) == 1
     assert exclude[0]["source_instance_id"] == "ebr_001"
     assert exclude[0]["valley"] == "M3_valley"
@@ -482,69 +722,75 @@ def test_ingestion_record_includes_excluded_ebr_records():
     ]
 
 
-def test_excluded_ebr_records_empty_when_not_present():
-    """Missing bundle gives empty excluded_ebr_records."""
+def test_input_excluded_ebr_records_empty_when_not_present():
+    """Missing bundle gives empty input_excluded_ebr_records."""
     from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
     summary = {"target_kpoints": [], "iband": [], "input": {}}
     record = build_database_ingestion_record(valley_summary=summary)
-    assert record["excluded_ebr_records"] == []
+    assert record["input_excluded_ebr_records"] == []
     assert record["ebr_export_status"] == "not_available"
 
 
-def test_database_index_excluded_ebr_records_aggregated():
-    """Index aggregates excluded EBR records with run_id provenance."""
+def test_database_index_input_excluded_records_aggregated():
+    """Index aggregates input exclusions with run provenance."""
     from valleyscope.analysis.database_index import build_database_index
     rec = {
         "schema_version": "1.3.0",
-        "record_status": "has_ready_ebr_bundles",
-        "ready_bundle_count": 1,
+        "record_status": "no_reduced_ebr_input",
+        "reduced_table_validation_candidate_bundle_count": 0,
+        "final_reduced_ebr_result_count": 0,
+        "final_mapping_excluded_bundle_count": 0,
+        "input_excluded_instance_count": 1,
         "valley_irrep_records": [],
         "reduced_ebr_records": [],
         "reduced_ebr_classification_counts": {},
         "reduced_ebr_mapping_status": "?",
         "reduced_ebr_table_status": "?",
         "ebr_export_status": "partial_export",
-        "excluded_ebr_records": [
+        "input_excluded_ebr_records": [
             {"source_instance_id": "ebr_001", "valley": "M3_valley",
              "exclusion_reasons": ["spinor_convention_unverified"]},
         ],
         "validation_errors": [],
     }
     idx = build_database_index([rec])
-    assert idx["excluded_ebr_record_count_total"] == 1
+    assert idx["input_excluded_instance_count_total"] == 1
     assert idx["ebr_export_status_counts"]["partial_export"] == 1
-    assert idx["excluded_ebr_records"][0]["run_id"] == "run_0000"
+    assert idx["input_excluded_ebr_records"][0]["run_id"] == "run_0000"
 
 
-def test_database_index_excluded_ebr_records_have_source_record():
-    """Excluded EBR records carry source_record when source_files provided."""
+def test_database_index_input_exclusions_have_source_record():
+    """Input exclusions carry source_record when source_files are provided."""
     from valleyscope.analysis.database_index import build_database_index
     rec = {
-        "record_status": "has_ready_ebr_bundles",
-        "ready_bundle_count": 0,
+        "record_status": "no_reduced_ebr_input",
+        "reduced_table_validation_candidate_bundle_count": 0,
+        "final_reduced_ebr_result_count": 0,
+        "final_mapping_excluded_bundle_count": 0,
+        "input_excluded_instance_count": 1,
         "valley_irrep_records": [],
         "reduced_ebr_records": [],
         "reduced_ebr_classification_counts": {},
         "reduced_ebr_mapping_status": "?",
         "reduced_ebr_table_status": "?",
         "ebr_export_status": "no_bundles",
-        "excluded_ebr_records": [
+        "input_excluded_ebr_records": [
             {"source_instance_id": "ebr_x", "valley": "M1_valley",
              "exclusion_reasons": ["low_seed_overlap"]},
         ],
     }
     idx = build_database_index([rec], source_files=["/tmp/rec.json"])
-    er = idx["excluded_ebr_records"][0]
+    er = idx["input_excluded_ebr_records"][0]
     assert er["run_id"] == "run_0000"
     assert er["source_record"] == "/tmp/rec.json"
 
 
-def test_ingestion_record_schema_version_is_1_5_0():
-    """Ingestion record schema_version is now 1.5.0."""
+def test_ingestion_record_schema_version_is_1_6_0():
+    """Ingestion record schema_version is now 1.6.0."""
     from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
     summary = {"target_kpoints": [], "iband": [], "input": {}}
     record = build_database_ingestion_record(valley_summary=summary)
-    assert record["schema_version"] == "1.5.0"
+    assert record["schema_version"] == "1.6.0"
 
 
 # -----------------------------------------------------------------------
@@ -654,7 +900,7 @@ def test_ingestion_preserves_centered_certificate_identity_from_bundle():
         valley_ebr_export_bundle=bundle,
     )
 
-    assert record["schema_version"] == "1.5.0"
+    assert record["schema_version"] == "1.6.0"
     assert record["valley_irrep_records"][0]["certificate_identity"] == (
         certificate_identity
     )
@@ -686,8 +932,8 @@ def test_legacy_records_still_ingest_without_generic_fields():
     record = build_database_ingestion_record(
         valley_summary=summary, valley_ebr_export_bundle=bundle,
     )
-    assert record["ready_bundle_count"] == 0
-    assert record["validation_candidate_count"] == 1
+    assert record["final_reduced_ebr_result_count"] == 0
+    assert record["reduced_table_validation_candidate_bundle_count"] == 1
     r = record["valley_irrep_records"][0]
     assert r["matched_irrep"] == "C3_spinor_phase_+1/2"
     for key in [
@@ -707,8 +953,13 @@ def test_database_index_preserves_generic_irrep_fields_with_run_provenance():
 
     record = {
         "schema_version": "1.3.0",
-        "record_status": "has_ready_ebr_bundles",
-        "ready_bundle_count": 1,
+        "record_status": "has_reduced_table_validation_candidates",
+        "reduced_table_validation_candidate_bundle_count": 1,
+        "final_reduced_ebr_result_count": 0,
+        "final_mapping_excluded_bundle_count": 0,
+        "input_excluded_instance_count": 0,
+        "input_excluded_ebr_records": [],
+        "final_mapping_excluded_records": [],
         "valley_irrep_records": [{
             "kpoint": "GammaM",
             "valley": "K_valley",
@@ -810,8 +1061,9 @@ def test_reduced_ebr_records_pick_up_table_provenance():
     assert r["reduction_basis_count"] == 6
     assert r["dropped_source_row_count"] == 14
     assert r["table_status"] == "loaded"
-    # Verbose provenance must NOT leak into compact records.
-    assert "dropped_source_rows" not in r
+    assert r["dropped_source_rows"] == ["label1", "label2"]
+    assert r["filtered_zero_vector_ebr_count"] == 0
+    assert r["filtered_zero_vector_ebrs"] == []
     assert "auto_canonical" not in r
 
 
@@ -927,7 +1179,7 @@ def test_reduced_ebr_records_from_directory_with_table_provenance(tmp_path):
     assert r["space_group_number"] == 143
     assert r["expected_hsps"] == ["GammaM", "KM"]
     assert r["reduction_basis_count"] == 6
-    assert "dropped_source_rows" not in r
+    assert r["dropped_source_rows"] == ["label1", "label2"]
 
 
 def test_tmote2_ingestion_compact_reduced_ebr_records():
@@ -959,4 +1211,4 @@ def test_tmote2_ingestion_compact_reduced_ebr_records():
     assert r["valleyscope_reduction"] == "sampled_hsp_valley_preserving"
     assert r["source_basis_count"] > r["reduction_basis_count"] > 0
     assert r["table_status"] == "loaded"
-    assert "dropped_source_rows" not in r
+    assert isinstance(r["dropped_source_rows"], list)
