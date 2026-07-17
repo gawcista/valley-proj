@@ -477,9 +477,9 @@ def test_standard_profile_ebr_export_bundle_present_when_payload_exists():
         config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
         config = load_config(config_path)
 
-        ebr_bundle = {"status": "ready_for_external_solver", "bundle_count": 1,
-                      "excluded_count": 0, "schema_version": "1.1.0",
-                      "reduced_ebr_decomposition_status": "not_implemented",
+        ebr_bundle = {"status": "ready_for_reduced_table_validation",
+                      "bundle_count": 1, "excluded_count": 0,
+                      "schema_version": "1.5.0",
                       "bundles": [], "excluded_instances": []}
         outputs = write_analysis_outputs(
             config=config, qcut=0.5, weight_rows=[], sector_names=["K_valley"],

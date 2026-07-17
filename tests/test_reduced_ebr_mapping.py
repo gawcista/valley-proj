@@ -52,7 +52,7 @@ def _bundle():
             "valley": "K_valley",
             "subspace_group_candidate": "P3",
             "subspace_space_group": {"candidate_space_group_symbol": "P3"},
-            "ready_for_external_solver": True,
+            "ready_for_reduced_table_validation": True,
             "irreps_by_kpoint": {
                 "GammaM": ["C3_spinor_phase_+1/2"],
                 "KM": ["C3_spinor_phase_+1/6", "C3_spinor_phase_+1/6", "C3_spinor_phase_-1/6"],
@@ -117,7 +117,7 @@ def test_exact_solution_found():
             "bundle_id": "b_001", "valley": "K",
             "subspace_group_candidate": "P3",
             "subspace_space_group": {"candidate_space_group_symbol": "P3"},
-            "ready_for_external_solver": True,
+            "ready_for_reduced_table_validation": True,
             "irreps_by_kpoint": bundle_vec,
         }],
     }
@@ -140,7 +140,7 @@ def test_no_exact_solution():
         "bundles": [{
             "bundle_id": "b_001", "valley": "K",
             "subspace_group_candidate": "P3",
-            "ready_for_external_solver": True,
+            "ready_for_reduced_table_validation": True,
             "irreps_by_kpoint": bundle_vec,
         }],
     }
@@ -163,7 +163,9 @@ def test_missing_table():
 def test_null_bundle():
     r = build_reduced_ebr_mapping(ebr_export_bundle=None)
     assert r["status"] == "not_evaluated"
-    assert r["mapping_status"] == "not_evaluated"
+    assert r["schema_version"] == "1.5.0"
+    assert "mapping_status" not in r
+    assert "reduced_ebr_decomposition_status" not in r
     assert r["solutions"] == []
 
 # -----------------------------------------------------------------------
@@ -176,7 +178,7 @@ def test_group_mismatch_excluded():
             "bundle_id": "b_001", "valley": "M1",
             "subspace_group_candidate": "P2",
             "subspace_space_group": {"candidate_space_group_symbol": "P2"},
-            "ready_for_external_solver": True,
+            "ready_for_reduced_table_validation": True,
             "irreps_by_kpoint": {"GammaM": ["C2_spinor_phase_+1/4"]},
         }],
     }
@@ -194,9 +196,12 @@ def test_group_mismatch_excluded():
 
 def test_schema_fields():
     r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(_bundle(), _SAMPLE_TABLE), table=_SAMPLE_TABLE)
-    for k in ["status", "mapping_status", "reduced_ebr_decomposition_status", "table_status",
+    for k in ["status", "schema_version", "table_status",
               "solutions", "excluded_bundles", "solver"]:
         assert k in r, f"missing: {k}"
+    assert r["schema_version"] == "1.5.0"
+    assert "mapping_status" not in r
+    assert "reduced_ebr_decomposition_status" not in r
 
 def test_json_serializable():
     r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(_bundle(), _SAMPLE_TABLE), table=_SAMPLE_TABLE)
@@ -220,7 +225,7 @@ def test_not_ready_excluded():
             "bundle_id": "b_001", "valley": "K",
             "subspace_group_candidate": "P3",
             "subspace_space_group": {"candidate_space_group_symbol": "P3"},
-            "ready_for_external_solver": False,
+            "ready_for_reduced_table_validation": False,
             "irreps_by_kpoint": {},
         }],
     }
@@ -241,13 +246,13 @@ def test_unknown_irrep_label_is_not_matched_by_hsp_only():
             "bundle_id": "b_001",
             "valley": "K",
             "subspace_group_candidate": "P3",
-            "ready_for_external_solver": True,
+            "ready_for_reduced_table_validation": True,
             "expected_hsps": ["GammaM"],
             "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
         }],
     }
     r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(b, table), table=table)
-    assert r["status"] == "not_evaluated"
+    assert r["status"] == "blocked"
     assert "could not resolve" in r["excluded_bundles"][0]["reason"]
 
 def test_unique_operation_suffix_fallback_does_not_double_count():
@@ -264,7 +269,7 @@ def test_unique_operation_suffix_fallback_does_not_double_count():
             "bundle_id": "b_001",
             "valley": "K",
             "subspace_group_candidate": "P3",
-            "ready_for_external_solver": True,
+            "ready_for_reduced_table_validation": True,
             "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
         }],
     }
@@ -288,12 +293,12 @@ def test_ambiguous_operation_suffix_fallback_is_excluded():
             "bundle_id": "b_001",
             "valley": "K",
             "subspace_group_candidate": "P3",
-            "ready_for_external_solver": True,
+            "ready_for_reduced_table_validation": True,
             "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
         }],
     }
     r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(b, table), table=table)
-    assert r["status"] == "not_evaluated"
+    assert r["status"] == "blocked"
     assert "could not resolve" in r["excluded_bundles"][0]["reason"]
 
 def test_negative_max_coefficient_raises():
@@ -534,11 +539,10 @@ def test_reduced_ebr_catalog_removed():
 
 def _write_bundle(path: Path, bundles: list[dict]) -> None:
     payload = {
-        "status": "ready_for_external_solver",
+        "status": "ready_for_reduced_table_validation",
         "bundle_count": len(bundles),
         "excluded_count": 0,
         "schema_version": "1.0.0",
-        "reduced_ebr_decomposition_status": "not_implemented",
         "bundles": bundles,
         "excluded_instances": [],
     }
@@ -559,7 +563,7 @@ def test_cli_solved_exact(tmp_path):
     _write_bundle(bundle_path, [{
         "bundle_id": "b_001", "valley": "K",
         "subspace_group_candidate": "P3",
-        "ready_for_external_solver": True,
+            "ready_for_reduced_table_validation": True,
         "irreps_by_kpoint": {
             "GammaM": ["C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"],
             "KM": ["C3_spinor_phase_+1/6", "C3_spinor_phase_-1/6"],
@@ -572,7 +576,7 @@ def test_cli_solved_exact(tmp_path):
     assert out.exists()
     mapping = json.loads(out.read_text(encoding="utf-8"))
     # Production path rejects minimal table without provenance.
-    assert mapping["status"] == "not_evaluated"
+    assert mapping["status"] == "blocked"
     assert mapping["solutions"] == []
     assert len(mapping["excluded_bundles"]) == 1
 
@@ -584,7 +588,7 @@ def test_cli_no_exact_solution(tmp_path):
     _write_bundle(bundle_path, [{
         "bundle_id": "b_001", "valley": "K",
         "subspace_group_candidate": "P3",
-        "ready_for_external_solver": True,
+            "ready_for_reduced_table_validation": True,
         "irreps_by_kpoint": {
             "GammaM": ["C3_spinor_phase_+1/2"] * 5,
             "KM": [],
@@ -596,7 +600,7 @@ def test_cli_no_exact_solution(tmp_path):
     assert rc == 0
     mapping = json.loads(out.read_text(encoding="utf-8"))
     # Production path rejects minimal table without provenance.
-    assert mapping["status"] == "not_evaluated"
+    assert mapping["status"] == "blocked"
     assert mapping["solutions"] == []
 
 def test_cli_stdout_includes_status_and_output_path(capsys, tmp_path):
@@ -607,7 +611,7 @@ def test_cli_stdout_includes_status_and_output_path(capsys, tmp_path):
     _write_bundle(bundle_path, [{
         "bundle_id": "b_001", "valley": "K",
         "subspace_group_candidate": "P3",
-        "ready_for_external_solver": True,
+            "ready_for_reduced_table_validation": True,
         "irreps_by_kpoint": {
             "GammaM": ["C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"],
             "KM": ["C3_spinor_phase_+1/6", "C3_spinor_phase_-1/6"],
@@ -617,7 +621,7 @@ def test_cli_stdout_includes_status_and_output_path(capsys, tmp_path):
 
     _cli(bundle_path, table_path, out)
     captured = capsys.readouterr().out
-    assert "not_evaluated" in captured
+    assert "blocked" in captured
     assert str(out) in captured
 
 def test_cli_invalid_table_fails_without_writing_output(tmp_path):
@@ -634,7 +638,7 @@ def test_cli_invalid_table_fails_without_writing_output(tmp_path):
     _write_bundle(bundle_path, [{
         "bundle_id": "b_001", "valley": "K",
         "subspace_group_candidate": "P3",
-        "ready_for_external_solver": True,
+            "ready_for_reduced_table_validation": True,
         "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"], "KM": []},
     }])
     _write_table(table_path, bad_table)
@@ -666,7 +670,7 @@ def test_cli_respects_max_coefficient(tmp_path):
     _write_bundle(bundle_path, [{
         "bundle_id": "b_001", "valley": "K",
         "subspace_group_candidate": "P3",
-        "ready_for_external_solver": True,
+            "ready_for_reduced_table_validation": True,
         "irreps_by_kpoint": {
             "GammaM": ["C3_spinor_phase_+1/2"] * 6,
             "KM": ["C3_spinor_phase_+1/6"] * 6,
@@ -686,7 +690,7 @@ def test_cli_respects_max_coefficient(tmp_path):
     assert rc == 0
     mapping = json.loads(out.read_text(encoding="utf-8"))
     # Production path rejects minimal table without provenance.
-    assert mapping["status"] == "not_evaluated"
+    assert mapping["status"] == "blocked"
 
 def test_cli_analyze_hsp_reduced_ebr_unchanged(tmp_path):
     """Existing analyze-hsp reduced-EBR behavior is unchanged by CLI addition."""
@@ -813,7 +817,7 @@ def _bundle_with_hsps(expected, irreps_by_kp, g="P3", ready=True):
         "bundles": [{
             "bundle_id": "b_001", "valley": "K",
             "subspace_group_candidate": g,
-            "ready_for_external_solver": ready,
+            "ready_for_reduced_table_validation": ready,
             "expected_hsps": expected,
             "irreps_by_kpoint": irreps_by_kp,
         }],
@@ -883,36 +887,7 @@ def test_malformed_declared_expected_hsps_excludes():
     assert len(r["excluded_bundles"]) == 1
     assert "hsp_basis_malformed" in r["excluded_bundles"][0]["reason"]
 
-def test_legacy_bundle_without_expected_hsps_still_works():
-    """Legacy bundle without expected_hsps derives basis from irreps_by_kpoint keys."""
-    b = {
-        "bundles": [{
-            "bundle_id": "b_001", "valley": "K",
-            "subspace_group_candidate": "P3",
-            "ready_for_external_solver": True,
-            "irreps_by_kpoint": {
-                "GammaM": ["C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"],
-                "KM": ["C3_spinor_phase_+1/6", "C3_spinor_phase_-1/6"],
-            },
-        }],
-    }
-    r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(b, _SAMPLE_TABLE), table=_SAMPLE_TABLE)
-    assert r["status"] == "solved_exact"
 
-def test_legacy_bundle_without_expected_hsps_fails_when_keys_mismatch():
-    """Legacy bundle without expected_hsps fails when irreps_by_kpoint keys mismatch table."""
-    b = {
-        "bundles": [{
-            "bundle_id": "b_001", "valley": "K",
-            "subspace_group_candidate": "P3",
-            "ready_for_external_solver": True,
-            "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
-        }],
-    }
-    r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(b, _SAMPLE_TABLE), table=_SAMPLE_TABLE)
-    assert len(r["excluded_bundles"]) == 1
-    reason = r["excluded_bundles"][0]["reason"]
-    assert "expected_hsps mismatch" in reason or "irrep HSP basis mismatch" in reason
 
 def test_basis_gate_before_group_check():
     """Basis mismatch excludes even when group matches."""
@@ -1046,6 +1021,62 @@ def test_max_coefficient_truncation_reported():
     s = classify_bundle([10, 10], [[1, 0], [0, 1]], ["EBR_A", "EBR_B"], 5)
     assert s["search_status"] == "truncated_by_max_coefficient"
 
+
+def test_top_level_status_is_partial_when_one_bundle_is_blocked():
+    export = _bundle_with_hsps(
+        expected=["GammaM", "KM"],
+        irreps_by_kp={
+            "GammaM": [
+                "C3_spinor_phase_+1/2",
+                "C3_spinor_phase_+1/2",
+            ],
+            "KM": [
+                "C3_spinor_phase_+1/6",
+                "C3_spinor_phase_-1/6",
+            ],
+        },
+    )
+    _ready(export, _SAMPLE_TABLE)
+    blocked = dict(export["bundles"][0])
+    blocked["bundle_id"] = "blocked_bundle"
+    blocked["certificate_identity"] = {}
+    export["bundles"].append(blocked)
+
+    result = build_reduced_ebr_mapping(
+        ebr_export_bundle=export,
+        table=_SAMPLE_TABLE,
+    )
+
+    assert result["status"] == "partial"
+    assert len(result["solutions"]) == 1
+    assert len(result["excluded_bundles"]) == 1
+
+
+def test_top_level_status_preserves_indeterminate_truncation():
+    table = {
+        **_SAMPLE_TABLE,
+        "expected_hsps": ["GammaM"],
+        "irreps": ["GammaM:irrep_A", "GammaM:irrep_B"],
+        "ebrs": [
+            {"label": "EBR_A", "vector": [1, 0]},
+            {"label": "EBR_B", "vector": [0, 1]},
+        ],
+    }
+    export = _bundle_with_hsps(
+        expected=["GammaM"],
+        irreps_by_kp={
+            "GammaM": ["irrep_A"] * 10 + ["irrep_B"] * 10,
+        },
+    )
+
+    result = build_reduced_ebr_mapping(
+        ebr_export_bundle=_ready(export, table),
+        table=table,
+        max_coefficient=5,
+    )
+
+    assert result["status"] == "indeterminate_truncated"
+
 def test_classification_fields_on_existing_tests():
     """All solutions must carry classification, integer_span_status,
     and nonnegative_solution_status."""
@@ -1068,7 +1099,7 @@ def test_cli_shows_classification_counts(tmp_path, capsys):
     _write_bundle(bundle_path, [{
         "bundle_id": "b_001", "valley": "K",
         "subspace_group_candidate": "P3",
-        "ready_for_external_solver": True,
+            "ready_for_reduced_table_validation": True,
         "expected_hsps": ["GammaM", "KM"],
         "irreps_by_kpoint": {
             "GammaM": ["C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"],
@@ -1080,14 +1111,16 @@ def test_cli_shows_classification_counts(tmp_path, capsys):
     assert rc == 0
     captured = capsys.readouterr().out
     # Minimal table without provenance → rejected; no classification to show.
-    assert "not_evaluated" in captured
+    assert "blocked" in captured
 
 def test_schema_fields_include_classification():
     """Top-level schema must still include all required fields."""
     r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(_bundle(), _SAMPLE_TABLE), table=_SAMPLE_TABLE)
-    for k in ["status", "mapping_status", "reduced_ebr_decomposition_status",
-              "table_status", "solutions", "excluded_bundles", "solver"]:
+    for k in ["status", "schema_version", "table_status", "solutions",
+              "excluded_bundles", "solver"]:
         assert k in r, f"missing top-level key: {k}"
+    assert "mapping_status" not in r
+    assert "reduced_ebr_decomposition_status" not in r
     assert r["solver"] == "smith_normal_form_plus_bounded_nonnegative_search"
 
 def test_pyproject_lists_sympy_dependency_for_integer_span_classifier():
@@ -1114,8 +1147,7 @@ def _render_reduced_ebr_text(report: dict) -> str:
 def test_summary_renders_atomic_classification():
     """Summary text shows atomic-compatible with decomposition."""
     report = {
-        "status": "solved_exact", "mapping_status": "solved_exact",
-        "reduced_ebr_decomposition_status": "solved_exact",
+        "schema_version": "1.5.0", "status": "solved_exact",
         "table_status": "loaded",
         "solutions": [{
             "bundle_id": "b_001", "valley": "K",
@@ -1137,8 +1169,7 @@ def test_summary_renders_atomic_classification():
 def test_summary_renders_fragile_classification():
     """Summary text shows in integer span, no nonnegative witness."""
     report = {
-        "status": "no_exact_solution", "mapping_status": "no_exact_solution",
-        "reduced_ebr_decomposition_status": "no_exact_solution",
+        "schema_version": "1.5.0", "status": "no_exact_solution",
         "table_status": "loaded",
         "solutions": [{
             "bundle_id": "b_001", "valley": "K",
@@ -1161,8 +1192,7 @@ def test_summary_renders_fragile_classification():
 def test_summary_renders_stable_classification():
     """Summary text shows outside integer span."""
     report = {
-        "status": "no_exact_solution", "mapping_status": "no_exact_solution",
-        "reduced_ebr_decomposition_status": "no_exact_solution",
+        "schema_version": "1.5.0", "status": "no_exact_solution",
         "table_status": "loaded",
         "solutions": [{
             "bundle_id": "b_001", "valley": "K",
@@ -1179,8 +1209,7 @@ def test_summary_renders_stable_classification():
 def test_summary_renders_truncated_search_status():
     """Summary text shows truncated search status."""
     report = {
-        "status": "no_exact_solution", "mapping_status": "no_exact_solution",
-        "reduced_ebr_decomposition_status": "no_exact_solution",
+        "schema_version": "1.5.0", "status": "no_exact_solution",
         "table_status": "loaded",
         "solutions": [{
             "bundle_id": "b_001", "valley": "K",
@@ -1201,8 +1230,7 @@ def test_summary_renders_truncated_search_status():
 def test_summary_renders_classification_counts():
     """Summary text shows classification counts when present."""
     report = {
-        "status": "no_exact_solution", "mapping_status": "no_exact_solution",
-        "reduced_ebr_decomposition_status": "no_exact_solution",
+        "schema_version": "1.5.0", "status": "no_exact_solution",
         "table_status": "loaded",
         "solutions": [
             {"bundle_id": "b_a", "valley": "A", "status": "solved_exact",
@@ -1228,8 +1256,7 @@ def test_summary_renders_classification_counts():
 def test_summary_excluded_bundles_unchanged():
     """Excluded bundles rendering is unchanged."""
     report = {
-        "status": "not_evaluated", "mapping_status": "not_evaluated",
-        "reduced_ebr_decomposition_status": "not_evaluated",
+        "schema_version": "1.5.0", "status": "not_evaluated",
         "table_status": "loaded", "solutions": [],
         "excluded_bundles": [
             {"bundle_id": "b_x", "reason": "not ready for external solver"},
@@ -1242,8 +1269,7 @@ def test_summary_excluded_bundles_unchanged():
 def test_summary_missing_table_unchanged():
     """Missing table rendering is unchanged."""
     report = {
-        "status": "missing_table", "mapping_status": "missing_table",
-        "reduced_ebr_decomposition_status": "missing_table",
+        "schema_version": "1.5.0", "status": "missing_table",
         "table_status": "not_provided", "solutions": [],
         "excluded_bundles": [],
     }
@@ -1407,7 +1433,7 @@ def test_table_file_and_spec_file_equivalent_outputs():
             "bundle_id": "b_001", "valley": "K",
             "subspace_group_candidate": "P3",
             "subspace_space_group": {"candidate_space_group_symbol": "P3"},
-            "ready_for_external_solver": True,
+            "ready_for_reduced_table_validation": True,
             "irreps_by_kpoint": bundle_vec,
         }],
     }
@@ -1433,7 +1459,7 @@ def test_table_file_and_spec_file_equivalent_outputs():
     )
     assert result_spec["status"] == "solved_exact"
     assert result_table["solutions"] == result_spec["solutions"]
-    assert result_table["mapping_status"] == result_spec["mapping_status"]
+    assert result_table["status"] == result_spec["status"]
 
 
 def test_reduced_ebr_input_provenance_in_output():
@@ -1447,7 +1473,7 @@ def test_reduced_ebr_input_provenance_in_output():
             "bundle_id": "b_001", "valley": "K",
             "subspace_group_candidate": "P3",
             "subspace_space_group": {"candidate_space_group_symbol": "P3"},
-            "ready_for_external_solver": True,
+            "ready_for_reduced_table_validation": True,
             "irreps_by_kpoint": bundle_vec,
         }],
     }
@@ -1489,7 +1515,7 @@ def test_reduced_ebr_input_provenance_in_ingestion_record():
             "bundle_id": "b_001", "valley": "K",
             "subspace_group_candidate": "P3",
             "subspace_space_group": {"candidate_space_group_symbol": "P3"},
-            "ready_for_external_solver": True,
+            "ready_for_reduced_table_validation": True,
             "irreps_by_kpoint": bundle_vec,
         }],
     }
@@ -1526,7 +1552,7 @@ def test_reduced_ebr_input_not_present_when_not_provided():
             "bundle_id": "b_001", "valley": "K",
             "subspace_group_candidate": "P3",
             "subspace_space_group": {"candidate_space_group_symbol": "P3"},
-            "ready_for_external_solver": True,
+            "ready_for_reduced_table_validation": True,
             "irreps_by_kpoint": bundle_vec,
         }],
     }

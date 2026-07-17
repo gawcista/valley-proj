@@ -301,11 +301,10 @@ def test_schema_fields_present():
         irrep_workflow_decisions=decisions,
         valley_irrep_matching=matching,
     )
-    keys = {"status", "candidate_count", "blocked_count",
-            "reduced_ebr_decomposition_status", "by_kpoint",
+    keys = {"status", "candidate_count", "blocked_count", "by_kpoint",
             "candidates", "blocked", "interpretation"}
     assert keys <= set(r)
-    assert r["reduced_ebr_decomposition_status"] == "not_implemented"
+    assert "reduced_ebr_decomposition_status" not in r
 
 
 def test_no_forbidden_terms():

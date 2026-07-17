@@ -138,25 +138,6 @@ def test_builder_provenance_marks_public_source_and_reduction_contract():
     assert provenance["review_status"] == "fixture-only"
 
 
-def test_builder_accepts_legacy_aliases_for_initial_callers():
-    table, calls = _build_with_fake_loader(
-        space_group_number=None,
-        spinful=None,
-        sg_number="150",
-        spinor=False,
-    )
-    assert calls == [("150", False)]
-    assert table["provenance"]["space_group_number"] == "150"
-    assert table["provenance"]["spinful"] is False
-
-
-def test_builder_rejects_conflicting_aliases():
-    with pytest.raises(ValueError, match="space_group_number or sg_number"):
-        _build_with_fake_loader(sg_number=150)
-    with pytest.raises(ValueError, match="spinful or spinor"):
-        _build_with_fake_loader(spinor=True)
-
-
 def test_builder_propagates_explicit_mapping_errors():
     with pytest.raises(ValueError, match="source_hsp_by_irrep"):
         _build_with_fake_loader(source_hsp_by_irrep={})
@@ -242,7 +223,7 @@ def test_spec_file_table_feeds_reduced_ebr_mapping_e2e(tmp_path):
                 "bundle_id": "synthetic_bundle",
                 "valley": "K",
                 "subspace_group_candidate": "P3",
-                "ready_for_external_solver": True,
+                "ready_for_reduced_table_validation": True,
                 "expected_hsps": _EXPECTED_HSPS,
                 "irreps_by_kpoint": {
                     "GammaM": [
@@ -2380,7 +2361,7 @@ def test_c3_real_source_mapping_e2e_solved_exact(tmp_path):
             "bundle_id": "c3_real_source_smoke_bundle",
             "valley": "K",
             "subspace_group_candidate": "P3",
-            "ready_for_external_solver": True,
+                "ready_for_reduced_table_validation": True,
             "expected_hsps": ["GammaM", "KM"],
             "irreps_by_kpoint": irreps_by_kp,
         }],
@@ -2390,7 +2371,6 @@ def test_c3_real_source_mapping_e2e_solved_exact(tmp_path):
     attach_real_certificate(bundle, table)
     result = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
 
-    assert result["mapping_status"] == "solved_exact"
     # Production path may reject minimal table.
     assert result["status"] == "solved_exact"
     solution = result["solutions"][0]
@@ -2520,7 +2500,7 @@ def test_c2_mm_m3_dry_run_mapping_e2e_solved_exact():
             "bundle_id": "c2_mm_m3_dry_run_bundle",
             "valley": "M3",
             "subspace_group_candidate": "P2",
-            "ready_for_external_solver": True,
+                "ready_for_reduced_table_validation": True,
             "expected_hsps": ["MM"],
             "irreps_by_kpoint": irreps_by_kp,
         }],
@@ -2532,7 +2512,6 @@ def test_c2_mm_m3_dry_run_mapping_e2e_solved_exact():
 
     # Production path may reject minimal table.
     assert result["status"] == "solved_exact"
-    assert result["mapping_status"] == "solved_exact"
     assert result["excluded_bundles"] == []
     solution = result["solutions"][0]
     assert solution["status"] == "solved_exact"  # solution-level
@@ -2589,15 +2568,14 @@ def test_c2_mm_m3_dry_run_cli_build_and_map_e2e(tmp_path):
         hsp, phase = key.split(":", 1)
         irreps_by_kp.setdefault(hsp, []).extend([phase] * target_vec[i])
     bundle = {
-        "status": "ready_for_external_solver",
+        "status": "ready_for_reduced_table_validation",
         "bundle_count": 1, "excluded_count": 0,
         "schema_version": "1.0.0",
-        "reduced_ebr_decomposition_status": "not_implemented",
         "bundles": [{
             "bundle_id": "c2_cli_dry_run",
             "valley": "M3",
             "subspace_group_candidate": "P2",
-            "ready_for_external_solver": True,
+                "ready_for_reduced_table_validation": True,
             "expected_hsps": ["MM"],
             "irreps_by_kpoint": irreps_by_kp,
         }],
@@ -2614,8 +2592,7 @@ def test_c2_mm_m3_dry_run_cli_build_and_map_e2e(tmp_path):
     ])
     assert rc == 0
     mapping = json.loads(mapping_path.read_text())
-    assert mapping["status"] == "not_evaluated"
-    assert mapping["mapping_status"] == "not_evaluated"
+    assert mapping["status"] == "blocked"
     assert mapping["table_status"] == "loaded"
     # CLI bundle may lack certificate_identity; promotion blocks.
     if mapping["excluded_bundles"]:

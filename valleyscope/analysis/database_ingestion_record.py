@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-_SCHEMA_VERSION = "1.4.0"
+_SCHEMA_VERSION = "1.5.0"
 
 
 def build_database_ingestion_record(
@@ -84,14 +84,10 @@ def build_database_ingestion_record(
             for bundle in bundles:
                 if not isinstance(bundle, dict):
                     continue
-                is_solver_ready = bundle.get("ready_for_external_solver") is True
                 is_validation_candidate = (
                     bundle.get("ready_for_reduced_table_validation") is True
                 )
-                if is_solver_ready:
-                    decomposition_ready_count += 1
-                    _extract_irrep_records(bundle, valley_irrep_records)
-                elif is_validation_candidate:
+                if is_validation_candidate:
                     validation_candidate_count += 1
                     # Validation candidates contain trusted valley-preserving
                     # irreps; preserve them independently of EBR readiness.
@@ -344,7 +340,9 @@ def _compact_excluded_records(
             "subspace_group_candidate": exc.get("subspace_group_candidate", "?"),
             "subspace_space_group": exc.get("subspace_space_group", {}),
             "status": exc.get("status", "?"),
-            "ready_for_ebr_decomposition": exc.get("ready_for_ebr_decomposition", False),
+            "canonical_hsp_vector_complete": exc.get(
+                "canonical_hsp_vector_complete", False
+            ),
             "exclusion_reasons": exc.get("exclusion_reasons", []),
         })
     return records

@@ -130,6 +130,24 @@ def _spin_records(spinful):
     }
 
 
+def _complete_coverage(mapping, *, valley="K_valley"):
+    required = list(mapping)
+    return {
+        "by_valley": {
+            valley: {
+                "required_source_hsp_labels": required,
+                "covered_source_hsp_labels": required,
+                "missing_source_hsp_labels": [],
+                "trusted_matched_source_hsp_labels": required,
+                "trusted_missing_source_hsp_labels": [],
+                "source_hsp_to_sampled_kpoint": dict(mapping),
+                "complete": True,
+                "ready_for_ebr_promotion": True,
+            }
+        }
+    }
+
+
 def _table(*, sg_number=143, symbol="P3", spinful=False, **over):
     """Synthetic table for isolated promotion-validator unit tests only."""
     table = {
@@ -159,7 +177,7 @@ def _bundle(*, sg_number=143, symbol="P3", spinful=False, cert=None, **over):
         "subspace_space_group": {"status": "resolved",
                                  "candidate_space_group_number": sg_number,
                                  "candidate_space_group_symbol": symbol},
-        "ready_for_external_solver": True,
+                "ready_for_reduced_table_validation": True,
         "ready_for_reduced_table_validation": True,
         "expected_hsps": ["GammaM", "KM"],
         "irreps_by_kpoint": {"GammaM": ["A", "A"], "KM": ["A", "B"]},
@@ -298,7 +316,7 @@ def test_legacy_export_without_required_operation_ids_remains_fail_closed():
         ebr_export_bundle=legacy_export,
         table=_table(),
     )
-    assert result["mapping_status"] == "not_evaluated"
+    assert result["status"] == "blocked"
     assert result["solutions"] == []
     assert len(result["excluded_bundles"]) == 1
     assert "primitive_affine_evidence_invalid" in result["excluded_bundles"][0]["reason"]
@@ -482,6 +500,7 @@ def test_sg79_centered_resolver_to_exact_solve_uses_default_irreptables_table():
 
     instances = build_ebr_problem_instances(
         ebr_input_candidates={"candidates": candidates},
+        projected_hsp_coverage=_complete_coverage({"GM": "GammaM"}),
     )
     export = build_ebr_export_bundle(ebr_problem_instances=instances)
     exported_identity = export["bundles"][0]["certificate_identity"]
@@ -605,7 +624,11 @@ def test_injected_primitive_certificate_with_synthetic_table_solves_plumbing():
     } for i, (kp, irr, mult) in enumerate(rows)]
 
     instances = build_ebr_problem_instances(
-        ebr_input_candidates={"candidates": candidates})
+        ebr_input_candidates={"candidates": candidates},
+        projected_hsp_coverage=_complete_coverage(
+            {"GM": "GammaM", "K": "KM"}
+        ),
+    )
     export = build_ebr_export_bundle(ebr_problem_instances=instances)
     r = build_reduced_ebr_mapping(ebr_export_bundle=export, table=_table())
     assert r["status"] == "solved_exact"
@@ -997,7 +1020,11 @@ def test_injected_certificate_to_solve_is_plumbing_not_production():
     } for i, (kp, irr, mult) in enumerate(rows)]
 
     instances = build_ebr_problem_instances(
-        ebr_input_candidates={"candidates": candidates})
+        ebr_input_candidates={"candidates": candidates},
+        projected_hsp_coverage=_complete_coverage(
+            {"GM": "GammaM", "K": "KM"}
+        ),
+    )
     export = build_ebr_export_bundle(ebr_problem_instances=instances)
     r = build_reduced_ebr_mapping(ebr_export_bundle=export, table=_table())
     assert r["status"] == "solved_exact"

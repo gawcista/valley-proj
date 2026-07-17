@@ -37,7 +37,7 @@ def test_ingestion_record_with_ready_bundle():
         "bundles": [{
             "bundle_id": "b_001", "source_instance_id": "ebr_001",
             "subspace_group_candidate": "P3",
-            "ready_for_external_solver": True,
+                "ready_for_reduced_table_validation": True,
             "irrep_records_by_kpoint": {
                 "GammaM": [{"valley": "K_valley", "operation_id": 1,
                             "operation_order": 3,
@@ -53,8 +53,9 @@ def test_ingestion_record_with_ready_bundle():
     record = build_database_ingestion_record(
         valley_summary=summary, valley_ebr_export_bundle=bundle)
 
-    assert record["record_status"] == "has_ready_ebr_bundles"
-    assert record["ready_bundle_count"] == 1
+    assert record["record_status"] == "no_ready_ebr_bundles"
+    assert record["ready_bundle_count"] == 0
+    assert record["validation_candidate_count"] == 1
     assert record["space_group_international"] == "P321"
     records = record["valley_irrep_records"]
     assert len(records) == 1
@@ -74,7 +75,7 @@ def test_ingestion_record_excludes_non_ready_bundles():
     bundle = {
         "bundles": [{
             "bundle_id": "b_001",
-            "ready_for_external_solver": False,
+                "ready_for_reduced_table_validation": False,
             "irrep_records_by_kpoint": {},
         }],
     }
@@ -234,7 +235,7 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
         for kpoint, records in c3_records.items()
     }
     bundle = {
-        "status": "ready_for_external_solver",
+        "status": "ready_for_reduced_table_validation",
         "bundle_count": 2,
         "excluded_count": 0,
         "bundles": [
@@ -243,7 +244,7 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
                 "valley": "K_valley",
                 "subspace_group_candidate": "P3",
                 "subspace_space_group": {"candidate_space_group_symbol": "P3"},
-                "ready_for_external_solver": True,
+                "ready_for_reduced_table_validation": True,
                 "irrep_records_by_kpoint": c3_records,
             },
             {
@@ -251,7 +252,7 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
                 "valley": "Kp_valley",
                 "subspace_group_candidate": "P3",
                 "subspace_space_group": {"candidate_space_group_symbol": "P3"},
-                "ready_for_external_solver": True,
+                "ready_for_reduced_table_validation": True,
                 "irrep_records_by_kpoint": c3p_records,
             },
         ],
@@ -294,7 +295,7 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
 
     record = load_database_ingestion_record_from_directory(run_dir)
 
-    assert record["schema_version"] == "1.4.0"
+    assert record["schema_version"] == "1.5.0"
     assert record["record_status"] == "has_ready_ebr_bundles"
     assert record["ready_bundle_count"] == 2
     assert len(record["valley_irrep_records"]) == 8
@@ -456,7 +457,7 @@ def test_ingestion_record_includes_excluded_ebr_records():
                 "subspace_group_candidate": "P2",
                 "subspace_space_group": {"candidate_space_group_symbol": "P2"},
                 "status": "blocked",
-                "ready_for_ebr_decomposition": False,
+                "canonical_hsp_vector_complete": False,
                 "exclusion_reasons": [
                     "spinor_convention_unverified",
                     "low_seed_projector_symmetry",
@@ -538,12 +539,12 @@ def test_database_index_excluded_ebr_records_have_source_record():
     assert er["source_record"] == "/tmp/rec.json"
 
 
-def test_ingestion_record_schema_version_is_1_4_0():
-    """Ingestion record schema_version is now 1.4.0."""
+def test_ingestion_record_schema_version_is_1_5_0():
+    """Ingestion record schema_version is now 1.5.0."""
     from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
     summary = {"target_kpoints": [], "iband": [], "input": {}}
     record = build_database_ingestion_record(valley_summary=summary)
-    assert record["schema_version"] == "1.4.0"
+    assert record["schema_version"] == "1.5.0"
 
 
 # -----------------------------------------------------------------------
@@ -557,7 +558,7 @@ def test_irrep_records_preserve_generic_fields():
         "bundles": [{
             "bundle_id": "b_001",
             "subspace_group_candidate": "P3",
-            "ready_for_external_solver": True,
+                "ready_for_reduced_table_validation": True,
             "irrep_records_by_kpoint": {
                 "GammaM": [{
                     "valley": "K_valley",
@@ -637,7 +638,7 @@ def test_ingestion_preserves_centered_certificate_identity_from_bundle():
             "bundle_id": "b_centered",
             "source_instance_id": "i_centered",
             "subspace_group_candidate": "C2",
-            "ready_for_external_solver": True,
+                "ready_for_reduced_table_validation": True,
             "certificate_identity": certificate_identity,
             "irrep_records_by_kpoint": {
                 "GM": [{
@@ -653,7 +654,7 @@ def test_ingestion_preserves_centered_certificate_identity_from_bundle():
         valley_ebr_export_bundle=bundle,
     )
 
-    assert record["schema_version"] == "1.4.0"
+    assert record["schema_version"] == "1.5.0"
     assert record["valley_irrep_records"][0]["certificate_identity"] == (
         certificate_identity
     )
@@ -667,7 +668,7 @@ def test_legacy_records_still_ingest_without_generic_fields():
         "bundles": [{
             "bundle_id": "b_001",
             "subspace_group_candidate": "P3",
-            "ready_for_external_solver": True,
+                "ready_for_reduced_table_validation": True,
             "irrep_records_by_kpoint": {
                 "GammaM": [{
                     "valley": "K_valley",
@@ -685,7 +686,8 @@ def test_legacy_records_still_ingest_without_generic_fields():
     record = build_database_ingestion_record(
         valley_summary=summary, valley_ebr_export_bundle=bundle,
     )
-    assert record["ready_bundle_count"] == 1
+    assert record["ready_bundle_count"] == 0
+    assert record["validation_candidate_count"] == 1
     r = record["valley_irrep_records"][0]
     assert r["matched_irrep"] == "C3_spinor_phase_+1/2"
     for key in [

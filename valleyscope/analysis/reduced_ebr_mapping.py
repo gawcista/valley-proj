@@ -24,6 +24,7 @@ from valleyscope.analysis.time_reversal_sewing import (
 
 _REQUIRED_TABLE_KEYS = {"schema_version", "subspace_group_candidate",
                          "expected_hsps", "irreps", "ebrs"}
+_OUTPUT_SCHEMA_VERSION = "1.5.0"
 _SOLVER_NAME = "smith_normal_form_plus_bounded_nonnegative_search"
 
 # Standard-setting certificate convention — REAL producer vocabulary.
@@ -343,9 +344,10 @@ def promote_bundle_for_solve(*, bundle: dict, table: dict) -> dict:
 
     # ---- F. Irrep keys resolve exactly and unambiguously ----
     table_irreps = table.get("irreps", [])
+    irrep_vector: list[int] | None = None
     if isinstance(irreps_by_kp, dict) and isinstance(table_irreps, list):
-        counts = _count_irreps(irreps_by_kp, table_irreps)
-        if counts is None:
+        irrep_vector = _count_irreps(irreps_by_kp, table_irreps)
+        if irrep_vector is None:
             blockers.append(_blocker("irrep_key_unresolved",
                 "could not resolve irrep keys: bundle irrep keys do not "
                 "resolve exactly/unambiguously to table irreps"))
@@ -383,8 +385,6 @@ def promote_bundle_for_solve(*, bundle: dict, table: dict) -> dict:
     promoted_bundle: dict | None = None
     if promoted:
         promoted_bundle = dict(bundle)
-        promoted_bundle["ready_for_external_solver"] = True
-        promoted_bundle["hsp_basis_status"] = state
         promoted_bundle["promotion_provenance"] = {
             "source": "promote_bundle_for_solve",
             "validation_report": dict(report),
@@ -398,6 +398,7 @@ def promote_bundle_for_solve(*, bundle: dict, table: dict) -> dict:
         "blocker_reasons": blockers,
         "validation_report": report,
         "canonical_state": state,
+        "irrep_vector": irrep_vector if promoted else None,
         "table_provenance": table_provenance,
         "certificate_identity": dict(cert_id),
     }
@@ -1860,7 +1861,8 @@ def build_reduced_ebr_mapping(
         return _status("not_evaluated", "no export bundle available",
                        reduced_ebr_input=reduced_ebr_input)
 
-    bundles = ebr_export_bundle.get("bundles", [])
+    raw_bundles = ebr_export_bundle.get("bundles", [])
+    bundles = raw_bundles if isinstance(raw_bundles, list) else []
 
     if table is None:
         result: dict = {
@@ -1881,17 +1883,17 @@ def build_reduced_ebr_mapping(
         }
         return result
 
-    table_group = str(table.get("subspace_group_candidate", ""))
-    table_irreps = table["irreps"]
     table_ebrs = table["ebrs"]
-    n_irreps = len(table_irreps)
-    table_expected = set(table.get("expected_hsps", []))
 
     solutions: list[dict] = []
     excluded: list[dict] = []
 
     for bundle in bundles:
         if not isinstance(bundle, dict):
+            excluded.append({
+                "bundle_id": "?",
+                "reason": "malformed export bundle entry",
+            })
             continue
         # Every bundle must pass the same validation against the actual
         # table used for this solve.  Pre-existing readiness flags are
@@ -1899,10 +1901,7 @@ def build_reduced_ebr_mapping(
         is_validation_candidate = (
             bundle.get("ready_for_reduced_table_validation") is True
         )
-        is_premarked_ready = (
-            bundle.get("ready_for_external_solver") is True
-        )
-        if is_validation_candidate or is_premarked_ready:
+        if is_validation_candidate:
             promo = promote_bundle_for_solve(bundle=bundle, table=table)
             if promo["promoted"] and promo["promoted_bundle"] is not None:
                 bundle = promo["promoted_bundle"]
@@ -1936,88 +1935,19 @@ def build_reduced_ebr_mapping(
                 "subspace_space_group": bundle.get(
                     "subspace_space_group", {}),
                 "irrep_source_provenance_by_kpoint": _per_kpoint_prov(bundle),
-                "reason": "not ready for external solver",
+                "reason": "not ready for reviewed reduced-table validation",
             })
             continue
 
         bundle_group = str(bundle.get("subspace_group_candidate", ""))
-        if bundle_group != table_group:
+        irrep_counts = promo.get("irrep_vector")
+        if not isinstance(irrep_counts, list):
             excluded.append({
                 "bundle_id": bundle.get("bundle_id", "?"),
                 "subspace_group_candidate": bundle_group,
                 "subspace_space_group": bundle.get("subspace_space_group", {}),
                 "irrep_source_provenance_by_kpoint": _per_kpoint_prov(bundle),
-                "reason": (
-                    f"table group {table_group} != "
-                    f"bundle group {bundle_group}"
-                ),
-            })
-            continue
-
-        # --- Reduced-dimensional basis compatibility gate ---
-        # The table and bundle must agree on the sampled HSP set.
-        bundle_irreps = bundle.get("irreps_by_kpoint", {})
-        actual_hsps = set(bundle_irreps) if isinstance(bundle_irreps, dict) else set()
-
-        bundle_expected = bundle.get("expected_hsps")
-        if bundle_expected is None:
-            # Legacy bundle without declared expected_hsps: derive from
-            # irreps_by_kpoint keys.
-            bundle_expected_set = actual_hsps
-        elif (
-            isinstance(bundle_expected, list)
-            and all(isinstance(h, str) and h for h in bundle_expected)
-            and len(set(bundle_expected)) == len(bundle_expected)
-        ):
-            bundle_expected_set = set(bundle_expected)
-        else:
-            excluded.append({
-                "bundle_id": bundle.get("bundle_id", "?"),
-                "subspace_group_candidate": bundle.get("subspace_group_candidate", ""),
-                "subspace_space_group": bundle.get("subspace_space_group", {}),
-                "irrep_source_provenance_by_kpoint": _per_kpoint_prov(bundle),
-                "reason": (
-                    "malformed expected_hsps: expected a unique list of "
-                    "non-empty HSP labels"
-                ),
-            })
-            continue
-
-        if bundle_expected_set != table_expected:
-            excluded.append({
-                "bundle_id": bundle.get("bundle_id", "?"),
-                "subspace_group_candidate": bundle.get("subspace_group_candidate", ""),
-                "subspace_space_group": bundle.get("subspace_space_group", {}),
-                "irrep_source_provenance_by_kpoint": _per_kpoint_prov(bundle),
-                "reason": (
-                    f"expected_hsps mismatch: "
-                    f"table has {sorted(table_expected)}, "
-                    f"bundle has {sorted(bundle_expected_set)}"
-                ),
-            })
-            continue
-
-        if actual_hsps != table_expected:
-            excluded.append({
-                "bundle_id": bundle.get("bundle_id", "?"),
-                "subspace_group_candidate": bundle.get("subspace_group_candidate", ""),
-                "subspace_space_group": bundle.get("subspace_space_group", {}),
-                "irrep_source_provenance_by_kpoint": _per_kpoint_prov(bundle),
-                "reason": (
-                    f"irrep HSP basis mismatch: "
-                    f"table expects {sorted(table_expected)}, "
-                    f"bundle irreps_by_kpoint has {sorted(actual_hsps)}"
-                ),
-            })
-            continue
-        irrep_counts = _count_irreps(bundle_irreps, table_irreps)
-        if irrep_counts is None:
-            excluded.append({
-                "bundle_id": bundle.get("bundle_id", "?"),
-                "subspace_group_candidate": bundle.get("subspace_group_candidate", ""),
-                "subspace_space_group": bundle.get("subspace_space_group", {}),
-                "irrep_source_provenance_by_kpoint": _per_kpoint_prov(bundle),
-                "reason": "could not resolve irrep keys to table irreps",
+                "reason": "promotion returned no canonical irrep vector",
             })
             continue
 
@@ -2060,21 +1990,14 @@ def build_reduced_ebr_mapping(
                     promo_prov["certificate_identity"]
         solutions.append(solution)
 
-    if not solutions:
-        return {
-            **_status("not_evaluated", "no bundles to decompose",
-                      reduced_ebr_input=reduced_ebr_input),
-            "solutions": [],
-            "excluded_bundles": excluded,
-            "table_status": "loaded" if table else "not_provided",
-        }
-
-    all_solved = all(s.get("status") == "solved_exact" for s in solutions)
-    mapping_status = "solved_exact" if all_solved else "no_exact_solution"
+    mapping_status = _aggregate_mapping_status(
+        solutions=solutions,
+        excluded=excluded,
+        input_count=len(bundles),
+    )
     result = {
+        "schema_version": _OUTPUT_SCHEMA_VERSION,
         "status": mapping_status,
-        "mapping_status": mapping_status,
-        "reduced_ebr_decomposition_status": mapping_status,
         "table_status": "loaded",
         "solutions": solutions,
         "excluded_bundles": excluded,
@@ -2089,6 +2012,269 @@ def build_reduced_ebr_mapping(
     }
     if reduced_ebr_input is not None:
         result["reduced_ebr_input"] = dict(reduced_ebr_input)
+    return result
+
+
+def build_auto_reduced_ebr_mapping(
+    *,
+    ebr_export_bundle: dict[str, object] | None,
+    spinor: bool,
+    max_coefficient: int = 6,
+) -> dict[str, object]:
+    """Build one reviewed irreptables table per canonical bundle and solve."""
+    bundles = (
+        ebr_export_bundle.get("bundles", [])
+        if isinstance(ebr_export_bundle, dict) else []
+    )
+    if not isinstance(bundles, list) or not bundles:
+        return _status(
+            "not_evaluated",
+            "no canonical HSP-vector bundles available for auto evaluation",
+            reduced_ebr_input={"source": "auto_canonical", "bundle_count": 0},
+        )
+
+    from valleyscope.analysis.irreptables_runtime_table_builder import (
+        build_auto_canonical_reduced_ebr_table,
+        build_auto_time_reversal_reduced_ebr_table,
+    )
+
+    solutions: list[dict] = []
+    excluded: list[dict] = []
+    per_bundle: list[dict[str, object]] = []
+    ready_count = 0
+    loaded_count = 0
+    tr_bundle_count = sum(
+        isinstance(bundle, dict)
+        and bundle.get("problem_kind") == "valley_orbit_reduced_ebr"
+        for bundle in bundles
+    )
+
+    for raw_bundle in bundles:
+        if not isinstance(raw_bundle, dict):
+            excluded.append({
+                "bundle_id": "?",
+                "reason": "malformed export bundle entry",
+            })
+            per_bundle.append({
+                "bundle_id": "?",
+                "status": "blocked",
+                "table_status": "not_applicable",
+            })
+            continue
+        bundle_id = str(raw_bundle.get("bundle_id", "?"))
+        if raw_bundle.get("ready_for_reduced_table_validation") is not True:
+            excluded.append({
+                "bundle_id": bundle_id,
+                "subspace_group_candidate": raw_bundle.get(
+                    "subspace_group_candidate", ""
+                ),
+                "subspace_space_group": raw_bundle.get(
+                    "subspace_space_group", {}
+                ),
+                "reason": "not ready for reviewed reduced-table validation",
+            })
+            per_bundle.append({
+                "bundle_id": bundle_id,
+                "status": "blocked",
+                "table_status": "not_applicable",
+            })
+            continue
+
+        ready_count += 1
+        try:
+            table, is_time_reversal = _build_auto_table_for_bundle(
+                bundle=raw_bundle,
+                spinor=spinor,
+                unitary_builder=build_auto_canonical_reduced_ebr_table,
+                time_reversal_builder=(
+                    build_auto_time_reversal_reduced_ebr_table
+                ),
+            )
+        except Exception as exc:
+            reason = f"{type(exc).__name__}: {exc}"
+            excluded.append({
+                "bundle_id": bundle_id,
+                "subspace_group_candidate": raw_bundle.get(
+                    "subspace_group_candidate", ""
+                ),
+                "subspace_space_group": raw_bundle.get(
+                    "subspace_space_group", {}
+                ),
+                "reason": f"auto reduced-table build failed: {reason}",
+            })
+            per_bundle.append({
+                "bundle_id": bundle_id,
+                "status": "blocked",
+                "table_status": "blocked",
+                "reason": reason,
+            })
+            continue
+
+        loaded_count += 1
+        table_input = _auto_table_input(table, is_time_reversal)
+        bundle_result = build_reduced_ebr_mapping(
+            ebr_export_bundle={"bundles": [raw_bundle]},
+            table=table,
+            max_coefficient=max_coefficient,
+            reduced_ebr_input=table_input,
+        )
+        before = len(solutions) + len(excluded)
+        for solution in bundle_result.get("solutions", []):
+            if not isinstance(solution, dict):
+                continue
+            existing = solution.get("table_provenance", {})
+            solution["table_provenance"] = {
+                **table_input,
+                **(existing if isinstance(existing, dict) else {}),
+            }
+            solution["table_status"] = "loaded"
+            solutions.append(solution)
+        excluded.extend(
+            row for row in bundle_result.get("excluded_bundles", [])
+            if isinstance(row, dict)
+        )
+        if len(solutions) + len(excluded) == before:
+            excluded.append({
+                "bundle_id": bundle_id,
+                "reason": "auto mapping produced no result record",
+            })
+        per_bundle.append({
+            "bundle_id": bundle_id,
+            "sg_number": table_input.get("space_group_number"),
+            "expected_hsps": table_input.get("expected_hsps", []),
+            "status": bundle_result.get("status", "blocked"),
+            "table_status": "loaded",
+        })
+
+    status = _aggregate_mapping_status(
+        solutions=solutions,
+        excluded=excluded,
+        input_count=len(bundles),
+    )
+    if loaded_count == 0:
+        table_status = "blocked"
+    elif loaded_count < len(bundles):
+        table_status = "partial"
+    else:
+        table_status = "loaded"
+    if tr_bundle_count == len(bundles):
+        source = "auto_time_reversal_grey"
+    elif tr_bundle_count:
+        source = "auto_unitary_and_time_reversal"
+    else:
+        source = "auto_canonical"
+    return {
+        "schema_version": _OUTPUT_SCHEMA_VERSION,
+        "status": status,
+        "table_status": table_status,
+        "solutions": solutions,
+        "excluded_bundles": excluded,
+        "solver": _SOLVER_NAME,
+        "max_coefficient": int(max_coefficient),
+        "interpretation": (
+            "Exact reduced EBR classification using one independently "
+            "validated irreptables table per canonical HSP-vector bundle."
+        ),
+        "reduced_ebr_input": {
+            "source": source,
+            "spinful": bool(spinor),
+            "bundle_count": len(bundles),
+            "ready_bundle_count": ready_count,
+            "evaluated_count": len(solutions),
+            "blocked_count": len(excluded),
+        },
+        "auto_canonical_bundles": per_bundle,
+    }
+
+
+def _build_auto_table_for_bundle(
+    *,
+    bundle: dict,
+    spinor: bool,
+    unitary_builder,
+    time_reversal_builder,
+) -> tuple[dict, bool]:
+    ssg = bundle.get("subspace_space_group", {})
+    if not isinstance(ssg, dict) or not ssg:
+        raise ValueError("missing subspace_space_group")
+    sg_number = ssg.get("candidate_space_group_number")
+    if not _is_positive_int(sg_number):
+        raise ValueError("missing or invalid candidate_space_group_number")
+    irreps_by_kpoint = bundle.get("irreps_by_kpoint", {})
+    expected_hsps = bundle.get("expected_hsps", [])
+    if not isinstance(irreps_by_kpoint, dict) or not irreps_by_kpoint:
+        raise ValueError("missing irreps_by_kpoint")
+    if not isinstance(expected_hsps, list) or not expected_hsps:
+        raise ValueError("missing expected_hsps")
+    group = str(bundle.get("subspace_group_candidate", ""))
+    is_time_reversal = (
+        bundle.get("problem_kind") == "valley_orbit_reduced_ebr"
+    )
+    kwargs = {
+        "spinor": bool(spinor),
+        "bundle_irreps_by_kpoint": irreps_by_kpoint,
+        "expected_hsps": expected_hsps,
+        "subspace_group_candidate": group,
+        "subspace_space_group": ssg,
+    }
+    if not is_time_reversal:
+        return unitary_builder(
+            subspace_sg_number=int(sg_number), **kwargs
+        ), False
+    time_reversal = bundle.get("time_reversal", {})
+    grey_bns = (
+        time_reversal.get("grey_bns_number")
+        if isinstance(time_reversal, dict) else None
+    )
+    if not isinstance(grey_bns, str) or not grey_bns:
+        raise ValueError("valley-orbit bundle has no reviewed grey BNS number")
+    return time_reversal_builder(
+        unitary_space_group_number=int(sg_number),
+        grey_bns_number=grey_bns,
+        **kwargs,
+    ), True
+
+
+def _auto_table_input(table: dict, is_time_reversal: bool) -> dict:
+    provenance = (
+        table.get("provenance", {})
+        if isinstance(table.get("provenance"), dict) else {}
+    )
+    table_irreps = table.get("irreps", [])
+    basis_count = len(table_irreps) if isinstance(table_irreps, list) else 0
+    result = {
+        "source": (
+            "auto_time_reversal_grey"
+            if is_time_reversal else "auto_canonical"
+        ),
+        "subspace_group_candidate": table.get(
+            "subspace_group_candidate", ""
+        ),
+        "space_group_number": provenance.get("space_group_number"),
+        "spinful": provenance.get("spinful"),
+        "data_source": provenance.get("data_source", ""),
+        "package": provenance.get("package", ""),
+        "package_version": provenance.get("package_version", ""),
+        "expected_hsps": list(table.get("expected_hsps", [])),
+        "valleyscope_reduction": provenance.get("valleyscope_reduction", ""),
+        "source_basis_count": provenance.get("source_basis_count", basis_count),
+        "reduction_basis_count": provenance.get(
+            "reduction_basis_count", basis_count
+        ),
+    }
+    if is_time_reversal:
+        result["time_reversal_grey_bns_number"] = provenance.get(
+            "time_reversal_grey_bns_number"
+        )
+        result["time_reversal_source"] = provenance.get(
+            "time_reversal_source"
+        )
+    if provenance.get("dropped_source_rows"):
+        result["dropped_source_rows"] = provenance["dropped_source_rows"]
+        result["dropped_source_row_count"] = provenance.get(
+            "dropped_source_row_count",
+            len(provenance["dropped_source_rows"]),
+        )
     return result
 
 
@@ -2199,11 +2385,6 @@ def _build_per_kpoint_provenance(bundle: dict) -> dict[str, object] | None:
     return {"irrep_source_provenance_by_kpoint": by_kpoint}
 
 
-def _extract_bundle_irrep_provenance(bundle: dict) -> dict[str, object] | None:
-    """Legacy single-record extractor — use _build_per_kpoint_provenance."""
-    return _build_per_kpoint_provenance(bundle)
-
-
 def _per_kpoint_prov(bundle: dict) -> dict[str, object] | None:
     """Shorthand: return per-kpoint provenance dict if available."""
     result = _build_per_kpoint_provenance(bundle)
@@ -2213,9 +2394,8 @@ def _per_kpoint_prov(bundle: dict) -> dict[str, object] | None:
 def _status(status: str, reason: str,
             reduced_ebr_input: dict | None = None) -> dict:
     result: dict = {
+        "schema_version": _OUTPUT_SCHEMA_VERSION,
         "status": status,
-        "mapping_status": status,
-        "reduced_ebr_decomposition_status": status,
         "table_status": "not_applicable",
         "solutions": [],
         "excluded_bundles": [],
@@ -2225,3 +2405,26 @@ def _status(status: str, reason: str,
     if reduced_ebr_input is not None:
         result["reduced_ebr_input"] = dict(reduced_ebr_input)
     return result
+
+
+def _aggregate_mapping_status(
+    *,
+    solutions: list[dict],
+    excluded: list[dict],
+    input_count: int,
+) -> str:
+    """Aggregate one final status without losing blocked or indeterminate rows."""
+    if input_count == 0:
+        return "not_evaluated"
+    if excluded:
+        return "partial" if solutions else "blocked"
+    statuses = {str(solution.get("status", "")) for solution in solutions}
+    if not statuses:
+        return "not_evaluated"
+    if statuses == {"solved_exact"}:
+        return "solved_exact"
+    if statuses == {"no_exact_solution"}:
+        return "no_exact_solution"
+    if statuses == {"indeterminate_truncated"}:
+        return "indeterminate_truncated"
+    return "partial"

@@ -354,11 +354,10 @@ def test_write_analysis_outputs_plumbs_hsp_star_reports_to_summary(tmp_path):
         "instances": [{"instance_id": "ebr_instance_001"}],
     }
     ebr_export_bundle = {
-        "status": "ready_for_external_solver",
-        "schema_version": "1.1.0",
+        "status": "ready_for_reduced_table_validation",
+        "schema_version": "1.5.0",
         "bundle_count": 1,
         "excluded_count": 0,
-        "reduced_ebr_decomposition_status": "not_implemented",
         "bundles": [
             {
                 "bundle_id": "bundle_ebr_instance_001",
@@ -368,7 +367,7 @@ def test_write_analysis_outputs_plumbs_hsp_star_reports_to_summary(tmp_path):
                 "expected_hsps": ["GammaM", "KM"],
                 "optional_hsps": ["MM"],
                 "missing_optional_hsps": ["MM"],
-                "ready_for_external_solver": True,
+                "ready_for_reduced_table_validation": True,
             },
         ],
         "excluded_instances": [],
@@ -895,7 +894,7 @@ def test_generic_irrep_source_blocked_negative_toy_fixture(tmp_path):
     assert blocked[0]["matching_strategy"] == "bilbao_restricted_character"
     assert summary["valley_ebr_input_candidates"]["status"] == "no_candidates"
     assert summary["valley_ebr_input_candidates"]["candidate_count"] == 0
-    assert summary["valley_ebr_problem_instances"]["status"] == "no_instances"
+    assert summary["valley_ebr_problem_instances"]["status"] == "no_canonical_hsp_vectors"
     assert summary["valley_ebr_export_bundle"]["status"] == "no_bundles"
     assert not (out_dir / "valley_reduced_ebr_mapping.json").exists()
 
@@ -1152,20 +1151,19 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     assert summary["valley_ebr_input_candidates"]["candidate_count"] == 2
     assert summary["valley_ebr_problem_instances"]["instance_count"] == 1
     inst = summary["valley_ebr_problem_instances"]["instances"][0]
-    assert inst["ready_for_reduced_table_validation"] is False
-    assert inst["ready_for_ebr_decomposition"] is False
+    assert inst["canonical_hsp_vector_complete"] is False
     assert inst["subspace_group_candidate"] == "P2"
     assert inst["expected_hsps"] == ["GammaM"]
     assert inst["required_source_hsp_labels"] == ["GM", "A", "B", "Y"]
     assert inst["covered_source_hsp_labels"] == ["GM"]
     assert inst["missing_source_hsp_labels"] == ["A", "B", "Y"]
-    assert inst["hsp_basis_status"] == "incomplete_source_hsp_coverage"
+    assert inst["status"] == "incomplete_canonical_hsp_vector"
     assert summary["valley_ebr_export_bundle"]["bundle_count"] == 0
     assert summary["valley_ebr_export_bundle"]["excluded_count"] == 1
     result = summary["valley_reduced_ebr_mapping"]
     # Workflow bundles carry an unresolved standard-setting certificate
     # (Phase E incomplete), so promotion is fail-closed: not_evaluated.
-    assert result["mapping_status"] == "not_evaluated"
+    assert result["status"] == "not_evaluated"
     assert result["solutions"] == []
     record = load_database_ingestion_record_from_directory(str(out_dir))
     assert record["record_status"] == "no_ready_ebr_bundles"
@@ -1179,10 +1177,10 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
         bad_outputs["valley_summary_json"].read_text(encoding="utf-8")
     )
     bad_mapping = bad_summary["valley_reduced_ebr_mapping"]
-    assert bad_mapping["mapping_status"] == "not_evaluated"
+    assert bad_mapping["status"] == "not_evaluated"
     assert bad_mapping["solutions"] == []
     bad_instance = bad_summary["valley_ebr_problem_instances"]["instances"][0]
-    assert bad_instance["hsp_basis_status"] == "incomplete_source_hsp_coverage"
+    assert bad_instance["status"] == "incomplete_canonical_hsp_vector"
 
 
 def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
@@ -1503,10 +1501,10 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
     # --- Equivalence assertions ---
     # Both paths use auto-canonical first; external-table fallback may differ
     # if one path's table lacks provenance.
-    assert mapping_spec["mapping_status"] == "not_evaluated"
-    assert mapping_table["mapping_status"] == "not_evaluated"
+    assert mapping_spec["status"] == "blocked"
+    assert mapping_table["status"] == "blocked"
     # Solutions and excluded must agree when statuses agree.
-    if mapping_spec["mapping_status"] == mapping_table["mapping_status"]:
+    if mapping_spec["status"] == mapping_table["status"]:
         assert mapping_spec["solutions"] == mapping_table["solutions"]
         # The two independent table sources block the same bundles; the
         # fail-closed validator's per-source diagnostic detail may differ, so
@@ -1530,7 +1528,7 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
     del mapping_spec_stripped["reduced_ebr_input"]
     # Both stripped dicts must be valid states.
     for ms in (mapping_spec_stripped, mapping_table_stripped):
-        assert ms["mapping_status"] == "not_evaluated"
+        assert ms["status"] == "blocked"
 
     # Ingestion records also equivalent modulo reduced_ebr_input.
     rec_table = load_database_ingestion_record_from_directory(str(out_table))
@@ -1544,8 +1542,8 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
     # Summary embeddings agree on status and key fields.
     summary_emb_table = dict(summary_table["valley_reduced_ebr_mapping"])
     summary_emb_spec = dict(summary_spec["valley_reduced_ebr_mapping"])
-    assert summary_emb_spec["mapping_status"] == "not_evaluated"
-    assert summary_emb_table["mapping_status"] == "not_evaluated"
+    assert summary_emb_spec["status"] == "blocked"
+    assert summary_emb_table["status"] == "blocked"
 
 
 # -----------------------------------------------------------------------
@@ -2032,10 +2030,29 @@ def test_unmock_generic_source_adapter_positive_full_pipeline():
     ]
 
     # 3. Problem instances.
-    instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
+    instances = build_ebr_problem_instances(
+        ebr_input_candidates=candidates,
+        projected_hsp_coverage={
+            "by_valley": {
+                "K_valley": {
+                    "required_source_hsp_labels": ["K"],
+                    "covered_source_hsp_labels": ["K"],
+                    "missing_source_hsp_labels": [],
+                    "trusted_matched_source_hsp_labels": ["K"],
+                    "trusted_missing_source_hsp_labels": [],
+                    "source_hsp_to_sampled_kpoint": {"K": "GammaM"},
+                    "complete": True,
+                    "ready_for_ebr_promotion": True,
+                    "source_basis_provenance": {
+                        "data_source": "irreptables"
+                    },
+                }
+            }
+        },
+    )
     assert instances["instance_count"] == 1
     inst = instances["instances"][0]
-    assert inst["ready_for_reduced_table_validation"] is True; assert inst["ready_for_ebr_decomposition"] is False
+    assert inst["canonical_hsp_vector_complete"] is True
     assert inst["subspace_group_candidate"] == "P3"
     # removed
 
@@ -2043,7 +2060,7 @@ def test_unmock_generic_source_adapter_positive_full_pipeline():
     ebr_bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
     assert ebr_bundle["bundle_count"] == 1
     b = ebr_bundle["bundles"][0]
-    assert b["ready_for_external_solver"] is False  # sampled_basis
+    assert b["ready_for_reduced_table_validation"] is True
 
     # 5. Reduced EBR mapping.
     bp_irreps = b["irreps_by_kpoint"]["GammaM"]
@@ -2058,7 +2075,7 @@ def test_unmock_generic_source_adapter_positive_full_pipeline():
     # (Phase E incomplete), so fail-closed promotion blocks.  No fictitious
     # certificate is injected; this documents the exact remaining blocker.
     result = build_reduced_ebr_mapping(ebr_export_bundle=ebr_bundle, table=table_def)
-    assert result["mapping_status"] == "not_evaluated"
+    assert result["status"] == "blocked"
     assert result["solutions"] == []
     excl_codes = {c["code"]
                   for c in result["excluded_bundles"][0]["blocker_reasons"]}
@@ -2073,7 +2090,7 @@ def test_unmock_generic_source_adapter_positive_full_pipeline():
     )
     assert record["record_status"] == "no_ready_ebr_bundles"
     assert record["ready_bundle_count"] == 0
-    assert record["reduced_ebr_mapping_status"] == "not_evaluated"
+    assert record["reduced_ebr_mapping_status"] == "blocked"
 
 
 def test_spinful_p3_analyze_hsp_unmocked_feasibility(tmp_path):

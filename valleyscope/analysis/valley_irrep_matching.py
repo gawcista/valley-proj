@@ -31,7 +31,6 @@ def build_valley_irrep_matching_report(
     *,
     irrep_workflow_decisions: dict[str, object] | None,
     symmetry_adapted_valley_report: dict[str, object] | None,
-    allow_caution: bool = False,
     source_operation_maps: (
         Mapping[str, Mapping[str, Mapping[int, int]]] | None
     ) = None,

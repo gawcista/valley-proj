@@ -3,15 +3,8 @@
 Groups trusted candidate irreps into per-valley/per-subspace-group EBR
 problem instances with a certificate-aware physical identity key.
 
-State model
------------
-1. ``sampled_basis`` — trusted irrep rows collected on a sampled HSP basis.
-   ``ready_for_reduced_table_validation`` = true, ``ready_for_ebr_decomposition`` = false.
-2. ``table_validated`` — HSP basis validated against a reviewed
-   irreptables-derived reduced table (requires external table; not yet wired).
-3. ``validated_basis`` — basis and certificate confirmed; instance is ready
-   for exact reduced EBR decomposition.
-4. Solve attempted/completed (downstream in ``reduced_ebr_mapping.py``).
+This stage owns only construction of a complete canonical source-HSP vector.
+Reviewed-table validation and exact reduced EBR outcomes are downstream.
 
 Does NOT implement reduced EBR decomposition, EBR table matching,
 compatibility relations, or new physics.
@@ -191,19 +184,38 @@ def build_ebr_problem_instances(
                 expected_hsps = [str(label) for label in mapped_expected]
 
         has_hsps = bool(actual_hsps)
-        # State 1 (sampled_basis): trusted irrep rows collected, not yet
-        # validated against a reviewed reduced table.
-        if has_hsps and coverage_present and not coverage_ready:
-            hsp_basis_status = "incomplete_source_hsp_coverage"
-            status = "incomplete_source_hsp_coverage"
-        else:
-            hsp_basis_status = "sampled_basis" if has_hsps else "no_data"
-            status = "sampled_basis" if has_hsps else "no_data"
-        ready_for_validation = has_hsps and coverage_ready
-        blocked_by = []
+        canonical_hsp_vector_complete = (
+            has_hsps
+            and coverage_present
+            and coverage_complete
+            and coverage_ready
+            and bool(required_source_hsps)
+            and len(source_to_sampled) == len(required_source_hsps)
+            and actual_hsps == sorted(expected_hsps)
+        )
+        status = (
+            "canonical_hsp_vector_ready"
+            if canonical_hsp_vector_complete
+            else "incomplete_canonical_hsp_vector"
+        )
+        blocked_by: list[str] = []
+        if not coverage_present:
+            blocked_by.append("projected_hsp_coverage_missing")
+        elif not coverage_complete:
+            blocked_by.append("source_hsp_coverage_incomplete")
+        elif not coverage_ready:
+            blocked_by.append(
+                "source_hsp_coverage_not_ready_for_ebr_promotion"
+            )
         if coverage_present and trusted_missing_source_hsps:
             blocked_by.append(
                 f"missing trusted source HSPs: {trusted_missing_source_hsps}"
+            )
+        if has_hsps and actual_hsps != sorted(expected_hsps):
+            blocked_by.append(
+                "canonical sampled HSP basis does not match certified "
+                f"source-HSP mapping: actual={actual_hsps}, "
+                f"expected={sorted(expected_hsps)}"
             )
 
         instances.append({
@@ -228,12 +240,10 @@ def build_ebr_problem_instances(
             },
             "candidate_count": len(cands),
             "status": status,
-            "ready_for_reduced_table_validation": ready_for_validation,
-            "ready_for_ebr_decomposition": False,
+            "canonical_hsp_vector_complete": canonical_hsp_vector_complete,
             "blocked_by": blocked_by,
             "expected_hsps": expected_hsps,
-            "expected_hsp_policy_source": "sampled_irrep_basis",
-            "hsp_basis_status": hsp_basis_status,
+            "expected_hsp_policy_source": "certified_source_hsp_basis",
             "optional_hsps": optional_hsps,
             "actual_hsps": actual_hsps,
             "missing_optional_hsps": [],
@@ -249,20 +259,14 @@ def build_ebr_problem_instances(
             ),
         })
 
-    overall_status = "has_instances" if instances else "no_instances"
+    overall_status = _problem_report_status(instances)
     return {
         "status": overall_status,
         "instance_count": len(instances),
-        "reduced_ebr_decomposition_status": "not_implemented",
         "interpretation": (
-            "Per-valley/per-subspace-group EBR problem instances grouped from "
-            "trusted input candidates by certificate-aware (SG number, SG symbol, "
-            "Hall number, certificate validation status, valley) identity.  "
-            "State 1 (sampled_basis): irrep rows collected on a sampled HSP basis, "
-            "ready_for_reduced_table_validation=true, "
-            "ready_for_ebr_decomposition=false.  Promotion to state 2 "
-            "(table_validated) and state 3 (validated_basis) requires a reviewed "
-            "irreptables-derived reduced table."
+            "Per-valley/per-subspace-group canonical source-HSP vectors "
+            "grouped from trusted input candidates by certificate-aware "
+            "physical identity. Reviewed-table validation is downstream."
         ),
         "instances": instances,
     }
@@ -368,15 +372,16 @@ def _build_time_reversal_problem_instances(
             "operations_by_kpoint": {},
             "irrep_records_by_kpoint": {},
             "candidate_count": len(component_candidates),
-            "status": "sampled_basis" if validated else "blocked",
-            "ready_for_reduced_table_validation": validated,
-            "ready_for_ebr_decomposition": False,
+            "status": (
+                "canonical_hsp_vector_ready"
+                if validated else "incomplete_canonical_hsp_vector"
+            ),
+            "canonical_hsp_vector_complete": validated,
             "blocked_by": _deduplicate_strings(blockers),
             "expected_hsps": list(expected_hsps),
             "expected_hsp_policy_source": (
                 "validated_time_reversal_hsp_orbits"
             ),
-            "hsp_basis_status": "sampled_basis" if validated else "blocked",
             "optional_hsps": [],
             "actual_hsps": list(irreps_by_kpoint),
             "missing_optional_hsps": [],
@@ -439,9 +444,8 @@ def _build_time_reversal_problem_instances(
             },
         })
     return {
-        "status": "has_instances" if instances else "no_instances",
+        "status": _problem_report_status(instances),
         "instance_count": len(instances),
-        "reduced_ebr_decomposition_status": "not_implemented",
         "interpretation": (
             "Joint time-reversal valley-orbit EBR problem instances. "
             "Valley-resolved unitary irreps remain identifiable as components; "
@@ -457,6 +461,18 @@ def _deduplicate_strings(values: list[str]) -> list[str]:
         if value not in out:
             out.append(value)
     return out
+
+
+def _problem_report_status(instances: list[dict[str, object]]) -> str:
+    complete = sum(
+        instance.get("canonical_hsp_vector_complete") is True
+        for instance in instances
+    )
+    if not instances or complete == 0:
+        return "no_canonical_hsp_vectors"
+    if complete == len(instances):
+        return "canonical_hsp_vectors_ready"
+    return "partial_canonical_hsp_vectors"
 
 
 def _string_list(value: object) -> list[str]:
@@ -493,17 +509,10 @@ def _positive_multiplicity(value: object) -> int:
     return 1
 
 
-def _int_or_zero(value: object) -> int:
-    if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    return 0
-
-
 def _empty_report(reason: str) -> dict[str, object]:
     return {
-        "status": "no_instances",
+        "status": "no_canonical_hsp_vectors",
         "instance_count": 0,
-        "reduced_ebr_decomposition_status": "not_implemented",
         "interpretation": reason,
         "instances": [],
     }

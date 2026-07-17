@@ -89,12 +89,10 @@ def test_reduced_ebr_enabled_without_input_marks_not_provided(tmp_path):
     mapping = json.loads(
         outputs["valley_reduced_ebr_mapping_json"].read_text(encoding="utf-8")
     )
-    assert mapping["status"] == "missing_table"
-    assert mapping["table_status"] == "not_provided"
+    assert mapping["status"] == "not_evaluated"
+    assert mapping["table_status"] == "not_applicable"
     # Auto-canonical is attempted; falls back gracefully when no bundles.
-    assert mapping["reduced_ebr_input"]["source"] in (
-        "auto_canonical_blocked", "not_provided",
-    )
+    assert mapping["reduced_ebr_input"]["source"] == "auto_canonical"
 
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     assert summary["valley_reduced_ebr_mapping"] == mapping
@@ -105,9 +103,8 @@ def test_summary_text_surfaces_atomic_nonnegative_outside_classification():
     from valleyscope.io.config import load_config
 
     mapping = {
+        "schema_version": "1.5.0",
         "status": "no_exact_solution",
-        "mapping_status": "no_exact_solution",
-        "reduced_ebr_decomposition_status": "no_exact_solution",
         "table_status": "loaded",
         "solutions": [
             {"bundle_id": "b_atom", "valley": "K", "status": "solved_exact",
@@ -172,9 +169,8 @@ def test_summary_text_truncated_search_surfaced():
     from valleyscope.io.config import load_config
 
     mapping = {
+        "schema_version": "1.5.0",
         "status": "no_exact_solution",
-        "mapping_status": "no_exact_solution",
-        "reduced_ebr_decomposition_status": "no_exact_solution",
         "table_status": "loaded",
         "solutions": [{
             "bundle_id": "b_001", "valley": "K", "status": "no_exact_solution",
@@ -251,7 +247,7 @@ def test_reduced_ebr_classifier_payload_written_consistently_to_public_outputs(t
                 "bundle_id": "b_atom",
                 "valley": "K",
                 "subspace_group_candidate": "P3",
-                "ready_for_external_solver": True,
+                "ready_for_reduced_table_validation": True,
                 "expected_hsps": ["GammaM"],
                 "irreps_by_kpoint": {"GammaM": ["irrep_A", "irrep_A", "irrep_B"]},
             },
@@ -259,7 +255,7 @@ def test_reduced_ebr_classifier_payload_written_consistently_to_public_outputs(t
                 "bundle_id": "b_frag",
                 "valley": "K",
                 "subspace_group_candidate": "P3",
-                "ready_for_external_solver": True,
+                "ready_for_reduced_table_validation": True,
                 "expected_hsps": ["GammaM"],
                 "irreps_by_kpoint": {"GammaM": ["irrep_B"]},
             },
@@ -267,7 +263,7 @@ def test_reduced_ebr_classifier_payload_written_consistently_to_public_outputs(t
                 "bundle_id": "b_stab",
                 "valley": "K",
                 "subspace_group_candidate": "P3",
-                "ready_for_external_solver": True,
+                "ready_for_reduced_table_validation": True,
                 "expected_hsps": ["GammaM"],
                 "irreps_by_kpoint": {"GammaM": ["irrep_C"]},
             },
@@ -409,15 +405,35 @@ def test_provenance_survives_through_output_writer_to_export_bundle(tmp_path):
     assert candidates["candidate_count"] == 2
     assert candidates["blocked_count"] == 1
 
-    instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
+    instances = build_ebr_problem_instances(
+        ebr_input_candidates=candidates,
+        projected_hsp_coverage={
+            "by_valley": {
+                "K_valley": {
+                    "required_source_hsp_labels": ["GM", "K"],
+                    "covered_source_hsp_labels": ["GM", "K"],
+                    "missing_source_hsp_labels": [],
+                    "trusted_matched_source_hsp_labels": ["GM", "K"],
+                    "trusted_missing_source_hsp_labels": [],
+                    "source_hsp_to_sampled_kpoint": {
+                        "GM": "GammaM", "K": "KM"
+                    },
+                    "complete": True,
+                    "ready_for_ebr_promotion": True,
+                    "source_basis_provenance": {
+                        "data_source": "irreptables"
+                    },
+                }
+            }
+        },
+    )
     assert instances["instance_count"] == 1
     inst = instances["instances"][0]
-    assert inst["ready_for_reduced_table_validation"] is True
-    assert inst["ready_for_ebr_decomposition"] is False
+    assert inst["canonical_hsp_vector_complete"] is True
 
     export_bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
     assert export_bundle["bundle_count"] == 1
-    assert export_bundle["bundles"][0]["ready_for_external_solver"] is False
+    assert export_bundle["bundles"][0]["ready_for_reduced_table_validation"] is True
 
     # Write through the output writer.
     h5_path = tmp_path / "wf.h5"

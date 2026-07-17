@@ -61,31 +61,51 @@ def _make_c3_preserving_candidates():
     }
 
 
+def _complete_coverage(*, valley="K_valley", mapping=None):
+    mapping = mapping or {"GM": "GammaM", "K": "KM"}
+    required = list(mapping)
+    return {
+        "by_valley": {
+            valley: {
+                "required_source_hsp_labels": required,
+                "covered_source_hsp_labels": required,
+                "missing_source_hsp_labels": [],
+                "trusted_matched_source_hsp_labels": required,
+                "trusted_missing_source_hsp_labels": [],
+                "source_hsp_to_sampled_kpoint": dict(mapping),
+                "complete": True,
+                "ready_for_ebr_promotion": True,
+                "source_basis_provenance": {"data_source": "irreptables"},
+            }
+        }
+    }
+
+
 # -----------------------------------------------------------------------
-# 1. State-1 (sampled_basis): status + gate assertions
+# 1. Complete canonical HSP vector
 # -----------------------------------------------------------------------
 
-def test_candidates_group_into_sampled_basis_instance():
-    """State 1: sampled_basis, ready_for_reduced_table_validation=true,
-    ready_for_ebr_decomposition=false."""
+def test_candidates_group_into_canonical_hsp_vector():
     r = build_ebr_problem_instances(
         ebr_input_candidates=_make_c3_preserving_candidates(),
+        projected_hsp_coverage=_complete_coverage(),
     )
-    assert r["status"] == "has_instances"
+    assert r["status"] == "canonical_hsp_vectors_ready"
     assert r["instance_count"] == 1
     inst = r["instances"][0]
     assert inst["subspace_group_candidate"] == "P3"
     assert inst["subspace_space_group"]["candidate_space_group_symbol"] == "P3"
     assert inst["valley"] == "K_valley"
     # State 1: sampled basis, not ready for decomposition.
-    assert inst["status"] == "sampled_basis"
-    assert inst["hsp_basis_status"] == "sampled_basis"
-    assert inst["ready_for_reduced_table_validation"] is True
-    assert inst["ready_for_ebr_decomposition"] is False
+    assert inst["status"] == "canonical_hsp_vector_ready"
+    assert inst["canonical_hsp_vector_complete"] is True
+    assert "hsp_basis_status" not in inst
+    assert "ready_for_reduced_table_validation" not in inst
+    assert "ready_for_ebr_decomposition" not in inst
     assert "GammaM" in inst["irreps_by_kpoint"]
     assert "KM" in inst["irreps_by_kpoint"]
     assert inst["expected_hsps"] == ["GammaM", "KM"]
-    assert inst["expected_hsp_policy_source"] == "sampled_irrep_basis"
+    assert inst["expected_hsp_policy_source"] == "certified_source_hsp_basis"
     assert inst["optional_hsps"] == []
     assert inst["missing_optional_hsps"] == []
     assert "certificate_identity" in inst
@@ -95,8 +115,7 @@ def test_candidates_group_into_sampled_basis_instance():
 # 2. Partial HSP data
 # -----------------------------------------------------------------------
 
-def test_partial_hsp_sampled_basis_state():
-    """Single-HSP instance is state 1 (sampled_basis), not complete."""
+def test_single_hsp_without_certified_coverage_is_incomplete():
     cands = {
         "candidates": [
             {
@@ -117,13 +136,38 @@ def test_partial_hsp_sampled_basis_state():
     r = build_ebr_problem_instances(ebr_input_candidates=cands)
     assert r["instance_count"] == 1
     inst = r["instances"][0]
-    assert inst["status"] == "sampled_basis"
-    assert inst["ready_for_ebr_decomposition"] is False
-    assert inst["ready_for_reduced_table_validation"] is True
+    assert inst["status"] == "incomplete_canonical_hsp_vector"
+    assert inst["canonical_hsp_vector_complete"] is False
     assert inst["expected_hsps"] == ["GammaM"]
-    assert inst["expected_hsp_policy_source"] == "sampled_irrep_basis"
-    assert inst["hsp_basis_status"] == "sampled_basis"
+    assert inst["expected_hsp_policy_source"] == "certified_source_hsp_basis"
+    assert "projected_hsp_coverage_missing" in inst["blocked_by"]
     assert inst["subspace_sg_number"] == 143
+
+
+def test_missing_coverage_fails_closed_for_canonical_vector():
+    r = build_ebr_problem_instances(
+        ebr_input_candidates=_make_c3_preserving_candidates(),
+    )
+
+    inst = r["instances"][0]
+    assert inst["status"] == "incomplete_canonical_hsp_vector"
+    assert inst["canonical_hsp_vector_complete"] is False
+    assert "projected_hsp_coverage_missing" in inst["blocked_by"]
+
+
+def test_complete_but_untrusted_coverage_has_explicit_blocker():
+    coverage = _complete_coverage()
+    coverage["by_valley"]["K_valley"]["ready_for_ebr_promotion"] = False
+    r = build_ebr_problem_instances(
+        ebr_input_candidates=_make_c3_preserving_candidates(),
+        projected_hsp_coverage=coverage,
+    )
+
+    inst = r["instances"][0]
+    assert inst["canonical_hsp_vector_complete"] is False
+    assert "source_hsp_coverage_not_ready_for_ebr_promotion" in (
+        inst["blocked_by"]
+    )
 
 
 # -----------------------------------------------------------------------
@@ -150,15 +194,14 @@ def test_blocked_rows_excluded():
     }
     r = build_ebr_problem_instances(ebr_input_candidates=cands)
     assert r["instance_count"] == 0
-    assert r["status"] == "no_instances"
+    assert r["status"] == "no_canonical_hsp_vectors"
 
 
 # -----------------------------------------------------------------------
 # 4. P2 sampled-basis
 # -----------------------------------------------------------------------
 
-def test_p2_valley_preserving_sampled_basis():
-    """P2 valley-preserving data is state 1 (sampled_basis)."""
+def test_p2_valley_preserving_canonical_vector():
     cands = {
         "candidates": [
             {
@@ -177,14 +220,17 @@ def test_p2_valley_preserving_sampled_basis():
             },
         ],
     }
-    r = build_ebr_problem_instances(ebr_input_candidates=cands)
+    r = build_ebr_problem_instances(
+        ebr_input_candidates=cands,
+        projected_hsp_coverage=_complete_coverage(
+            valley="M1_valley", mapping={"GM": "GammaM"}
+        ),
+    )
     assert r["instance_count"] == 1
     inst = r["instances"][0]
-    assert inst["status"] == "sampled_basis"
-    assert inst["ready_for_ebr_decomposition"] is False
-    assert inst["ready_for_reduced_table_validation"] is True
+    assert inst["status"] == "canonical_hsp_vector_ready"
+    assert inst["canonical_hsp_vector_complete"] is True
     assert inst["expected_hsps"] == ["GammaM"]
-    assert inst["hsp_basis_status"] == "sampled_basis"
 
 
 # -----------------------------------------------------------------------
@@ -193,7 +239,7 @@ def test_p2_valley_preserving_sampled_basis():
 
 def test_null_input():
     r = build_ebr_problem_instances(ebr_input_candidates=None)
-    assert r["status"] == "no_instances"
+    assert r["status"] == "no_canonical_hsp_vectors"
     assert r["instance_count"] == 0
 
 
@@ -201,7 +247,7 @@ def test_empty_candidates():
     r = build_ebr_problem_instances(
         ebr_input_candidates={"status": "no_candidates", "candidates": []},
     )
-    assert r["status"] == "no_instances"
+    assert r["status"] == "no_canonical_hsp_vectors"
 
 
 # -----------------------------------------------------------------------
@@ -224,6 +270,7 @@ def test_json_serializable():
 def test_schema_fields():
     r = build_ebr_problem_instances(
         ebr_input_candidates=_make_c3_preserving_candidates(),
+        projected_hsp_coverage=_complete_coverage(),
     )
     inst = r["instances"][0]
     for key in ["instance_id", "valley", "subspace_group_candidate",
@@ -232,14 +279,13 @@ def test_schema_fields():
                 "readiness_level", "readiness_evidence",
                 "irreps_by_kpoint", "operations_by_kpoint",
                 "candidate_count", "status",
-                "ready_for_ebr_decomposition",
-                "ready_for_reduced_table_validation",
+                "canonical_hsp_vector_complete",
                 "certificate_identity",
                 "blocked_by",
                 "expected_hsps", "optional_hsps", "actual_hsps",
-                "missing_optional_hsps", "hsp_basis_status"]:
+                "missing_optional_hsps"]:
         assert key in inst, f"missing key: {key}"
-    assert r["reduced_ebr_decomposition_status"] == "not_implemented"
+    assert "reduced_ebr_decomposition_status" not in r
 
 
 # -----------------------------------------------------------------------
@@ -291,7 +337,10 @@ def test_multiple_valleys():
             },
         ],
     }
-    r = build_ebr_problem_instances(ebr_input_candidates=cands)
+    r = build_ebr_problem_instances(
+        ebr_input_candidates=cands,
+        projected_hsp_coverage=_complete_coverage(),
+    )
     assert r["instance_count"] == 2
     valleys = {inst["valley"] for inst in r["instances"]}
     assert valleys == {"K_valley", "Kp_valley"}
@@ -381,12 +430,14 @@ def test_generic_multiplicity_records_expand_irrep_counts():
             },
         ],
     }
-    r = build_ebr_problem_instances(ebr_input_candidates=cands)
+    r = build_ebr_problem_instances(
+        ebr_input_candidates=cands,
+        projected_hsp_coverage=_complete_coverage(),
+    )
     assert r["instance_count"] == 1
     inst = r["instances"][0]
-    assert inst["status"] == "sampled_basis"
-    assert inst["ready_for_reduced_table_validation"] is True
-    assert inst["ready_for_ebr_decomposition"] is False
+    assert inst["status"] == "canonical_hsp_vector_ready"
+    assert inst["canonical_hsp_vector_complete"] is True
     assert inst["irreps_by_kpoint"]["GammaM"] == ["-GM6_a", "-GM6_a"]
     assert inst["irreps_by_kpoint"]["KM"] == ["-K5"]
     rec = inst["irrep_records_by_kpoint"]["GammaM"][0]
@@ -418,23 +469,27 @@ def test_identity_only_hsp_preserved_not_dropped():
             },
         ],
     }
-    r = build_ebr_problem_instances(ebr_input_candidates=cands)
+    r = build_ebr_problem_instances(
+        ebr_input_candidates=cands,
+        projected_hsp_coverage=_complete_coverage(
+            mapping={"M": "MM"}
+        ),
+    )
     assert r["instance_count"] == 1
     inst = r["instances"][0]
-    assert inst["status"] == "sampled_basis"
+    assert inst["status"] == "canonical_hsp_vector_ready"
     assert "MM" in inst["actual_hsps"]
     assert "MM" in inst["expected_hsps"]
-    assert inst["hsp_basis_status"] == "sampled_basis"
+    assert inst["canonical_hsp_vector_complete"] is True
 
 
-def test_hsp_basis_status_is_sampled_basis():
-    """All instances built from sampled candidates have hsp_basis_status=sampled_basis."""
+def test_obsolete_hsp_basis_status_is_absent():
     r = build_ebr_problem_instances(
         ebr_input_candidates=_make_c3_preserving_candidates(),
     )
     inst = r["instances"][0]
-    assert inst["hsp_basis_status"] == "sampled_basis"
-    assert inst["expected_hsp_policy_source"] == "sampled_irrep_basis"
+    assert "hsp_basis_status" not in inst
+    assert inst["expected_hsp_policy_source"] == "certified_source_hsp_basis"
 
 
 def test_aggregate_workflow_provenance():

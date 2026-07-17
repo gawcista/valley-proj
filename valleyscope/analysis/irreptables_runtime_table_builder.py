@@ -26,8 +26,8 @@ from valleyscope.analysis.irrep_runtime_reducer import (
 
 def build_reduced_table_from_irreptables(
     *,
-    space_group_number: int | str | None = None,
-    spinful: bool | None = None,
+    space_group_number: int | str,
+    spinful: bool,
     source_hsp_by_irrep: Mapping[str, str],
     valleyscope_key_by_source_irrep: Mapping[str, str] | None = None,
     valleyscope_irrep_multiplicity_by_source_irrep: (
@@ -39,23 +39,16 @@ def build_reduced_table_from_irreptables(
     source_loader: Callable[[int | str, bool], Mapping[str, object]] | None = None,
     provenance: Mapping[str, object] | None = None,
     subspace_space_group: Mapping[str, object] | None = None,
-    sg_number: int | str | None = None,
-    spinor: bool | None = None,
-    provenance_extra: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     """Build a reduced external table from public ``irreptables`` EBR data.
-
-    ``sg_number`` / ``spinor`` and ``provenance_extra`` are accepted as legacy
-    aliases for the first implementation pass.  New callers should use
-    ``space_group_number``, ``spinful``, and ``provenance``.
 
     ``valleyscope_irrep_multiplicity_by_source_irrep`` accepts the new
     multiplicity-aware mapping alongside the legacy one-to-one
     ``valleyscope_key_by_source_irrep``.  Only one of the two may be
     provided.
     """
-    resolved_sg = _resolve_space_group_number(space_group_number, sg_number)
-    resolved_spinful = _resolve_spinful(spinful, spinor)
+    resolved_sg = _resolve_space_group_number(space_group_number)
+    resolved_spinful = _resolve_spinful(spinful)
     loader = source_loader or _load_ebr_data_from_irreptables
 
     try:
@@ -75,7 +68,6 @@ def build_reduced_table_from_irreptables(
         expected_hsps=expected_hsps,
         subspace_group_candidate=subspace_group_candidate,
         provenance=provenance,
-        provenance_extra=provenance_extra,
     )
     source_payload = build_runtime_source_payload_from_ebr_data(
         ebr_data=ebr_data,
@@ -107,30 +99,21 @@ def _load_ebr_data_from_irreptables(
 
 
 def _resolve_space_group_number(
-    space_group_number: int | str | None,
-    sg_number: int | str | None,
+    space_group_number: int | str,
 ) -> int | str:
-    if space_group_number is not None and sg_number is not None:
-        raise ValueError("provide only one of space_group_number or sg_number")
-    resolved = space_group_number if space_group_number is not None else sg_number
-    if resolved is None:
-        raise ValueError("space_group_number is required")
     if (
-        not isinstance(resolved, (int, str))
-        or isinstance(resolved, bool)
-        or resolved == ""
+        not isinstance(space_group_number, (int, str))
+        or isinstance(space_group_number, bool)
+        or space_group_number == ""
     ):
         raise ValueError("space_group_number must be a non-empty int or string")
-    return resolved
+    return space_group_number
 
 
-def _resolve_spinful(spinful: bool | None, spinor: bool | None) -> bool:
-    if spinful is not None and spinor is not None:
-        raise ValueError("provide only one of spinful or spinor")
-    resolved = spinful if spinful is not None else spinor
-    if not isinstance(resolved, bool):
+def _resolve_spinful(spinful: bool) -> bool:
+    if not isinstance(spinful, bool):
         raise ValueError("spinful is required and must be bool")
-    return resolved
+    return spinful
 
 
 def _builder_provenance(
@@ -140,7 +123,6 @@ def _builder_provenance(
     expected_hsps: Sequence[str],
     subspace_group_candidate: str,
     provenance: Mapping[str, object] | None,
-    provenance_extra: Mapping[str, object] | None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "data_source": "irreptables",
@@ -152,8 +134,6 @@ def _builder_provenance(
         "subspace_group_candidate": subspace_group_candidate,
         "valleyscope_reduction": "sampled_hsp_valley_preserving",
     }
-    if provenance_extra:
-        payload.update(dict(provenance_extra))
     if provenance:
         payload.update(dict(provenance))
     return payload
@@ -281,8 +261,8 @@ def _build_common(
     ),
     source_loader: Callable[[int | str, bool], Mapping[str, object]] | None = None,
 ) -> dict[str, Any]:
-    space_group_number = _resolve_space_group_number(spec["space_group_number"], None)
-    spinful = _resolve_spinful(spec["spinful"], None)
+    space_group_number = _resolve_space_group_number(spec["space_group_number"])
+    spinful = _resolve_spinful(spec["spinful"])
     subspace_group_candidate = _required_nonempty_string(spec, "subspace_group_candidate")
     provenance = _optional_mapping(spec, "provenance")
     expected_hsps = _required_string_sequence(spec, "expected_hsps")

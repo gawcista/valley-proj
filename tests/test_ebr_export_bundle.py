@@ -21,10 +21,8 @@ _SAMPLED_BASIS_INSTANCE = {
             },
             "workflow_path": "direct_qcut",
             "readiness_level": "trusted",
-            "status": "sampled_basis",
-            "hsp_basis_status": "sampled_basis",
-            "ready_for_reduced_table_validation": True,
-            "ready_for_ebr_decomposition": False,
+            "status": "canonical_hsp_vector_ready",
+            "canonical_hsp_vector_complete": True,
             "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"], "KM": ["C3_spinor_phase_+1/6"]},
             "operations_by_kpoint": {"GammaM": [1], "KM": [1]},
             "irrep_records_by_kpoint": {},
@@ -51,10 +49,8 @@ _VALIDATED_BASIS_INSTANCE = {
             },
             "workflow_path": "direct_qcut",
             "readiness_level": "trusted",
-            "status": "validated_basis",
-            "hsp_basis_status": "validated_basis",
-            "ready_for_reduced_table_validation": True,
-            "ready_for_ebr_decomposition": True,
+            "status": "canonical_hsp_vector_ready",
+            "canonical_hsp_vector_complete": True,
             "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
             "operations_by_kpoint": {"GammaM": [1]},
             "irrep_records_by_kpoint": {},
@@ -67,39 +63,22 @@ _VALIDATED_BASIS_INSTANCE = {
 
 
 # -----------------------------------------------------------------------
-# 1. Sampled-basis: exported but NOT solver-ready
+# 1. Complete canonical vector is exported for table validation
 # -----------------------------------------------------------------------
 
-def test_sampled_basis_exported_without_solver_readiness():
-    """State 1: sampled_basis instance is exported for validation,
-    ready_for_external_solver=false."""
+def test_canonical_vector_exported_for_table_validation():
     r = build_ebr_export_bundle(ebr_problem_instances=_SAMPLED_BASIS_INSTANCE)
     assert r["bundle_count"] == 1
     assert r["excluded_count"] == 0
     b = r["bundles"][0]
-    assert b["ready_for_external_solver"] is False
     assert b["ready_for_reduced_table_validation"] is True
-    assert b["hsp_basis_status"] == "sampled_basis"
+    assert "ready_for_external_solver" not in b
     assert b["subspace_group_candidate"] == "P3"
     assert b["missing_optional_hsps"] == ["MM"]
 
 
 # -----------------------------------------------------------------------
-# 2. Validated-basis: exported WITH solver readiness
-# -----------------------------------------------------------------------
-
-def test_validated_basis_exported_with_solver_readiness():
-    """State 3+: validated_basis instance is exported with ready_for_external_solver=true."""
-    r = build_ebr_export_bundle(ebr_problem_instances=_VALIDATED_BASIS_INSTANCE)
-    assert r["bundle_count"] == 1
-    b = r["bundles"][0]
-    assert b["ready_for_external_solver"] is True
-    assert b["ready_for_reduced_table_validation"] is True
-    assert b["hsp_basis_status"] == "validated_basis"
-
-
-# -----------------------------------------------------------------------
-# 3. Partial / no_data excluded
+# 2. Incomplete vectors are excluded
 # -----------------------------------------------------------------------
 
 def test_partial_instance_excluded():
@@ -110,24 +89,19 @@ def test_partial_instance_excluded():
             "subspace_group_candidate": "P3",
             "subspace_space_group": {"candidate_space_group_symbol": "P3"},
             "certificate_identity": {},
-            "status": "no_data",
-            "hsp_basis_status": "no_data",
-            "ready_for_reduced_table_validation": False,
-            "ready_for_ebr_decomposition": False,
+            "status": "incomplete_canonical_hsp_vector",
+            "canonical_hsp_vector_complete": False,
+            "blocked_by": ["source_hsp_coverage_incomplete"],
         }],
     })
     assert r["bundle_count"] == 0
     assert r["excluded_count"] == 1
     e = r["excluded_instances"][0]
     assert e["subspace_space_group"]["candidate_space_group_symbol"] == "P3"
-    assert any(
-        "ready_for_reduced_table_validation=false" in reason
-        for reason in e["exclusion_reasons"]
-    )
+    assert e["exclusion_reasons"] == ["source_hsp_coverage_incomplete"]
 
 
-def test_sampled_basis_without_validation_gate_excluded():
-    """Instance without ready_for_reduced_table_validation is excluded."""
+def test_incomplete_canonical_vector_is_excluded():
     r = build_ebr_export_bundle(ebr_problem_instances={
         "instances": [{
             "instance_id": "ebr_instance_001",
@@ -135,10 +109,9 @@ def test_sampled_basis_without_validation_gate_excluded():
             "subspace_group_candidate": "P2",
             "subspace_space_group": {"candidate_space_group_symbol": "P2"},
             "certificate_identity": {},
-            "status": "sampled_basis",
-            "hsp_basis_status": "sampled_basis",
-            "ready_for_reduced_table_validation": False,
-            "ready_for_ebr_decomposition": False,
+            "status": "incomplete_canonical_hsp_vector",
+            "canonical_hsp_vector_complete": False,
+            "blocked_by": ["projected_hsp_coverage_missing"],
         }],
     })
     assert r["bundle_count"] == 0
@@ -163,10 +136,10 @@ def test_empty_instances():
 
 
 # -----------------------------------------------------------------------
-# 5. Mixed: sampled + validated
+# 4. Multiple complete canonical vectors
 # -----------------------------------------------------------------------
 
-def test_mixed_sampled_and_validated():
+def test_multiple_canonical_vectors_export_once_each():
     r = build_ebr_export_bundle(ebr_problem_instances={
         "instances": [
             _SAMPLED_BASIS_INSTANCE["instances"][0],
@@ -175,8 +148,10 @@ def test_mixed_sampled_and_validated():
     })
     assert r["bundle_count"] == 2
     assert r["excluded_count"] == 0
-    solver_ready = [b["ready_for_external_solver"] for b in r["bundles"]]
-    assert solver_ready == [False, True]
+    assert all(
+        bundle["ready_for_reduced_table_validation"] is True
+        for bundle in r["bundles"]
+    )
 
 
 # -----------------------------------------------------------------------
@@ -197,18 +172,19 @@ def test_json_serializable():
 def test_schema_fields():
     r = build_ebr_export_bundle(ebr_problem_instances=_SAMPLED_BASIS_INSTANCE)
     keys = {"status", "bundle_count", "excluded_count", "schema_version",
-            "reduced_ebr_decomposition_status", "bundles",
+            "bundles",
             "excluded_instances", "interpretation"}
     assert keys <= set(r)
-    assert r["reduced_ebr_decomposition_status"] == "not_implemented"
-    assert r["schema_version"] == "1.4.0"
+    assert "reduced_ebr_decomposition_status" not in r
+    assert r["schema_version"] == "1.5.0"
     b = r["bundles"][0]
     for k in ["bundle_id", "source_instance_id", "valley",
               "irreps_by_kpoint", "operations_by_kpoint",
-              "ready_for_external_solver",
               "ready_for_reduced_table_validation",
-              "hsp_basis_status"]:
+              "canonical_hsp_vector_complete"]:
         assert k in b, f"missing: {k}"
+    assert "ready_for_external_solver" not in b
+    assert "hsp_basis_status" not in b
     assert "certificate_identity" in b
 
 
@@ -243,8 +219,8 @@ def test_source_hsp_coverage_fields_are_exported_without_loss():
 def test_schema_doc_covers_centered_export_and_ingestion_versions():
     schema = Path("docs/schema.md").read_text(encoding="utf-8")
     normalized_schema = " ".join(schema.split())
-    assert 'Schema version `"1.4.0"`' in schema
-    assert 'Current ingestion-record schema version: `"1.4.0"`' in schema
+    assert 'Schema version `"1.5.0"`' in schema
+    assert 'Current ingestion-record schema version: `"1.5.0"`' in schema
     assert "centered_affine_operation_map" in schema
     assert "centering_coset_index" in schema
     assert (
@@ -264,7 +240,7 @@ def test_schema_1_2_preserves_required_operation_ids_in_certificate_identity():
         ebr_problem_instances={"instances": [instance]},
     )
 
-    assert report["schema_version"] == "1.4.0"
+    assert report["schema_version"] == "1.5.0"
     exported_identity = report["bundles"][0]["certificate_identity"]
     assert exported_identity["affine_required_operation_ids"] == [-3, 4]
 
@@ -308,7 +284,7 @@ def test_schema_1_2_preserves_centered_expansion_identity_without_loss():
         ebr_problem_instances={"instances": [instance]},
     )
 
-    assert report["schema_version"] == "1.4.0"
+    assert report["schema_version"] == "1.5.0"
     assert report["bundles"][0]["certificate_identity"] == certificate_identity
 
 

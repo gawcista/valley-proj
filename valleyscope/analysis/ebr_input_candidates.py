@@ -19,7 +19,6 @@ def build_ebr_input_candidates(
     *,
     irrep_workflow_decisions: dict[str, object] | None,
     valley_irrep_matching: dict[str, object] | None,
-    symmetry_adapted_valley_report: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Collect trusted matched irreps as EBR input candidates.
 
@@ -185,11 +184,10 @@ def build_ebr_input_candidates(
         "candidate_count": len(candidates),
         "blocked_count": len(blocked),
         "non_source_count": len(non_source_rows),
-        "reduced_ebr_decomposition_status": "not_implemented",
         "interpretation": (
             "Trusted matched valley-preserving irreps collected as EBR input "
-            "candidates. Reduced EBR decomposition is not implemented here. "
-            "Rows with usable_with_caution, blocked, or diagnostic_only status "
+            "candidates. Rows with usable_with_caution, blocked, or "
+            "diagnostic_only status "
             "are excluded from candidates and listed in the blocked section "
             "with explicit reasons."
         ),
@@ -298,7 +296,6 @@ def _empty_report(reason: str) -> dict[str, object]:
         "candidate_count": 0,
         "blocked_count": 0,
         "non_source_count": 0,
-        "reduced_ebr_decomposition_status": "not_implemented",
         "interpretation": reason,
         "by_kpoint": {},
         "candidates": [],

@@ -4,14 +4,16 @@ import json, pytest, yaml
 from pathlib import Path
 
 from valleyscope.io.config import load_config
-from valleyscope.workflows.analyze_hsp import _build_auto_canonical_mapping, analyze_hsp
+from valleyscope.workflows.analyze_hsp import analyze_hsp
 from valleyscope.analysis.irreptables_runtime_table_builder import (
     build_auto_canonical_reduced_ebr_table,
     _extract_kvector_token,
     _validate_expected_hsps,
 )
 from valleyscope.analysis.reduced_ebr_mapping import (
-    build_reduced_ebr_mapping, load_reduced_ebr_table,
+    build_auto_reduced_ebr_mapping,
+    build_reduced_ebr_mapping,
+    load_reduced_ebr_table,
 )
 from valleyscope.analysis.reduced_ebr_solver import classify_bundle
 from tests.helpers_io_workflow import write_fixture, write_config
@@ -54,14 +56,13 @@ def _mk_bundle(bid, sg_num, symbol, hsps, irreps, ready=True):
             "subspace_space_group": {"status": "resolved",
                                      "candidate_space_group_number": sg_num,
                                      "candidate_space_group_symbol": symbol},
-            "ready_for_external_solver": ready,
             "ready_for_reduced_table_validation": ready,
             "expected_hsps": hsps, "irreps_by_kpoint": irreps,
             "irrep_records_by_kpoint": _spin_records(irreps, spinful=True),
             "certificate_identity": cert if cert is not None else {}}
 
-def _bm(*bundles): return _build_auto_canonical_mapping(
-    ebr_export_bundle={"bundles": list(bundles)}, spinor_wf=True)
+def _bm(*bundles): return build_auto_reduced_ebr_mapping(
+    ebr_export_bundle={"bundles": list(bundles)}, spinor=True)
 
 def _auto_table(sg, hsps, irreps, loader=None):
     return build_auto_canonical_reduced_ebr_table(
@@ -72,12 +73,16 @@ def _auto_table(sg, hsps, irreps, loader=None):
 def symbol_for(sg): return {75: "P4", 143: "P3"}.get(sg, f"SG{sg}")
 
 # ---------------------------------------------------------------------------
-# Workflow-level: _build_auto_canonical_mapping
+# Auto mapping orchestration
 # ---------------------------------------------------------------------------
 
-def test_none_or_empty_returns_none():
-    assert _build_auto_canonical_mapping(ebr_export_bundle=None, spinor_wf=True) is None
-    assert _build_auto_canonical_mapping(ebr_export_bundle={"bundles": []}, spinor_wf=True) is None
+def test_none_or_empty_is_not_evaluated():
+    for bundle in (None, {"bundles": []}):
+        result = build_auto_reduced_ebr_mapping(
+            ebr_export_bundle=bundle,
+            spinor=True,
+        )
+        assert result["status"] == "not_evaluated"
 
 def test_malformed_ready_excluded():
     r = _bm({** _mk_bundle("b", 75, "P4", ["GM"], {"GM": ["-GM5"]}),
@@ -92,27 +97,40 @@ def test_malformed_ready_excluded():
 def test_per_bundle_aggregation(label, desc):
     if label == "solved_only":
         r = _bm(_mk_bundle("b1", 75, "P4", ["GammaM"], {"GammaM": ["-GM5"]}))
-        assert r["mapping_status"] == "solved_exact"
+        assert r["status"] == "solved_exact"
     elif label == "solved_plus_blocked":
         r = _bm(_mk_bundle("b1", 75, "P4", ["GammaM"], {"GammaM": ["-GM5"]}),
                 {**_mk_bundle("b2", 143, "P3", ["GammaM"], {"GammaM": ["-GM4"]}),
                  "subspace_space_group": None})
-        assert r["mapping_status"] == "partial"
+        assert r["status"] == "partial"
     elif label == "non_ready_excluded":
         r = _bm(_mk_bundle("b1", 75, "P4", ["GammaM"], {"GammaM": ["-GM5"]}),
                 {**_mk_bundle("b2", 75, "P4", ["GammaM"], {"GammaM": ["-GM4"]}),
-                 "ready_for_external_solver": False,
                  "ready_for_reduced_table_validation": False})
-        assert r["mapping_status"] == "solved_exact" and len(r["excluded_bundles"]) == 1
+        assert r["status"] == "partial" and len(r["excluded_bundles"]) == 1
+        assert r["table_status"] == "partial"
 
 def test_no_ready_bundles_not_evaluated():
-    r = _bm({"_id": "b", "ready_for_external_solver": False})
-    assert r and r["status"] == "not_evaluated" and r["reduced_ebr_input"]["ready_bundle_count"] == 0
+    r = _bm({"bundle_id": "b", "ready_for_reduced_table_validation": False})
+    assert r["status"] == "blocked"
+    assert r["reduced_ebr_input"]["ready_bundle_count"] == 0
 
 def test_no_buildable_blocked():
     r = _bm({** _mk_bundle("b", 75, "P4", ["GammaM"], {"GammaM": ["-GM5"]}),
              "subspace_space_group": None})
     assert r and r["status"] == "blocked"
+
+
+def test_blocked_tr_bundle_keeps_grey_source_identity():
+    bundle = _mk_bundle(
+        "tr", 143, "P3", ["GammaM"], {"GammaM": ["-GM4"]}
+    )
+    bundle["problem_kind"] = "valley_orbit_reduced_ebr"
+    bundle["time_reversal"] = {}
+    r = _bm(bundle)
+    assert r["status"] == "blocked"
+    assert r["table_status"] == "blocked"
+    assert r["reduced_ebr_input"]["source"] == "auto_time_reversal_grey"
 
 def test_source_failure_blocked_not_physical():
     r = _bm(_mk_bundle("b", 9999, "XX", ["GammaM"], {"GammaM": ["-GM4"]}))
@@ -139,7 +157,8 @@ def test_auto_table_e2e_solve(tmp_path):
     p = tmp_path / "t.json"; p.write_text(json.dumps(t))
     eb = {"bundles": [_mk_bundle("b", 75, "P4", ["GammaM"], {"GammaM": ["-GM5", "-GM6"]})]}
     r = build_reduced_ebr_mapping(ebr_export_bundle=eb, table=load_reduced_ebr_table(p))
-    assert r["mapping_status"] == "solved_exact" and r["solutions"][0]["classification"] == "atomic-compatible-candidate"
+    assert r["status"] == "solved_exact"
+    assert r["solutions"][0]["classification"] == "atomic-compatible-candidate"
 
 def test_auto_table_hsp_mismatch(tmp_path):
     t = _auto_table(75, ["GammaM"], {"GammaM": ["-GM5"]})
@@ -295,7 +314,7 @@ def test_explicit_table_and_spec_regression(tmp_path):
     eb = {"bundles": [_mk_bundle("b",75,"P4",["GammaM"],{"GammaM":["-GM5"]})]}
     tt = load_reduced_ebr_table(tp); attach_real_certificate(eb, tt)
     r = build_reduced_ebr_mapping(ebr_export_bundle=eb, table=tt, reduced_ebr_input={"source":"table_file"})
-    assert r["mapping_status"] == "solved_exact"
+    assert r["status"] == "solved_exact"
     # spec_file — use a loader that returns exactly the labels declared in the spec
     from valleyscope.analysis.irreptables_runtime_table_builder import build_reduced_table_from_spec_file
     sp = tmp_path / "s.json"; sp.write_text(json.dumps({"schema_version":"1.1.0","data_source":"irreptables","space_group_number":75,"spinful":True,"source_hsp_by_irrep":{"-GM5":"GammaM","-GM6":"GammaM"},"valleyscope_irrep_multiplicity_by_source_irrep":{"-GM5":{"GammaM:-GM5":1},"-GM6":{"GammaM:-GM6":1}},"expected_hsps":["GammaM"],"allowed_irrep_keys":["GammaM:-GM5","GammaM:-GM6"],"subspace_group_candidate":"P4"}))
@@ -303,7 +322,7 @@ def test_explicit_table_and_spec_regression(tmp_path):
     t2 = build_reduced_table_from_spec_file(str(sp), source_loader=_spec_ld)
     eb2 = {"bundles": [_mk_bundle("b",75,"P4",["GammaM"],{"GammaM":["-GM5"]})]}; attach_real_certificate(eb2, t2)
     r2 = build_reduced_ebr_mapping(ebr_export_bundle=eb2, table=t2, reduced_ebr_input={"source":"spec_file"})
-    assert r2["mapping_status"] == "solved_exact"
+    assert r2["status"] == "solved_exact"
 
 def test_no_cn_like_labels():
     t = _auto_table(75, ["GammaM"], {"GammaM": ["-GM5"]}, loader=_p4_loader(gm=["-GM5","-GM6"], x=[]))

@@ -21,97 +21,35 @@ from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping, 
 
 from tests.helpers_io_workflow import write_fixture, write_config
 
+
+def _complete_coverage_for_candidates(report):
+    by_valley = {}
+    for candidate in report.get("candidates", []):
+        valley = candidate["valley"]
+        kpoint = candidate["kpoint"]
+        by_valley.setdefault(valley, {})[kpoint] = kpoint
+    return {
+        "by_valley": {
+            valley: {
+                "required_source_hsp_labels": list(mapping),
+                "covered_source_hsp_labels": list(mapping),
+                "missing_source_hsp_labels": [],
+                "trusted_matched_source_hsp_labels": list(mapping),
+                "trusted_missing_source_hsp_labels": [],
+                "source_hsp_to_sampled_kpoint": mapping,
+                "complete": True,
+                "ready_for_ebr_promotion": True,
+                "source_basis_provenance": {"data_source": "irreptables"},
+            }
+            for valley, mapping in by_valley.items()
+        }
+    }
+
 # Valley irrep -> EBR pipeline contract tests
 # -----------------------------------------------------------------------
 
-def test_ebr_input_candidates_excludes_non_trusted():
-    """Non-trusted/diagnostic-only rows must not reach ready_for_ebr_input=true."""
-    from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
-
-    # Workflow: K_valley is trusted/direct_qcut, Kp_valley is diagnostic_only.
-    workflow = {
-        "by_kpoint": {
-            "GammaM": {
-                "K_valley": {"readiness_level": "trusted", "workflow_path": "direct_qcut"},
-                "Kp_valley": {"readiness_level": "usable_with_caution", "workflow_path": "symmetry_adapted"},
-            },
-        },
-    }
-    # Matching: generic_matches_by_kpoint — K_valley matched, Kp_valley diagnostic_only.
-    matching = {
-        "matching_mode": "generic",
-        "generic_matches_by_kpoint": {
-            "GammaM": {
-                "K_valley": {
-                    "matching_status": "matched",
-                    "matching_strategy": "bilbao_restricted_character",
-                    "irrep_multiplicities": {"C3_spinor_phase_+1/2": 1},
-                    "subspace_space_group": {
-                        "status": "resolved",
-                        "candidate_space_group_number": 143,
-                        "candidate_space_group_symbol": "P3",
-                    },
-                    "valley_preserving_operation_ids": [0, 1],
-                    "hsp_little_group_operation_ids": [0, 1],
-                },
-                "Kp_valley": {
-                    "matching_status": "diagnostic",
-                    "matching_strategy": "bilbao_restricted_character",
-                    "irrep_multiplicities": {"C3_spinor_phase_-1/2": 1},
-                    "subspace_space_group": {
-                        "status": "resolved",
-                        "candidate_space_group_number": 143,
-                        "candidate_space_group_symbol": "P3",
-                    },
-                    "valley_preserving_operation_ids": [0, 1],
-                    "hsp_little_group_operation_ids": [0, 1],
-                    "diagnostic_only": True,
-                },
-            },
-        },
-    }
-
-    report = build_ebr_input_candidates(
-        irrep_workflow_decisions=workflow,
-        valley_irrep_matching=matching,
-    )
-
-    # Only trusted, non-diagnostic rows are candidates.
-    candidates = report["candidates"]
-    assert len(candidates) == 1
-    assert candidates[0]["valley"] == "K_valley"
-    assert candidates[0]["ready_for_ebr_input"] is True
-
-    # Diagnostic row is blocked.
-    blocked = report["blocked"]
-    assert any("diagnostic_only=true" in str(b.get("reason", "")) for b in blocked)
-    assert any(b.get("valley") == "Kp_valley" for b in blocked)
 
 
-def test_ebr_input_candidates_excludes_blocked_path():
-    """Workflow path=blocked must not produce candidates."""
-    from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
-
-    workflow = {
-        "by_kpoint": {
-            "MM": {
-                "K_valley": {"readiness_level": "blocked", "workflow_path": "blocked"},
-            },
-        },
-    }
-    matching = {
-        "by_kpoint": {
-            "MM": {
-                "K_valley": {},
-            },
-        },
-    }
-    report = build_ebr_input_candidates(
-        irrep_workflow_decisions=workflow,
-        valley_irrep_matching=matching,
-    )
-    assert report["candidate_count"] == 0
-    assert report["status"] == "no_candidates"
 
 
 def test_generic_projected_subspace_k_is_excluded_without_becoming_blocker():
@@ -162,53 +100,8 @@ def test_generic_projected_subspace_k_is_excluded_without_becoming_blocker():
     assert report["non_source_rows"][0]["local_representation_ready"] is True
 
 
-def test_ebr_problem_instances_ready_from_actual():
-    """Table-authoritative: ready from actual irreps, not hard-coded policy."""
-    from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
-
-    candidates = {
-        "status": "has_candidates",
-        "candidates": [{
-            "kpoint": "GammaM", "valley": "K_valley",
-            "subspace_group_candidate": "P3",
-            "workflow_path": "direct_qcut",
-            "readiness_level": "trusted",
-            "matched_irrep": "C3_spinor_phase_+1/2",
-            "operation_id": 1,
-            "ready_for_ebr_input": True,
-        }],
-    }
-    report = build_ebr_problem_instances(ebr_input_candidates=candidates)
-    assert report["instance_count"] == 1
-    inst = report["instances"][0]
-    assert inst["ready_for_reduced_table_validation"] is True; assert inst["ready_for_ebr_decomposition"] is False
-    assert inst["expected_hsps"] == ["GammaM"]
-    assert inst["status"] == "sampled_basis"
 
 
-def test_ebr_problem_instances_complete_hsp_is_ready():
-    """All required HSPs present -> ready_for_ebr_decomposition=true."""
-    from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
-
-    candidates = {
-        "status": "has_candidates",
-        "candidates": [
-            {"kpoint": "GammaM", "valley": "K_valley",
-             "subspace_group_candidate": "P3",
-             "workflow_path": "direct_qcut", "readiness_level": "trusted",
-             "matched_irrep": "C3_spinor_phase_+1/2", "operation_id": 1,
-             "ready_for_ebr_input": True},
-            {"kpoint": "KM", "valley": "K_valley",
-             "subspace_group_candidate": "P3",
-             "workflow_path": "direct_qcut", "readiness_level": "trusted",
-             "matched_irrep": "C3_spinor_phase_+1/6", "operation_id": 1,
-             "ready_for_ebr_input": True},
-        ],
-    }
-    report = build_ebr_problem_instances(ebr_input_candidates=candidates)
-    inst = report["instances"][0]
-    assert inst["ready_for_reduced_table_validation"] is True; assert inst["ready_for_ebr_decomposition"] is False
-    assert inst["status"] == "sampled_basis"
 
 
 def test_incomplete_per_valley_source_hsp_coverage_blocks_ebr_promotion():
@@ -249,97 +142,18 @@ def test_incomplete_per_valley_source_hsp_coverage_blocks_ebr_promotion():
     )
 
     instance = report["instances"][0]
-    assert instance["status"] == "incomplete_source_hsp_coverage"
-    assert instance["hsp_basis_status"] == "incomplete_source_hsp_coverage"
-    assert instance["ready_for_reduced_table_validation"] is False
-    assert instance["ready_for_ebr_decomposition"] is False
+    assert instance["status"] == "incomplete_canonical_hsp_vector"
+    assert instance["canonical_hsp_vector_complete"] is False
     assert instance["required_source_hsp_labels"] == ["GM", "K"]
     assert instance["covered_source_hsp_labels"] == ["GM"]
     assert instance["missing_source_hsp_labels"] == ["K"]
     assert "missing trusted source HSPs: ['K']" in instance["blocked_by"]
 
 
-def test_ebr_export_bundle_preserves_hsp_and_irrep_fields():
-    """Export bundle must preserve expected_hsps, irreps_by_kpoint, operations_by_kpoint."""
-    from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
-
-    problem_instances = {
-        "instances": [{
-            "instance_id": "ebr_instance_001",
-            "valley": "K_valley",
-            "subspace_group_candidate": "P3",
-            "workflow_path": "direct_qcut",
-            "readiness_level": "trusted",
-            "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
-            "operations_by_kpoint": {"GammaM": [1]},
-            "expected_hsps": ["GammaM", "KM"],
-            "optional_hsps": ["MM"],
-            "missing_optional_hsps": ["MM"],
-            "ready_for_ebr_decomposition": False, "ready_for_reduced_table_validation": True,
-            "status": "sampled_basis",
-        }],
-    }
-    report = build_ebr_export_bundle(ebr_problem_instances=problem_instances)
-    assert report["bundle_count"] == 1
-    bundle = report["bundles"][0]
-    assert bundle["ready_for_external_solver"] is False
-    assert bundle["subspace_group_candidate"] == "P3"
-    assert bundle["expected_hsps"] == ["GammaM", "KM"]
-    assert bundle["optional_hsps"] == ["MM"]
-    assert bundle["missing_optional_hsps"] == ["MM"]
-    assert bundle["irreps_by_kpoint"] == {"GammaM": ["C3_spinor_phase_+1/2"]}
-    assert bundle["operations_by_kpoint"] == {"GammaM": [1]}
 
 
-def test_ebr_export_bundle_excludes_non_ready():
-    """Non-ready instances are excluded, not bundled."""
-    from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
-
-    problem_instances = {
-        "instances": [{
-            "instance_id": "ebr_instance_001",
-            "valley": "K_valley",
-            "subspace_group_candidate": "P3",
-            "status": "partial",
-            "ready_for_ebr_decomposition": False,
-            "ready_for_reduced_table_validation": False,
-            "blocked_by": ["missing required HSPs: [KM]"],
-        }],
-    }
-    report = build_ebr_export_bundle(ebr_problem_instances=problem_instances)
-    assert report["bundle_count"] == 0
-    assert report["status"] == "no_bundles"
-    assert report["excluded_count"] == 1
-    assert "ready_for_reduced_table_validation" in str(report["excluded_instances"][0]["exclusion_reasons"])
 
 
-def test_reduced_ebr_mapping_rejects_hsp_mismatch():
-    """Reduced EBR mapping must reject bundles whose HSP basis does not match the table."""
-    from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
-
-    table = {
-        "schema_version": "1.0.0",
-        "subspace_group_candidate": "P3",
-        "expected_hsps": ["GammaM", "KM"],
-        "irreps": ["GammaM:C3_spinor_phase_+1/2", "KM:C3_spinor_phase_+1/6"],
-        "ebrs": [{"label": "EBR_A", "vector": [1, 0]}, {"label": "EBR_B", "vector": [0, 1]}],
-    }
-    # Bundle only has GammaM, missing KM.  Must be solver-ready to reach
-    # the HSP-compatibility check (not blocked at the validation gate).
-    bundle = {
-        "bundles": [{
-            "bundle_id": "b_001", "valley": "K",
-            "subspace_group_candidate": "P3",
-            "ready_for_external_solver": True,
-            "expected_hsps": ["GammaM"],
-            "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
-        }],
-    }
-    attach_real_certificate(bundle, table)
-    r = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
-    assert len(r["solutions"]) == 0
-    assert len(r["excluded_bundles"]) == 1
-    assert "expected_hsps mismatch" in r["excluded_bundles"][0]["reason"]
 
 
 def test_generic_p4_table_authoritative_bundle_maps_and_rejects_mismatch():
@@ -382,20 +196,36 @@ def test_generic_p4_table_authoritative_bundle_maps_and_rejects_mismatch():
                 },
             ],
         }, 75, "P4", spinor=True),
+        projected_hsp_coverage={
+            "by_valley": {
+                "K_valley": {
+                    "required_source_hsp_labels": ["GammaM", "XM"],
+                    "covered_source_hsp_labels": ["GammaM", "XM"],
+                    "missing_source_hsp_labels": [],
+                    "trusted_matched_source_hsp_labels": ["GammaM", "XM"],
+                    "trusted_missing_source_hsp_labels": [],
+                    "source_hsp_to_sampled_kpoint": {
+                        "GammaM": "GammaM", "XM": "XM"
+                    },
+                    "complete": True,
+                    "ready_for_ebr_promotion": True,
+                    "source_basis_provenance": {
+                        "data_source": "irreptables"
+                    },
+                }
+            }
+        },
     )
     inst = problem_instances["instances"][0]
     assert inst["subspace_group_candidate"] == "P4"
     assert inst["expected_hsps"] == ["GammaM", "XM"]
-    assert inst["expected_hsp_policy_source"] == "sampled_irrep_basis"
-    assert inst["ready_for_reduced_table_validation"] is True; assert inst["ready_for_ebr_decomposition"] is False
+    assert inst["expected_hsp_policy_source"] == "certified_source_hsp_basis"
+    assert inst["canonical_hsp_vector_complete"] is True
 
     export_bundle = build_ebr_export_bundle(
         ebr_problem_instances=problem_instances
     )
-    assert export_bundle["status"] in (
-        "ready_for_external_solver", "ready_for_reduced_table_validation",
-        "partial_export",
-    )
+    assert export_bundle["status"] == "ready_for_reduced_table_validation"
     bundle = export_bundle["bundles"][0]
     assert bundle["subspace_group_candidate"] == "P4"
     assert bundle["expected_hsps"] == ["GammaM", "XM"]
@@ -509,8 +339,8 @@ def test_ready_export_bundle_maps_to_public_reduced_ebr_outputs_only(tmp_path):
                 "expected_hsps": ["GammaM", "KM"],
                 "optional_hsps": ["MM"],
                 "missing_optional_hsps": ["MM"],
-                "ready_for_ebr_decomposition": False, "ready_for_reduced_table_validation": True,
-                "status": "sampled_basis",
+                "canonical_hsp_vector_complete": True,
+                "status": "canonical_hsp_vector_ready",
                 "certificate_identity": real_primitive_certificate_identity(143, "P3", spinor=True),
                 "irrep_records_by_kpoint": {
                     "GammaM": [{"matched_irrep": "C3_spinor_phase_+1/2",
@@ -597,7 +427,10 @@ def test_ebr_problem_instances_include_irrep_records():
              "ready_for_ebr_input": True},
         ],
     }
-    report = build_ebr_problem_instances(ebr_input_candidates=candidates)
+    report = build_ebr_problem_instances(
+        ebr_input_candidates=candidates,
+        projected_hsp_coverage=_complete_coverage_for_candidates(candidates),
+    )
     inst = report["instances"][0]
     assert "irrep_records_by_kpoint" in inst
     records = inst["irrep_records_by_kpoint"]
@@ -643,8 +476,8 @@ def test_export_bundle_copies_irrep_records():
             "expected_hsps": ["GammaM", "KM"],
             "optional_hsps": [],
             "missing_optional_hsps": [],
-            "ready_for_ebr_decomposition": False, "ready_for_reduced_table_validation": True,
-            "status": "sampled_basis",
+                "canonical_hsp_vector_complete": True,
+                "status": "canonical_hsp_vector_ready",
         }],
     }
     report = build_ebr_export_bundle(ebr_problem_instances=problem_instances)
@@ -692,7 +525,12 @@ def test_non_trusted_rows_excluded_from_irrep_records():
     # 1 trusted candidate.
     assert candidates_report["candidate_count"] == 1
 
-    instances_report = build_ebr_problem_instances(ebr_input_candidates=candidates_report)
+    instances_report = build_ebr_problem_instances(
+        ebr_input_candidates=candidates_report,
+        projected_hsp_coverage=_complete_coverage_for_candidates(
+            candidates_report
+        ),
+    )
     inst = instances_report["instances"][0]
     records = inst["irrep_records_by_kpoint"]
     gamma_recs = records.get("GammaM", [])
@@ -720,7 +558,7 @@ def test_reduced_ebr_mapping_ignores_irrep_records():
         "bundles": [{
             "bundle_id": "b_001", "valley": "K",
             "subspace_group_candidate": "P3",
-            "ready_for_external_solver": True,
+            "ready_for_reduced_table_validation": True,
             "expected_hsps": ["GammaM", "KM"],
             "irreps_by_kpoint": {
                 "GammaM": ["C3_spinor_phase_+1/2"],
@@ -822,10 +660,13 @@ def test_generic_irrep_full_pipeline_smoke():
 
     # 3. Problem instances (table-authoritative: expected_hsps from actual).
     candidates = add_real_certificate_to_candidates(candidates, 75, "P4", spinor=True)
-    instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
+    instances = build_ebr_problem_instances(
+        ebr_input_candidates=candidates,
+        projected_hsp_coverage=_complete_coverage_for_candidates(candidates),
+    )
     assert instances["instance_count"] == 1
     inst = instances["instances"][0]
-    assert inst["ready_for_reduced_table_validation"] is True; assert inst["ready_for_ebr_decomposition"] is False
+    assert inst["canonical_hsp_vector_complete"] is True
     assert inst["expected_hsps"] == ["GammaM"]
 
     # 4. Export bundle.
@@ -833,9 +674,8 @@ def test_generic_irrep_full_pipeline_smoke():
     assert bundle["bundle_count"] == 1
     b = bundle["bundles"][0]
     # State 1 (sampled_basis): exported for validation, not solver-ready.
-    assert b["ready_for_external_solver"] is False
     assert b["ready_for_reduced_table_validation"] is True
-    assert b["hsp_basis_status"] == "sampled_basis"
+    assert "ready_for_external_solver" not in b
 
     # 5. Reduced EBR mapping with a matching table.
     bp_irreps = b["irreps_by_kpoint"]["GammaM"]
@@ -853,7 +693,7 @@ def test_generic_irrep_full_pipeline_smoke():
     result = build_reduced_ebr_mapping(
         ebr_export_bundle=bundle, table=matching_table
     )
-    assert result["mapping_status"] == "solved_exact"
+    assert result["status"] == "solved_exact"
 
     # 6. Rejected by mismatched HSP basis.
     bad_table = dict(matching_table)
@@ -964,12 +804,15 @@ def test_generic_ebr_builder_e2e_p4_group_agnostic(tmp_path):
 
     # 3. Problem instances.
     candidates = add_real_certificate_to_candidates(candidates, 75, "P4", spinor=True)
-    instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
+    instances = build_ebr_problem_instances(
+        ebr_input_candidates=candidates,
+        projected_hsp_coverage=_complete_coverage_for_candidates(candidates),
+    )
     assert instances["instance_count"] == 1
     inst = instances["instances"][0]
-    assert inst["ready_for_reduced_table_validation"] is True; assert inst["ready_for_ebr_decomposition"] is False
+    assert inst["canonical_hsp_vector_complete"] is True
     assert inst["expected_hsps"] == ["GammaM"]
-    assert inst["expected_hsp_policy_source"] == "sampled_irrep_basis"
+    assert inst["expected_hsp_policy_source"] == "certified_source_hsp_basis"
     assert inst["subspace_group_candidate"] == "P4"
 
     # 4. Export bundle.
@@ -977,8 +820,8 @@ def test_generic_ebr_builder_e2e_p4_group_agnostic(tmp_path):
     assert bundle["bundle_count"] == 1
     b = bundle["bundles"][0]
     # State 1 (sampled_basis): exported for validation, not solver-ready.
-    assert b["ready_for_external_solver"] is False
     assert b["ready_for_reduced_table_validation"] is True
+    assert "ready_for_external_solver" not in b
     assert b["subspace_group_candidate"] == "P4"
 
     # 5. Build reduced EBR table via runtime reducer (not hand-written).
@@ -1016,7 +859,7 @@ def test_generic_ebr_builder_e2e_p4_group_agnostic(tmp_path):
     result = build_reduced_ebr_mapping(
         ebr_export_bundle=bundle, table=validated_table
     )
-    assert result["mapping_status"] == "solved_exact"
+    assert result["status"] == "solved_exact"
     assert result["solutions"][0]["classification"] == "atomic-compatible-candidate"
     assert result["solutions"][0]["subspace_group_candidate"] == "P4"
 
@@ -1118,7 +961,10 @@ def test_irreptables_loader_e2e_p4_group_agnostic(tmp_path):
         valley_irrep_matching=matching,
     )
     candidates = add_real_certificate_to_candidates(candidates, 75, "P4", spinor=True)
-    instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
+    instances = build_ebr_problem_instances(
+        ebr_input_candidates=candidates,
+        projected_hsp_coverage=_complete_coverage_for_candidates(candidates),
+    )
     bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
     b = bundle["bundles"][0]
 
@@ -1183,7 +1029,7 @@ def test_irreptables_loader_e2e_p4_group_agnostic(tmp_path):
     result = build_reduced_ebr_mapping(
         ebr_export_bundle=bundle, table=validated_table
     )
-    assert result["mapping_status"] == "solved_exact"
+    assert result["status"] == "solved_exact"
     assert result["solutions"][0]["classification"] == "atomic-compatible-candidate"
     assert result["solutions"][0]["subspace_group_candidate"] == "P4"
 
@@ -1303,7 +1149,10 @@ def test_p4_public_output_contract(tmp_path):
         valley_irrep_matching=matching,
     )
     candidates = add_real_certificate_to_candidates(candidates, 75, "P4", spinor=True)
-    instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
+    instances = build_ebr_problem_instances(
+        ebr_input_candidates=candidates,
+        projected_hsp_coverage=_complete_coverage_for_candidates(candidates),
+    )
     bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
     b = bundle["bundles"][0]
     # Contract 3: all EBR outputs use P4 as physical group identity.
@@ -1332,7 +1181,7 @@ def test_p4_public_output_contract(tmp_path):
     result = build_reduced_ebr_mapping(
         ebr_export_bundle=bundle, table=loaded_table
     )
-    assert result["mapping_status"] == "solved_exact"
+    assert result["status"] == "solved_exact"
     assert result["solutions"][0]["subspace_group_candidate"] == "P4"
 
     # 5. Summary: public output JSON contract — P4 is the physical identity.
@@ -1425,7 +1274,10 @@ def test_standard_outputs_no_cn_like_guardrail(tmp_path):
         valley_irrep_matching=matching,
     )
     candidates = add_real_certificate_to_candidates(candidates, 75, "P4", spinor=True)
-    instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
+    instances = build_ebr_problem_instances(
+        ebr_input_candidates=candidates,
+        projected_hsp_coverage=_complete_coverage_for_candidates(candidates),
+    )
     bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
     rep_report = build_valley_projected_representation_report(
         kpoint_names=["GammaM"],
@@ -1644,7 +1496,10 @@ def test_problem_instance_preserves_multi_hsp_provenance():
              "source_table_spinor": True,
              "valley_preserving_operation_ids": [0, 1]}},
     ]}
-    report = build_ebr_problem_instances(ebr_input_candidates=candidates)
+    report = build_ebr_problem_instances(
+        ebr_input_candidates=candidates,
+        projected_hsp_coverage=_complete_coverage_for_candidates(candidates),
+    )
     inst = report["instances"][0]
     records = inst["irrep_records_by_kpoint"]
     assert "GammaM" in records and "KM" in records
@@ -1703,8 +1558,8 @@ def test_export_bundle_preserves_multi_hsp_provenance():
         "optional_hsps": [],
         "missing_optional_hsps": [],
         "irrep_records_by_kpoint": records,
-        "status": "sampled_basis",
-        "ready_for_ebr_decomposition": False, "ready_for_reduced_table_validation": True,
+        "status": "canonical_hsp_vector_ready",
+        "canonical_hsp_vector_complete": True,
     }]}
 
     report = build_ebr_export_bundle(ebr_problem_instances=problem_instances)
@@ -1724,7 +1579,7 @@ def test_reduced_ebr_solution_preserves_multi_hsp_provenance():
              "ebrs": [{"label": "EBR_A", "vector": [1, 1]}]}
     bundle = {"bundles": [{
         "bundle_id": "b_001", "valley": "K", "subspace_group_candidate": "P4",
-        "ready_for_external_solver": True,
+            "ready_for_reduced_table_validation": True,
         "expected_hsps": ["GammaM", "KM"],
         "irreps_by_kpoint": {"GammaM": ["-GM5"], "KM": ["-K5"]},
         "irrep_records_by_kpoint": {
@@ -1739,7 +1594,7 @@ def test_reduced_ebr_solution_preserves_multi_hsp_provenance():
     complete_table_provenance(table, 75, spinful=True)
     attach_real_certificate(bundle, table)
     r = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
-    assert r["mapping_status"] == "solved_exact"
+    assert r["status"] == "solved_exact"
     sol = r["solutions"][0]
     by_kp = sol.get("irrep_source_provenance_by_kpoint", {})
     assert "GammaM" in by_kp and "KM" in by_kp
@@ -1757,7 +1612,7 @@ def test_reduced_ebr_excluded_preserves_provenance():
              "ebrs": [{"label": "EBR_A", "vector": [1]}]}
     bundle = {"bundles": [{
         "bundle_id": "b_001", "valley": "K", "subspace_group_candidate": "P4",
-        "ready_for_external_solver": True,
+            "ready_for_reduced_table_validation": True,
         "expected_hsps": ["GammaM", "KM"],
         "irreps_by_kpoint": {"GammaM": ["-GM5"], "KM": ["-K5"]},
         "irrep_records_by_kpoint": {
@@ -1872,7 +1727,10 @@ def test_public_e2e_record_chain_with_certificate_provenance():
     assert cert_in_cand["standard_setting_certificate"]["validation_status"] == "validated"
 
     candidates = add_real_certificate_to_candidates(candidates, 75, "P4", spinor=True)
-    instances = build_ebr_problem_instances(ebr_input_candidates=candidates)
+    instances = build_ebr_problem_instances(
+        ebr_input_candidates=candidates,
+        projected_hsp_coverage=_complete_coverage_for_candidates(candidates),
+    )
     assert instances["instance_count"] >= 1
     bundle = build_ebr_export_bundle(ebr_problem_instances=instances)
     assert bundle["bundle_count"] >= 1
@@ -1889,7 +1747,7 @@ def test_public_e2e_record_chain_with_certificate_provenance():
     mapping_result = build_reduced_ebr_mapping(
         ebr_export_bundle=bundle, table=table
     )
-    assert mapping_result["mapping_status"] == "solved_exact"
+    assert mapping_result["status"] == "solved_exact"
     solution = mapping_result["solutions"][0]
     assert solution["classification"] == "atomic-compatible-candidate"
     assert solution["ebr_decomposition"] == [

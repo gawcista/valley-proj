@@ -361,7 +361,7 @@ def _reviewed_joint_bundle_and_table():
         "expected_hsps": ["GM"],
         "irreps_by_kpoint": {"GM": ["-GM4GM4"]},
         "source_hsp_to_sampled_kpoint": {"GM": "GM"},
-        "ready_for_external_solver": True,
+                "ready_for_reduced_table_validation": True,
     }
     export = {"bundles": [bundle]}
     assert attach_real_certificate(export, table) is not None
@@ -1356,10 +1356,11 @@ def test_joint_valley_orbit_problem_and_export_replace_one_valley_claims():
     assert instance["problem_kind"] == "valley_orbit_reduced_ebr"
     assert instance["valley_orbit"] == ["left", "right"]
     assert instance["valley"] == ""
-    assert instance["ready_for_reduced_table_validation"] is True
+    assert instance["canonical_hsp_vector_complete"] is True
+    assert "ready_for_reduced_table_validation" not in instance
 
     export = build_ebr_export_bundle(ebr_problem_instances=problems)
-    assert export["schema_version"] == "1.4.0"
+    assert export["schema_version"] == "1.5.0"
     assert export["bundle_count"] == 1
     assert export["bundles"][0]["problem_kind"] == (
         "valley_orbit_reduced_ebr"

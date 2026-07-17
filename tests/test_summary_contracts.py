@@ -78,6 +78,7 @@ def test_summary_text_renders_qcut_fraction_for_relative_mode(tmp_path):
         output_paths={},
     )
 
+    assert summary["schema_version"] == "1.5.0"
     assert summary["qcut"]["fraction"] == pytest.approx(0.2)
     text = render_summary_text(summary)
     assert "qcut mode: relative_min_valley_distance" in text
@@ -1318,7 +1319,8 @@ def test_schema_doc_covers_public_outputs_and_reduced_ebr_statuses():
 
     # Reduced-EBR public statuses must be listed in table or prose.
     for status in [
-        "not_evaluated", "missing_table", "solved_exact", "no_exact_solution",
+        "not_evaluated", "missing_table", "blocked", "partial",
+        "indeterminate_truncated", "solved_exact", "no_exact_solution",
     ]:
         assert status in schema_text, (
             f"docs/schema.md must document reduced-EBR status '{status}'"
@@ -1326,9 +1328,8 @@ def test_schema_doc_covers_public_outputs_and_reduced_ebr_statuses():
 
     # Reduced-EBR public field names must appear.
     for field in [
-        "mapping_status", "reduced_ebr_decomposition_status",
-        "table_status", "reduced_ebr_input",
-        "not_applicable", "not_provided", "loaded",
+        "schema_version", "table_status", "reduced_ebr_input",
+        "not_applicable", "not_provided", "loaded", "partial",
     ]:
         assert field in schema_text, (
             f"docs/schema.md must document reduced-EBR field '{field}'"
@@ -1630,7 +1631,7 @@ def test_tmote2_projected_source_hsp_coverage_and_tr_orbit_are_explicit():
 
     export = s["valley_ebr_export_bundle"]
     assert export["bundle_count"] == 1
-    assert s["valley_ebr_export_bundle"]["schema_version"] == "1.4.0"
+    assert s["valley_ebr_export_bundle"]["schema_version"] == "1.5.0"
     assert export["bundles"][0]["problem_kind"] == "valley_orbit_reduced_ebr"
     assert export["bundles"][0]["valley_orbit"] == [
         "K_valley", "Kp_valley",
@@ -1772,17 +1773,16 @@ def test_tmote2_reduced_ebr_auto_canonical_provenance():
     r = _read_fixture_reduced_ebr()
 
     # Top-level status
-    assert r["mapping_status"] == "no_exact_solution"
+    assert r["status"] == "no_exact_solution"
+    assert r["schema_version"] == "1.5.0"
     assert r["table_status"] == "loaded"
 
     # reduced_ebr_input self-auditing
     inp = r.get("reduced_ebr_input", {})
     assert inp["source"] == "auto_time_reversal_grey"
-    assert inp["auto_canonical"] is False
-    assert inp["auto_time_reversal"] is True
     assert inp["spinful"] is True
     assert inp["ready_bundle_count"] == 1
-    assert inp["solved_count"] == 1
+    assert inp["evaluated_count"] == 1
     assert inp["blocked_count"] == 0
 
     # auto_canonical_bundles

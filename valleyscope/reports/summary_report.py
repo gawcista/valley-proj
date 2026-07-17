@@ -11,6 +11,8 @@ import numpy as np
 from valleyscope.io.config import AppConfig
 from valleyscope.reports.json_report import _json_default
 
+_SCHEMA_VERSION = "1.5.0"
+
 
 def build_summary_payload(
     *,
@@ -47,6 +49,7 @@ def build_summary_payload(
     if config.projection.qcut_mode == "relative_min_valley_distance":
         qcut_payload["fraction"] = float(config.projection.qcut_fraction)
     payload: dict[str, Any] = {
+        "schema_version": _SCHEMA_VERSION,
         "input": {
             "wavefunction_h5": str(config.input.wavefunction_h5),
             "operation_structure_file": None
@@ -1677,10 +1680,6 @@ def _render_ebr_input_candidates(
         "generic/non-source rows: "
         f"{report.get('non_source_count', 0)}"
     )
-    lines.append(
-        f"reduced EBR decomposition: "
-        f"{report.get('reduced_ebr_decomposition_status', 'not_implemented')}"
-    )
     cands = report.get("candidates", [])
     if isinstance(cands, list) and cands:
         rows: list[list[Any]] = []
@@ -1828,10 +1827,6 @@ def _render_ebr_problem_instances(
     _section(lines, "EBR problem instances")
     lines.append(f"status: {report.get('status', 'no_data')}")
     lines.append(f"instance count: {report.get('instance_count', 0)}")
-    lines.append(
-        f"reduced EBR decomposition: "
-        f"{report.get('reduced_ebr_decomposition_status', 'not_implemented')}"
-    )
     instances = report.get("instances", [])
     if isinstance(instances, list) and instances:
         rows: list[list[Any]] = []
@@ -1841,7 +1836,7 @@ def _render_ebr_problem_instances(
                 inst.get("valley_orbit") or inst.get("valley", ""),
                 _canonical_sg_display(inst),
                 inst.get("status", ""),
-                str(inst.get("ready_for_ebr_decomposition", "")),
+                str(inst.get("canonical_hsp_vector_complete", "")),
                 _short_list(inst.get("blocked_by", [])),
                 _short_list(inst.get("expected_hsps", [])),
                 _short_list(inst.get("required_source_hsp_labels", [])),
@@ -1850,7 +1845,7 @@ def _render_ebr_problem_instances(
             ])
         lines.extend(
             _table(
-                ["id", "valley/orbit", "group", "status", "ready",
+                ["id", "valley/orbit", "group", "status", "complete",
                  "blocked_by", "sampled_hsp", "source_required",
                  "source_covered", "source_missing"],
                 rows,
@@ -1868,10 +1863,6 @@ def _render_ebr_export_bundle(
     lines.append(f"schema version: {report.get('schema_version', '')}")
     lines.append(f"bundles: {report.get('bundle_count', 0)}")
     lines.append(f"excluded: {report.get('excluded_count', 0)}")
-    lines.append(
-        f"reduced EBR decomposition: "
-        f"{report.get('reduced_ebr_decomposition_status', 'not_implemented')}"
-    )
     bundles = report.get("bundles", [])
     if isinstance(bundles, list) and bundles:
         rows: list[list[Any]] = []
@@ -1884,13 +1875,13 @@ def _render_ebr_export_bundle(
                 _short_list(b.get("expected_hsps", [])),
                 _short_list(b.get("optional_hsps", [])),
                 _short_list(b.get("missing_optional_hsps", [])),
-                b.get("ready_for_external_solver", ""),
+                b.get("ready_for_reduced_table_validation", ""),
             ])
         lines.extend(
             _table(
                 ["bundle_id", "valley/orbit", "group", "path",
                  "expected_hsp", "optional_hsp", "missing_opt",
-                 "ext_solver_ready"],
+                 "table_validation_ready"],
                 rows,
             )
         )
@@ -1912,27 +1903,23 @@ def _render_reduced_ebr_mapping(
 ) -> None:
     _section(lines, "Reduced EBR mapping")
     lines.append(f"status: {report.get('status', 'no_data')}")
-    lines.append(f"mapping status: {report.get('mapping_status', report.get('status', ''))}")
+    lines.append(f"schema version: {report.get('schema_version', '')}")
     lines.append(f"table: {report.get('table_status', '')}")
-    lines.append(
-        f"reduced EBR decomposition: "
-        f"{report.get('reduced_ebr_decomposition_status', '')}"
-    )
 
     solutions = report.get("solutions", [])
     if isinstance(solutions, list) and solutions:
         # Classification counts.
         atomic = sum(1 for s in solutions if isinstance(s, dict)
                      and s.get("classification") == "atomic-compatible-candidate")
-        fragile = sum(1 for s in solutions if isinstance(s, dict)
-                      and s.get("classification") == "in_integer_span_no_nonnegative_witness")
-        stable = sum(1 for s in solutions if isinstance(s, dict)
-                     and s.get("classification") == "outside_integer_span")
+        no_witness = sum(1 for s in solutions if isinstance(s, dict)
+                         and s.get("classification") == "in_integer_span_no_nonnegative_witness")
+        outside_span = sum(1 for s in solutions if isinstance(s, dict)
+                           and s.get("classification") == "outside_integer_span")
         truncated = sum(1 for s in solutions if isinstance(s, dict)
                         and s.get("search_status") == "truncated_by_max_coefficient")
         lines.append(f"classifications: atomic-compatible={atomic}, "
-                     f"in integer span, no nonnegative witness={fragile}, "
-                     f"outside integer span={stable}"
+                     f"in integer span, no nonnegative witness={no_witness}, "
+                     f"outside integer span={outside_span}"
                      + (f", search_truncated={truncated}" if truncated else ""))
 
         for sol in solutions:
@@ -1966,16 +1953,7 @@ def _render_reduced_ebr_mapping(
             elif classification == "outside_integer_span":
                 lines.append(f"{label}: outside integer span (outside integer span)")
             else:
-                # Legacy rows without classification.
-                decomp = sol.get("ebr_decomposition")
-                if isinstance(decomp, list) and decomp:
-                    terms = [
-                        f"{e.get('label', '')} x {e.get('coefficient', '')}"
-                        for e in decomp if isinstance(e, dict)
-                    ]
-                    lines.append(f"{label}: {' + '.join(terms)}")
-                else:
-                    lines.append(f"{label}: {sol.get('status', '?')}")
+                lines.append(f"{label}: unrecognized classification")
 
             if sol.get("search_status") == "truncated_by_max_coefficient":
                 lines.append(f"         (search truncated by max_coefficient)")
