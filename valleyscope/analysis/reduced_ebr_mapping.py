@@ -501,7 +501,7 @@ def _validate_problem_kind_compatibility(
     ):
         blockers.append(_blocker(
             "time_reversal_bundle_evidence_invalid",
-            "valley-orbit bundle lacks a complete exchanged-valley "
+            "valley-orbit bundle lacks a complete valley "
             "involution, source-irrep pairing, HSP orbits, or matching grey "
             "BNS evidence",
         ))
@@ -538,9 +538,11 @@ def _joint_bundle_time_reversal_evidence_valid(
     if not isinstance(unitary_irreps, dict) or set(unitary_irreps) != orbit_members:
         return False
     unitary_irrep_labels: set[str] = set()
+    component_hsp_sets: list[set[str]] = []
     for component in unitary_irreps.values():
         if not isinstance(component, dict) or not component:
             return False
+        component_hsp_sets.append(set(component))
         for hsp, counts in component.items():
             if (
                 not isinstance(hsp, str)
@@ -595,6 +597,7 @@ def _joint_bundle_time_reversal_evidence_valid(
     ):
         return False
     declared_hsps: set[str] = set()
+    representative_hsps: set[str] = set()
     for row in hsp_orbits:
         members = row.get("members")
         representative = row.get("representative")
@@ -611,12 +614,30 @@ def _joint_bundle_time_reversal_evidence_valid(
         ):
             return False
         declared_hsps.update(members)
+        representative_hsps.add(representative)
     full_hsp_labels = evidence.get("full_unitary_source_hsp_labels")
     if (
         not isinstance(full_hsp_labels, list)
         or any(not isinstance(hsp, str) or not hsp for hsp in full_hsp_labels)
         or len(set(full_hsp_labels)) != len(full_hsp_labels)
         or declared_hsps != set(full_hsp_labels)
+    ):
+        return False
+    expected_hsps = bundle.get("expected_hsps")
+    irreps_by_kpoint = bundle.get("irreps_by_kpoint")
+    if (
+        not isinstance(expected_hsps, list)
+        or not expected_hsps
+        or any(not isinstance(hsp, str) or not hsp for hsp in expected_hsps)
+        or len(set(expected_hsps)) != len(expected_hsps)
+        or set(expected_hsps) != representative_hsps
+        or not isinstance(irreps_by_kpoint, dict)
+        or set(irreps_by_kpoint) != set(expected_hsps)
+        or any(
+            component_hsps != set(expected_hsps)
+            or not component_hsps.issubset(declared_hsps)
+            for component_hsps in component_hsp_sets
+        )
     ):
         return False
 
@@ -638,12 +659,26 @@ def _joint_bundle_time_reversal_evidence_valid(
     if not unitary_irrep_labels.issubset(irrep_pairing):
         return False
 
-    if len(valley_orbit) == 1 and not validate_time_reversal_sewing_report(
-        evidence.get("antiunitary_sewing_evidence"),
-        valley_members=valley_orbit,
-        theta_square=expected_theta_square,
-    ):
-        return False
+    if len(valley_orbit) == 1:
+        source_to_sampled = bundle.get("source_hsp_to_sampled_kpoint")
+        if (
+            not isinstance(source_to_sampled, dict)
+            or set(source_to_sampled) != set(expected_hsps)
+            or any(
+                not isinstance(sampled, str) or not sampled
+                for sampled in source_to_sampled.values()
+            )
+            or len(set(source_to_sampled.values())) != len(source_to_sampled)
+            or not validate_time_reversal_sewing_report(
+                evidence.get("antiunitary_sewing_evidence"),
+                valley_members=valley_orbit,
+                theta_square=expected_theta_square,
+                required_kpoints=[
+                    source_to_sampled[hsp] for hsp in expected_hsps
+                ],
+            )
+        ):
+            return False
 
     grey_bns_number = evidence.get("grey_bns_number")
     return (

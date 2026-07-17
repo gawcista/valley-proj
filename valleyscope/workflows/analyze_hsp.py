@@ -296,10 +296,10 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         coefficients = kpoint.coefficients[positions]
         coefficients_by_kpoint[kpoint_name] = coefficients
         g_vectors_frac_by_kpoint[kpoint_name] = np.asarray(
-            kpoint.g_vectors_frac, dtype=int
+            kpoint.g_vectors_frac
         )
         band_indices_by_kpoint[kpoint_name] = np.asarray(
-            kpoint.band_indices_vasp[positions], dtype=int
+            kpoint.band_indices_vasp[positions]
         )
         kpoint_frac_by_name[kpoint_name] = np.asarray(kpoint.frac, dtype=float)
         q_cart = kpoint.cart.reshape(1, 3) + kpoint.g_vectors_cart

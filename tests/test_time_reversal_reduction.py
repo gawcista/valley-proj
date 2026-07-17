@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 import numpy as np
 import pytest
 
@@ -29,7 +31,6 @@ from valleyscope.irreps.tables import (
 )
 from valleyscope.irreps.ebr_data_adapter import load_ebr_source_data
 from valleyscope.irreps.time_reversal_ebr import (
-    derive_time_reversal_ebr_column_pairing,
     validate_grey_group_time_reversal_source,
 )
 from valleyscope.irreps.time_reversal_source import (
@@ -209,54 +210,6 @@ def test_non_involutive_explicit_mapping_validation_fails_closed():
     ]
 
 
-def test_ebr_pairing_uses_complete_vectors_and_preserves_ambiguity():
-    report = derive_time_reversal_ebr_column_pairing(
-        source_basis_labels=["q1", "qa1", "r1", "ra1"],
-        source_ebrs=[
-            {"ebr_label": "x", "vector": [1, 0, 1, 0]},
-            {"ebr_label": "y", "vector": [0, 1, 0, 1]},
-            {"ebr_label": "y_duplicate", "vector": [0, 1, 0, 1]},
-        ],
-        irrep_partner_by_label={
-            "q1": "qa1", "qa1": "q1", "r1": "ra1", "ra1": "r1",
-        },
-    )
-
-    assert report["status"] == "ambiguous"
-    assert report["partner_candidates_by_ebr_label"]["x"] == [
-        "y", "y_duplicate",
-    ]
-    assert report["partner_candidates_by_ebr_label"]["y"] == ["x"]
-
-
-def test_time_reversal_ebr_pairing_rejects_empty_source_columns():
-    report = derive_time_reversal_ebr_column_pairing(
-        source_basis_labels=["g"],
-        source_ebrs=[],
-        irrep_partner_by_label={"g": "g"},
-    )
-
-    assert report["status"] == "blocked"
-    assert "time_reversal_ebr_source_columns_missing" in report["blockers"]
-
-
-def test_ebr_pairing_does_not_pair_columns_equal_only_after_row_deletion():
-    report = derive_time_reversal_ebr_column_pairing(
-        source_basis_labels=["q1", "qa1", "r1", "ra1"],
-        source_ebrs=[
-            {"ebr_label": "x", "vector": [1, 0, 1, 0]},
-            {"ebr_label": "false_reduced_partner", "vector": [0, 1, 1, 0]},
-        ],
-        irrep_partner_by_label={
-            "q1": "qa1", "qa1": "q1", "r1": "ra1", "ra1": "r1",
-        },
-    )
-
-    assert report["status"] == "blocked"
-    assert report["partner_candidates_by_ebr_label"]["x"] == []
-    assert "missing_time_reversal_ebr_partner:x" in report["blockers"]
-
-
 def test_spinful_sg143_grey_source_proves_unitary_pair_closure():
     table = load_standard_irrep_table(143, spinor=True)
     source = load_ebr_source_data(143, True)
@@ -282,9 +235,6 @@ def test_spinful_sg143_grey_source_proves_unitary_pair_closure():
     assert report["grey_unitary_restriction_by_irrep"]["-GM4GM4"] == {
         "-GM4": 2,
     }
-    assert report["unitary_ebr_column_pairing_diagnostic"]["status"] == (
-        "validated"
-    )
 
 
 def test_scalar_real_grey_source_restricts_once_without_column_doubling():
@@ -306,9 +256,6 @@ def test_scalar_real_grey_source_restricts_once_without_column_doubling():
     assert report["status"] == "validated"
     assert report["grey_unitary_restriction_by_irrep"]["GM1"] == {"GM1": 1}
     assert report["grey_unitary_restriction_case_by_irrep"]["GM1"] == "real"
-    assert report["unitary_ebr_column_pairing_diagnostic"]["status"] == (
-        "validated"
-    )
 
 
 def test_scalar_complex_grey_source_restricts_to_conjugate_pair():
@@ -335,6 +282,31 @@ def test_scalar_complex_grey_source_restricts_to_conjugate_pair():
     }
     assert report["grey_unitary_restriction_case_by_irrep"]["GM2GM3"] == (
         "complex_paired"
+    )
+
+
+def test_grey_source_rejects_nonbijective_unitary_irrep_involution():
+    table = load_standard_irrep_table(143, spinor=False)
+    source = load_ebr_source_data(143, False)
+    rows = _reviewed_rows(table, source["source_basis_labels"])
+    orbits = derive_time_reversal_source_irrep_orbits(
+        reviewed_rows=rows,
+        centering_vectors=[[0.0, 0.0, 0.0]],
+    )
+    corrupted = dict(orbits["irrep_partner_by_label"])
+    corrupted["H1"] = "GM1"
+
+    report = validate_grey_group_time_reversal_source(
+        unitary_table=table,
+        reviewed_rows=rows,
+        unitary_source_data=source,
+        irrep_partner_by_label=corrupted,
+        centering_vectors=[[0.0, 0.0, 0.0]],
+    )
+
+    assert report["status"] == "blocked"
+    assert "incomplete_or_nonbijective_time_reversal_irrep_row_mapping" in (
+        report["blockers"]
     )
 
 
@@ -385,6 +357,7 @@ def _reviewed_joint_bundle_and_table():
         "spinor": True,
         "expected_hsps": ["GM"],
         "irreps_by_kpoint": {"GM": ["-GM4GM4"]},
+        "source_hsp_to_sampled_kpoint": {"GM": "GM"},
         "ready_for_external_solver": True,
     }
     export = {"bundles": [bundle]}
@@ -496,6 +469,18 @@ def test_joint_problem_rejects_incomplete_hsp_and_irrep_involutions():
     )
 
 
+def test_joint_problem_rejects_component_hsp_outside_declared_inventory():
+    bundle, table = _reviewed_joint_bundle_and_table()
+    malformed = deepcopy(bundle)
+    malformed["unitary_valley_irreps"]["left"] = {
+        "X": {"-GM4": 1},
+    }
+
+    assert "time_reversal_bundle_evidence_invalid" in _blocker_codes(
+        promote_bundle_for_solve(bundle=malformed, table=table)
+    )
+
+
 def test_self_mapped_joint_problem_requires_serialized_sewing_evidence():
     bundle, table = _reviewed_joint_bundle_and_table()
     self_mapped = dict(bundle)
@@ -522,6 +507,12 @@ def test_self_mapped_joint_problem_requires_serialized_sewing_evidence():
     self_mapped["time_reversal"]["antiunitary_sewing_evidence"] = sewing
 
     assert promote_bundle_for_solve(bundle=self_mapped, table=table)["promoted"]
+
+    unrelated = deepcopy(self_mapped)
+    unrelated["source_hsp_to_sampled_kpoint"] = {"GM": "other"}
+    assert "time_reversal_bundle_evidence_invalid" in _blocker_codes(
+        promote_bundle_for_solve(bundle=unrelated, table=table)
+    )
 
     missing = dict(self_mapped)
     missing["time_reversal"] = dict(self_mapped["time_reversal"])
@@ -623,6 +614,7 @@ def _self_mapped_candidates(*, multiplicity: int):
         "matched_irrep": "g",
         "irrep_multiplicity": multiplicity,
         "irrep_source_provenance": {"source_hsp_label": "G"},
+        "kpoint": "G",
         "ready_for_ebr_input": True,
     }]}
 
@@ -665,6 +657,7 @@ def test_self_mapped_valley_promotes_only_with_numerical_antiunitary_evidence():
     orbit = report["valley_orbits"][0]
     assert orbit["mapping_type"] == "self_mapped"
     assert orbit["irreps_by_kpoint"] == {"G": ["g_corep"]}
+    assert orbit["source_hsp_to_sampled_kpoint"] == {"G": "G"}
     assert orbit["antiunitary_corepresentation_status"] == "validated"
 
 

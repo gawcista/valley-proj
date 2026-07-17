@@ -391,7 +391,9 @@ def _build_time_reversal_problem_instances(
                 "full_unitary_source_hsp_labels", []
             ) if validated else [],
             "trusted_missing_source_hsp_labels": [],
-            "source_hsp_to_sampled_kpoint": {},
+            "source_hsp_to_sampled_kpoint": raw_orbit.get(
+                "source_hsp_to_sampled_kpoint", {}
+            ),
             "source_hsp_coverage_complete": validated,
             "source_hsp_coverage_provenance": {
                 "source": "time_reversal_valley_orbit_completion",

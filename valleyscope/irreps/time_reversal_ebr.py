@@ -25,92 +25,6 @@ from valleyscope.irreps.tables import (
 _TOL = 5e-5
 
 
-def derive_time_reversal_ebr_column_pairing(
-    *,
-    source_basis_labels: Sequence[str],
-    source_ebrs: Sequence[Mapping[str, object]],
-    irrep_partner_by_label: Mapping[str, str],
-) -> dict[str, object]:
-    """Apply the full row involution to every source EBR vector."""
-    basis = [str(label) for label in source_basis_labels]
-    blockers: list[str] = []
-    if not basis or len(set(basis)) != len(basis):
-        blockers.append("invalid_or_duplicate_time_reversal_ebr_source_basis")
-    if (
-        set(irrep_partner_by_label) != set(basis)
-        or set(irrep_partner_by_label.values()) != set(basis)
-    ):
-        blockers.append("incomplete_time_reversal_irrep_row_mapping")
-    if any(
-        irrep_partner_by_label.get(
-            irrep_partner_by_label.get(label, ""), ""
-        ) != label
-        for label in basis
-    ):
-        blockers.append("non_involutive_time_reversal_irrep_row_mapping")
-    if not source_ebrs:
-        blockers.append("time_reversal_ebr_source_columns_missing")
-
-    labels: list[str] = []
-    vectors: list[tuple[int, ...]] = []
-    for index, raw in enumerate(source_ebrs):
-        label = raw.get("ebr_label") if isinstance(raw, Mapping) else None
-        vector = raw.get("vector") if isinstance(raw, Mapping) else None
-        if not isinstance(label, str) or not label or label in labels:
-            blockers.append(f"invalid_or_duplicate_source_ebr_label:{index}")
-            continue
-        if (
-            not isinstance(vector, Sequence)
-            or isinstance(vector, (str, bytes))
-            or len(vector) != len(basis)
-            or any(
-                not isinstance(value, int)
-                or isinstance(value, bool)
-                or value < 0
-                for value in vector
-            )
-        ):
-            blockers.append(f"malformed_complete_source_ebr_vector:{label}")
-            continue
-        labels.append(label)
-        vectors.append(tuple(int(value) for value in vector))
-
-    basis_index = {label: index for index, label in enumerate(basis)}
-    transformed: dict[str, list[int]] = {}
-    candidates_by_label: dict[str, list[str]] = {}
-    if not blockers:
-        for label, vector in zip(labels, vectors):
-            tr_vector = tuple(
-                vector[basis_index[irrep_partner_by_label[row_label]]]
-                for row_label in basis
-            )
-            transformed[label] = list(tr_vector)
-            candidates = [
-                candidate_label
-                for candidate_label, candidate_vector in zip(labels, vectors)
-                if candidate_vector == tr_vector
-            ]
-            candidates_by_label[label] = candidates
-            if not candidates:
-                blockers.append(f"missing_time_reversal_ebr_partner:{label}")
-
-    ambiguous = [
-        label for label, candidates in candidates_by_label.items()
-        if len(candidates) > 1
-    ]
-    status = "blocked" if blockers else (
-        "ambiguous" if ambiguous else "validated"
-    )
-    return {
-        "status": status,
-        "complete_source_basis_labels": basis,
-        "partner_candidates_by_ebr_label": candidates_by_label,
-        "time_reversed_vectors_by_ebr_label": transformed,
-        "ambiguous_ebr_labels": ambiguous,
-        "blockers": blockers,
-    }
-
-
 def validate_grey_group_time_reversal_source(
     *,
     unitary_table: StandardIrrepTable,
@@ -124,25 +38,41 @@ def validate_grey_group_time_reversal_source(
 ) -> dict[str, object]:
     """Validate unitary TR pairs against an explicit type-II grey table.
 
-    The grey-group rows prove antiunitary corepresentation closure.  EBR
-    columns are related only after comparison on the complete source basis.
+    The grey-group rows and direct grey EBR columns are authoritative.
     """
     blockers: list[str] = []
     unit_basis = unitary_source_data.get("source_basis_labels", [])
-    unit_ebrs = unitary_source_data.get("source_ebrs", [])
     if (
         not isinstance(unit_basis, Sequence)
         or isinstance(unit_basis, (str, bytes))
-        or not isinstance(unit_ebrs, Sequence)
-        or isinstance(unit_ebrs, (str, bytes))
     ):
         return _blocked("malformed_unitary_ebr_source_data")
     unit_basis = [str(label) for label in unit_basis]
-    pairing = derive_time_reversal_ebr_column_pairing(
-        source_basis_labels=unit_basis,
-        source_ebrs=[row for row in unit_ebrs if isinstance(row, Mapping)],
-        irrep_partner_by_label=irrep_partner_by_label,
-    )
+    if not unit_basis or len(set(unit_basis)) != len(unit_basis) or any(
+        not label for label in unit_basis
+    ):
+        blockers.append("invalid_or_duplicate_time_reversal_ebr_source_basis")
+    if (
+        set(irrep_partner_by_label) != set(unit_basis)
+        or set(irrep_partner_by_label.values()) != set(unit_basis)
+        or any(
+            not isinstance(label, str)
+            or not label
+            or not isinstance(partner, str)
+            or not partner
+            for label, partner in irrep_partner_by_label.items()
+        )
+    ):
+        blockers.append(
+            "incomplete_or_nonbijective_time_reversal_irrep_row_mapping"
+        )
+    if any(
+        irrep_partner_by_label.get(
+            irrep_partner_by_label.get(label, ""), ""
+        ) != label
+        for label in unit_basis
+    ):
+        blockers.append("non_involutive_time_reversal_irrep_row_mapping")
     try:
         bns_number = derive_type_ii_bns_number(unitary_table.number)
         grey_table = load_magnetic_irrep_table(
@@ -277,7 +207,6 @@ def validate_grey_group_time_reversal_source(
         "grey_source_ebrs": [dict(row) for row in grey_ebrs],
         "grey_unitary_restriction_by_irrep": restrictions,
         "grey_unitary_restriction_case_by_irrep": restriction_cases,
-        "unitary_ebr_column_pairing_diagnostic": pairing,
         "blockers": blockers,
     }
 
@@ -420,6 +349,5 @@ def _blocked(
         "grey_source_ebrs": [],
         "grey_unitary_restriction_by_irrep": {},
         "grey_unitary_restriction_case_by_irrep": {},
-        "unitary_ebr_column_pairing_diagnostic": {},
         "blockers": [*blockers, reason],
     }

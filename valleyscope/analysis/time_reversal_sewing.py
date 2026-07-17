@@ -194,18 +194,62 @@ def validate_time_reversal_sewing_report(
     *,
     valley_members: list[str],
     theta_square: object,
+    required_kpoints: list[str] | None = None,
 ) -> bool:
     """Validate serialized sewing evidence before readiness promotion."""
-    if not isinstance(evidence, Mapping) or evidence.get("status") != "validated":
+    if (
+        not isinstance(evidence, Mapping)
+        or evidence.get("status") != "validated"
+        or evidence.get("blockers") != []
+    ):
         return False
     if theta_square not in (-1, 1) or evidence.get("theta_square") != theta_square:
+        return False
+    if evidence.get("spin_convention") != (
+        "spinful_i_sigma_y_K"
+        if theta_square == -1 else "scalar_complex_conjugation"
+    ):
+        return False
+    spinor_verified = evidence.get("spinor_convention_verified")
+    if not isinstance(spinor_verified, bool) or (
+        theta_square == -1 and not spinor_verified
+    ):
         return False
     kpoint_mapping = evidence.get("time_reversal_kpoint_mapping")
     if not isinstance(kpoint_mapping, Mapping) or not kpoint_mapping:
         return False
+    if any(
+        not isinstance(source, str)
+        or not source
+        or not isinstance(target, str)
+        or not target
+        for source, target in kpoint_mapping.items()
+    ):
+        return False
     if set(kpoint_mapping) != set(kpoint_mapping.values()) or any(
         kpoint_mapping.get(kpoint_mapping.get(name, "")) != name
         for name in kpoint_mapping
+    ):
+        return False
+    if required_kpoints is not None and (
+        not required_kpoints
+        or len(set(required_kpoints)) != len(required_kpoints)
+        or set(kpoint_mapping) != set(required_kpoints)
+    ):
+        return False
+    reciprocal_shifts = evidence.get("reciprocal_shifts_by_kpoint")
+    if not isinstance(reciprocal_shifts, Mapping) or set(
+        reciprocal_shifts
+    ) != set(kpoint_mapping):
+        return False
+    if any(
+        not _is_integer_list(shift, length=3)
+        for shift in reciprocal_shifts.values()
+    ):
+        return False
+    if any(
+        reciprocal_shifts[source] != reciprocal_shifts[target]
+        for source, target in kpoint_mapping.items()
     ):
         return False
     rows = evidence.get("rows")
@@ -215,50 +259,101 @@ def validate_time_reversal_sewing_report(
         row.get("source_kpoint"): row
         for row in rows if isinstance(row, Mapping)
     }
-    if set(rows_by_source) != set(kpoint_mapping):
+    if len(rows_by_source) != len(rows) or set(rows_by_source) != set(
+        kpoint_mapping
+    ):
         return False
     for source, target in kpoint_mapping.items():
         row = rows_by_source[source]
         if (
             row.get("status") != "validated"
             or row.get("target_kpoint") != target
+            or row.get("reciprocal_shift") != reciprocal_shifts[source]
+            or row.get("mapping_miss_count") != 0
             or row.get("theta_square") != theta_square
             or row.get("blockers") != []
         ):
             return False
+        source_bands = row.get("source_band_indices_vasp")
+        target_bands = row.get("target_band_indices_vasp")
+        if (
+            not _is_integer_list(source_bands, positive=True)
+            or not _is_integer_list(target_bands, positive=True)
+            or len(set(source_bands)) != len(source_bands)
+            or len(set(target_bands)) != len(target_bands)
+            or source_bands != rows_by_source[target].get(
+                "target_band_indices_vasp"
+            )
+            or target_bands != rows_by_source[target].get(
+                "source_band_indices_vasp"
+            )
+            or (theta_square == -1 and source == target and len(source_bands) % 2)
+        ):
+            return False
         for key in (
+            "source_orthonormality_residual",
+            "target_orthonormality_residual",
             "target_subspace_closure_residual",
             "sewing_unitarity_residual",
             "theta_square_residual",
         ):
             value = row.get(key)
-            if (
-                not isinstance(value, (int, float))
-                or isinstance(value, bool)
-                or not np.isfinite(value)
-                or value > _TOL
-            ):
+            if not _is_residual(value):
                 return False
         singular_values = row.get("overlap_singular_values")
         if (
             not isinstance(singular_values, list)
-            or not singular_values
+            or len(singular_values) != len(source_bands)
             or any(
                 not isinstance(value, (int, float))
                 or isinstance(value, bool)
+                or not np.isfinite(value)
                 or abs(float(value) - 1.0) > _TOL
                 for value in singular_values
             )
         ):
             return False
         covariance = row.get("projector_covariance")
-        if not isinstance(covariance, Mapping) or any(
-            not isinstance(covariance.get(valley), Mapping)
-            or covariance[valley].get("status") != "validated"
-            for valley in valley_members
-        ):
+        if not isinstance(covariance, Mapping):
             return False
+        for valley in valley_members:
+            entry = covariance.get(valley)
+            if (
+                not isinstance(entry, Mapping)
+                or entry.get("status") != "validated"
+                or entry.get("partner_valley") != valley
+                or not _is_residual(entry.get("covariance_residual"))
+            ):
+                return False
     return True
+
+
+def _is_integer_list(
+    value: object,
+    *,
+    length: int | None = None,
+    positive: bool = False,
+) -> bool:
+    return (
+        isinstance(value, list)
+        and bool(value)
+        and (length is None or len(value) == length)
+        and all(
+            isinstance(item, int)
+            and not isinstance(item, bool)
+            and (not positive or item > 0)
+            for item in value
+        )
+    )
+
+
+def _is_residual(value: object) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and np.isfinite(value)
+        and 0.0 <= float(value) <= _TOL
+    )
 
 
 def _build_sewing_row(
