@@ -112,25 +112,49 @@ def test_ingestion_candidate_without_mapping_has_candidate_status():
 
 
 @pytest.mark.parametrize(
-    "solution_status", ["no_exact_solution", "indeterminate_truncated"]
+    ("solution_status", "classification", "search_status"),
+    [
+        (
+            "no_exact_solution",
+            "in_integer_span_no_nonnegative_witness",
+            None,
+        ),
+        (
+            "indeterminate_truncated",
+            "indeterminate_truncated",
+            "truncated_by_max_coefficient",
+        ),
+    ],
 )
-def test_evaluated_nonexact_solution_is_a_final_result(solution_status):
+def test_evaluated_nonexact_solution_is_a_final_result(
+    solution_status, classification, search_status,
+):
+    solution = {
+        "bundle_id": "b",
+        "status": solution_status,
+        "classification": classification,
+    }
+    if search_status is not None:
+        solution["search_status"] = search_status
     record = build_database_ingestion_record(
         valley_summary={"target_kpoints": [], "iband": [], "input": {}},
         valley_reduced_ebr_mapping={
             "status": solution_status,
             "table_status": "loaded",
-            "solutions": [{
-                "bundle_id": "b",
-                "status": solution_status,
-                "classification": "in_integer_span_no_nonnegative_witness",
-            }],
+            "solutions": [solution],
             "excluded_bundles": [],
         },
     )
 
     assert record["record_status"] == "has_final_reduced_ebr_results"
     assert record["final_reduced_ebr_result_count"] == 1
+    counts = record["reduced_ebr_classification_counts"]
+    assert counts[classification] == 1
+    assert sum(counts.values()) == record["final_reduced_ebr_result_count"]
+    if search_status is not None:
+        assert record["reduced_ebr_records"][0]["search_status"] == (
+            search_status
+        )
 
 
 def test_tr_validation_candidate_unitary_irreps_survive_without_mapping():
@@ -306,6 +330,7 @@ def test_ingestion_record_missing_reduced_ebr_is_not_an_error():
         "atomic_compatible": 0,
         "in_integer_span_no_nonnegative_witness": 0,
         "outside_integer_span": 0,
+        "indeterminate_truncated": 0,
     }
     assert len(record["validation_errors"]) == 0
 
@@ -595,6 +620,29 @@ def test_database_index_builder_two_records():
         assert "run_id" in rr
         assert "source_record" in rr
     assert len(index["reduced_ebr_records"]) == 2
+
+
+def test_database_index_aggregates_indeterminate_truncated_classification():
+    from valleyscope.analysis.database_index import build_database_index
+
+    record = _make_ingestion_record()
+    record["final_reduced_ebr_result_count"] = 2
+    record["reduced_ebr_classification_counts"] = {
+        "atomic_compatible": 1,
+        "in_integer_span_no_nonnegative_witness": 0,
+        "outside_integer_span": 0,
+        "indeterminate_truncated": 1,
+    }
+
+    index = build_database_index([record])
+
+    assert index["final_reduced_ebr_result_count_total"] == 2
+    assert index["reduced_ebr_classification_counts_total"] == {
+        "atomic_compatible": 1,
+        "in_integer_span_no_nonnegative_witness": 0,
+        "outside_integer_span": 0,
+        "indeterminate_truncated": 1,
+    }
 
 
 def test_database_index_uses_stage_owned_aggregates_only():

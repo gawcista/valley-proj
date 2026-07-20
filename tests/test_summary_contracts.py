@@ -1325,6 +1325,7 @@ def test_schema_doc_covers_public_outputs_and_reduced_ebr_statuses():
         assert status in schema_text, (
             f"docs/schema.md must document reduced-EBR status '{status}'"
         )
+    assert "| `indeterminate_truncated` | int |" in schema_text
 
     # Reduced-EBR public field names must appear.
     for field in [

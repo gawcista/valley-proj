@@ -65,7 +65,7 @@ _VALIDATED_BASIS_INSTANCE = {
 
 
 # -----------------------------------------------------------------------
-# 1. Complete canonical vector is exported for table validation
+# 1. Complete and trusted canonical vector is exported for table validation
 # -----------------------------------------------------------------------
 
 def test_canonical_vector_exported_for_table_validation():
@@ -77,6 +77,7 @@ def test_canonical_vector_exported_for_table_validation():
     assert "ready_for_external_solver" not in b
     assert b["subspace_group_candidate"] == "P3"
     assert b["missing_optional_hsps"] == ["MM"]
+    assert "complete and trusted" in r["interpretation"].lower()
 
 
 # -----------------------------------------------------------------------

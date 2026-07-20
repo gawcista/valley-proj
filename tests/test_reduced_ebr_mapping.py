@@ -1076,6 +1076,51 @@ def test_top_level_status_preserves_indeterminate_truncation():
     )
 
     assert result["status"] == "indeterminate_truncated"
+    solution = result["solutions"][0]
+    assert solution["status"] == "indeterminate_truncated"
+    assert solution["classification"] == "indeterminate_truncated"
+    assert solution["search_status"] == "truncated_by_max_coefficient"
+
+
+def test_cli_distinguishes_truncated_search_from_no_exact_solution(
+    tmp_path, capsys,
+):
+    from valleyscope.cli import main
+
+    table = {
+        **_SAMPLE_TABLE,
+        "expected_hsps": ["GammaM"],
+        "irreps": ["GammaM:irrep_A", "GammaM:irrep_B"],
+        "ebrs": [
+            {"label": "EBR_A", "vector": [1, 0]},
+            {"label": "EBR_B", "vector": [0, 1]},
+        ],
+    }
+    export = _ready(_bundle_with_hsps(
+        expected=["GammaM"],
+        irreps_by_kp={
+            "GammaM": ["irrep_A"] * 10 + ["irrep_B"] * 10,
+        },
+    ), table)
+    bundle_path = tmp_path / "bundle.json"
+    table_path = tmp_path / "table.json"
+    output_path = tmp_path / "mapping.json"
+    bundle_path.write_text(json.dumps(export), encoding="utf-8")
+    table_path.write_text(json.dumps(table), encoding="utf-8")
+
+    rc = main([
+        "map-reduced-ebr",
+        str(bundle_path),
+        str(table_path),
+        "--max-coefficient", "5",
+        "--output", str(output_path),
+    ])
+
+    assert rc == 0
+    output = capsys.readouterr().out
+    assert "no exact solution:   0" in output
+    assert "indeterminate:       1" in output
+    assert "indeterminate-truncated:            1" in output
 
 def test_classification_fields_on_existing_tests():
     """All solutions must carry classification, integer_span_status,

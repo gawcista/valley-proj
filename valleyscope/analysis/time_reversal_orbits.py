@@ -173,7 +173,7 @@ def build_time_reversal_valley_orbit_report(
         str, Mapping[str, Mapping[str, object]]
     ] | None = None,
 ) -> dict[str, object]:
-    """Complete trusted sampled rows on exchanged or self-mapped TR orbits."""
+    """Build structural TR corep candidates and gate their physical trust."""
     if valley_mapping_report.get("status") != "validated":
         return _blocked_orbit_report(
             "time_reversal_valley_mapping_not_validated"
@@ -203,18 +203,23 @@ def build_time_reversal_valley_orbit_report(
             return _blocked_orbit_report(
                 "time_reversal_valley_orbit_members_malformed"
             )
-        blockers: list[str] = []
+        structural_blockers: list[str] = []
+        readiness_blockers: list[str] = []
         mapping_type = str(raw_orbit.get("mapping_type", ""))
         if mapping_type == "exchanged":
             if len(members) != 2:
-                blockers.append("malformed_exchanged_time_reversal_valley_orbit")
+                structural_blockers.append(
+                    "malformed_exchanged_time_reversal_valley_orbit"
+                )
         elif mapping_type == "self_mapped":
             if len(members) != 1:
-                blockers.append(
+                structural_blockers.append(
                     "malformed_self_mapped_time_reversal_valley_orbit"
                 )
         else:
-            blockers.append("unknown_time_reversal_valley_mapping_type")
+            structural_blockers.append(
+                "unknown_time_reversal_valley_mapping_type"
+            )
 
         source_reports = [
             source_irrep_orbits_by_valley.get(member, {})
@@ -224,9 +229,13 @@ def build_time_reversal_valley_orbit_report(
             grey_source_by_valley.get(member, {}) for member in members
         ]
         if any(report.get("status") != "validated" for report in source_reports):
-            blockers.append("time_reversal_source_irrep_orbits_not_validated")
+            structural_blockers.append(
+                "time_reversal_source_irrep_orbits_not_validated"
+            )
         if any(report.get("status") != "validated" for report in grey_reports):
-            blockers.append("grey_group_time_reversal_source_not_validated")
+            structural_blockers.append(
+                "grey_group_time_reversal_source_not_validated"
+            )
         if source_reports and any(
             report.get("time_reversal_hsp_mapping")
             != source_reports[0].get("time_reversal_hsp_mapping")
@@ -234,7 +243,9 @@ def build_time_reversal_valley_orbit_report(
             != source_reports[0].get("irrep_partner_by_label")
             for report in source_reports[1:]
         ):
-            blockers.append("valley_source_time_reversal_models_disagree")
+            structural_blockers.append(
+                "valley_source_time_reversal_models_disagree"
+            )
         if grey_reports and any(
             report.get("grey_bns_number")
             != grey_reports[0].get("grey_bns_number")
@@ -242,7 +253,9 @@ def build_time_reversal_valley_orbit_report(
             != grey_reports[0].get("grey_unitary_restriction_by_irrep")
             for report in grey_reports[1:]
         ):
-            blockers.append("valley_grey_source_models_disagree")
+            structural_blockers.append(
+                "valley_grey_source_models_disagree"
+            )
 
         source_report = source_reports[0] if source_reports else {}
         grey_report = grey_reports[0] if grey_reports else {}
@@ -252,7 +265,9 @@ def build_time_reversal_valley_orbit_report(
         if not isinstance(hsp_mapping, Mapping) or not isinstance(
             irrep_mapping, Mapping
         ) or not isinstance(independent_hsps, list):
-            blockers.append("time_reversal_source_mapping_malformed")
+            structural_blockers.append(
+                "time_reversal_source_mapping_malformed"
+            )
             hsp_mapping = {}
             irrep_mapping = {}
             independent_hsps = []
@@ -277,7 +292,7 @@ def build_time_reversal_valley_orbit_report(
                 projector_workflows,
                 projector_workflow_blockers,
             ) = _candidate_projector_workflows(candidates, members)
-            source_mapping_blockers.extend(projector_workflow_blockers)
+            readiness_blockers.extend(projector_workflow_blockers)
             (
                 projector_provenance,
                 projector_provenance_blockers,
@@ -285,17 +300,17 @@ def build_time_reversal_valley_orbit_report(
                 projector_workflows,
                 trusted_projector_provenance_by_kpoint,
             )
-            source_mapping_blockers.extend(projector_provenance_blockers)
+            readiness_blockers.extend(projector_provenance_blockers)
             (
                 source_hsp_bindings,
                 source_hsp_binding_blockers,
             ) = _candidate_source_hsp_bindings(candidates, members)
-            source_mapping_blockers.extend(source_hsp_binding_blockers)
+            structural_blockers.extend(source_hsp_binding_blockers)
             if set(source_to_sampled) != set(independent_hsps):
-                source_mapping_blockers.append(
+                structural_blockers.append(
                     "antiunitary_source_hsp_sampled_kpoint_mapping_incomplete"
                 )
-            blockers.extend(source_mapping_blockers)
+            structural_blockers.extend(source_mapping_blockers)
             if not validate_time_reversal_sewing_report(
                 antiunitary_sewing_report,
                 valley_members=members,
@@ -304,13 +319,13 @@ def build_time_reversal_valley_orbit_report(
                 required_projector_workflows=projector_workflows,
                 required_projector_provenance=projector_provenance,
             ):
-                blockers.append(
+                readiness_blockers.append(
                     "antiunitary_corepresentation_sewing_not_validated"
                 )
         for member in members:
             for hsp in independent_hsps:
                 if not actual.get(member, {}).get(str(hsp)):
-                    blockers.append(
+                    structural_blockers.append(
                         f"missing_trusted_independent_hsp:{member}:{hsp}"
                     )
 
@@ -328,13 +343,13 @@ def build_time_reversal_valley_orbit_report(
                 for hsp, counts in by_hsp.items():
                     partner_hsp = hsp_mapping.get(hsp)
                     if not isinstance(partner_hsp, str):
-                        blockers.append(
+                        structural_blockers.append(
                             f"missing_time_reversal_hsp_partner:{hsp}"
                         )
                         continue
                     target_valley = partner_valley.get(valley)
                     if target_valley not in inferred:
-                        blockers.append(
+                        structural_blockers.append(
                             f"missing_time_reversal_valley_partner:{valley}"
                         )
                         continue
@@ -344,7 +359,7 @@ def build_time_reversal_valley_orbit_report(
                     for irrep, multiplicity in counts.items():
                         partner_irrep = irrep_mapping.get(irrep)
                         if not isinstance(partner_irrep, str):
-                            blockers.append(
+                            structural_blockers.append(
                                 f"missing_time_reversal_irrep_partner:{irrep}"
                             )
                             continue
@@ -362,7 +377,7 @@ def build_time_reversal_valley_orbit_report(
             for hsp, inferred_counts in inferred.get(member, {}).items():
                 actual_counts = actual.get(member, {}).get(hsp)
                 if actual_counts is not None and actual_counts != inferred_counts:
-                    blockers.append(
+                    structural_blockers.append(
                         "time_reversal_multiplicity_or_irrep_mismatch:"
                         f"{member}:{hsp}:actual={actual_counts}:"
                         f"inferred={inferred_counts}"
@@ -374,7 +389,7 @@ def build_time_reversal_valley_orbit_report(
         for member in members:
             for hsp in full_hsps:
                 if not completed.get(member, {}).get(hsp):
-                    blockers.append(
+                    structural_blockers.append(
                         f"incomplete_time_reversal_component:{member}:{hsp}"
                     )
 
@@ -386,7 +401,7 @@ def build_time_reversal_valley_orbit_report(
                     target[irrep] = target.get(irrep, 0) + multiplicity
 
         grey_counts: dict[str, dict[str, int]] = {}
-        if not blockers:
+        if not structural_blockers:
             grey_counts, decomposition_blockers = _decompose_grey_counts(
                 unitary_counts_by_hsp=combined,
                 grey_restrictions=grey_report.get(
@@ -399,7 +414,12 @@ def build_time_reversal_valley_orbit_report(
                     "unitary_source_hsp_by_irrep", {}
                 ),
             )
-            blockers.extend(decomposition_blockers)
+            structural_blockers.extend(decomposition_blockers)
+
+        all_blockers = _deduplicate([
+            *structural_blockers,
+            *readiness_blockers,
+        ])
 
         irreps_by_kpoint = {
             hsp: [
@@ -415,9 +435,10 @@ def build_time_reversal_valley_orbit_report(
             "representative": raw_orbit.get("representative", members[0]),
             "members": members,
             "mapping_type": mapping_type,
-            "status": "validated" if not blockers else "blocked",
+            "status": "validated" if not all_blockers else "blocked",
             "antiunitary_corepresentation_status": (
-                "validated" if mapping_type == "self_mapped" and not blockers
+                "validated"
+                if mapping_type == "self_mapped" and not all_blockers
                 else "not_required_for_exchanged_orbit"
                 if mapping_type == "exchanged"
                 else "blocked"
@@ -438,7 +459,9 @@ def build_time_reversal_valley_orbit_report(
             "grey_irrep_multiplicities_by_hsp": grey_counts,
             "irreps_by_kpoint": irreps_by_kpoint,
             "expected_hsps": list(independent_hsps),
-            "blockers": _deduplicate(blockers),
+            "structural_blockers": _deduplicate(structural_blockers),
+            "readiness_blockers": _deduplicate(readiness_blockers),
+            "blockers": all_blockers,
         })
 
     return {

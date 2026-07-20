@@ -138,7 +138,12 @@ def _map_reduced_ebr(args) -> int:
     solutions = mapping.get("solutions", [])
     excluded = mapping.get("excluded_bundles", [])
     solved = sum(1 for s in solutions if s.get("status") == "solved_exact")
-    unsolved = len(solutions) - solved
+    no_exact = sum(
+        1 for s in solutions if s.get("status") == "no_exact_solution"
+    )
+    indeterminate = sum(
+        1 for s in solutions if s.get("status") == "indeterminate_truncated"
+    )
 
     atomic = sum(1 for s in solutions
                  if s.get("classification") == "atomic-compatible-candidate")
@@ -146,15 +151,19 @@ def _map_reduced_ebr(args) -> int:
         if s.get("classification") == "in_integer_span_no_nonnegative_witness")
     outside_span = sum(1 for s in solutions
         if s.get("classification") == "outside_integer_span")
+    truncated = sum(1 for s in solutions
+        if s.get("classification") == "indeterminate_truncated")
 
     print(f"status:              {status}")
     print(f"total bundles:       {len(solutions)}")
     print(f"solved (exact):      {solved}")
-    print(f"no exact solution:   {unsolved}")
-    if atomic or in_span_no_witness or outside_span:
+    print(f"no exact solution:   {no_exact}")
+    print(f"indeterminate:       {indeterminate}")
+    if atomic or in_span_no_witness or outside_span or truncated:
         print(f"  atomic-compatible:                 {atomic}")
         print(f"  in-integer-span-no-nonneg-witness: {in_span_no_witness}")
         print(f"  outside-integer-span:              {outside_span}")
+        print(f"  indeterminate-truncated:            {truncated}")
     print(f"excluded:            {len(excluded)}")
     print(f"reduced EBR mapping: {output_path}")
     return 0

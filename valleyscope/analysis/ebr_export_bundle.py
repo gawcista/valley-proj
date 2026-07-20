@@ -115,9 +115,9 @@ def build_ebr_export_bundle(
         "excluded_count": len(excluded),
         "schema_version": _SCHEMA_VERSION,
         "interpretation": (
-            "Complete canonical source-HSP vectors packaged for reviewed "
-            "reduced-table validation. Exact mapping outcomes are reported "
-            "only by the final reduced-EBR mapping."
+            "Complete and trusted canonical source-HSP vectors packaged for "
+            "reviewed reduced-table validation. Exact mapping outcomes are "
+            "reported only by the final reduced-EBR mapping."
         ),
         "bundles": bundles,
         "excluded_instances": excluded,

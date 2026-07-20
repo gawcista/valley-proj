@@ -151,10 +151,16 @@ def build_database_ingestion_record(
                              and s.get("classification") == "in_integer_span_no_nonnegative_witness")
             outside = sum(1 for s in solutions if isinstance(s, dict)
                           and s.get("classification") == "outside_integer_span")
+            truncated = sum(
+                1 for s in solutions
+                if isinstance(s, dict)
+                and s.get("classification") == "indeterminate_truncated"
+            )
             record["reduced_ebr_classification_counts"] = {
                 "atomic_compatible": atomic,
                 "in_integer_span_no_nonnegative_witness": no_witness,
                 "outside_integer_span": outside,
+                "indeterminate_truncated": truncated,
             }
         # --- per-bundle reduced EBR records (compact public fields) ---
         if isinstance(solutions, list):
@@ -466,4 +472,5 @@ def _empty_classification_counts() -> dict[str, int]:
         "atomic_compatible": 0,
         "in_integer_span_no_nonnegative_witness": 0,
         "outside_integer_span": 0,
+        "indeterminate_truncated": 0,
     }

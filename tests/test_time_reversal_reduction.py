@@ -1310,85 +1310,130 @@ def test_grey_decomposition_rejects_unknown_wrong_hsp_and_empty_basis(
     assert blocker in blockers
 
 
-def test_joint_valley_orbit_problem_and_export_replace_one_valley_claims():
-    candidates = _orbit_candidates()["candidates"]
-    for candidate in candidates:
-        candidate["irrep_source_provenance"]["source_table_spinor"] = True
-        candidate.update({
-            "workflow_path": "direct_qcut",
-            "readiness_level": "trusted",
-            "subspace_group_candidate": "P4",
-            "subspace_space_group": {
-                "status": "resolved",
-                "candidate_space_group_number": 75,
-                "candidate_space_group_symbol": "P4",
-            },
-        })
-    orbit_report = {
-        "status": "validated",
-        "enabled": True,
-        "theta_square": -1,
-        "time_reversal_valley_mapping": {"left": "right", "right": "left"},
-        "valley_orbits": [{
-            "status": "validated",
-            "members": ["left", "right"],
-            "full_unitary_source_hsp_labels": ["G", "Q", "QA", "M"],
-            "expected_hsps": ["G", "Q", "M"],
-            "irreps_by_kpoint": {
-                "G": ["g_corep"], "Q": ["q1_corep", "q2_corep"],
-                "M": ["m_corep"],
-            },
-            "unitary_valley_irreps": {"left": {}, "right": {}},
-            "time_reversal_hsp_orbits": [],
-            "time_reversal_irrep_pairing": {},
-            "grey_bns_number": "75.2",
-            "blockers": [],
-        }],
-    }
-
-    problems = build_ebr_problem_instances(
-        ebr_input_candidates={"candidates": candidates},
-        time_reversal_orbit_report=orbit_report,
-    )
-
-    assert problems["instance_count"] == 1
-    instance = problems["instances"][0]
-    assert instance["problem_kind"] == "valley_orbit_reduced_ebr"
-    assert instance["valley_orbit"] == ["left", "right"]
-    assert instance["valley"] == ""
-    assert instance["canonical_hsp_vector_complete"] is True
-    assert instance["canonical_hsp_vector_ready"] is True
-    assert "ready_for_reduced_table_validation" not in instance
-
-    export = build_ebr_export_bundle(ebr_problem_instances=problems)
-    assert export["schema_version"] == "1.6.0"
-    assert export["bundle_count"] == 1
-    assert export["bundles"][0]["problem_kind"] == (
-        "valley_orbit_reduced_ebr"
-    )
-    assert export["bundles"][0]["valley_orbit"] == ["left", "right"]
-    assert not any(
-        bundle.get("valley") in {"left", "right"}
-        for bundle in export["bundles"]
-    )
-
-    orbit_report["valley_orbits"][0].update({
-        "status": "blocked",
-        "blockers": ["antiunitary_corepresentation_not_validated"],
+def _self_mapped_pipeline_candidates():
+    candidates = _self_mapped_candidates(multiplicity=1)
+    candidate = candidates["candidates"][0]
+    candidate["irrep_source_provenance"]["source_table_spinor"] = False
+    candidate.update({
+        "readiness_level": "trusted",
+        "subspace_group_candidate": "P1",
+        "subspace_space_group": {
+            "status": "resolved",
+            "candidate_space_group_number": 1,
+            "candidate_space_group_symbol": "P1",
+        },
     })
-    blocked_problems = build_ebr_problem_instances(
-        ebr_input_candidates={"candidates": candidates},
-        time_reversal_orbit_report=orbit_report,
+    return candidates
+
+
+def _self_mapped_pipeline_orbit_report(
+    *, candidates, sewing_report, projector_provenance,
+):
+    return build_time_reversal_valley_orbit_report(
+        valley_mapping_report={
+            "status": "validated",
+            "theta_square": 1,
+            "time_reversal_valley_mapping": {"v": "v"},
+            "valley_orbits": [{
+                "representative": "v",
+                "members": ["v"],
+                "mapping_type": "self_mapped",
+            }],
+        },
+        source_irrep_orbits_by_valley={"v": _self_mapped_source_report()},
+        grey_source_by_valley={
+            "v": _self_mapped_grey_report(multiplicity=1),
+        },
+        ebr_input_candidates=candidates,
+        antiunitary_sewing_report=sewing_report,
+        trusted_projector_provenance_by_kpoint=projector_provenance,
     )
-    blocked_instance = blocked_problems["instances"][0]
-    assert blocked_instance["status"] == (
+
+
+def test_tr_producer_preserves_complete_untrusted_vector_but_export_blocks_it():
+    candidates = _self_mapped_pipeline_candidates()
+    sewing = _scalar_self_mapped_sewing_report()
+    projector_provenance = _projector_provenance_from_sewing(sewing)
+
+    validated_report = _self_mapped_pipeline_orbit_report(
+        candidates=candidates,
+        sewing_report=sewing,
+        projector_provenance=projector_provenance,
+    )
+    validated_problems = build_ebr_problem_instances(
+        ebr_input_candidates=candidates,
+        time_reversal_orbit_report=validated_report,
+    )
+    validated_instance = validated_problems["instances"][0]
+    assert validated_instance["canonical_hsp_vector_complete"] is True
+    assert validated_instance["canonical_hsp_vector_ready"] is True
+    assert build_ebr_export_bundle(
+        ebr_problem_instances=validated_problems,
+    )["bundle_count"] == 1
+
+    untrusted_report = _self_mapped_pipeline_orbit_report(
+        candidates=candidates,
+        sewing_report=None,
+        projector_provenance=projector_provenance,
+    )
+    untrusted_orbit = untrusted_report["valley_orbits"][0]
+    assert untrusted_report["status"] == "blocked"
+    assert untrusted_orbit["structural_blockers"] == []
+    assert untrusted_orbit["readiness_blockers"] == [
+        "antiunitary_corepresentation_sewing_not_validated",
+    ]
+    assert untrusted_orbit["grey_irrep_multiplicities_by_hsp"] == {
+        "G": {"g_corep": 1},
+    }
+    assert untrusted_orbit["irreps_by_kpoint"] == {"G": ["g_corep"]}
+    assert "antiunitary_corepresentation_sewing_not_validated" in (
+        untrusted_orbit["blockers"]
+    )
+
+    untrusted_problems = build_ebr_problem_instances(
+        ebr_input_candidates=candidates,
+        time_reversal_orbit_report=untrusted_report,
+    )
+    untrusted_instance = untrusted_problems["instances"][0]
+    assert untrusted_instance["status"] == (
         "canonical_hsp_vector_complete_but_untrusted"
     )
-    assert blocked_instance["canonical_hsp_vector_complete"] is True
-    assert blocked_instance["canonical_hsp_vector_ready"] is False
-    assert blocked_problems["status"] == (
-        "canonical_hsp_vectors_complete_but_untrusted"
+    assert untrusted_instance["canonical_hsp_vector_complete"] is True
+    assert untrusted_instance["canonical_hsp_vector_ready"] is False
+    untrusted_export = build_ebr_export_bundle(
+        ebr_problem_instances=untrusted_problems,
     )
+    assert untrusted_export["bundle_count"] == 0
+    assert untrusted_export["excluded_instances"][0][
+        "canonical_hsp_vector_complete"
+    ] is True
+
+
+def test_tr_producer_keeps_structurally_incomplete_vector_incomplete():
+    candidates = _self_mapped_pipeline_candidates()
+    candidates["candidates"][0]["matched_irrep"] = ""
+    sewing = _scalar_self_mapped_sewing_report()
+    report = _self_mapped_pipeline_orbit_report(
+        candidates=candidates,
+        sewing_report=sewing,
+        projector_provenance=_projector_provenance_from_sewing(sewing),
+    )
+
+    orbit = report["valley_orbits"][0]
+    assert "missing_trusted_independent_hsp:v:G" in orbit[
+        "structural_blockers"
+    ]
+    assert orbit["grey_irrep_multiplicities_by_hsp"] == {}
+    assert orbit["irreps_by_kpoint"] == {}
+    assert "missing_trusted_independent_hsp:v:G" in orbit["blockers"]
+    problems = build_ebr_problem_instances(
+        ebr_input_candidates=candidates,
+        time_reversal_orbit_report=report,
+    )
+    instance = problems["instances"][0]
+    assert instance["status"] == "incomplete_canonical_hsp_vector"
+    assert instance["canonical_hsp_vector_complete"] is False
+    assert instance["canonical_hsp_vector_ready"] is False
     assert build_ebr_export_bundle(
-        ebr_problem_instances=blocked_problems,
+        ebr_problem_instances=problems,
     )["bundle_count"] == 0
