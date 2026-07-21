@@ -97,7 +97,11 @@ def build_database_ingestion_record(
                     validation_candidate_count += 1
                     # Validation candidates contain trusted valley-preserving
                     # irreps; preserve them independently of EBR readiness.
-                    _extract_irrep_records(bundle, valley_irrep_records)
+                    binding_error = _extract_irrep_records(
+                        bundle, valley_irrep_records
+                    )
+                    if binding_error is not None:
+                        errors.append(binding_error)
     record["reduced_table_validation_candidate_bundle_count"] = (
         validation_candidate_count
     )
@@ -314,13 +318,13 @@ def load_database_ingestion_record_from_directory(
 def _extract_irrep_records(
     bundle: dict[str, Any],
     out: list[dict[str, Any]],
-) -> None:
+) -> str | None:
     """Flatten trusted irrep_records_by_kpoint into a list of per-record dicts."""
     source_bundle_id = bundle.get("bundle_id", "")
     source_instance_id = bundle.get("source_instance_id", "")
     records_by_kp = bundle.get("irrep_records_by_kpoint", {})
     if not isinstance(records_by_kp, dict):
-        return
+        return None
     output_start = len(out)
 
     for kpoint, records in records_by_kp.items():
@@ -364,9 +368,9 @@ def _extract_irrep_records(
             out.append(entry)
 
     if len(out) != output_start:
-        return
+        return None
     if bundle.get("problem_kind") != "valley_orbit_reduced_ebr":
-        return
+        return None
     unitary_irreps = bundle.get("unitary_valley_irreps", {})
     source_to_sampled = bundle.get("source_hsp_to_sampled_kpoint", {})
     time_reversal = bundle.get("time_reversal", {})
@@ -374,12 +378,22 @@ def _extract_irrep_records(
         time_reversal.get("source_hsp_to_sampled_kpoint_by_valley", {})
         if isinstance(time_reversal, dict) else {}
     )
-    if not isinstance(unitary_irreps, dict):
-        return
-    if not isinstance(source_to_sampled, dict):
-        source_to_sampled = {}
-    if not isinstance(source_to_sampled_by_valley, dict):
-        source_to_sampled_by_valley = {}
+    representative_valley = (
+        time_reversal.get("representative_valley")
+        if isinstance(time_reversal, dict) else None
+    )
+    binding_error = _validate_valley_orbit_source_hsp_bindings(
+        unitary_irreps=unitary_irreps,
+        source_to_sampled=source_to_sampled,
+        source_to_sampled_by_valley=source_to_sampled_by_valley,
+        representative_valley=representative_valley,
+    )
+    if binding_error is not None:
+        bundle_id = source_bundle_id or "<unknown>"
+        return (
+            f"bundle {bundle_id}: invalid valley-orbit "
+            f"source-HSP/sample binding ({binding_error})"
+        )
     for valley in sorted(unitary_irreps):
         by_source_hsp = unitary_irreps.get(valley)
         if not isinstance(by_source_hsp, dict):
@@ -397,15 +411,7 @@ def _extract_irrep_records(
                 ):
                     continue
                 out.append({
-                    "kpoint": (
-                        source_to_sampled_by_valley.get(valley, {}).get(
-                            source_hsp,
-                            source_to_sampled.get(source_hsp, source_hsp),
-                        )
-                        if isinstance(
-                            source_to_sampled_by_valley.get(valley), dict
-                        ) else source_to_sampled.get(source_hsp, source_hsp)
-                    ),
+                    "kpoint": source_to_sampled_by_valley[valley][source_hsp],
                     "source_hsp_label": source_hsp,
                     "valley": valley,
                     "subspace_group_candidate": bundle.get(
@@ -422,6 +428,64 @@ def _extract_irrep_records(
                         "certificate_identity", {}
                     ),
                 })
+    return None
+
+
+def _validate_valley_orbit_source_hsp_bindings(
+    *,
+    unitary_irreps: object,
+    source_to_sampled: object,
+    source_to_sampled_by_valley: object,
+    representative_valley: object,
+) -> str | None:
+    if not isinstance(unitary_irreps, dict) or not unitary_irreps:
+        return "unitary valley irreps are missing or malformed"
+    if (
+        not isinstance(representative_valley, str)
+        or not representative_valley
+        or representative_valley not in unitary_irreps
+    ):
+        return "representative valley is missing or malformed"
+    if not _valid_source_hsp_to_sampled_map(source_to_sampled):
+        return "representative flat map is missing or malformed"
+    if (
+        not isinstance(source_to_sampled_by_valley, dict)
+        or set(source_to_sampled_by_valley) != set(unitary_irreps)
+    ):
+        return "valley-resolved component coverage is incomplete"
+    if source_to_sampled_by_valley.get(representative_valley) != source_to_sampled:
+        return "representative flat map conflicts with its component map"
+
+    expected_source_hsps = set(source_to_sampled)
+    for valley, raw_irreps in unitary_irreps.items():
+        if not isinstance(valley, str) or not valley:
+            return "unitary valley label is malformed"
+        if not isinstance(raw_irreps, dict) or not raw_irreps:
+            return f"unitary source-HSP basis is missing for valley {valley}"
+        by_source = source_to_sampled_by_valley.get(valley)
+        if (
+            not _valid_source_hsp_to_sampled_map(by_source)
+            or set(by_source) != expected_source_hsps
+        ):
+            return f"source-HSP coverage is incomplete for valley {valley}"
+        if not set(raw_irreps).issubset(by_source):
+            return f"emitted source-HSP binding is missing for valley {valley}"
+    return None
+
+
+def _valid_source_hsp_to_sampled_map(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and bool(value)
+        and all(
+            isinstance(source_hsp, str)
+            and bool(source_hsp)
+            and isinstance(sampled, str)
+            and bool(sampled)
+            for source_hsp, sampled in value.items()
+        )
+        and len(set(value.values())) == len(value)
+    )
 
 
 def _compact_excluded_records(

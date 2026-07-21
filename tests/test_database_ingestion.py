@@ -157,34 +157,38 @@ def test_evaluated_nonexact_solution_is_a_final_result(
         )
 
 
+def _tr_validation_candidate_bundle():
+    return {
+        "bundle_id": "tr",
+        "source_instance_id": "orbit",
+        "problem_kind": "valley_orbit_reduced_ebr",
+        "subspace_group_candidate": "P3",
+        "ready_for_reduced_table_validation": True,
+        "workflow_path": "time_reversal_valley_orbit",
+        "readiness_level": "trusted",
+        "source_hsp_to_sampled_kpoint": {
+            "GM": "GammaM", "K": "KM",
+        },
+        "time_reversal": {
+            "representative_valley": "K",
+            "source_hsp_to_sampled_kpoint_by_valley": {
+                "K": {"GM": "GammaM", "K": "KM"},
+                "Kp": {"GM": "GammaM_Kp", "K": "KM_Kp"},
+            },
+        },
+        "unitary_valley_irreps": {
+            "K": {"GM": {"A": 1}, "K": {"B": 2}},
+            "Kp": {"GM": {"A": 1}},
+        },
+        "irrep_records_by_kpoint": {},
+    }
+
+
 def test_tr_validation_candidate_unitary_irreps_survive_without_mapping():
     record = build_database_ingestion_record(
         valley_summary={"target_kpoints": [], "iband": [], "input": {}},
         valley_ebr_export_bundle={
-            "bundles": [{
-                "bundle_id": "tr",
-                "source_instance_id": "orbit",
-                "problem_kind": "valley_orbit_reduced_ebr",
-                "subspace_group_candidate": "P3",
-                "ready_for_reduced_table_validation": True,
-                "workflow_path": "time_reversal_valley_orbit",
-                "readiness_level": "trusted",
-                "source_hsp_to_sampled_kpoint": {
-                    "GM": "GammaM", "K": "KM",
-                },
-                "time_reversal": {
-                    "representative_valley": "K",
-                    "source_hsp_to_sampled_kpoint_by_valley": {
-                        "K": {"GM": "GammaM", "K": "KM"},
-                        "Kp": {"GM": "GammaM_Kp", "K": "KM_Kp"},
-                    },
-                },
-                "unitary_valley_irreps": {
-                    "K": {"GM": {"A": 1}, "K": {"B": 2}},
-                    "Kp": {"GM": {"A": 1}},
-                },
-                "irrep_records_by_kpoint": {},
-            }],
+            "bundles": [_tr_validation_candidate_bundle()],
         },
     )
 
@@ -236,6 +240,54 @@ def test_tr_validation_candidate_unitary_irreps_survive_without_mapping():
             "certificate_identity": {},
         },
     ]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "missing_valley_resolved_contract",
+        "malformed_valley_resolved_contract",
+        "missing_nonrepresentative_component",
+        "missing_nonrepresentative_source_hsp",
+        "representative_flat_map_conflict",
+    ],
+)
+def test_tr_ingestion_fallback_requires_complete_valley_resolved_binding(
+    mutation,
+):
+    from valleyscope.analysis.database_index import build_database_index
+
+    bundle = _tr_validation_candidate_bundle()
+    if mutation == "missing_valley_resolved_contract":
+        bundle["time_reversal"].pop(
+            "source_hsp_to_sampled_kpoint_by_valley"
+        )
+    elif mutation == "malformed_valley_resolved_contract":
+        bundle["time_reversal"][
+            "source_hsp_to_sampled_kpoint_by_valley"
+        ] = []
+    elif mutation == "missing_nonrepresentative_component":
+        bundle["time_reversal"][
+            "source_hsp_to_sampled_kpoint_by_valley"
+        ].pop("Kp")
+    elif mutation == "missing_nonrepresentative_source_hsp":
+        bundle["time_reversal"][
+            "source_hsp_to_sampled_kpoint_by_valley"
+        ]["Kp"].pop("GM")
+    else:
+        bundle["source_hsp_to_sampled_kpoint"]["GM"] = "wrong_GammaM"
+
+    record = build_database_ingestion_record(
+        valley_summary={"target_kpoints": [], "iband": [], "input": {}},
+        valley_ebr_export_bundle={"bundles": [bundle]},
+    )
+
+    assert record["valley_irrep_records"] == []
+    assert len(record["validation_errors"]) == 1
+    assert "tr" in record["validation_errors"][0]
+    assert "source-HSP/sample binding" in record["validation_errors"][0]
+    index = build_database_index([record])
+    assert index["valley_irrep_records"] == []
 
 
 def test_ingestion_record_with_ready_bundle():
