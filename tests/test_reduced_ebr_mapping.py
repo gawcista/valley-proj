@@ -163,7 +163,7 @@ def test_missing_table():
 def test_null_bundle():
     r = build_reduced_ebr_mapping(ebr_export_bundle=None)
     assert r["status"] == "not_evaluated"
-    assert r["schema_version"] == "1.7.0"
+    assert r["schema_version"] == "1.8.0"
     assert "mapping_status" not in r
     assert "reduced_ebr_decomposition_status" not in r
     assert r["solutions"] == []
@@ -199,7 +199,7 @@ def test_schema_fields():
     for k in ["status", "schema_version", "table_status",
               "solutions", "excluded_bundles", "solver"]:
         assert k in r, f"missing: {k}"
-    assert r["schema_version"] == "1.7.0"
+    assert r["schema_version"] == "1.8.0"
     assert "mapping_status" not in r
     assert "reduced_ebr_decomposition_status" not in r
 

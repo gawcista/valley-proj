@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-_SCHEMA_VERSION = "1.7.0"
+_SCHEMA_VERSION = "1.8.0"
 
 
 def build_ebr_export_bundle(
@@ -37,6 +37,10 @@ def build_ebr_export_bundle(
                 "problem_kind": inst.get(
                     "problem_kind", "unitary_valley_reduced_ebr"
                 ),
+                "physical_object_kind": inst.get(
+                    "physical_object_kind",
+                    "unitary_valley_projected_subspace",
+                ),
                 "valley": inst.get("valley", ""),
                 "valley_orbit": inst.get("valley_orbit", []),
                 "subspace_group_candidate": inst.get("subspace_group_candidate", ""),
@@ -49,6 +53,9 @@ def build_ebr_export_bundle(
                 "irreps_by_kpoint": inst.get("irreps_by_kpoint", {}),
                 "operations_by_kpoint": inst.get("operations_by_kpoint", {}),
                 "irrep_records_by_kpoint": inst.get("irrep_records_by_kpoint", {}),
+                "unitary_irrep_completion_records_by_hsp": inst.get(
+                    "unitary_irrep_completion_records_by_hsp", {}
+                ),
                 "unitary_valley_irreps": inst.get(
                     "unitary_valley_irreps", {}
                 ),
@@ -88,11 +95,18 @@ def build_ebr_export_bundle(
             "problem_kind": inst.get(
                 "problem_kind", "unitary_valley_reduced_ebr"
             ),
+            "physical_object_kind": inst.get(
+                "physical_object_kind",
+                "unitary_valley_projected_subspace",
+            ),
             "valley": inst.get("valley", ""),
             "valley_orbit": inst.get("valley_orbit", []),
             "subspace_group_candidate": inst.get("subspace_group_candidate", ""),
             "subspace_space_group": inst.get("subspace_space_group", {}),
             "status": inst.get("status", ""),
+            "unitary_irrep_completion_records_by_hsp": inst.get(
+                "unitary_irrep_completion_records_by_hsp", {}
+            ),
             "required_source_hsp_labels": inst.get(
                 "required_source_hsp_labels", []
             ),

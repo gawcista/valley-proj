@@ -14,7 +14,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-_SCHEMA_VERSION = "1.7.0"
+from valleyscope.analysis.reduced_ebr_mapping import (
+    _is_tr_completed_unitary_bundle,
+    _unitary_bundle_completion_evidence_valid,
+)
+
+_SCHEMA_VERSION = "1.8.0"
 
 
 def build_database_ingestion_record(
@@ -87,6 +92,11 @@ def build_database_ingestion_record(
     if valley_ebr_export_bundle is not None:
         bundles = valley_ebr_export_bundle.get("bundles", [])
         if isinstance(bundles, list):
+            has_tr_completed_unitary = any(
+                isinstance(bundle, dict)
+                and _is_tr_completed_unitary_bundle(bundle)
+                for bundle in bundles
+            )
             for bundle in bundles:
                 if not isinstance(bundle, dict):
                     continue
@@ -98,7 +108,9 @@ def build_database_ingestion_record(
                     # Validation candidates contain trusted valley-preserving
                     # irreps; preserve them independently of EBR readiness.
                     binding_error = _extract_irrep_records(
-                        bundle, valley_irrep_records
+                        bundle,
+                        valley_irrep_records,
+                        allow_joint_fallback=not has_tr_completed_unitary,
                     )
                     if binding_error is not None:
                         errors.append(binding_error)
@@ -185,12 +197,28 @@ def build_database_ingestion_record(
                 }
                 if "problem_kind" in s:
                     rec["problem_kind"] = s["problem_kind"]
+                if "physical_object_kind" in s:
+                    rec["physical_object_kind"] = s[
+                        "physical_object_kind"
+                    ]
                 if "valley_orbit" in s:
                     rec["valley_orbit"] = s["valley_orbit"]
                 if "unitary_valley_irreps" in s:
                     rec["unitary_valley_irreps"] = s["unitary_valley_irreps"]
                 if "time_reversal" in s:
                     rec["time_reversal"] = s["time_reversal"]
+                if "unitary_irrep_completion_records_by_hsp" in s:
+                    rec["unitary_irrep_completion_records_by_hsp"] = s[
+                        "unitary_irrep_completion_records_by_hsp"
+                    ]
+                for key in (
+                    "expected_hsps",
+                    "required_source_hsp_labels",
+                    "covered_source_hsp_labels",
+                    "source_hsp_to_sampled_kpoint",
+                ):
+                    if key in s:
+                        rec[key] = s[key]
                 if "ebr_decomposition" in s:
                     rec["ebr_decomposition"] = s["ebr_decomposition"]
                 if "integer_solution" in s:
@@ -318,10 +346,26 @@ def load_database_ingestion_record_from_directory(
 def _extract_irrep_records(
     bundle: dict[str, Any],
     out: list[dict[str, Any]],
+    *,
+    allow_joint_fallback: bool = True,
 ) -> str | None:
     """Flatten trusted irrep_records_by_kpoint into a list of per-record dicts."""
     source_bundle_id = bundle.get("bundle_id", "")
     source_instance_id = bundle.get("source_instance_id", "")
+    if _is_tr_completed_unitary_bundle(bundle):
+        if not _unitary_bundle_completion_evidence_valid(bundle):
+            return (
+                f"bundle {source_bundle_id or '<unknown>'}: invalid "
+                "TR-completed unitary provenance"
+            )
+        _append_tr_completed_unitary_records(
+            bundle=bundle,
+            out=out,
+            source_bundle_id=source_bundle_id,
+            source_instance_id=source_instance_id,
+        )
+        return None
+
     records_by_kp = bundle.get("irrep_records_by_kpoint", {})
     if not isinstance(records_by_kp, dict):
         return None
@@ -369,7 +413,10 @@ def _extract_irrep_records(
 
     if len(out) != output_start:
         return None
-    if bundle.get("problem_kind") != "valley_orbit_reduced_ebr":
+    if (
+        bundle.get("problem_kind") != "valley_orbit_reduced_ebr"
+        or not allow_joint_fallback
+    ):
         return None
     unitary_irreps = bundle.get("unitary_valley_irreps", {})
     source_to_sampled = bundle.get("source_hsp_to_sampled_kpoint", {})
@@ -429,6 +476,57 @@ def _extract_irrep_records(
                     ),
                 })
     return None
+
+
+def _append_tr_completed_unitary_records(
+    *,
+    bundle: dict[str, Any],
+    out: list[dict[str, Any]],
+    source_bundle_id: object,
+    source_instance_id: object,
+) -> None:
+    valley = str(bundle["valley"])
+    records_by_hsp = bundle["unitary_irrep_completion_records_by_hsp"]
+    for source_hsp in bundle["expected_hsps"]:
+        for record in records_by_hsp[source_hsp]:
+            kind = record["completion_kind"]
+            entry: dict[str, Any] = {
+                "source_hsp_label": source_hsp,
+                "valley": valley,
+                "subspace_group_candidate": bundle.get(
+                    "subspace_group_candidate", ""
+                ),
+                "matched_irrep": record["irrep"],
+                "irrep_multiplicity": record["multiplicity"],
+                "completion_kind": kind,
+                "workflow_path": bundle.get("workflow_path", ""),
+                "readiness_level": bundle.get("readiness_level", ""),
+                "source": "unitary_irrep_completion_records",
+                "source_bundle_id": source_bundle_id,
+                "source_instance_id": source_instance_id,
+                "certificate_identity": bundle.get(
+                    "certificate_identity", {}
+                ),
+                "source_candidate_identity": record[
+                    "source_candidate_identity"
+                ],
+                "source_candidate_provenance": record[
+                    "source_candidate_provenance"
+                ],
+                "structural_status": record["structural_status"],
+                "readiness_status": record["readiness_status"],
+            }
+            if kind == "observed_at_sampled_kpoint":
+                entry["kpoint"] = record["sampled_kpoint"]
+            else:
+                for key in (
+                    "evidence_valley",
+                    "evidence_source_hsp_label",
+                    "evidence_sampled_kpoint",
+                    "reviewed_time_reversal_relation",
+                ):
+                    entry[key] = record[key]
+            out.append(entry)
 
 
 def _validate_valley_orbit_source_hsp_bindings(

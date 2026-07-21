@@ -290,6 +290,127 @@ def test_tr_ingestion_fallback_requires_complete_valley_resolved_binding(
     assert index["valley_irrep_records"] == []
 
 
+def _tr_completed_unitary_bundle():
+    observed_identity = {
+        "source": "fixture/K/GM",
+        "valley": "K",
+        "source_hsp_label": "GM",
+        "sampled_kpoint": "GammaM",
+        "irrep": "A",
+        "multiplicity": 1,
+    }
+    provenance = {"source": "fixture/K/GM", "workflow_path": "direct_qcut"}
+    return {
+        "bundle_id": "unitary_K",
+        "source_instance_id": "unitary_K_instance",
+        "problem_kind": "unitary_valley_reduced_ebr",
+        "physical_object_kind": "unitary_valley_projected_subspace",
+        "valley": "K",
+        "valley_orbit": ["K", "Kp"],
+        "subspace_group_candidate": "P3",
+        "workflow_path": "time_reversal_completed_unitary_valley",
+        "readiness_level": "trusted",
+        "ready_for_reduced_table_validation": True,
+        "expected_hsps": ["GM", "KA"],
+        "irreps_by_kpoint": {"GM": ["A"], "KA": ["B"]},
+        "source_hsp_to_sampled_kpoint": {"GM": "GammaM"},
+        "time_reversal": {
+            "mapping_type": "exchanged",
+            "valley_orbit": ["K", "Kp"],
+        },
+        "irrep_records_by_kpoint": {},
+        "unitary_irrep_completion_records_by_hsp": {
+            "GM": [{
+                "completion_kind": "observed_at_sampled_kpoint",
+                "target_valley": "K",
+                "target_source_hsp_label": "GM",
+                "irrep": "A",
+                "multiplicity": 1,
+                "sampled_kpoint": "GammaM",
+                "source_candidate_identity": observed_identity,
+                "source_candidate_provenance": provenance,
+                "structural_status": "validated",
+                "readiness_status": "trusted",
+                "blockers": [],
+            }],
+            "KA": [{
+                "completion_kind": "inferred_by_time_reversal",
+                "target_valley": "K",
+                "target_source_hsp_label": "KA",
+                "irrep": "B",
+                "multiplicity": 1,
+                "evidence_valley": "Kp",
+                "evidence_source_hsp_label": "K",
+                "evidence_sampled_kpoint": "KM_Kp",
+                "reviewed_time_reversal_relation": {
+                    "evidence_valley": "Kp",
+                    "target_valley": "K",
+                    "evidence_source_hsp_label": "K",
+                    "target_source_hsp_label": "KA",
+                    "evidence_irrep": "Bp",
+                    "target_irrep": "B",
+                },
+                "source_candidate_identity": {
+                    **observed_identity,
+                    "source": "fixture/Kp/K",
+                    "valley": "Kp",
+                    "source_hsp_label": "K",
+                    "sampled_kpoint": "KM_Kp",
+                    "irrep": "Bp",
+                },
+                "source_candidate_provenance": {
+                    **provenance, "source": "fixture/Kp/K",
+                },
+                "structural_status": "validated",
+                "readiness_status": "trusted",
+                "blockers": [],
+            }],
+        },
+    }
+
+
+def test_tr_unitary_ingestion_preserves_observed_and_inferred_rows():
+    unitary = _tr_completed_unitary_bundle()
+    legacy_joint = _tr_validation_candidate_bundle()
+    record = build_database_ingestion_record(
+        valley_summary={"target_kpoints": [], "iband": [], "input": {}},
+        valley_ebr_export_bundle={"bundles": [unitary, legacy_joint]},
+    )
+
+    assert len(record["valley_irrep_records"]) == 2
+    observed, inferred = record["valley_irrep_records"]
+    assert observed["completion_kind"] == "observed_at_sampled_kpoint"
+    assert observed["kpoint"] == "GammaM"
+    assert inferred["completion_kind"] == "inferred_by_time_reversal"
+    assert "kpoint" not in inferred
+    assert inferred["evidence_sampled_kpoint"] == "KM_Kp"
+    assert inferred["source_bundle_id"] == "unitary_K"
+
+
+@pytest.mark.parametrize("mutation", ["missing_evidence", "missing_tr_metadata"])
+def test_tr_unitary_ingestion_never_uses_joint_representative_fallback(
+    mutation,
+):
+    unitary = _tr_completed_unitary_bundle()
+    if mutation == "missing_evidence":
+        unitary["unitary_irrep_completion_records_by_hsp"]["KA"][0].pop(
+            "evidence_sampled_kpoint"
+        )
+    else:
+        unitary.pop("time_reversal")
+    record = build_database_ingestion_record(
+        valley_summary={"target_kpoints": [], "iband": [], "input": {}},
+        valley_ebr_export_bundle={
+            "bundles": [unitary, _tr_validation_candidate_bundle()],
+        },
+    )
+
+    assert record["valley_irrep_records"] == []
+    assert record["validation_errors"] == [
+        "bundle unitary_K: invalid TR-completed unitary provenance"
+    ]
+
+
 def test_ingestion_record_with_ready_bundle():
     """Ready export bundle produces trusted irrep records."""
     from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
@@ -564,7 +685,7 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
 
     record = load_database_ingestion_record_from_directory(run_dir)
 
-    assert record["schema_version"] == "1.7.0"
+    assert record["schema_version"] == "1.8.0"
     assert record["record_status"] == "has_final_reduced_ebr_results"
     assert record["reduced_table_validation_candidate_bundle_count"] == 2
     assert record["final_reduced_ebr_result_count"] == 2
@@ -893,11 +1014,11 @@ def test_database_index_input_exclusions_have_source_record():
 
 
 def test_ingestion_record_schema_version_is_1_7_0():
-    """Ingestion record schema_version is now 1.7.0."""
+    """Ingestion record schema_version is now 1.8.0."""
     from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
     summary = {"target_kpoints": [], "iband": [], "input": {}}
     record = build_database_ingestion_record(valley_summary=summary)
-    assert record["schema_version"] == "1.7.0"
+    assert record["schema_version"] == "1.8.0"
 
 
 # -----------------------------------------------------------------------
@@ -1007,7 +1128,7 @@ def test_ingestion_preserves_centered_certificate_identity_from_bundle():
         valley_ebr_export_bundle=bundle,
     )
 
-    assert record["schema_version"] == "1.7.0"
+    assert record["schema_version"] == "1.8.0"
     assert record["valley_irrep_records"][0]["certificate_identity"] == (
         certificate_identity
     )
@@ -1295,7 +1416,7 @@ def test_reduced_ebr_records_from_directory_with_table_provenance(tmp_path):
 
 
 def test_tmote2_ingestion_compact_reduced_ebr_records():
-    """tMoTe2 fixture: one compact joint TR valley-orbit P3 record."""
+    """tMoTe2 fixture retains two unitary and one joint TR EBR records."""
     ing = load_database_ingestion_record_from_directory(
         Path(__file__).parent.parent / "real_tests" / "tMoTe2" / "output"
         / "valley_analysis_wave",
@@ -1304,8 +1425,11 @@ def test_tmote2_ingestion_compact_reduced_ebr_records():
     if not recs:
         pytest.skip("tMoTe2 fixture output not found or no reduced EBR records")
 
-    assert len(recs) == 1
-    r = recs[0]
+    assert len(recs) == 3
+    r = next(
+        row for row in recs
+        if row["problem_kind"] == "valley_orbit_reduced_ebr"
+    )
     assert r["problem_kind"] == "valley_orbit_reduced_ebr"
     assert r["valley_orbit"] == ["K_valley", "Kp_valley"]
     assert set(r["unitary_valley_irreps"]) == {"K_valley", "Kp_valley"}
@@ -1324,3 +1448,31 @@ def test_tmote2_ingestion_compact_reduced_ebr_records():
     assert r["source_basis_count"] > r["reduction_basis_count"] > 0
     assert r["table_status"] == "loaded"
     assert isinstance(r["dropped_source_rows"], list)
+    unitary = {
+        row["valley"]: row for row in recs
+        if row["problem_kind"] == "unitary_valley_reduced_ebr"
+    }
+    assert set(unitary) == {"K_valley", "Kp_valley"}
+    assert all(
+        row["physical_object_kind"] == (
+            "unitary_valley_projected_subspace"
+        )
+        and row["classification"] == "outside_integer_span"
+        and row["table_source"] == "auto_canonical"
+        for row in unitary.values()
+    )
+    irrep_rows = ing["valley_irrep_records"]
+    assert len(irrep_rows) == 8
+    inferred = [
+        row for row in irrep_rows
+        if row.get("completion_kind") == "inferred_by_time_reversal"
+    ]
+    assert {
+        (row["valley"], row["source_hsp_label"], row["matched_irrep"])
+        for row in inferred
+    } == {
+        ("K_valley", "KA", "-KA5"),
+        ("Kp_valley", "KA", "-KA6"),
+    }
+    assert all("kpoint" not in row for row in inferred)
+    assert all(row["evidence_sampled_kpoint"] == "KM" for row in inferred)

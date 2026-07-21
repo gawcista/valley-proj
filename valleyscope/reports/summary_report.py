@@ -11,7 +11,7 @@ import numpy as np
 from valleyscope.io.config import AppConfig
 from valleyscope.reports.json_report import _json_default
 
-_SCHEMA_VERSION = "1.7.0"
+_SCHEMA_VERSION = "1.8.0"
 
 
 def build_summary_payload(
@@ -1843,6 +1843,7 @@ def _render_ebr_problem_instances(
         for inst in instances:
             rows.append([
                 inst.get("instance_id", ""),
+                inst.get("physical_object_kind", ""),
                 inst.get("valley_orbit") or inst.get("valley", ""),
                 _canonical_sg_display(inst),
                 inst.get("status", ""),
@@ -1853,12 +1854,15 @@ def _render_ebr_problem_instances(
                 _short_list(inst.get("required_source_hsp_labels", [])),
                 _short_list(inst.get("covered_source_hsp_labels", [])),
                 _short_list(inst.get("missing_source_hsp_labels", [])),
+                _completion_kind_summary(
+                    inst.get("unitary_irrep_completion_records_by_hsp")
+                ),
             ])
         lines.extend(
             _table(
-                ["id", "valley/orbit", "group", "status", "complete", "ready",
+                ["id", "physical_object", "valley/orbit", "group", "status", "complete", "ready",
                  "blocked_by", "sampled_hsp", "source_required",
-                 "source_covered", "source_missing"],
+                 "source_covered", "source_missing", "completion"],
                 rows,
             )
         )
@@ -1880,6 +1884,7 @@ def _render_ebr_export_bundle(
         for b in bundles:
             rows.append([
                 b.get("bundle_id", ""),
+                b.get("physical_object_kind", ""),
                 b.get("valley_orbit") or b.get("valley", ""),
                 _canonical_sg_display(b),
                 b.get("workflow_path", ""),
@@ -1887,12 +1892,15 @@ def _render_ebr_export_bundle(
                 _short_list(b.get("optional_hsps", [])),
                 _short_list(b.get("missing_optional_hsps", [])),
                 b.get("ready_for_reduced_table_validation", ""),
+                _completion_kind_summary(
+                    b.get("unitary_irrep_completion_records_by_hsp")
+                ),
             ])
         lines.extend(
             _table(
-                ["bundle_id", "valley/orbit", "group", "path",
+                ["bundle_id", "physical_object", "valley/orbit", "group", "path",
                  "expected_hsp", "optional_hsp", "missing_opt",
-                 "table_validation_ready"],
+                 "table_validation_ready", "completion"],
                 rows,
             )
         )
@@ -1938,7 +1946,12 @@ def _render_reduced_ebr_mapping(
                 continue
             bid = sol.get("bundle_id", "?")
             val = sol.get("valley", "")
-            label = f"  {bid} {val}"
+            physical_object = sol.get("physical_object_kind", "")
+            label = f"  {bid} {val}".rstrip()
+            if physical_object:
+                lines.append(
+                    f"{label}: physical_object={physical_object}"
+                )
             classification = sol.get("classification", "")
 
             if classification == "atomic-compatible-candidate":
@@ -1975,6 +1988,27 @@ def _render_reduced_ebr_mapping(
         for e in excluded:
             lines.append(f"  {e.get('bundle_id', '')}: {e.get('reason', '')}")
     lines.append("")
+
+
+def _completion_kind_summary(records_by_hsp: object) -> str:
+    observed = 0
+    inferred = 0
+    if isinstance(records_by_hsp, dict):
+        for records in records_by_hsp.values():
+            if not isinstance(records, list):
+                continue
+            for record in records:
+                if not isinstance(record, dict):
+                    continue
+                if record.get("completion_kind") == (
+                    "observed_at_sampled_kpoint"
+                ):
+                    observed += 1
+                elif record.get("completion_kind") == (
+                    "inferred_by_time_reversal"
+                ):
+                    inferred += 1
+    return f"observed={observed}, inferred={inferred}"
 
 
 OUTPUT_FILE_LABELS: dict[str, str] = {

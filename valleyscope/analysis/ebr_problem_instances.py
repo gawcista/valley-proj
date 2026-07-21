@@ -304,7 +304,7 @@ def _build_time_reversal_problem_instances(
     candidates: list[dict[str, object]],
     time_reversal_orbit_report: dict[str, object],
 ) -> dict[str, object]:
-    """Build only joint physical EBR problems when explicit TR is enabled."""
+    """Build per-valley unitary problems and the joint grey-orbit problem."""
     raw_orbits = time_reversal_orbit_report.get("valley_orbits", [])
     if not isinstance(raw_orbits, list):
         raw_orbits = []
@@ -370,6 +370,7 @@ def _build_time_reversal_problem_instances(
         instances.append({
             "instance_id": instance_id,
             "problem_kind": "valley_orbit_reduced_ebr",
+            "physical_object_kind": "joint_time_reversal_valley_orbit",
             "valley": "",
             "valley_orbit": list(members),
             "subspace_group_candidate": sg_symbol or "",
@@ -430,7 +431,7 @@ def _build_time_reversal_problem_instances(
                 "source": "time_reversal_valley_orbit_completion",
             },
             "unitary_valley_irreps": raw_orbit.get(
-                "unitary_valley_irreps", {}
+                "time_reversal_completed_unitary_valley_irreps", {}
             ),
             "time_reversal": {
                 "theta_square": time_reversal_orbit_report.get(
@@ -463,6 +464,9 @@ def _build_time_reversal_problem_instances(
                 "source_hsp_to_sampled_kpoint_by_valley": raw_orbit.get(
                     "source_hsp_to_sampled_kpoint_by_valley", {}
                 ),
+                "unitary_valley_irrep_completion_records": raw_orbit.get(
+                    "unitary_valley_irrep_completion_records", {}
+                ),
                 "antiunitary_sewing_evidence": (
                     time_reversal_orbit_report.get(
                         "antiunitary_sewing_evidence", {}
@@ -473,18 +477,299 @@ def _build_time_reversal_problem_instances(
                 "grey_bns_number": raw_orbit.get("grey_bns_number"),
             },
         })
+        instances.extend(_build_tr_unitary_component_instances(
+            orbit_index=index,
+            raw_orbit=raw_orbit,
+            component_candidates=component_candidates,
+            time_reversal_orbit_report=time_reversal_orbit_report,
+        ))
     counts = _problem_report_counts(instances)
     return {
         "status": _problem_report_status(instances),
         "instance_count": len(instances),
         **counts,
         "interpretation": (
-            "Joint time-reversal valley-orbit EBR problem instances. "
-            "Valley-resolved unitary irreps remain identifiable as components; "
-            "no independent one-valley physical EBR problem is produced."
+            "Separate time-reversal-completed unitary valley problems and "
+            "joint grey-orbit EBR problems. Inferred unitary rows retain "
+            "their opposite-valley sampled evidence and are not reported as "
+            "independently sampled rows."
         ),
         "instances": instances,
     }
+
+
+def _build_tr_unitary_component_instances(
+    *,
+    orbit_index: int,
+    raw_orbit: dict[str, object],
+    component_candidates: list[dict[str, object]],
+    time_reversal_orbit_report: dict[str, object],
+) -> list[dict[str, object]]:
+    members = raw_orbit.get("members", [])
+    if not isinstance(members, list):
+        return []
+    full_hsps = _string_list(
+        raw_orbit.get("full_unitary_source_hsp_labels", [])
+    )
+    completed = raw_orbit.get(
+        "time_reversal_completed_unitary_valley_irreps", {}
+    )
+    all_records = raw_orbit.get(
+        "unitary_valley_irrep_completion_records", {}
+    )
+    sampled_by_valley = raw_orbit.get(
+        "source_hsp_to_sampled_kpoint_by_valley", {}
+    )
+    if not isinstance(completed, dict):
+        completed = {}
+    if not isinstance(all_records, dict):
+        all_records = {}
+    if not isinstance(sampled_by_valley, dict):
+        sampled_by_valley = {}
+
+    instances: list[dict[str, object]] = []
+    for component_index, valley in enumerate(members, start=1):
+        if not isinstance(valley, str) or not valley:
+            continue
+        candidates = [
+            candidate for candidate in component_candidates
+            if candidate.get("valley") == valley
+        ]
+        counts_by_hsp = completed.get(valley, {})
+        records_by_hsp = all_records.get(valley, {})
+        if not isinstance(counts_by_hsp, dict):
+            counts_by_hsp = {}
+        if not isinstance(records_by_hsp, dict):
+            records_by_hsp = {}
+
+        blockers: list[str] = []
+        fingerprints = {
+            _certificate_fingerprint(candidate) for candidate in candidates
+        }
+        if not candidates:
+            blockers.append(
+                f"no_trusted_unitary_valley_irrep_component:{valley}"
+            )
+        if len(fingerprints) != 1:
+            blockers.append(
+                f"unitary_component_standard_setting_mismatch:{valley}"
+            )
+        spin_values = {
+            provenance.get("source_table_spinor")
+            for candidate in candidates
+            if isinstance(
+                provenance := candidate.get("irrep_source_provenance"), dict
+            )
+            and isinstance(provenance.get("source_table_spinor"), bool)
+        }
+        if len(spin_values) != 1:
+            blockers.append(
+                f"unitary_component_spin_evidence_mismatch:{valley}"
+            )
+
+        complete_counts = (
+            bool(full_hsps)
+            and set(counts_by_hsp) == set(full_hsps)
+            and all(
+                isinstance(counts_by_hsp.get(hsp), dict)
+                and bool(counts_by_hsp.get(hsp))
+                for hsp in full_hsps
+            )
+        )
+        complete_records = (
+            bool(full_hsps)
+            and set(records_by_hsp) == set(full_hsps)
+            and _completion_records_match_counts(
+                counts_by_hsp=counts_by_hsp,
+                records_by_hsp=records_by_hsp,
+            )
+        )
+        if not complete_counts:
+            blockers.append(
+                f"unitary_component_source_hsp_vector_incomplete:{valley}"
+            )
+        if not complete_records:
+            blockers.append(
+                f"unitary_component_completion_provenance_incomplete:{valley}"
+            )
+        for hsp, records in records_by_hsp.items():
+            if not isinstance(records, list):
+                blockers.append(
+                    "unitary_component_completion_records_malformed:"
+                    f"{valley}:{hsp}"
+                )
+                continue
+            for record in records:
+                if not isinstance(record, dict):
+                    blockers.append(
+                        "unitary_component_completion_record_malformed:"
+                        f"{valley}:{hsp}"
+                    )
+                    continue
+                if (
+                    record.get("structural_status") != "validated"
+                    or record.get("readiness_status") != "trusted"
+                ):
+                    record_blockers = record.get("blockers", [])
+                    if isinstance(record_blockers, list) and record_blockers:
+                        blockers.extend(
+                            str(value) for value in record_blockers
+                            if isinstance(value, str)
+                        )
+                    else:
+                        blockers.append(
+                            "unitary_component_completion_record_untrusted:"
+                            f"{valley}:{hsp}"
+                        )
+
+        canonical_complete = complete_counts and complete_records
+        canonical_ready = canonical_complete and not blockers
+        ssg = _first_subspace_space_group(candidates)
+        sampled_mapping = sampled_by_valley.get(valley, {})
+        if not isinstance(sampled_mapping, dict):
+            sampled_mapping = {}
+        irreps_by_kpoint = {
+            hsp: [
+                irrep
+                for irrep, multiplicity in sorted(
+                    counts_by_hsp.get(hsp, {}).items()
+                )
+                for _ in range(multiplicity)
+            ]
+            for hsp in full_hsps
+            if isinstance(counts_by_hsp.get(hsp), dict)
+            and counts_by_hsp.get(hsp)
+        }
+        workflow_paths = sorted({
+            str(candidate.get("workflow_path", ""))
+            for candidate in candidates if candidate.get("workflow_path")
+        })
+        instances.append({
+            "instance_id": (
+                f"ebr_instance_{orbit_index:03d}_unitary_"
+                f"{component_index:03d}"
+            ),
+            "problem_kind": "unitary_valley_reduced_ebr",
+            "physical_object_kind": "unitary_valley_projected_subspace",
+            "valley": valley,
+            "valley_orbit": list(members),
+            "subspace_group_candidate": ssg.get(
+                "candidate_space_group_symbol", ""
+            ),
+            "subspace_sg_number": ssg.get(
+                "candidate_space_group_number"
+            ),
+            "subspace_space_group": dict(ssg),
+            "spinor": next(iter(spin_values), None),
+            "certificate_identity": _certificate_identity(candidates),
+            "workflow_path": "time_reversal_completed_unitary_valley",
+            "workflow_paths": workflow_paths,
+            "readiness_level": (
+                "trusted" if canonical_ready else "blocked"
+            ),
+            "readiness_evidence": [
+                "trusted_unitary_valley_irreps",
+                "validated_row_level_time_reversal_completion",
+            ] if canonical_ready else [],
+            "irreps_by_kpoint": irreps_by_kpoint,
+            "operations_by_kpoint": {},
+            "irrep_records_by_kpoint": {},
+            "unitary_irrep_completion_records_by_hsp": {
+                hsp: [dict(record) for record in records]
+                for hsp, records in records_by_hsp.items()
+                if isinstance(records, list)
+            },
+            "candidate_count": len(candidates),
+            "status": _canonical_vector_status(
+                complete=canonical_complete,
+                ready=canonical_ready,
+            ),
+            "canonical_hsp_vector_complete": canonical_complete,
+            "canonical_hsp_vector_ready": canonical_ready,
+            "blocked_by": _deduplicate_strings(blockers),
+            "expected_hsps": list(full_hsps),
+            "expected_hsp_policy_source": (
+                "time_reversal_completed_unitary_source_hsp_basis"
+            ),
+            "optional_hsps": [],
+            "actual_hsps": list(irreps_by_kpoint),
+            "missing_optional_hsps": [],
+            "required_source_hsp_labels": list(full_hsps),
+            "covered_source_hsp_labels": (
+                list(full_hsps) if canonical_complete else []
+            ),
+            "missing_source_hsp_labels": [
+                hsp for hsp in full_hsps if hsp not in irreps_by_kpoint
+            ],
+            "trusted_matched_source_hsp_labels": (
+                list(full_hsps) if canonical_ready else []
+            ),
+            "trusted_missing_source_hsp_labels": (
+                [] if canonical_ready else list(full_hsps)
+            ),
+            "source_hsp_to_sampled_kpoint": dict(sampled_mapping),
+            "source_hsp_coverage_complete": canonical_complete,
+            "source_hsp_coverage_provenance": {
+                "source": "time_reversal_completed_unitary_valley",
+                "observed_rows_are_sampled": True,
+                "inferred_rows_are_sampled": False,
+            },
+            "time_reversal": {
+                "theta_square": time_reversal_orbit_report.get(
+                    "theta_square"
+                ),
+                "mapping_type": raw_orbit.get("mapping_type"),
+                "valley_orbit": list(members),
+                "time_reversal_valley_mapping": (
+                    time_reversal_orbit_report.get(
+                        "time_reversal_valley_mapping", {}
+                    )
+                ),
+                "time_reversal_hsp_orbits": raw_orbit.get(
+                    "time_reversal_hsp_orbits", []
+                ),
+                "time_reversal_irrep_pairing": raw_orbit.get(
+                    "time_reversal_irrep_pairing", {}
+                ),
+                "antiunitary_sewing_evidence": (
+                    time_reversal_orbit_report.get(
+                        "antiunitary_sewing_evidence", {}
+                    )
+                    if raw_orbit.get("mapping_type") == "self_mapped"
+                    else {}
+                ),
+            },
+        })
+    return instances
+
+
+def _completion_records_match_counts(
+    *,
+    counts_by_hsp: dict[str, object],
+    records_by_hsp: dict[str, object],
+) -> bool:
+    for hsp, raw_counts in counts_by_hsp.items():
+        records = records_by_hsp.get(hsp)
+        if not isinstance(raw_counts, dict) or not isinstance(records, list):
+            return False
+        derived: dict[str, int] = {}
+        for record in records:
+            if not isinstance(record, dict):
+                return False
+            irrep = record.get("irrep")
+            multiplicity = record.get("multiplicity")
+            if (
+                not isinstance(irrep, str)
+                or not irrep
+                or not isinstance(multiplicity, int)
+                or isinstance(multiplicity, bool)
+                or multiplicity <= 0
+            ):
+                return False
+            derived[irrep] = derived.get(irrep, 0) + multiplicity
+        if derived != raw_counts:
+            return False
+    return set(counts_by_hsp) == set(records_by_hsp)
 
 
 def _deduplicate_strings(values: list[str]) -> list[str]:

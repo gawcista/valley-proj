@@ -13,6 +13,7 @@ from valleyscope.analysis.irreptables_runtime_table_builder import (
     _validate_expected_hsps,
 )
 from valleyscope.analysis.reduced_ebr_mapping import (
+    _build_auto_table_for_bundle,
     build_auto_reduced_ebr_mapping,
     build_reduced_ebr_mapping,
     load_reduced_ebr_table,
@@ -135,6 +136,53 @@ def test_blocked_tr_bundle_keeps_grey_source_identity():
     assert r["status"] == "blocked"
     assert r["table_status"] == "blocked"
     assert r["reduced_ebr_input"]["source"] == "auto_time_reversal_grey"
+
+
+def test_auto_table_selection_keeps_unitary_and_joint_physics_distinct():
+    calls = []
+
+    def unitary_builder(**kwargs):
+        calls.append(("unitary", kwargs))
+        return {"kind": "unitary"}
+
+    def grey_builder(**kwargs):
+        calls.append(("grey", kwargs))
+        return {"kind": "grey"}
+
+    base = {
+        "subspace_space_group": {
+            "candidate_space_group_number": 143,
+        },
+        "subspace_group_candidate": "P3",
+        "irreps_by_kpoint": {"GM": ["-GM4"]},
+        "expected_hsps": ["GM"],
+    }
+    unitary = {
+        **base,
+        "problem_kind": "unitary_valley_reduced_ebr",
+        "physical_object_kind": "unitary_valley_projected_subspace",
+    }
+    joint = {
+        **base,
+        "problem_kind": "valley_orbit_reduced_ebr",
+        "physical_object_kind": "joint_time_reversal_valley_orbit",
+        "time_reversal": {"grey_bns_number": "143.2"},
+    }
+
+    assert _build_auto_table_for_bundle(
+        bundle=unitary,
+        spinor=True,
+        unitary_builder=unitary_builder,
+        time_reversal_builder=grey_builder,
+    ) == ({"kind": "unitary"}, False)
+    assert _build_auto_table_for_bundle(
+        bundle=joint,
+        spinor=True,
+        unitary_builder=unitary_builder,
+        time_reversal_builder=grey_builder,
+    ) == ({"kind": "grey"}, True)
+    assert [kind for kind, _ in calls] == ["unitary", "grey"]
+    assert calls[1][1]["grey_bns_number"] == "143.2"
 
 def test_source_failure_blocked_not_physical():
     r = _bm(_mk_bundle("b", 9999, "XX", ["GammaM"], {"GammaM": ["-GM4"]}))
@@ -263,7 +311,7 @@ def test_no_numeric_index_blocks():
 def test_unknown_irreptable_label_blocks():
     with pytest.raises(ValueError, match="not found in irreptables irrep table"):
         _auto_table(75, ["GammaM"], {"GammaM": ["-ZZ99"]},
-                    loader=lambda sg,spin: {"basis": {"irrep_labels": ["-ZZ99"]}, "ebrs": [{"ebr_name":"E","vector":[1]}]})
+                    loader=lambda sg,spin: {"basis": {"irrep_labels": ["-GM5"]}, "ebrs": [{"ebr_name":"E","vector":[1]}]})
 
 def test_conflicting_hsp_raises():
     with pytest.raises(ValueError, match="conflicting HSP mapping"):
@@ -287,16 +335,24 @@ def test_kvector_parser(label, expected):
     else:
         with pytest.raises(ValueError): _extract_kvector_token(label)
 
-def test_sg143_ka_ha_dropped():
-    """KA/HA rows from real SG143 EBR data are dropped (not sampled)."""
+def test_sg143_unitary_table_retains_declared_ka_source_hsp():
+    """Reviewed EBR source rows support the complete K/KA unitary basis."""
     from irreptables.ebrs import load_ebr_data
     t = build_auto_canonical_reduced_ebr_table(
         subspace_sg_number=143, spinor=True,
-        bundle_irreps_by_kpoint={"GammaM": ["-GM4"], "KM": ["-K5"]},
-        expected_hsps=["GammaM", "KM"], subspace_group_candidate="P3",
+        bundle_irreps_by_kpoint={
+            "GM": ["-GM4"], "K": ["-K5"],
+            "KA": ["-KA6"], "M": ["-M2"],
+        },
+        expected_hsps=["GM", "K", "KA", "M"],
+        subspace_group_candidate="P3",
         source_loader=lambda sg,spin: load_ebr_data(sg, spin))
-    dropped = [d for d in t["provenance"].get("dropped_source_rows", []) if "KA" in d or "HA" in d]
-    assert len(dropped) > 0 and all("token=" in d for d in dropped)
+    assert t["expected_hsps"] == ["GM", "K", "KA", "M"]
+    assert "KA:-KA6" in t["irreps"]
+    assert not any(
+        "-KA6" in row
+        for row in t["provenance"].get("dropped_source_rows", [])
+    )
 
 # ---------------------------------------------------------------------------
 # Solver uniqueness and truncation

@@ -48,6 +48,40 @@ def _analysis_output_file_keys() -> set[str]:
 # summary rendering
 # ---------------------------------------------------------------------------
 
+def test_summary_distinguishes_unitary_and_joint_tr_ebr_objects():
+    from valleyscope.reports.summary_report import _render_ebr_problem_instances
+
+    report = {
+            "status": "ready",
+            "instance_count": 2,
+            "instances": [{
+                "instance_id": "u",
+                "physical_object_kind": "unitary_valley_projected_subspace",
+                "valley": "K",
+                "status": "ready",
+                "canonical_hsp_vector_complete": True,
+                "canonical_hsp_vector_ready": True,
+                "unitary_irrep_completion_records_by_hsp": {
+                    "GM": [{"completion_kind": "observed_at_sampled_kpoint"}],
+                    "KA": [{"completion_kind": "inferred_by_time_reversal"}],
+                },
+            }, {
+                "instance_id": "j",
+                "physical_object_kind": "joint_time_reversal_valley_orbit",
+                "valley_orbit": ["K", "Kp"],
+                "status": "ready",
+                "canonical_hsp_vector_complete": True,
+                "canonical_hsp_vector_ready": True,
+            }],
+        }
+
+    lines = []
+    _render_ebr_problem_instances(lines, report)
+    text = "\n".join(lines)
+    assert "unitary_valley_projected_subspace" in text
+    assert "joint_time_reversal_valley_orbit" in text
+    assert "observed=1, inferred=1" in text
+
 def test_summary_text_renders_qcut_fraction_for_relative_mode(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "config.yaml"
@@ -78,7 +112,7 @@ def test_summary_text_renders_qcut_fraction_for_relative_mode(tmp_path):
         output_paths={},
     )
 
-    assert summary["schema_version"] == "1.7.0"
+    assert summary["schema_version"] == "1.8.0"
     assert summary["qcut"]["fraction"] == pytest.approx(0.2)
     text = render_summary_text(summary)
     assert "qcut mode: relative_min_valley_distance" in text
@@ -1631,12 +1665,29 @@ def test_tmote2_projected_source_hsp_coverage_and_tr_orbit_are_explicit():
             assert target["projector_fingerprint"].startswith("sha256:")
 
     export = s["valley_ebr_export_bundle"]
-    assert export["bundle_count"] == 1
-    assert s["valley_ebr_export_bundle"]["schema_version"] == "1.7.0"
-    assert export["bundles"][0]["problem_kind"] == "valley_orbit_reduced_ebr"
-    assert export["bundles"][0]["valley_orbit"] == [
-        "K_valley", "Kp_valley",
-    ]
+    assert export["bundle_count"] == 3
+    assert s["valley_ebr_export_bundle"]["schema_version"] == "1.8.0"
+    by_kind_and_valley = {
+        (bundle["problem_kind"], bundle["valley"]): bundle
+        for bundle in export["bundles"]
+    }
+    joint = by_kind_and_valley[("valley_orbit_reduced_ebr", "")]
+    assert joint["valley_orbit"] == ["K_valley", "Kp_valley"]
+    for valley, expected_ka in (
+        ("K_valley", "-KA5"), ("Kp_valley", "-KA6")
+    ):
+        unitary = by_kind_and_valley[
+            ("unitary_valley_reduced_ebr", valley)
+        ]
+        assert unitary["expected_hsps"] == ["GM", "K", "KA", "M"]
+        inferred = unitary[
+            "unitary_irrep_completion_records_by_hsp"
+        ]["KA"][0]
+        assert inferred["irrep"] == expected_ka
+        assert inferred["completion_kind"] == "inferred_by_time_reversal"
+        assert "sampled_kpoint" not in inferred
+        assert inferred["evidence_valley"] != valley
+        assert inferred["evidence_sampled_kpoint"] == "KM"
 
 
 def test_tmote2_public_output_no_cn_like_and_production_no_material_names():
@@ -1775,33 +1826,48 @@ def test_tmote2_reduced_ebr_auto_canonical_provenance():
 
     # Top-level status
     assert r["status"] == "no_exact_solution"
-    assert r["schema_version"] == "1.7.0"
+    assert r["schema_version"] == "1.8.0"
     assert r["table_status"] == "loaded"
 
     # reduced_ebr_input self-auditing
     inp = r.get("reduced_ebr_input", {})
-    assert inp["source"] == "auto_time_reversal_grey"
+    assert inp["source"] == "auto_unitary_and_time_reversal"
     assert inp["spinful"] is True
-    assert inp["reduced_table_validation_candidate_bundle_count"] == 1
-    assert inp["final_reduced_ebr_result_count"] == 1
+    assert inp["reduced_table_validation_candidate_bundle_count"] == 3
+    assert inp["final_reduced_ebr_result_count"] == 3
     assert inp["final_mapping_excluded_bundle_count"] == 0
 
     # auto_canonical_bundles
     bundles = r.get("auto_canonical_bundles", [])
-    assert len(bundles) == 1
+    assert len(bundles) == 3
     for b in bundles:
         assert b["sg_number"] == 143
-        assert b["expected_hsps"] == ["GM", "K", "M"]
         assert b["status"] == "no_exact_solution"
         assert b["table_status"] == "loaded"
 
     # Solutions
-    for sol in r.get("solutions", []):
-        # classification
-        assert sol["problem_kind"] == "valley_orbit_reduced_ebr"
-        assert sol["valley_orbit"] == ["K_valley", "Kp_valley"]
-        assert sol["classification"] == "in_integer_span_no_nonnegative_witness"
-        assert sol["nonnegative_solution_status"] == "no_nonnegative_solution"
+    solutions = r.get("solutions", [])
+    assert len(solutions) == 3
+    joint = next(
+        sol for sol in solutions
+        if sol["problem_kind"] == "valley_orbit_reduced_ebr"
+    )
+    assert joint["valley_orbit"] == ["K_valley", "Kp_valley"]
+    assert joint["classification"] == "in_integer_span_no_nonnegative_witness"
+    assert joint["nonnegative_solution_status"] == "no_nonnegative_solution"
+    unitary = {
+        sol["valley"]: sol for sol in solutions
+        if sol["problem_kind"] == "unitary_valley_reduced_ebr"
+    }
+    assert set(unitary) == {"K_valley", "Kp_valley"}
+    assert all(
+        sol["classification"] == "outside_integer_span"
+        and sol["expected_hsps"] == ["GM", "K", "KA", "M"]
+        and sol["table_provenance"]["source"] == "auto_canonical"
+        for sol in unitary.values()
+    )
+
+    for sol in [joint]:
 
         # table_provenance injected per solution
         tp = sol.get("table_provenance", {})
@@ -1836,7 +1902,11 @@ def test_tmote2_reduced_ebr_auto_canonical_provenance():
 def test_tmote2_reduced_ebr_preserves_unitary_mm_components():
     """The joint result retains both valley-resolved unitary M rows."""
     r = _read_fixture_reduced_ebr()
-    assert len(r.get("solutions", [])) == 1
-    components = r["solutions"][0]["unitary_valley_irreps"]
+    assert len(r.get("solutions", [])) == 3
+    joint = next(
+        sol for sol in r["solutions"]
+        if sol["problem_kind"] == "valley_orbit_reduced_ebr"
+    )
+    components = joint["unitary_valley_irreps"]
     assert components["K_valley"]["M"] == {"-M2": 1}
     assert components["Kp_valley"]["M"] == {"-M2": 1}

@@ -479,6 +479,37 @@ def build_auto_canonical_reduced_ebr_table(
     for irrep in irrep_table.irreps:
         label_to_bilbao_kp[irrep.label] = irrep.kpoint_label
 
+    # The reviewed EBR basis can contain a distinct source-HSP arm (for
+    # example KA) that is absent from the representative-only standard-irrep
+    # table.  Such rows are authoritative source-basis labels, not aliases for
+    # their TR partner, so resolve them from the EBR source itself.
+    loader = source_loader or _load_ebr_data_from_irreptables
+    try:
+        ebr_data = loader(subspace_sg_number, spinor)
+    except Exception as exc:
+        if isinstance(exc, RuntimeError):
+            raise
+        raise RuntimeError(
+            "failed to load irreptables EBR data for "
+            f"space_group_number={subspace_sg_number!r}, "
+            f"spinful={spinor}: {type(exc).__name__}: {exc}"
+        ) from exc
+    ebr_basis_labels = _extract_ebr_basis_labels(ebr_data)
+    invalid_source_labels: list[str] = []
+    for label in ebr_basis_labels:
+        try:
+            token = _extract_kvector_token(label)
+        except ValueError as exc:
+            invalid_source_labels.append(f"{label}: {exc}")
+            continue
+        label_to_bilbao_kp.setdefault(label, token)
+    if invalid_source_labels:
+        raise ValueError(
+            "EBR basis labels with invalid k-vector token for "
+            f"SG {subspace_sg_number} spinor={spinor}: "
+            f"{invalid_source_labels}"
+        )
+
     unresolved_bundle_labels: list[str] = []
     for vs_hsp, labels in bundle_irreps_by_kpoint.items():
         if not isinstance(labels, Sequence) or isinstance(labels, (str, bytes)):
@@ -540,21 +571,7 @@ def build_auto_canonical_reduced_ebr_table(
     # Every sampled Bilbao HSP must be in the mapping.
     sampled_bilbao_hsps: set[str] = set(bilbao_to_valleyscope.keys())
 
-    # --- 3. Load irreptables EBR data ---
-    loader = source_loader or _load_ebr_data_from_irreptables
-    try:
-        ebr_data = loader(subspace_sg_number, spinor)
-    except Exception as exc:
-        if isinstance(exc, RuntimeError):
-            raise
-        raise RuntimeError(
-            "failed to load irreptables EBR data for "
-            f"space_group_number={subspace_sg_number!r}, "
-            f"spinful={spinor}: {type(exc).__name__}: {exc}"
-        ) from exc
-
-    ebr_basis_labels = _extract_ebr_basis_labels(ebr_data)
-
+    # --- 3. Reuse the reviewed EBR data loaded for source-label validation ---
     def _cached_loader(_sg: int | str, _spin: bool) -> Mapping[str, object]:
         return ebr_data
 
