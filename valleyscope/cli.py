@@ -155,7 +155,12 @@ def _map_reduced_ebr(args) -> int:
         if s.get("classification") == "indeterminate_truncated")
 
     print(f"status:              {status}")
-    print(f"total bundles:       {len(solutions)}")
+    raw_input_bundles = bundle.get("bundles", [])
+    input_bundle_count = (
+        len(raw_input_bundles) if isinstance(raw_input_bundles, list) else 0
+    )
+    print(f"input bundles:       {input_bundle_count}")
+    print(f"evaluated results:   {len(solutions)}")
     print(f"solved (exact):      {solved}")
     print(f"no exact solution:   {no_exact}")
     print(f"indeterminate:       {indeterminate}")

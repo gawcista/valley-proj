@@ -12,6 +12,7 @@ from valleyscope.analysis.irreptables_runtime_table_builder import (
 )
 from valleyscope.analysis.reduced_ebr_mapping import (
     _joint_bundle_time_reversal_evidence_valid,
+    build_reduced_ebr_mapping,
     promote_bundle_for_solve,
 )
 
@@ -338,8 +339,13 @@ def _reviewed_joint_bundle_and_table():
         },
         "time_reversal": {
             "theta_square": -1,
+            "representative_valley": "left",
             "time_reversal_valley_mapping": {
                 "left": "right", "right": "left",
+            },
+            "source_hsp_to_sampled_kpoint_by_valley": {
+                "left": {"GM": "GM"},
+                "right": {"GM": "GM"},
             },
             "time_reversal_hsp_orbits": [{
                 "representative": "GM",
@@ -409,6 +415,28 @@ def test_joint_problem_promotion_requires_matching_type_ii_grey_provenance():
     bundle, table = _reviewed_joint_bundle_and_table()
 
     assert promote_bundle_for_solve(bundle=bundle, table=table)["promoted"]
+    mapping = build_reduced_ebr_mapping(
+        ebr_export_bundle={"bundles": [bundle]},
+        table=table,
+    )
+    assert mapping["solutions"][0]["time_reversal"][
+        "source_hsp_to_sampled_kpoint_by_valley"
+    ] == {
+        "left": {"GM": "GM"},
+        "right": {"GM": "GM"},
+    }
+
+    missing_component_binding = deepcopy(bundle)
+    missing_component_binding["time_reversal"] = deepcopy(
+        bundle["time_reversal"]
+    )
+    missing_component_binding["time_reversal"][
+        "source_hsp_to_sampled_kpoint_by_valley"
+    ]["right"] = {}
+    assert not promote_bundle_for_solve(
+        bundle=missing_component_binding,
+        table=table,
+    )["promoted"]
 
     missing = dict(table)
     missing["provenance"] = dict(table["provenance"])
@@ -503,6 +531,10 @@ def test_self_mapped_joint_problem_requires_serialized_sewing_evidence():
     }
     self_mapped["time_reversal"] = dict(bundle["time_reversal"])
     self_mapped["time_reversal"]["time_reversal_valley_mapping"] = {"v": "v"}
+    self_mapped["time_reversal"]["representative_valley"] = "v"
+    self_mapped["time_reversal"][
+        "source_hsp_to_sampled_kpoint_by_valley"
+    ] = {"v": {"GM": "GM"}}
     coefficients = np.asarray([
         [[1.0 + 0.0j], [0.0 + 0.0j]],
         [[0.0 + 0.0j], [1.0 + 0.0j]],
@@ -1068,7 +1100,11 @@ def test_redundant_dependent_hsp_candidate_is_checked_but_not_independent_map():
         "source_hsp_to_sampled_kpoint": {"Q": "Q_sample"},
         "time_reversal": {
             "theta_square": 1,
+            "representative_valley": "v",
             "time_reversal_valley_mapping": {"v": "v"},
+            "source_hsp_to_sampled_kpoint_by_valley": orbit[
+                "source_hsp_to_sampled_kpoint_by_valley"
+            ],
             "time_reversal_hsp_orbits": orbit["time_reversal_hsp_orbits"],
             "full_unitary_source_hsp_labels": ["Q", "QA"],
             "time_reversal_irrep_pairing": orbit[
@@ -1183,7 +1219,18 @@ def _orbit_candidates(*, mismatched_g: bool = False):
                 "valley": valley,
                 "matched_irrep": irrep,
                 "irrep_multiplicity": 1,
-                "irrep_source_provenance": {"source_hsp_label": hsp},
+                "irrep_source_provenance": {
+                    "source_hsp_label": hsp,
+                    "source_table_spinor": True,
+                },
+                "kpoint": f"{hsp}_{valley}",
+                "workflow_path": "direct_qcut",
+                "subspace_group_candidate": "P4",
+                "subspace_space_group": {
+                    "status": "resolved",
+                    "candidate_space_group_number": 75,
+                    "candidate_space_group_symbol": "P4",
+                },
                 "ready_for_ebr_input": True,
             })
     return {"candidates": rows}
@@ -1220,6 +1267,148 @@ def test_cross_valley_tr_completion_needs_no_separately_sampled_minus_k_row():
         "Q": ["q1_corep", "q2_corep"],
         "M": ["m_corep"],
     }
+    assert orbit["source_hsp_to_sampled_kpoint"] == {
+        "G": "G_left", "Q": "Q_left", "M": "M_left",
+    }
+    assert orbit["source_hsp_to_sampled_kpoint_by_valley"] == {
+        "left": {"G": "G_left", "Q": "Q_left", "M": "M_left"},
+        "right": {
+            "G": "G_right", "Q": "Q_right", "M": "M_right",
+        },
+    }
+
+    problems = build_ebr_problem_instances(
+        ebr_input_candidates=_orbit_candidates(),
+        time_reversal_orbit_report=report,
+    )
+    instance = problems["instances"][0]
+    assert instance["canonical_hsp_vector_ready"] is True
+    assert instance["time_reversal"][
+        "source_hsp_to_sampled_kpoint_by_valley"
+    ] == orbit["source_hsp_to_sampled_kpoint_by_valley"]
+    bundle = build_ebr_export_bundle(
+        ebr_problem_instances=problems,
+    )["bundles"][0]
+    assert bundle["time_reversal"][
+        "source_hsp_to_sampled_kpoint_by_valley"
+    ] == orbit["source_hsp_to_sampled_kpoint_by_valley"]
+
+
+def test_cross_valley_tr_completion_rejects_missing_sampled_kpoint_binding():
+    source = _synthetic_source_orbit_report()
+    grey = _synthetic_grey_report()
+    candidates = _orbit_candidates()
+    candidates["candidates"][0].pop("kpoint")
+
+    report = build_time_reversal_valley_orbit_report(
+        valley_mapping_report={
+            "status": "validated", "theta_square": -1,
+            "time_reversal_valley_mapping": {"left": "right", "right": "left"},
+            "valley_orbits": [{
+                "representative": "left", "members": ["left", "right"],
+                "mapping_type": "exchanged",
+            }],
+        },
+        source_irrep_orbits_by_valley={"left": source, "right": source},
+        grey_source_by_valley={"left": grey, "right": grey},
+        ebr_input_candidates=candidates,
+    )
+
+    assert report["status"] == "blocked"
+    assert "source_hsp_sampled_kpoint_missing:left:G" in report["blockers"]
+    assert "source_hsp_sampled_kpoint_mapping_incomplete:left:G" in (
+        report["blockers"]
+    )
+
+
+def test_cross_valley_tr_completion_rejects_conflicting_component_binding():
+    source = _synthetic_source_orbit_report()
+    grey = _synthetic_grey_report()
+    candidates = _orbit_candidates()
+    conflicting = deepcopy(candidates["candidates"][0])
+    conflicting["kpoint"] = "G_left_conflict"
+    candidates["candidates"].append(conflicting)
+
+    report = build_time_reversal_valley_orbit_report(
+        valley_mapping_report={
+            "status": "validated", "theta_square": -1,
+            "time_reversal_valley_mapping": {"left": "right", "right": "left"},
+            "valley_orbits": [{
+                "representative": "left", "members": ["left", "right"],
+                "mapping_type": "exchanged",
+            }],
+        },
+        source_irrep_orbits_by_valley={"left": source, "right": source},
+        grey_source_by_valley={"left": grey, "right": grey},
+        ebr_input_candidates=candidates,
+    )
+
+    assert report["status"] == "blocked"
+    assert (
+        "source_hsp_sampled_kpoint_mapping_ambiguous:"
+        "left:G:G_left:G_left_conflict"
+    ) in report["blockers"]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("time_reversal_hsp_mapping", {}),
+        ("irrep_partner_by_label", {}),
+        ("independent_hsp_labels", []),
+        ("independent_hsp_labels", ["G", ""]),
+    ],
+)
+def test_cross_valley_tr_completion_rejects_empty_or_malformed_source_basis(
+    field, value,
+):
+    source = _synthetic_source_orbit_report()
+    source[field] = value
+    grey = _synthetic_grey_report()
+
+    report = build_time_reversal_valley_orbit_report(
+        valley_mapping_report={
+            "status": "validated", "theta_square": -1,
+            "time_reversal_valley_mapping": {"left": "right", "right": "left"},
+            "valley_orbits": [{
+                "representative": "left", "members": ["left", "right"],
+                "mapping_type": "exchanged",
+            }],
+        },
+        source_irrep_orbits_by_valley={"left": source, "right": source},
+        grey_source_by_valley={"left": grey, "right": grey},
+        ebr_input_candidates=_orbit_candidates(),
+    )
+
+    assert report["status"] == "blocked"
+    assert "time_reversal_source_mapping_malformed" in report["blockers"]
+    assert report["valley_orbits"][0]["irreps_by_kpoint"] == {}
+
+
+def test_cross_valley_tr_completion_rejects_empty_grey_source_mapping():
+    source = _synthetic_source_orbit_report()
+    grey = _synthetic_grey_report()
+    grey["grey_unitary_restriction_by_irrep"] = {}
+
+    report = build_time_reversal_valley_orbit_report(
+        valley_mapping_report={
+            "status": "validated", "theta_square": -1,
+            "time_reversal_valley_mapping": {"left": "right", "right": "left"},
+            "valley_orbits": [{
+                "representative": "left", "members": ["left", "right"],
+                "mapping_type": "exchanged",
+            }],
+        },
+        source_irrep_orbits_by_valley={"left": source, "right": source},
+        grey_source_by_valley={"left": grey, "right": grey},
+        ebr_input_candidates=_orbit_candidates(),
+    )
+
+    assert report["status"] == "blocked"
+    assert "grey_group_time_reversal_source_mapping_malformed" in (
+        report["blockers"]
+    )
+    assert report["valley_orbits"][0]["irreps_by_kpoint"] == {}
 
 
 def test_cross_valley_tr_multiplicity_or_irrep_mismatch_blocks_completion():

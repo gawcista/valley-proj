@@ -78,7 +78,7 @@ def test_summary_text_renders_qcut_fraction_for_relative_mode(tmp_path):
         output_paths={},
     )
 
-    assert summary["schema_version"] == "1.6.0"
+    assert summary["schema_version"] == "1.7.0"
     assert summary["qcut"]["fraction"] == pytest.approx(0.2)
     text = render_summary_text(summary)
     assert "qcut mode: relative_min_valley_distance" in text
@@ -1632,7 +1632,7 @@ def test_tmote2_projected_source_hsp_coverage_and_tr_orbit_are_explicit():
 
     export = s["valley_ebr_export_bundle"]
     assert export["bundle_count"] == 1
-    assert s["valley_ebr_export_bundle"]["schema_version"] == "1.6.0"
+    assert s["valley_ebr_export_bundle"]["schema_version"] == "1.7.0"
     assert export["bundles"][0]["problem_kind"] == "valley_orbit_reduced_ebr"
     assert export["bundles"][0]["valley_orbit"] == [
         "K_valley", "Kp_valley",
@@ -1775,7 +1775,7 @@ def test_tmote2_reduced_ebr_auto_canonical_provenance():
 
     # Top-level status
     assert r["status"] == "no_exact_solution"
-    assert r["schema_version"] == "1.6.0"
+    assert r["schema_version"] == "1.7.0"
     assert r["table_status"] == "loaded"
 
     # reduced_ebr_input self-auditing

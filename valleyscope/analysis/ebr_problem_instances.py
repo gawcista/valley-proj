@@ -436,6 +436,7 @@ def _build_time_reversal_problem_instances(
                 "theta_square": time_reversal_orbit_report.get(
                     "theta_square"
                 ),
+                "representative_valley": raw_orbit.get("representative"),
                 "time_reversal_valley_mapping": (
                     time_reversal_orbit_report.get(
                         "time_reversal_valley_mapping", {}
@@ -458,6 +459,9 @@ def _build_time_reversal_problem_instances(
                 ),
                 "source_hsp_binding_by_sampled_kpoint": raw_orbit.get(
                     "source_hsp_binding_by_sampled_kpoint", {}
+                ),
+                "source_hsp_to_sampled_kpoint_by_valley": raw_orbit.get(
+                    "source_hsp_to_sampled_kpoint_by_valley", {}
                 ),
                 "antiunitary_sewing_evidence": (
                     time_reversal_orbit_report.get(

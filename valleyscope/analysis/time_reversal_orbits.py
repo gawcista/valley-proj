@@ -220,6 +220,12 @@ def build_time_reversal_valley_orbit_report(
             structural_blockers.append(
                 "unknown_time_reversal_valley_mapping_type"
             )
+        representative = raw_orbit.get("representative")
+        if representative not in members:
+            structural_blockers.append(
+                "time_reversal_valley_orbit_representative_malformed"
+            )
+            representative = members[0] if members else ""
 
         source_reports = [
             source_irrep_orbits_by_valley.get(member, {})
@@ -262,9 +268,18 @@ def build_time_reversal_valley_orbit_report(
         hsp_mapping = source_report.get("time_reversal_hsp_mapping", {})
         irrep_mapping = source_report.get("irrep_partner_by_label", {})
         independent_hsps = source_report.get("independent_hsp_labels", [])
-        if not isinstance(hsp_mapping, Mapping) or not isinstance(
-            irrep_mapping, Mapping
-        ) or not isinstance(independent_hsps, list):
+        if (
+            not _is_nonempty_involutive_string_mapping(hsp_mapping)
+            or not _is_nonempty_involutive_string_mapping(irrep_mapping)
+            or not isinstance(independent_hsps, list)
+            or not independent_hsps
+            or any(
+                not isinstance(hsp, str) or not hsp
+                for hsp in independent_hsps
+            )
+            or len(set(independent_hsps)) != len(independent_hsps)
+            or not set(independent_hsps).issubset(hsp_mapping)
+        ):
             structural_blockers.append(
                 "time_reversal_source_mapping_malformed"
             )
@@ -272,14 +287,41 @@ def build_time_reversal_valley_orbit_report(
             irrep_mapping = {}
             independent_hsps = []
 
+        grey_restrictions = grey_report.get(
+            "grey_unitary_restriction_by_irrep", {}
+        )
+        grey_hsp_by_irrep = grey_report.get(
+            "grey_source_hsp_by_irrep", {}
+        )
+        unitary_hsp_by_irrep = grey_report.get(
+            "unitary_source_hsp_by_irrep", {}
+        )
+        if any(
+            not isinstance(value, Mapping) or not value
+            for value in (
+                grey_restrictions,
+                grey_hsp_by_irrep,
+                unitary_hsp_by_irrep,
+            )
+        ):
+            structural_blockers.append(
+                "grey_group_time_reversal_source_mapping_malformed"
+            )
+
         actual = _candidate_unitary_counts(candidates, members)
-        source_to_sampled, source_mapping_blockers = (
+        (
+            source_to_sampled,
+            source_to_sampled_by_valley,
+            source_mapping_blockers,
+        ) = (
             _candidate_source_hsp_to_sampled_kpoint(
                 candidates,
                 members,
                 independent_hsps=independent_hsps,
+                representative=str(representative),
             )
         )
+        structural_blockers.extend(source_mapping_blockers)
         projector_workflows: dict[str, dict[str, str]] = {}
         projector_provenance: dict[
             str, dict[str, dict[str, object]]
@@ -306,11 +348,6 @@ def build_time_reversal_valley_orbit_report(
                 source_hsp_binding_blockers,
             ) = _candidate_source_hsp_bindings(candidates, members)
             structural_blockers.extend(source_hsp_binding_blockers)
-            if set(source_to_sampled) != set(independent_hsps):
-                structural_blockers.append(
-                    "antiunitary_source_hsp_sampled_kpoint_mapping_incomplete"
-                )
-            structural_blockers.extend(source_mapping_blockers)
             if not validate_time_reversal_sewing_report(
                 antiunitary_sewing_report,
                 valley_members=members,
@@ -399,22 +436,24 @@ def build_time_reversal_valley_orbit_report(
                 target = combined.setdefault(hsp, {})
                 for irrep, multiplicity in counts.items():
                     target[irrep] = target.get(irrep, 0) + multiplicity
+        if not combined:
+            structural_blockers.append(
+                "time_reversal_unitary_irrep_decomposition_empty"
+            )
 
         grey_counts: dict[str, dict[str, int]] = {}
         if not structural_blockers:
             grey_counts, decomposition_blockers = _decompose_grey_counts(
                 unitary_counts_by_hsp=combined,
-                grey_restrictions=grey_report.get(
-                    "grey_unitary_restriction_by_irrep", {}
-                ),
-                grey_hsp_by_irrep=grey_report.get(
-                    "grey_source_hsp_by_irrep", {}
-                ),
-                unitary_hsp_by_irrep=grey_report.get(
-                    "unitary_source_hsp_by_irrep", {}
-                ),
+                grey_restrictions=grey_restrictions,
+                grey_hsp_by_irrep=grey_hsp_by_irrep,
+                unitary_hsp_by_irrep=unitary_hsp_by_irrep,
             )
             structural_blockers.extend(decomposition_blockers)
+            if not set(independent_hsps).issubset(grey_counts):
+                structural_blockers.append(
+                    "time_reversal_grey_decomposition_basis_incomplete"
+                )
 
         all_blockers = _deduplicate([
             *structural_blockers,
@@ -432,7 +471,7 @@ def build_time_reversal_valley_orbit_report(
         }
         orbit_rows.append({
             "orbit_id": f"time_reversal_valley_orbit_{orbit_index:03d}",
-            "representative": raw_orbit.get("representative", members[0]),
+            "representative": representative,
             "members": members,
             "mapping_type": mapping_type,
             "status": "validated" if not all_blockers else "blocked",
@@ -452,6 +491,9 @@ def build_time_reversal_valley_orbit_report(
             "full_unitary_source_hsp_labels": full_hsps,
             "independent_time_reversal_hsp_labels": independent_hsps,
             "source_hsp_to_sampled_kpoint": source_to_sampled,
+            "source_hsp_to_sampled_kpoint_by_valley": (
+                source_to_sampled_by_valley
+            ),
             "projector_workflow_by_sampled_kpoint": projector_workflows,
             "projector_provenance_by_sampled_kpoint": projector_provenance,
             "source_hsp_binding_by_sampled_kpoint": source_hsp_bindings,
@@ -530,12 +572,16 @@ def _candidate_source_hsp_to_sampled_kpoint(
     members: Sequence[str],
     *,
     independent_hsps: Sequence[object],
-) -> tuple[dict[str, str], list[str]]:
+    representative: str,
+) -> tuple[dict[str, str], dict[str, dict[str, str]], list[str]]:
+    """Resolve representative and lossless per-valley sampled-HSP maps."""
     independent = {
         str(value) for value in independent_hsps
         if isinstance(value, str) and value
     }
-    sampled_by_source: dict[str, str] = {}
+    sampled_by_valley: dict[str, dict[str, str]] = {
+        member: {} for member in members
+    }
     blockers: list[str] = []
     for raw in candidates:
         if (
@@ -553,6 +599,7 @@ def _candidate_source_hsp_to_sampled_kpoint(
             provenance.get("source_hsp_label")
             if isinstance(provenance, Mapping) else None
         )
+        valley = str(raw.get("valley"))
         sampled = raw.get("kpoint")
         if not isinstance(source_hsp, str) or not source_hsp:
             continue
@@ -560,16 +607,47 @@ def _candidate_source_hsp_to_sampled_kpoint(
             continue
         if not isinstance(sampled, str) or not sampled:
             blockers.append(
-                f"antiunitary_sampled_kpoint_missing:{source_hsp}"
+                f"source_hsp_sampled_kpoint_missing:{valley}:{source_hsp}"
             )
             continue
-        previous = sampled_by_source.setdefault(source_hsp, sampled)
+        by_source = sampled_by_valley[valley]
+        previous = by_source.setdefault(source_hsp, sampled)
         if previous != sampled:
             blockers.append(
-                "antiunitary_source_hsp_sampled_kpoint_mapping_ambiguous:"
-                f"{source_hsp}:{previous}:{sampled}"
+                "source_hsp_sampled_kpoint_mapping_ambiguous:"
+                f"{valley}:{source_hsp}:{previous}:{sampled}"
             )
-    return sampled_by_source, _deduplicate(blockers)
+    for member, by_source in sampled_by_valley.items():
+        for source_hsp in independent:
+            if source_hsp not in by_source:
+                blockers.append(
+                    "source_hsp_sampled_kpoint_mapping_incomplete:"
+                    f"{member}:{source_hsp}"
+                )
+        if len(set(by_source.values())) != len(by_source):
+            blockers.append(
+                f"source_hsp_sampled_kpoint_mapping_noninjective:{member}"
+            )
+    representative_mapping = sampled_by_valley.get(representative, {})
+    return (
+        dict(representative_mapping),
+        sampled_by_valley,
+        _deduplicate(blockers),
+    )
+
+
+def _is_nonempty_involutive_string_mapping(value: object) -> bool:
+    if not isinstance(value, Mapping) or not value:
+        return False
+    if any(
+        not isinstance(label, str)
+        or not label
+        or not isinstance(partner, str)
+        or not partner
+        for label, partner in value.items()
+    ):
+        return False
+    return all(value.get(value.get(label)) == label for label in value)
 
 
 def _candidate_projector_workflows(

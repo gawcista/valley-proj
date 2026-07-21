@@ -163,7 +163,7 @@ def test_missing_table():
 def test_null_bundle():
     r = build_reduced_ebr_mapping(ebr_export_bundle=None)
     assert r["status"] == "not_evaluated"
-    assert r["schema_version"] == "1.6.0"
+    assert r["schema_version"] == "1.7.0"
     assert "mapping_status" not in r
     assert "reduced_ebr_decomposition_status" not in r
     assert r["solutions"] == []
@@ -199,7 +199,7 @@ def test_schema_fields():
     for k in ["status", "schema_version", "table_status",
               "solutions", "excluded_bundles", "solver"]:
         assert k in r, f"missing: {k}"
-    assert r["schema_version"] == "1.6.0"
+    assert r["schema_version"] == "1.7.0"
     assert "mapping_status" not in r
     assert "reduced_ebr_decomposition_status" not in r
 
@@ -1118,6 +1118,9 @@ def test_cli_distinguishes_truncated_search_from_no_exact_solution(
 
     assert rc == 0
     output = capsys.readouterr().out
+    assert "input bundles:       1" in output
+    assert "evaluated results:   1" in output
+    assert "total bundles:" not in output
     assert "no exact solution:   0" in output
     assert "indeterminate:       1" in output
     assert "indeterminate-truncated:            1" in output

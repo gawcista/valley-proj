@@ -172,6 +172,13 @@ def test_tr_validation_candidate_unitary_irreps_survive_without_mapping():
                 "source_hsp_to_sampled_kpoint": {
                     "GM": "GammaM", "K": "KM",
                 },
+                "time_reversal": {
+                    "representative_valley": "K",
+                    "source_hsp_to_sampled_kpoint_by_valley": {
+                        "K": {"GM": "GammaM", "K": "KM"},
+                        "Kp": {"GM": "GammaM_Kp", "K": "KM_Kp"},
+                    },
+                },
                 "unitary_valley_irreps": {
                     "K": {"GM": {"A": 1}, "K": {"B": 2}},
                     "Kp": {"GM": {"A": 1}},
@@ -215,7 +222,7 @@ def test_tr_validation_candidate_unitary_irreps_survive_without_mapping():
             "certificate_identity": {},
         },
         {
-            "kpoint": "GammaM",
+            "kpoint": "GammaM_Kp",
             "source_hsp_label": "GM",
             "valley": "Kp",
             "subspace_group_candidate": "P3",
@@ -505,7 +512,7 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
 
     record = load_database_ingestion_record_from_directory(run_dir)
 
-    assert record["schema_version"] == "1.6.0"
+    assert record["schema_version"] == "1.7.0"
     assert record["record_status"] == "has_final_reduced_ebr_results"
     assert record["reduced_table_validation_candidate_bundle_count"] == 2
     assert record["final_reduced_ebr_result_count"] == 2
@@ -833,12 +840,12 @@ def test_database_index_input_exclusions_have_source_record():
     assert er["source_record"] == "/tmp/rec.json"
 
 
-def test_ingestion_record_schema_version_is_1_6_0():
-    """Ingestion record schema_version is now 1.6.0."""
+def test_ingestion_record_schema_version_is_1_7_0():
+    """Ingestion record schema_version is now 1.7.0."""
     from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
     summary = {"target_kpoints": [], "iband": [], "input": {}}
     record = build_database_ingestion_record(valley_summary=summary)
-    assert record["schema_version"] == "1.6.0"
+    assert record["schema_version"] == "1.7.0"
 
 
 # -----------------------------------------------------------------------
@@ -948,7 +955,7 @@ def test_ingestion_preserves_centered_certificate_identity_from_bundle():
         valley_ebr_export_bundle=bundle,
     )
 
-    assert record["schema_version"] == "1.6.0"
+    assert record["schema_version"] == "1.7.0"
     assert record["valley_irrep_records"][0]["certificate_identity"] == (
         certificate_identity
     )
@@ -1122,6 +1129,11 @@ def test_reduced_ebr_records_preserve_joint_valley_orbit_identity():
         "time_reversal_valley_mapping": {
             "valley_a": "valley_b",
             "valley_b": "valley_a",
+        },
+        "representative_valley": "valley_a",
+        "source_hsp_to_sampled_kpoint_by_valley": {
+            "valley_a": {"K": "K_a"},
+            "valley_b": {"K": "K_b"},
         },
     }
     unitary_valley_irreps = {

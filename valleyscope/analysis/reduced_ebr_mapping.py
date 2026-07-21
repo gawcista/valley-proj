@@ -24,7 +24,7 @@ from valleyscope.analysis.time_reversal_sewing import (
 
 _REQUIRED_TABLE_KEYS = {"schema_version", "subspace_group_candidate",
                          "expected_hsps", "irreps", "ebrs"}
-_OUTPUT_SCHEMA_VERSION = "1.6.0"
+_OUTPUT_SCHEMA_VERSION = "1.7.0"
 _SOLVER_NAME = "smith_normal_form_plus_bounded_nonnegative_search"
 
 # Standard-setting certificate convention — REAL producer vocabulary.
@@ -736,8 +736,26 @@ def _joint_bundle_time_reversal_evidence_valid(
     ):
         return False
 
+    source_to_sampled = bundle.get("source_hsp_to_sampled_kpoint")
+    representative_valley = evidence.get("representative_valley")
+    source_to_sampled_by_valley = evidence.get(
+        "source_hsp_to_sampled_kpoint_by_valley"
+    )
+    if (
+        not isinstance(source_to_sampled, dict)
+        or not isinstance(representative_valley, str)
+        or representative_valley not in orbit_members
+        or not _source_hsp_sampled_mappings_valid(
+            mappings=source_to_sampled_by_valley,
+            valley_orbit=valley_orbit,
+            expected_hsps=expected_hsps,
+        )
+        or source_to_sampled_by_valley.get(representative_valley)
+        != source_to_sampled
+    ):
+        return False
+
     if len(valley_orbit) == 1:
-        source_to_sampled = bundle.get("source_hsp_to_sampled_kpoint")
         source_model = reviewed_source_model
         if source_model is None:
             source_model = _derive_reviewed_source_validation_model(
@@ -790,6 +808,30 @@ def _joint_bundle_time_reversal_evidence_valid(
         expected_bns_number is not None
         and grey_bns_number == expected_bns_number
     )
+
+
+def _source_hsp_sampled_mappings_valid(
+    *,
+    mappings: object,
+    valley_orbit: list[str],
+    expected_hsps: list[str],
+) -> bool:
+    if not isinstance(mappings, dict) or set(mappings) != set(valley_orbit):
+        return False
+    expected = set(expected_hsps)
+    for valley in valley_orbit:
+        by_source = mappings.get(valley)
+        if (
+            not isinstance(by_source, dict)
+            or set(by_source) != expected
+            or any(
+                not isinstance(sampled, str) or not sampled
+                for sampled in by_source.values()
+            )
+            or len(set(by_source.values())) != len(by_source)
+        ):
+            return False
+    return True
 
 
 def _unitary_components_match_time_reversal(

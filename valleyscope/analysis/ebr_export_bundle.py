@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-_SCHEMA_VERSION = "1.6.0"
+_SCHEMA_VERSION = "1.7.0"
 
 
 def build_ebr_export_bundle(

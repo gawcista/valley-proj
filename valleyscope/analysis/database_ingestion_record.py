@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-_SCHEMA_VERSION = "1.6.0"
+_SCHEMA_VERSION = "1.7.0"
 
 
 def build_database_ingestion_record(
@@ -369,10 +369,17 @@ def _extract_irrep_records(
         return
     unitary_irreps = bundle.get("unitary_valley_irreps", {})
     source_to_sampled = bundle.get("source_hsp_to_sampled_kpoint", {})
+    time_reversal = bundle.get("time_reversal", {})
+    source_to_sampled_by_valley = (
+        time_reversal.get("source_hsp_to_sampled_kpoint_by_valley", {})
+        if isinstance(time_reversal, dict) else {}
+    )
     if not isinstance(unitary_irreps, dict):
         return
     if not isinstance(source_to_sampled, dict):
         source_to_sampled = {}
+    if not isinstance(source_to_sampled_by_valley, dict):
+        source_to_sampled_by_valley = {}
     for valley in sorted(unitary_irreps):
         by_source_hsp = unitary_irreps.get(valley)
         if not isinstance(by_source_hsp, dict):
@@ -390,7 +397,15 @@ def _extract_irrep_records(
                 ):
                     continue
                 out.append({
-                    "kpoint": source_to_sampled.get(source_hsp, source_hsp),
+                    "kpoint": (
+                        source_to_sampled_by_valley.get(valley, {}).get(
+                            source_hsp,
+                            source_to_sampled.get(source_hsp, source_hsp),
+                        )
+                        if isinstance(
+                            source_to_sampled_by_valley.get(valley), dict
+                        ) else source_to_sampled.get(source_hsp, source_hsp)
+                    ),
                     "source_hsp_label": source_hsp,
                     "valley": valley,
                     "subspace_group_candidate": bundle.get(

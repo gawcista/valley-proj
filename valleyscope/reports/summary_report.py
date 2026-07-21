@@ -11,7 +11,7 @@ import numpy as np
 from valleyscope.io.config import AppConfig
 from valleyscope.reports.json_report import _json_default
 
-_SCHEMA_VERSION = "1.6.0"
+_SCHEMA_VERSION = "1.7.0"
 
 
 def build_summary_payload(
