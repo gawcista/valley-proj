@@ -17,7 +17,11 @@ from tests.reduced_ebr_promo_helpers import (
 from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
 from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
 from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
-from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping, load_reduced_ebr_table
+from valleyscope.analysis.reduced_ebr_mapping import (
+    build_reduced_ebr_mapping,
+    load_reduced_ebr_table,
+    promote_bundle_for_solve,
+)
 
 from tests.helpers_io_workflow import write_fixture, write_config
 
@@ -248,6 +252,28 @@ def test_generic_p4_table_authoritative_bundle_maps_and_rejects_mismatch():
     )
     # Sampled-basis bundles do not reach the solver.
     assert solved["status"] == "solved_exact"
+
+    missing_construction = dict(bundle)
+    missing_construction.pop("unitary_vector_construction")
+    promotion = promote_bundle_for_solve(
+        bundle=missing_construction,
+        table=matching_table,
+    )
+    assert promotion["promoted"] is False
+    assert {
+        row["code"] for row in promotion["blocker_reasons"]
+    } == {"unitary_construction_provenance_invalid"}
+
+    missing_physical_object = dict(bundle)
+    missing_physical_object.pop("physical_object_kind")
+    promotion = promote_bundle_for_solve(
+        bundle=missing_physical_object,
+        table=matching_table,
+    )
+    assert promotion["promoted"] is False
+    assert "problem_physical_object_kind_mismatch" in {
+        row["code"] for row in promotion["blocker_reasons"]
+    }
     assert solved["solutions"][0]["irrep_vector"] == [1, 1]
 
     mismatched_table = {

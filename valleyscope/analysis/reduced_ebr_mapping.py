@@ -495,9 +495,19 @@ def _validate_problem_kind_compatibility(
         unitary_kind: "unitary_valley_projected_subspace",
         orbit_kind: "joint_time_reversal_valley_orbit",
     }.get(problem_kind)
+    generated_construction_contract = (
+        "source_instance_id" in bundle
+        or "unitary_vector_construction" in bundle
+    )
     if (
-        physical_object_kind is not None
-        and physical_object_kind != expected_physical_object_kind
+        (
+            physical_object_kind is not None
+            and physical_object_kind != expected_physical_object_kind
+        )
+        or (
+            generated_construction_contract
+            and physical_object_kind is None
+        )
     ):
         blockers.append(_blocker(
             "problem_physical_object_kind_mismatch",
