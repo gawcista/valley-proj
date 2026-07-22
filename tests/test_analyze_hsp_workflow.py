@@ -1856,11 +1856,11 @@ def test_generic_irrep_override_rejects_spinor_mismatch():
 def test_generic_irrep_override_hsp_requires_coordinate_agreement():
     from valleyscope.irreps.tables import load_standard_irrep_table
     from valleyscope.workflows.analyze_hsp import (
-        _resolve_generic_irrep_hsp_label,
+        _resolve_generic_irrep_hsp_label_with_provenance,
     )
 
     table = load_standard_irrep_table(143, spinor=True)
-    label, blocker = _resolve_generic_irrep_hsp_label(
+    label, blocker, _ = _resolve_generic_irrep_hsp_label_with_provenance(
         table=table,
         k_frac=np.zeros(3),
         override_label="K",
@@ -2218,7 +2218,6 @@ def test_hsp_override_does_not_bypass_unresolved_standard_setting_mapping():
     """Override must not silently accept an HSP when k-map is unresolved."""
     import numpy as np
     from valleyscope.workflows.analyze_hsp import (
-        _resolve_generic_irrep_hsp_label,
         _resolve_generic_irrep_hsp_label_with_provenance,
     )
 
@@ -2229,7 +2228,7 @@ def test_hsp_override_does_not_bypass_unresolved_standard_setting_mapping():
         def match_kpoint_label(self, k, tolerance=1e-6):
             return None
 
-    label, blocker = _resolve_generic_irrep_hsp_label(
+    label, blocker, _ = _resolve_generic_irrep_hsp_label_with_provenance(
         table=_NoMatchTable(),
         k_frac=np.array([0.123, 0.456, 0.0]),
         override_label="M",

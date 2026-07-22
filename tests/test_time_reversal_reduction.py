@@ -12,9 +12,11 @@ from valleyscope.analysis.irreptables_runtime_table_builder import (
 )
 from valleyscope.analysis.reduced_ebr_mapping import (
     _joint_bundle_time_reversal_evidence_valid,
-    _unitary_bundle_completion_evidence_valid,
     build_reduced_ebr_mapping,
     promote_bundle_for_solve,
+)
+from valleyscope.analysis.unitary_provenance import (
+    validate_tr_completed_unitary_bundle as _unitary_bundle_completion_evidence_valid,
 )
 
 from valleyscope.analysis.time_reversal_orbits import (

@@ -530,9 +530,9 @@ def _validate_problem_kind_compatibility(
                 "grey-group table provenance",
             ))
             report["problem_kind_check"] = "failed"
-        elif _is_tr_completed_unitary_bundle(
+        elif unitary_bundle_claims_time_reversal_completion(
             bundle
-        ) and not _unitary_bundle_completion_evidence_valid(bundle):
+        ) and not validate_tr_completed_unitary_bundle(bundle):
             blockers.append(_blocker(
                 "unitary_completion_provenance_invalid",
                 "TR-completed unitary valley problem lacks complete, trusted "
@@ -542,8 +542,8 @@ def _validate_problem_kind_compatibility(
             report["completion_provenance_check"] = "failed"
         elif (
             physical_object_kind == "unitary_valley_projected_subspace"
-            and not _is_tr_completed_unitary_bundle(bundle)
-            and not _direct_unitary_bundle_construction_evidence_valid(bundle)
+            and not unitary_bundle_claims_time_reversal_completion(bundle)
+            and not validate_direct_unitary_bundle(bundle)
         ):
             blockers.append(_blocker(
                 "unitary_construction_provenance_invalid",
@@ -554,7 +554,7 @@ def _validate_problem_kind_compatibility(
             report["completion_provenance_check"] = "failed"
         else:
             report["problem_kind_check"] = "passed"
-            if _is_tr_completed_unitary_bundle(bundle):
+            if unitary_bundle_claims_time_reversal_completion(bundle):
                 report["completion_provenance_check"] = "passed"
         return
 
@@ -907,22 +907,6 @@ def _joint_bundle_time_reversal_evidence_valid(
         expected_bns_number is not None
         and grey_bns_number == expected_bns_number
     )
-
-
-def _unitary_bundle_completion_evidence_valid(bundle: dict) -> bool:
-    """Compatibility alias for the shared TR unitary validator."""
-    return validate_tr_completed_unitary_bundle(bundle)
-
-
-def _is_tr_completed_unitary_bundle(bundle: dict) -> bool:
-    """Compatibility alias for structural TR-completion detection."""
-    return unitary_bundle_claims_time_reversal_completion(bundle)
-
-
-def _direct_unitary_bundle_construction_evidence_valid(bundle: dict) -> bool:
-    """Compatibility alias for the shared direct unitary validator."""
-    return validate_direct_unitary_bundle(bundle)
-
 
 
 def _unitary_completion_records_valid(

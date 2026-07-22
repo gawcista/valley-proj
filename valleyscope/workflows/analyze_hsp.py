@@ -119,7 +119,6 @@ from valleyscope.reports.analysis_outputs import (
 )
 from valleyscope.reports.csv_report import weight_row
 from valleyscope.subspace.valley_basis import (
-    build_two_valley_adapted_basis,
     build_valley_adapted_basis,
     diagnose_valley_separability,
     summarize_valley_projector_quality,
@@ -185,22 +184,6 @@ def _generic_irrep_override_blocker(
             f"disagrees with wavefunction spinor={wavefunction_spinor}"
         )
     return None
-
-
-def _resolve_generic_irrep_hsp_label(
-    *,
-    table,
-    k_frac: np.ndarray | None,
-    override_label: str | None,
-    standard_match: dict[str, object] | None = None,
-) -> tuple[str | None, str | None]:
-    label, blocker, _ = _resolve_generic_irrep_hsp_label_with_provenance(
-        table=table,
-        k_frac=k_frac,
-        override_label=override_label,
-        standard_match=standard_match,
-    )
-    return label, blocker
 
 
 def _resolve_generic_irrep_hsp_label_with_provenance(

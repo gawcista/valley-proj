@@ -308,10 +308,10 @@ def build_time_reversal_valley_orbit_report(
                 "grey_group_time_reversal_source_mapping_malformed"
             )
 
-        actual = _candidate_unitary_counts(candidates, members)
         observed_completion_records = _candidate_unitary_completion_records(
             candidates, members
         )
+        actual = _counts_from_completion_records(observed_completion_records)
         candidate_provenance_blockers = [
             str(blocker)
             for by_hsp in observed_completion_records.values()
@@ -621,45 +621,6 @@ def build_time_reversal_valley_orbit_report(
             blocker for row in orbit_rows for blocker in row["blockers"]
         ]),
     }
-
-
-def _candidate_unitary_counts(
-    candidates: Sequence[object],
-    members: Sequence[str],
-) -> dict[str, dict[str, dict[str, int]]]:
-    out: dict[str, dict[str, dict[str, int]]] = {
-        member: {} for member in members
-    }
-    for raw in candidates:
-        if not isinstance(raw, Mapping):
-            continue
-        valley = raw.get("valley")
-        irrep = raw.get("matched_irrep")
-        multiplicity = raw.get("irrep_multiplicity", 1)
-        provenance = raw.get("irrep_source_provenance", {})
-        classification = raw.get("projected_hsp_classification", {})
-        source_hsp = (
-            classification.get("source_hsp_label")
-            if isinstance(classification, Mapping) else None
-        ) or (
-            provenance.get("source_hsp_label")
-            if isinstance(provenance, Mapping) else None
-        )
-        if (
-            valley not in out
-            or raw.get("ready_for_ebr_input") is not True
-            or not isinstance(irrep, str)
-            or not irrep
-            or not isinstance(source_hsp, str)
-            or not source_hsp
-            or not isinstance(multiplicity, int)
-            or isinstance(multiplicity, bool)
-            or multiplicity <= 0
-        ):
-            continue
-        counts = out[str(valley)].setdefault(source_hsp, {})
-        counts[irrep] = counts.get(irrep, 0) + multiplicity
-    return out
 
 
 def _candidate_unitary_completion_records(

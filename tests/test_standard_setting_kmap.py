@@ -529,13 +529,15 @@ def test_centered_direct_coordinate_match_is_not_trusted():
 
 def test_override_still_blocked_when_kmap_unresolved():
     """Manual HSP override cannot bypass unresolved standard-setting mapping."""
-    from valleyscope.workflows.analyze_hsp import _resolve_generic_irrep_hsp_label
+    from valleyscope.workflows.analyze_hsp import (
+        _resolve_generic_irrep_hsp_label_with_provenance,
+    )
 
     class _T:
         number = 5; name = "C2"; spinor = True
         def match_kpoint_label(self, k, tolerance=1e-6): return None
 
-    label, blocker = _resolve_generic_irrep_hsp_label(
+    label, blocker, _ = _resolve_generic_irrep_hsp_label_with_provenance(
         table=_T(), k_frac=np.array([0.123, 0.456, 0.0]),
         override_label="M",
         standard_match={"number": 5, "hall_number": 9, "hall_symbol": "C 2y"},
