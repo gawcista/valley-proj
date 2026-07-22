@@ -148,23 +148,10 @@ def build_ebr_export_bundle(
 
 
 def _unitary_vector_construction(inst: dict[str, object]) -> dict[str, object]:
-    """Preserve or derive the disjoint unitary construction contract."""
+    """Preserve the producer-owned unitary construction contract."""
     construction = inst.get("unitary_vector_construction")
     if isinstance(construction, dict) and construction:
         return dict(construction)
-    if (
-        inst.get("problem_kind", "unitary_valley_reduced_ebr")
-        == "unitary_valley_reduced_ebr"
-        and inst.get("valley_orbit") in ([], None)
-        and inst.get("time_reversal") in ({}, None)
-        and inst.get("unitary_irrep_completion_records_by_hsp") in ({}, None)
-        and isinstance(inst.get("irrep_records_by_kpoint"), dict)
-        and bool(inst.get("irrep_records_by_kpoint"))
-    ):
-        return {
-            "kind": "direct_observed_unitary_rows",
-            "source": "trusted_ebr_input_candidates",
-        }
     return {}
 
 

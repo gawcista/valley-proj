@@ -21,6 +21,11 @@ from valleyscope.irreps.time_reversal_geometry import (
 from valleyscope.analysis.time_reversal_sewing import (
     validate_time_reversal_sewing_report,
 )
+from valleyscope.analysis.unitary_provenance import (
+    unitary_bundle_claims_time_reversal_completion,
+    validate_direct_unitary_bundle,
+    validate_tr_completed_unitary_bundle,
+)
 
 _REQUIRED_TABLE_KEYS = {"schema_version", "subspace_group_candidate",
                          "expected_hsps", "irreps", "ebrs"}
@@ -905,186 +910,19 @@ def _joint_bundle_time_reversal_evidence_valid(
 
 
 def _unitary_bundle_completion_evidence_valid(bundle: dict) -> bool:
-    """Validate a serialized TR-completed unitary object fail closed."""
-    valley = bundle.get("valley")
-    valley_orbit = bundle.get("valley_orbit")
-    time_reversal = bundle.get("time_reversal")
-    irreps_by_kpoint = bundle.get("irreps_by_kpoint")
-    records_by_hsp = bundle.get(
-        "unitary_irrep_completion_records_by_hsp"
-    )
-    independent_source_to_sampled = bundle.get(
-        "independent_source_hsp_to_sampled_kpoint"
-    )
-    observed_source_to_sampled = bundle.get(
-        "observed_source_hsp_to_sampled_kpoint"
-    )
-    expected_hsps = bundle.get("expected_hsps")
-    construction = bundle.get("unitary_vector_construction")
-    if (
-        bundle.get("problem_kind") != "unitary_valley_reduced_ebr"
-        or bundle.get("physical_object_kind")
-        != "unitary_valley_projected_subspace"
-        or bundle.get("workflow_path")
-        != "time_reversal_completed_unitary_valley"
-        or not isinstance(construction, dict)
-        or construction.get("kind")
-        != "time_reversal_completed_unitary_rows"
-        or construction.get("source")
-        != "validated_time_reversal_valley_orbit"
-        or not isinstance(construction.get("orbit_id"), str)
-        or not construction.get("orbit_id")
-        or not isinstance(valley, str)
-        or not valley
-        or not isinstance(valley_orbit, list)
-        or not valley_orbit
-        or len(set(valley_orbit)) != len(valley_orbit)
-        or not isinstance(time_reversal, dict)
-        or time_reversal.get("mapping_type") not in {
-            "exchanged", "self_mapped",
-        }
-        or time_reversal.get("valley_orbit") != valley_orbit
-        or valley not in valley_orbit
-        or time_reversal.get("theta_square") not in (-1, 1)
-        or not isinstance(irreps_by_kpoint, dict)
-        or not isinstance(records_by_hsp, dict)
-        or not isinstance(independent_source_to_sampled, dict)
-        or bundle.get("source_hsp_to_sampled_kpoint")
-        != independent_source_to_sampled
-        or not isinstance(observed_source_to_sampled, dict)
-        or not isinstance(expected_hsps, list)
-        or not expected_hsps
-        or len(set(expected_hsps)) != len(expected_hsps)
-        or set(expected_hsps) != set(irreps_by_kpoint)
-        or set(expected_hsps) != set(records_by_hsp)
-        or bundle.get("irrep_records_by_kpoint") not in ({}, None)
-    ):
-        return False
-
-    valley_mapping = time_reversal.get("time_reversal_valley_mapping")
-    if (
-        not _nonempty_involutive_string_mapping(valley_mapping)
-        or set(valley_mapping) != set(valley_orbit)
-        or set(valley_mapping.values()) != set(valley_orbit)
-        or (
-            time_reversal.get("mapping_type") == "exchanged"
-            and (
-                len(valley_orbit) != 2
-                or any(valley_mapping[item] == item for item in valley_orbit)
-            )
-        )
-        or (
-            time_reversal.get("mapping_type") == "self_mapped"
-            and (
-                len(valley_orbit) != 1
-                or valley_mapping.get(valley_orbit[0]) != valley_orbit[0]
-            )
-        )
-    ):
-        return False
-
-    hsp_mapping, representative_hsps = _reviewed_hsp_involution(
-        time_reversal.get("time_reversal_hsp_orbits")
-    )
-    full_hsps = time_reversal.get("full_unitary_source_hsp_labels")
-    independent_hsps = time_reversal.get(
-        "independent_time_reversal_hsp_labels"
-    )
-    if (
-        hsp_mapping is None
-        or not isinstance(full_hsps, list)
-        or set(full_hsps) != set(expected_hsps)
-        or set(hsp_mapping) != set(expected_hsps)
-        or not isinstance(independent_hsps, list)
-        or set(independent_hsps) != representative_hsps
-        or set(independent_source_to_sampled) != set(independent_hsps)
-    ):
-        return False
-
-    irrep_mapping = time_reversal.get("time_reversal_irrep_pairing")
-    if not _nonempty_involutive_string_mapping(irrep_mapping):
-        return False
-    counts_by_hsp: dict[str, dict[str, int]] = {}
-    vector_irreps: set[str] = set()
-    for hsp, labels in irreps_by_kpoint.items():
-        if not isinstance(hsp, str) or not isinstance(labels, list):
-            return False
-        counts: dict[str, int] = {}
-        for label in labels:
-            if not isinstance(label, str) or not label:
-                return False
-            counts[label] = counts.get(label, 0) + 1
-            vector_irreps.add(label)
-        counts_by_hsp[hsp] = counts
-    if not vector_irreps.issubset(irrep_mapping):
-        return False
-    return _unitary_completion_records_valid(
-        valley=valley,
-        counts_by_hsp=counts_by_hsp,
-        records_by_hsp=records_by_hsp,
-        observed_source_to_sampled=observed_source_to_sampled,
-        valley_mapping=valley_mapping,
-        hsp_mapping=hsp_mapping,
-        irrep_mapping=irrep_mapping,
-        independent_hsps=set(independent_hsps),
-        expected_spinor=bundle.get("spinor"),
-    )
+    """Compatibility alias for the shared TR unitary validator."""
+    return validate_tr_completed_unitary_bundle(bundle)
 
 
 def _is_tr_completed_unitary_bundle(bundle: dict) -> bool:
-    """Return whether a unitary bundle claims or structurally implies TR completion."""
-    if bundle.get("problem_kind", "unitary_valley_reduced_ebr") != (
-        "unitary_valley_reduced_ebr"
-    ):
-        return False
-    construction = bundle.get("unitary_vector_construction")
-    construction_kind = (
-        construction.get("kind") if isinstance(construction, dict) else None
-    )
-    return any((
-        construction_kind == "time_reversal_completed_unitary_rows",
-        bundle.get("workflow_path")
-        == "time_reversal_completed_unitary_valley",
-        bool(bundle.get("valley_orbit")),
-        bool(bundle.get("unitary_irrep_completion_records_by_hsp")),
-        bool(bundle.get("time_reversal")),
-    ))
+    """Compatibility alias for structural TR-completion detection."""
+    return unitary_bundle_claims_time_reversal_completion(bundle)
 
 
 def _direct_unitary_bundle_construction_evidence_valid(bundle: dict) -> bool:
-    """Validate the disjoint direct-observation unitary construction path."""
-    construction = bundle.get("unitary_vector_construction")
-    records_by_kpoint = bundle.get("irrep_records_by_kpoint")
-    if (
-        bundle.get("problem_kind") != "unitary_valley_reduced_ebr"
-        or bundle.get("physical_object_kind")
-        != "unitary_valley_projected_subspace"
-        or not isinstance(bundle.get("valley"), str)
-        or not bundle.get("valley")
-        or bundle.get("valley_orbit") not in ([], None)
-        or bundle.get("time_reversal") not in ({}, None)
-        or bundle.get("unitary_irrep_completion_records_by_hsp")
-        not in ({}, None)
-        or not isinstance(construction, dict)
-        or construction.get("kind") != "direct_observed_unitary_rows"
-        or construction.get("source") != "trusted_ebr_input_candidates"
-        or not isinstance(records_by_kpoint, dict)
-        or not records_by_kpoint
-    ):
-        return False
-    return all(
-        isinstance(kpoint, str)
-        and bool(kpoint)
-        and isinstance(records, list)
-        and bool(records)
-        and all(
-            isinstance(record, dict)
-            and isinstance(record.get("matched_irrep"), str)
-            and bool(record.get("matched_irrep"))
-            for record in records
-        )
-        for kpoint, records in records_by_kpoint.items()
-    )
+    """Compatibility alias for the shared direct unitary validator."""
+    return validate_direct_unitary_bundle(bundle)
+
 
 
 def _unitary_completion_records_valid(

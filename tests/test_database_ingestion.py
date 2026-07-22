@@ -294,6 +294,7 @@ def test_tr_ingestion_fallback_requires_complete_valley_resolved_binding(
 def _tr_completed_unitary_bundle():
     observed_identity = {
         "source": "fixture/K/GM",
+        "workflow_path": "direct_qcut",
         "valley": "K",
         "source_hsp_label": "GM",
         "sampled_kpoint": "GammaM",

@@ -1044,6 +1044,13 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
             "status": "ok",
             "source_irrep_characters": source_chars,
             "source_operation_map": {0: 1, 4: 2},
+            "provenance": {
+                "table_sg_number": 75,
+                "table_name": "P4",
+                "table_spinor": False,
+                "source_hsp_label": "GM",
+                "source_table_operation_indices": [1, 2],
+            },
         },
     )
     captured_matching_kwargs = {}
@@ -1364,6 +1371,13 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
             "status": "ok",
             "source_irrep_characters": source_chars,
             "source_operation_map": {0: 1, 4: 2},
+            "provenance": {
+                "table_sg_number": 75,
+                "table_name": "P4",
+                "table_spinor": False,
+                "source_hsp_label": "GM",
+                "source_table_operation_indices": [1, 2],
+            },
         },
     )
     monkeypatch.setattr(

@@ -404,6 +404,13 @@ def test_provenance_survives_through_output_writer_to_export_bundle(tmp_path):
     # GammaM/K_valley_diag (diagnostic_only) → blocked.
     assert candidates["candidate_count"] == 2
     assert candidates["blocked_count"] == 1
+    for candidate in candidates["candidates"]:
+        candidate["irrep_source_provenance"].update({
+            "source_hsp_label": (
+                "GM" if candidate["kpoint"] == "GammaM" else "K"
+            ),
+            "source_table_spinor": True,
+        })
 
     instances = build_ebr_problem_instances(
         ebr_input_candidates=candidates,

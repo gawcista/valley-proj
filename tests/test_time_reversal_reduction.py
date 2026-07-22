@@ -1025,6 +1025,167 @@ def _self_mapped_nontrim_reviewed_source_model():
     }
 
 
+def _self_mapped_nontrim_pipeline_candidates(*, include_dependent: bool):
+    rows = [{
+        "valley": "v",
+        "matched_irrep": "q",
+        "irrep_multiplicity": 1,
+        "irrep_source_provenance": {
+            "source_hsp_label": "Q",
+            "source_table_spinor": False,
+        },
+        "projected_hsp_classification": {
+            "source_hsp_label": "Q",
+            "classification": "representative",
+            "source_hsp_membership": True,
+            "validation_status": "validated",
+            "parent_k_frac": [0.25, 0.0, 0.0],
+            "standard_k_frac": [0.25, 0.0, 0.0],
+            "source_hsp_representative_k_frac": [0.25, 0.0, 0.0],
+        },
+        "kpoint": "Q_sample",
+        "workflow_path": "direct_qcut",
+        "source": "fixture/v/Q",
+        "readiness_level": "trusted",
+        "subspace_group_candidate": "P1",
+        "subspace_space_group": {
+            "status": "resolved",
+            "candidate_space_group_number": 1,
+            "candidate_space_group_symbol": "P1",
+        },
+        "ready_for_ebr_input": True,
+    }]
+    if include_dependent:
+        rows.append({
+            **deepcopy(rows[0]),
+            "matched_irrep": "qa",
+            "irrep_source_provenance": {
+                "source_hsp_label": "QA",
+                "source_table_spinor": False,
+            },
+            "projected_hsp_classification": {
+                "source_hsp_label": "QA",
+                "classification": "representative",
+                "source_hsp_membership": True,
+                "validation_status": "validated",
+                "parent_k_frac": [0.75, 0.0, 0.0],
+                "standard_k_frac": [0.75, 0.0, 0.0],
+                "source_hsp_representative_k_frac": [0.75, 0.0, 0.0],
+            },
+            "kpoint": "QA_sample",
+            "source": "fixture/v/QA",
+        })
+    return {"candidates": rows}
+
+
+def _self_mapped_nontrim_pipeline(
+    *, include_dependent: bool, include_sewing: bool,
+):
+    candidates = _self_mapped_nontrim_pipeline_candidates(
+        include_dependent=include_dependent,
+    )
+    sewing = _self_mapped_nontrim_sewing_report() if include_sewing else None
+    report = build_time_reversal_valley_orbit_report(
+        valley_mapping_report={
+            "status": "validated",
+            "theta_square": 1,
+            "time_reversal_valley_mapping": {"v": "v"},
+            "valley_orbits": [{
+                "representative": "v",
+                "members": ["v"],
+                "mapping_type": "self_mapped",
+            }],
+        },
+        source_irrep_orbits_by_valley={
+            "v": _self_mapped_nontrim_source_report(),
+        },
+        grey_source_by_valley={"v": _self_mapped_nontrim_grey_report()},
+        ebr_input_candidates=candidates,
+        antiunitary_sewing_report=sewing,
+        trusted_projector_provenance_by_kpoint=(
+            _projector_provenance_from_sewing(sewing)
+            if sewing is not None else None
+        ),
+    )
+    problems = build_ebr_problem_instances(
+        ebr_input_candidates=candidates,
+        time_reversal_orbit_report=report,
+    )
+    export = build_ebr_export_bundle(ebr_problem_instances=problems)
+    unitary = next((
+        bundle for bundle in export["bundles"]
+        if bundle["problem_kind"] == "unitary_valley_reduced_ebr"
+    ), None)
+    return report, unitary
+
+
+def test_self_mapped_unitary_final_validation_rechecks_sewing_and_theta():
+    report, bundle = _self_mapped_nontrim_pipeline(
+        include_dependent=False,
+        include_sewing=True,
+    )
+    assert report["status"] == "validated"
+    assert bundle is not None
+    assert _unitary_bundle_completion_evidence_valid(bundle)
+
+    missing_sewing = deepcopy(bundle)
+    missing_sewing["time_reversal"].pop("antiunitary_sewing_evidence")
+    assert not _unitary_bundle_completion_evidence_valid(missing_sewing)
+
+    blocked_sewing = deepcopy(bundle)
+    blocked_sewing["time_reversal"]["antiunitary_sewing_evidence"][
+        "status"
+    ] = "blocked"
+    assert not _unitary_bundle_completion_evidence_valid(blocked_sewing)
+
+    wrong_sewing_orbit = deepcopy(bundle)
+    wrong_sewing_orbit["time_reversal"][
+        "antiunitary_sewing_evidence"
+    ]["time_reversal_kpoint_mapping"]["Q_sample"] = "Q_sample"
+    assert not _unitary_bundle_completion_evidence_valid(
+        wrong_sewing_orbit
+    )
+
+    wrong_theta = deepcopy(bundle)
+    wrong_theta["time_reversal"]["theta_square"] = -1
+    assert not _unitary_bundle_completion_evidence_valid(wrong_theta)
+
+    wrong_projector = deepcopy(bundle)
+    wrong_projector["time_reversal"][
+        "projector_workflow_by_sampled_kpoint"
+    ]["Q_sample"]["v"] = "symmetry_adapted"
+    assert not _unitary_bundle_completion_evidence_valid(wrong_projector)
+
+    wrong_evidence_k = deepcopy(bundle)
+    inferred = wrong_evidence_k[
+        "unitary_irrep_completion_records_by_hsp"
+    ]["QA"][0]
+    inferred["evidence_sampled_kpoint"] = "QA_sample"
+    inferred["source_candidate_identity"]["sampled_kpoint"] = "QA_sample"
+    assert not _unitary_bundle_completion_evidence_valid(wrong_evidence_k)
+
+
+def test_self_mapped_fully_observed_vector_does_not_require_sewing():
+    report, bundle = _self_mapped_nontrim_pipeline(
+        include_dependent=True,
+        include_sewing=False,
+    )
+
+    assert report["status"] == "blocked"
+    assert "antiunitary_corepresentation_sewing_not_validated" in report[
+        "blockers"
+    ]
+    assert bundle is not None
+    assert all(
+        record["completion_kind"] == "observed_at_sampled_kpoint"
+        for records in bundle[
+            "unitary_irrep_completion_records_by_hsp"
+        ].values()
+        for record in records
+    )
+    assert _unitary_bundle_completion_evidence_valid(bundle)
+
+
 def test_redundant_dependent_hsp_candidate_is_checked_but_not_independent_map():
     candidates = {"candidates": [
         {
@@ -1558,17 +1719,56 @@ def test_generated_tr_unitary_adversarial_mutations_block_promotion():
     source_record["source_candidate_identity"]["source"] = ""
     source_record["source_candidate_provenance"]["source"] = ""
 
+    invalid_candidate_workflow = deepcopy(left)
+    workflow_record = invalid_candidate_workflow[
+        "unitary_irrep_completion_records_by_hsp"
+    ]["QA"][0]
+    workflow_record["source_candidate_provenance"]["workflow_path"] = (
+        "time_reversal_valley_orbit"
+    )
+
+    forged_direct = deepcopy(left)
+    forged_direct["workflow_path"] = "direct_qcut"
+    forged_direct["valley_orbit"] = []
+    forged_direct["time_reversal"] = {}
+    forged_direct["unitary_irrep_completion_records_by_hsp"] = {}
+    forged_direct["unitary_vector_construction"] = {
+        "kind": "direct_observed_unitary_rows",
+        "source": "trusted_ebr_input_candidates",
+    }
+    forged_direct["source_hsp_to_sampled_kpoint"] = {
+        hsp: hsp for hsp in forged_direct["expected_hsps"]
+    }
+    forged_direct["irrep_records_by_kpoint"] = {
+        hsp: [{
+            "valley": "left",
+            "matched_irrep": labels[0],
+            "irrep_multiplicity": 1,
+            "workflow_path": "direct_qcut",
+            "readiness_level": "trusted",
+            "source": f"forged/{hsp}",
+            "irrep_source_provenance": {
+                "source_hsp_label": hsp,
+                "source_table_spinor": True,
+            },
+        }]
+        for hsp, labels in forged_direct["irreps_by_kpoint"].items()
+    }
+
     for mutated in (
         forged_partner,
         forged_evidence,
         missing_construction,
         empty_candidate_source,
+        invalid_candidate_workflow,
+        forged_direct,
     ):
         promotion = promote_bundle_for_solve(bundle=mutated, table=table)
         assert not promotion["promoted"]
-        assert "unitary_completion_provenance_invalid" in _blocker_codes(
-            promotion
-        )
+        assert _blocker_codes(promotion).intersection({
+            "unitary_completion_provenance_invalid",
+            "unitary_construction_provenance_invalid",
+        })
 
 
 @pytest.mark.parametrize(
@@ -1667,6 +1867,56 @@ def test_directly_observed_dependent_hsp_uses_observed_unitary_binding():
         for row in unitary.values()
     )
 
+    fully_observed_without_consistency = deepcopy(unitary["left"])
+    fully_observed_without_consistency[
+        "unitary_irrep_completion_records_by_hsp"
+    ]["QA"][0].pop("time_reversal_consistency")
+    assert _unitary_bundle_completion_evidence_valid(
+        fully_observed_without_consistency
+    )
+
+    independent_binding_mismatch = deepcopy(unitary["left"])
+    independent_binding_mismatch[
+        "independent_source_hsp_to_sampled_kpoint"
+    ]["Q"] = "QA_left"
+    independent_binding_mismatch[
+        "source_hsp_to_sampled_kpoint"
+    ]["Q"] = "QA_left"
+    assert not _unitary_bundle_completion_evidence_valid(
+        independent_binding_mismatch
+    )
+
+    noninjective_consumer = deepcopy(unitary["left"])
+    noninjective_consumer[
+        "observed_source_hsp_to_sampled_kpoint"
+    ]["QA"] = "Q_left"
+    dependent = noninjective_consumer[
+        "unitary_irrep_completion_records_by_hsp"
+    ]["QA"][0]
+    dependent["sampled_kpoint"] = "Q_left"
+    dependent["source_candidate_identity"]["sampled_kpoint"] = "Q_left"
+    assert not _unitary_bundle_completion_evidence_valid(
+        noninjective_consumer
+    )
+
+    noninjective_candidates = deepcopy(candidates)
+    for row in noninjective_candidates["candidates"]:
+        source_hsp = row["irrep_source_provenance"]["source_hsp_label"]
+        if source_hsp == "QA":
+            row["kpoint"] = (
+                "Q_left" if row["valley"] == "left" else "Q_right"
+            )
+    noninjective_report = _exchanged_orbit_report(
+        noninjective_candidates
+    )
+    assert noninjective_report["status"] == "blocked"
+    assert any(
+        blocker.startswith(
+            "observed_source_hsp_sampled_kpoint_mapping_noninjective"
+        )
+        for blocker in noninjective_report["blockers"]
+    )
+
 
 def test_redundant_observed_dependent_hsp_disagreement_blocks_all_dependents():
     candidates = _orbit_candidates()
@@ -1708,7 +1958,12 @@ def test_redundant_observed_dependent_hsp_disagreement_blocks_all_dependents():
 
 @pytest.mark.parametrize(
     "mutation",
-    ["missing_source", "missing_workflow_path", "missing_spin_provenance"],
+    [
+        "missing_source",
+        "missing_workflow_path",
+        "invalid_workflow_path",
+        "missing_spin_provenance",
+    ],
 )
 def test_candidate_provenance_is_required_for_source_and_dependent_rows(
     mutation,
@@ -1723,6 +1978,8 @@ def test_candidate_provenance_is_required_for_source_and_dependent_rows(
         source.pop("source")
     elif mutation == "missing_workflow_path":
         source.pop("workflow_path")
+    elif mutation == "invalid_workflow_path":
+        source["workflow_path"] = "time_reversal_valley_orbit"
     else:
         source["irrep_source_provenance"].pop("source_table_spinor")
 

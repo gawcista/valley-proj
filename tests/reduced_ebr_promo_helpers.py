@@ -109,6 +109,23 @@ def add_real_certificate_to_candidates(ebr_input_candidates: dict,
         if not isinstance(prov, dict):
             prov = {}
             c["irrep_source_provenance"] = prov
+        classification = c.get("projected_hsp_classification")
+        source_hsp = (
+            classification.get("source_hsp_label")
+            if isinstance(classification, dict) else None
+        )
+        if not isinstance(source_hsp, str) or not source_hsp:
+            source_hsp = c.get("kpoint")
+        if isinstance(source_hsp, str) and source_hsp:
+            if not isinstance(
+                prov.get("source_hsp_label"), str
+            ) or not prov.get("source_hsp_label"):
+                prov["source_hsp_label"] = source_hsp
+        c.setdefault(
+            "source",
+            "fixture/"
+            f"{c.get('valley', 'unknown')}/{source_hsp or 'unknown'}",
+        )
         kmap = prov.get("standard_setting_hsp_mapping")
         if not isinstance(kmap, dict):
             kmap = {}

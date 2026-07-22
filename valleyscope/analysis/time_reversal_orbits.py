@@ -753,6 +753,7 @@ def _source_candidate_identity(
 ) -> dict[str, object]:
     return {
         "source": str(raw.get("source", "")),
+        "workflow_path": str(raw.get("workflow_path", "")),
         "valley": str(raw.get("valley", "")),
         "source_hsp_label": source_hsp,
         "sampled_kpoint": raw.get("kpoint"),
@@ -795,7 +796,7 @@ def _candidate_provenance_blockers(
     source_provenance = raw.get("irrep_source_provenance")
     if not isinstance(source, str) or not source:
         missing.append("source")
-    if not isinstance(workflow_path, str) or not workflow_path:
+    if workflow_path not in ("direct_qcut", "symmetry_adapted"):
         missing.append("workflow_path")
     if raw.get("valley") != valley:
         missing.append("valley")
@@ -887,6 +888,17 @@ def _observed_source_hsp_to_sampled_kpoint(
                     "observed_source_hsp_sampled_kpoint_mapping_ambiguous:"
                     f"{valley}:{source_hsp}:"
                     + ":".join(sorted(sampled_values))
+                )
+    for valley, by_source_hsp in mappings.items():
+        by_sample: dict[str, list[str]] = {}
+        for source_hsp, sampled in by_source_hsp.items():
+            by_sample.setdefault(sampled, []).append(source_hsp)
+        for sampled, source_hsps in by_sample.items():
+            if len(source_hsps) > 1:
+                blockers.append(
+                    "observed_source_hsp_sampled_kpoint_mapping_noninjective:"
+                    f"{valley}:{sampled}:"
+                    + ":".join(sorted(source_hsps))
                 )
     return mappings, _deduplicate(blockers)
 

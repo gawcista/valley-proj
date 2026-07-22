@@ -1,4 +1,5 @@
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
@@ -17,6 +18,9 @@ from tests.reduced_ebr_promo_helpers import (
 from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
 from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
 from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
+from valleyscope.analysis.database_ingestion_record import (
+    build_database_ingestion_record,
+)
 from valleyscope.analysis.reduced_ebr_mapping import (
     build_reduced_ebr_mapping,
     load_reduced_ebr_table,
@@ -180,6 +184,10 @@ def test_generic_p4_table_authoritative_bundle_maps_and_rejects_mismatch():
                     "matched_irrep": "P4_spinor_phase_+1/4",
                     "irrep_multiplicity": 1,
                     "matching_strategy": "bilbao_restricted_character",
+                    "source": "fixture/K_valley/GammaM",
+                    "irrep_source_provenance": {
+                        "source_hsp_label": "GammaM",
+                    },
                     "ready_for_ebr_input": True,
                 },
                 {
@@ -196,6 +204,10 @@ def test_generic_p4_table_authoritative_bundle_maps_and_rejects_mismatch():
                     "matched_irrep": "P4_spinor_phase_-1/4",
                     "irrep_multiplicity": 1,
                     "matching_strategy": "bilbao_restricted_character",
+                    "source": "fixture/K_valley/XM",
+                    "irrep_source_provenance": {
+                        "source_hsp_label": "XM",
+                    },
                     "ready_for_ebr_input": True,
                 },
             ],
@@ -276,6 +288,71 @@ def test_generic_p4_table_authoritative_bundle_maps_and_rejects_mismatch():
     }
     assert solved["solutions"][0]["irrep_vector"] == [1, 1]
 
+    direct_record = bundle["irrep_records_by_kpoint"]["GammaM"][0]
+    assert direct_record["sampled_kpoint"] == "GammaM"
+    assert direct_record["source_hsp_label"] == "GammaM"
+    assert direct_record["certificate_identity"] == bundle[
+        "certificate_identity"
+    ]
+    assert bundle["spinor"] is True
+
+    direct_mutations = {
+        "irrep": lambda record: record.__setitem__(
+            "matched_irrep", "forged_irrep"
+        ),
+        "multiplicity": lambda record: record.__setitem__(
+            "irrep_multiplicity", 2
+        ),
+        "source_hsp": lambda record: record.__setitem__(
+            "source_hsp_label", "XM"
+        ),
+        "valley": lambda record: record.__setitem__(
+            "valley", "forged_valley"
+        ),
+        "sample": lambda record: record.__setitem__(
+            "sampled_kpoint", "XM"
+        ),
+        "spin": lambda record: record[
+            "irrep_source_provenance"
+        ].__setitem__("source_table_spinor", False),
+        "readiness": lambda record: record.__setitem__(
+            "readiness_level", "blocked"
+        ),
+        "workflow": lambda record: record.__setitem__(
+            "workflow_path", "time_reversal_valley_orbit"
+        ),
+        "workflow_identity_mismatch": lambda record: record.__setitem__(
+            "workflow_path", "symmetry_adapted"
+        ),
+        "source_identity_mismatch": lambda record: record.__setitem__(
+            "source", "forged/source"
+        ),
+    }
+    for mutation, mutate in direct_mutations.items():
+        forged = deepcopy(bundle)
+        mutate(forged["irrep_records_by_kpoint"]["GammaM"][0])
+        rejected_promotion = promote_bundle_for_solve(
+            bundle=forged,
+            table=matching_table,
+        )
+        assert not rejected_promotion["promoted"], mutation
+        assert "unitary_construction_provenance_invalid" in {
+            row["code"] for row in rejected_promotion["blocker_reasons"]
+        }
+
+        ingestion = build_database_ingestion_record(
+            valley_summary={},
+            valley_ebr_export_bundle={
+                "status": "ready_for_reduced_table_validation",
+                "bundles": [forged],
+                "excluded_instances": [],
+            },
+        )
+        assert any(
+            "invalid direct unitary construction provenance" in error
+            for error in ingestion["validation_errors"]
+        ), mutation
+
     mismatched_table = {
         "schema_version": "1.0.0",
         "subspace_group_candidate": "P4",
@@ -348,14 +425,61 @@ def test_ready_export_bundle_maps_to_public_reduced_ebr_outputs_only(tmp_path):
         ],
     }
     e2e_write_table(table_path, table)
+    certificate_identity = real_primitive_certificate_identity(
+        143, "P3", spinor=True
+    )
+
+    def direct_record(sampled_kpoint, source_hsp, matched_irrep):
+        identity = {
+            "source": f"fixture/K_valley/{source_hsp}",
+            "workflow_path": "direct_qcut",
+            "valley": "K_valley",
+            "source_hsp_label": source_hsp,
+            "sampled_kpoint": sampled_kpoint,
+            "irrep": matched_irrep,
+            "multiplicity": 1,
+        }
+        provenance = {
+            "source": identity["source"],
+            "workflow_path": "direct_qcut",
+            "irrep_source_provenance": {
+                "source_hsp_label": source_hsp,
+                "source_table_spinor": True,
+            },
+        }
+        return {
+            "valley": "K_valley",
+            "sampled_kpoint": sampled_kpoint,
+            "source_hsp_label": source_hsp,
+            "matched_irrep": matched_irrep,
+            "irrep_multiplicity": 1,
+            "workflow_path": "direct_qcut",
+            "readiness_level": "trusted",
+            "source": identity["source"],
+            "certificate_identity": certificate_identity,
+            "irrep_source_provenance": provenance[
+                "irrep_source_provenance"
+            ],
+            "source_candidate_identity": identity,
+            "source_candidate_provenance": provenance,
+        }
+
     export_bundle = build_ebr_export_bundle(
         ebr_problem_instances={
             "instances": [{
                 "instance_id": "ebr_instance_001",
+                "problem_kind": "unitary_valley_reduced_ebr",
+                "physical_object_kind": "unitary_valley_projected_subspace",
                 "valley": "K_valley",
+                "valley_orbit": [],
                 "subspace_group_candidate": "P3",
                 "subspace_sg_number": 143,
+                "spinor": True,
                 "workflow_path": "direct_qcut",
+                "unitary_vector_construction": {
+                    "kind": "direct_observed_unitary_rows",
+                    "source": "trusted_ebr_input_candidates",
+                },
                 "readiness_level": "trusted",
                 "irreps_by_kpoint": {
                     "GammaM": ["C3_spinor_phase_+1/2"],
@@ -368,12 +492,18 @@ def test_ready_export_bundle_maps_to_public_reduced_ebr_outputs_only(tmp_path):
                 "canonical_hsp_vector_complete": True,
                 "canonical_hsp_vector_ready": True,
                 "status": "canonical_hsp_vector_ready",
-                "certificate_identity": real_primitive_certificate_identity(143, "P3", spinor=True),
+                "certificate_identity": certificate_identity,
                 "irrep_records_by_kpoint": {
-                    "GammaM": [{"matched_irrep": "C3_spinor_phase_+1/2",
-                                "irrep_source_provenance": {"source_table_spinor": True}}],
-                    "KM": [{"matched_irrep": "C3_spinor_phase_+1/6",
-                            "irrep_source_provenance": {"source_table_spinor": True}}],
+                    "GammaM": [direct_record(
+                        "GammaM", "GM", "C3_spinor_phase_+1/2"
+                    )],
+                    "KM": [direct_record(
+                        "KM", "K", "C3_spinor_phase_+1/6"
+                    )],
+                },
+                "required_source_hsp_labels": ["GM", "K"],
+                "source_hsp_to_sampled_kpoint": {
+                    "GM": "GammaM", "K": "KM",
                 },
             }],
         }

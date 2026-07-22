@@ -88,6 +88,44 @@ def build_ebr_problem_instances(
         # --- Certificate identity from merged candidates ---
         cert_identity = _certificate_identity(cands)
 
+        direct_provenance_blockers: list[str] = []
+        spin_values = set()
+        for candidate in cands:
+            candidate_source = candidate.get("source")
+            candidate_workflow = candidate.get("workflow_path")
+            source_provenance = candidate.get("irrep_source_provenance")
+            if not isinstance(candidate_source, str) or not candidate_source:
+                direct_provenance_blockers.append(
+                    "direct_candidate_source_provenance_missing"
+                )
+            if candidate_workflow not in (
+                "direct_qcut", "symmetry_adapted",
+            ):
+                direct_provenance_blockers.append(
+                    "direct_candidate_projector_workflow_invalid"
+                )
+            if not isinstance(source_provenance, dict):
+                direct_provenance_blockers.append(
+                    "direct_candidate_irrep_source_provenance_missing"
+                )
+                continue
+            source_hsp = source_provenance.get("source_hsp_label")
+            source_spinor = source_provenance.get("source_table_spinor")
+            if not isinstance(source_hsp, str) or not source_hsp:
+                direct_provenance_blockers.append(
+                    "direct_candidate_source_hsp_provenance_missing"
+                )
+            if not isinstance(source_spinor, bool):
+                direct_provenance_blockers.append(
+                    "direct_candidate_spin_provenance_missing"
+                )
+            else:
+                spin_values.add(source_spinor)
+        if len(spin_values) != 1:
+            direct_provenance_blockers.append(
+                "direct_candidate_spin_provenance_mismatch"
+            )
+
         # --- Aggregate provenance ---
         workflow_paths = sorted({
             str(c.get("workflow_path", ""))
@@ -116,6 +154,15 @@ def build_ebr_problem_instances(
                 operations_by_kpoint.setdefault(kp, []).append(op_id)
             record: dict[str, object] = {
                 "valley": valley,
+                "sampled_kpoint": kp,
+                "source_hsp_label": (
+                    c.get("irrep_source_provenance", {}).get(
+                        "source_hsp_label", ""
+                    )
+                    if isinstance(
+                        c.get("irrep_source_provenance"), dict
+                    ) else ""
+                ),
                 "operation_id": c.get("operation_id"),
                 "operation_order": c.get("operation_order"),
                 "matched_irrep": c.get("matched_irrep"),
@@ -127,6 +174,34 @@ def build_ebr_problem_instances(
                 "workflow_path": str(c.get("workflow_path", "")),
                 "readiness_level": str(c.get("readiness_level", "")),
                 "source": c.get("source", ""),
+                "certificate_identity": dict(cert_identity),
+                "source_candidate_identity": {
+                    "source": c.get("source", ""),
+                    "workflow_path": str(c.get("workflow_path", "")),
+                    "valley": valley,
+                    "source_hsp_label": (
+                        c.get("irrep_source_provenance", {}).get(
+                            "source_hsp_label", ""
+                        )
+                        if isinstance(
+                            c.get("irrep_source_provenance"), dict
+                        ) else ""
+                    ),
+                    "sampled_kpoint": kp,
+                    "irrep": c.get("matched_irrep"),
+                    "multiplicity": _positive_multiplicity(
+                        c.get("irrep_multiplicity")
+                    ),
+                },
+                "source_candidate_provenance": {
+                    "source": c.get("source", ""),
+                    "workflow_path": str(c.get("workflow_path", "")),
+                    "irrep_source_provenance": dict(
+                        c.get("irrep_source_provenance", {})
+                    ) if isinstance(
+                        c.get("irrep_source_provenance"), dict
+                    ) else {},
+                },
             }
             for key in (
                 "matching_strategy",
@@ -186,7 +261,22 @@ def build_ebr_problem_instances(
                 isinstance(label, str) and label
                 for label in mapped_expected
             )
+            and len(set(mapped_expected)) == len(mapped_expected)
         )
+        if source_mapping_complete:
+            source_by_sample = {
+                sampled: source_hsp
+                for source_hsp, sampled in source_to_sampled.items()
+            }
+            if any(
+                record.get("source_hsp_label")
+                != source_by_sample.get(sampled)
+                for sampled, records in irrep_records_by_kpoint.items()
+                for record in records
+            ):
+                direct_provenance_blockers.append(
+                    "direct_candidate_source_hsp_binding_mismatch"
+                )
         if coverage_present and coverage_complete and source_mapping_complete:
             expected_hsps = [str(label) for label in mapped_expected]
 
@@ -201,12 +291,15 @@ def build_ebr_problem_instances(
         canonical_hsp_vector_ready = (
             canonical_hsp_vector_complete and coverage_ready
             and not trusted_missing_source_hsps
+            and not direct_provenance_blockers
         )
         status = _canonical_vector_status(
             complete=canonical_hsp_vector_complete,
             ready=canonical_hsp_vector_ready,
         )
-        blocked_by: list[str] = []
+        blocked_by: list[str] = list(dict.fromkeys(
+            direct_provenance_blockers
+        ))
         if not coverage_present:
             blocked_by.append("projected_hsp_coverage_missing")
         elif not coverage_complete:
@@ -239,6 +332,7 @@ def build_ebr_problem_instances(
             "subspace_group_candidate": canonical_sg,
             "subspace_sg_number": canonical_sg_number,
             "subspace_space_group": subspace_space_group,
+            "spinor": next(iter(spin_values), None),
             "certificate_identity": cert_identity,
             "workflow_path": workflow_path,
             "workflow_paths": workflow_paths,
@@ -775,6 +869,15 @@ def _build_tr_unitary_component_instances(
                 ),
                 "time_reversal_irrep_pairing": raw_orbit.get(
                     "time_reversal_irrep_pairing", {}
+                ),
+                "projector_workflow_by_sampled_kpoint": raw_orbit.get(
+                    "projector_workflow_by_sampled_kpoint", {}
+                ),
+                "projector_provenance_by_sampled_kpoint": raw_orbit.get(
+                    "projector_provenance_by_sampled_kpoint", {}
+                ),
+                "source_hsp_binding_by_sampled_kpoint": raw_orbit.get(
+                    "source_hsp_binding_by_sampled_kpoint", {}
                 ),
                 "antiunitary_sewing_evidence": (
                     time_reversal_orbit_report.get(

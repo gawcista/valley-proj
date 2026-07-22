@@ -492,6 +492,9 @@ def test_sg79_centered_resolver_to_exact_solve_uses_default_irreptables_table():
         "matched_irrep": irrep,
         "irrep_multiplicity": multiplicity,
         "operation_id": operation_id,
+        "workflow_path": "direct_qcut",
+        "readiness_level": "trusted",
+        "source": f"fixture/K_valley/{kpoint}/{irrep}",
         "subspace_group_candidate": "I4",
         "subspace_space_group": dict(subspace_group),
         "irrep_source_provenance": _provenance(),
@@ -606,10 +609,11 @@ def test_injected_primitive_certificate_with_synthetic_table_solves_plumbing():
     cert = real_primitive_certificate_dict(143, "P3")
     assert cert is not None
 
-    def _prov():
+    def _prov(source_hsp):
         return {"standard_setting_hsp_mapping": {
                     "standard_setting_certificate": dict(cert)},
-                "source_table_spinor": False}
+                "source_table_spinor": False,
+                "source_hsp_label": source_hsp}
 
     ssg = {"candidate_space_group_number": 143,
            "candidate_space_group_symbol": "P3", "status": "resolved"}
@@ -617,9 +621,11 @@ def test_injected_primitive_certificate_with_synthetic_table_solves_plumbing():
     candidates = [{
         "ready_for_ebr_input": True, "valley": "K_valley",
         "kpoint": kp, "matched_irrep": irr, "irrep_multiplicity": mult,
+        "workflow_path": "direct_qcut", "readiness_level": "trusted",
+        "source": f"fixture/K_valley/{kp}/{irr}",
         "operation_id": i, "subspace_group_candidate": "P3",
         "subspace_space_group": dict(ssg),
-        "irrep_source_provenance": _prov(),
+        "irrep_source_provenance": _prov("GM" if kp == "GammaM" else "K"),
     } for i, (kp, irr, mult) in enumerate(rows)]
 
     instances = build_ebr_problem_instances(
@@ -1002,10 +1008,11 @@ def test_injected_certificate_to_solve_is_plumbing_not_production():
     cert = real_primitive_certificate_dict(143, "P3")
     assert cert is not None
 
-    def _prov():
+    def _prov(source_hsp):
         return {"standard_setting_hsp_mapping": {
                     "standard_setting_certificate": dict(cert)},
-                "source_table_spinor": False}
+                "source_table_spinor": False,
+                "source_hsp_label": source_hsp}
 
     ssg = {"candidate_space_group_number": 143,
            "candidate_space_group_symbol": "P3", "status": "resolved"}
@@ -1013,9 +1020,11 @@ def test_injected_certificate_to_solve_is_plumbing_not_production():
     candidates = [{
         "ready_for_ebr_input": True, "valley": "K_valley",
         "kpoint": kp, "matched_irrep": irr, "irrep_multiplicity": mult,
+        "workflow_path": "direct_qcut", "readiness_level": "trusted",
+        "source": f"fixture/K_valley/{kp}/{irr}",
         "operation_id": i, "subspace_group_candidate": "P3",
         "subspace_space_group": dict(ssg),
-        "irrep_source_provenance": _prov(),
+        "irrep_source_provenance": _prov("GM" if kp == "GammaM" else "K"),
     } for i, (kp, irr, mult) in enumerate(rows)]
 
     instances = build_ebr_problem_instances(

@@ -14,10 +14,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from valleyscope.analysis.reduced_ebr_mapping import (
-    _direct_unitary_bundle_construction_evidence_valid,
-    _is_tr_completed_unitary_bundle,
-    _unitary_bundle_completion_evidence_valid,
+from valleyscope.analysis.unitary_provenance import (
+    unitary_bundle_claims_time_reversal_completion,
+    validate_unitary_bundle_provenance,
 )
 
 _SCHEMA_VERSION = "1.8.0"
@@ -95,7 +94,7 @@ def build_database_ingestion_record(
         if isinstance(bundles, list):
             has_tr_completed_unitary = any(
                 isinstance(bundle, dict)
-                and _is_tr_completed_unitary_bundle(bundle)
+                and unitary_bundle_claims_time_reversal_completion(bundle)
                 for bundle in bundles
             )
             for bundle in bundles:
@@ -356,8 +355,8 @@ def _extract_irrep_records(
     """Flatten trusted irrep_records_by_kpoint into a list of per-record dicts."""
     source_bundle_id = bundle.get("bundle_id", "")
     source_instance_id = bundle.get("source_instance_id", "")
-    if _is_tr_completed_unitary_bundle(bundle):
-        if not _unitary_bundle_completion_evidence_valid(bundle):
+    if unitary_bundle_claims_time_reversal_completion(bundle):
+        if not validate_unitary_bundle_provenance(bundle):
             return (
                 f"bundle {source_bundle_id or '<unknown>'}: invalid "
                 "TR-completed unitary provenance"
@@ -374,7 +373,7 @@ def _extract_irrep_records(
         bundle.get("problem_kind") == "unitary_valley_reduced_ebr"
         and bundle.get("physical_object_kind")
         == "unitary_valley_projected_subspace"
-        and not _direct_unitary_bundle_construction_evidence_valid(bundle)
+        and not validate_unitary_bundle_provenance(bundle)
     ):
         return (
             f"bundle {source_bundle_id or '<unknown>'}: invalid direct "

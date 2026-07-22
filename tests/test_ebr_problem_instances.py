@@ -6,7 +6,7 @@ from tests.reduced_ebr_promo_helpers import real_primitive_certificate_dict
 
 def _make_c3_preserving_candidates():
     """Generic C3 valley-preserving candidate fixture with subspace_space_group."""
-    return {
+    payload = {
         "status": "has_candidates",
         "candidates": [
             {
@@ -59,6 +59,17 @@ def _make_c3_preserving_candidates():
             },
         ],
     }
+    source_hsp_by_sample = {"GammaM": "GM", "KM": "K"}
+    for candidate in payload["candidates"]:
+        source_hsp = source_hsp_by_sample[candidate["kpoint"]]
+        candidate["source"] = (
+            f"fixture/{candidate['valley']}/{source_hsp}"
+        )
+        candidate["irrep_source_provenance"] = {
+            "source_hsp_label": source_hsp,
+            "source_table_spinor": True,
+        }
+    return payload
 
 
 def _complete_coverage(*, valley="K_valley", mapping=None):
@@ -256,6 +267,11 @@ def test_p2_valley_preserving_canonical_vector():
                 },
                 "operation_id": 4, "operation_order": 2,
                 "matched_irrep": "C2_spinor_phase_+1/4",
+                "source": "fixture/M1_valley/GM",
+                "irrep_source_provenance": {
+                    "source_hsp_label": "GM",
+                    "source_table_spinor": True,
+                },
                 "ready_for_ebr_input": True,
             },
         ],
@@ -448,6 +464,11 @@ def test_generic_multiplicity_records_expand_irrep_counts():
                 "matching_strategy": "bilbao_restricted_character",
                 "valley_preserving_operation_ids": [0, 4],
                 "source_operation_map": {0: 1, 4: 2},
+                "source": "fixture/K_valley/GM",
+                "irrep_source_provenance": {
+                    "source_hsp_label": "GM",
+                    "source_table_spinor": True,
+                },
                 "ready_for_ebr_input": True,
             },
             {
@@ -466,6 +487,11 @@ def test_generic_multiplicity_records_expand_irrep_counts():
                 "matching_strategy": "bilbao_restricted_character",
                 "valley_preserving_operation_ids": [0, 4],
                 "source_operation_map": {0: 1, 4: 2},
+                "source": "fixture/K_valley/K",
+                "irrep_source_provenance": {
+                    "source_hsp_label": "K",
+                    "source_table_spinor": True,
+                },
                 "ready_for_ebr_input": True,
             },
         ],
@@ -505,6 +531,11 @@ def test_identity_only_hsp_preserved_not_dropped():
                 },
                 "operation_id": 0, "operation_order": 1,
                 "matched_irrep": "GM1",
+                "source": "fixture/K_valley/M",
+                "irrep_source_provenance": {
+                    "source_hsp_label": "M",
+                    "source_table_spinor": True,
+                },
                 "ready_for_ebr_input": True,
             },
         ],
