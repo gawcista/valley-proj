@@ -96,6 +96,15 @@ def test_candidates_group_into_canonical_hsp_vector():
     assert inst["subspace_group_candidate"] == "P3"
     assert inst["subspace_space_group"]["candidate_space_group_symbol"] == "P3"
     assert inst["valley"] == "K_valley"
+    assert inst["problem_kind"] == "unitary_valley_reduced_ebr"
+    assert inst["physical_object_kind"] == (
+        "unitary_valley_projected_subspace"
+    )
+    assert inst["valley_orbit"] == []
+    assert inst["unitary_vector_construction"] == {
+        "kind": "direct_observed_unitary_rows",
+        "source": "trusted_ebr_input_candidates",
+    }
     # Structurally complete and trusted for reduced-table validation only.
     assert inst["status"] == "canonical_hsp_vector_ready"
     assert inst["canonical_hsp_vector_complete"] is True

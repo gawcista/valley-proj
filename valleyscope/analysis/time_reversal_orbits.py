@@ -312,6 +312,16 @@ def build_time_reversal_valley_orbit_report(
         observed_completion_records = _candidate_unitary_completion_records(
             candidates, members
         )
+        candidate_provenance_blockers = [
+            str(blocker)
+            for by_hsp in observed_completion_records.values()
+            for records in by_hsp.values()
+            for record in records
+            for blocker in record.get("blockers", [])
+            if isinstance(blocker, str)
+            and blocker.startswith("source_candidate_provenance_incomplete:")
+        ]
+        structural_blockers.extend(candidate_provenance_blockers)
         (
             source_to_sampled,
             source_to_sampled_by_valley,
@@ -325,11 +335,20 @@ def build_time_reversal_valley_orbit_report(
             )
         )
         structural_blockers.extend(source_mapping_blockers)
+        (
+            observed_source_to_sampled_by_valley,
+            observed_source_mapping_blockers,
+        ) = _observed_source_hsp_to_sampled_kpoint(
+            observed_completion_records,
+            members,
+        )
+        structural_blockers.extend(observed_source_mapping_blockers)
         _apply_source_mapping_readiness(
             records_by_valley=observed_completion_records,
-            independent_hsps=independent_hsps,
-            source_to_sampled_by_valley=source_to_sampled_by_valley,
-            blockers=source_mapping_blockers,
+            source_to_sampled_by_valley=(
+                observed_source_to_sampled_by_valley
+            ),
+            blockers=observed_source_mapping_blockers,
         )
         projector_workflows: dict[str, dict[str, str]] = {}
         projector_provenance: dict[
@@ -462,6 +481,15 @@ def build_time_reversal_valley_orbit_report(
                         blocker,
                     )
                     continue
+                if actual_counts is not None:
+                    _attach_time_reversal_consistency(
+                        observed_records=(
+                            completion_records.get(member, {}).get(hsp, [])
+                        ),
+                        inferred_records=inferred_records.get(
+                            member, {}
+                        ).get(hsp, []),
+                    )
                 if actual_counts is None:
                     completed[member][hsp] = dict(inferred_counts)
                     completion_records[member][hsp] = [
@@ -553,6 +581,13 @@ def build_time_reversal_valley_orbit_report(
             "source_hsp_to_sampled_kpoint": source_to_sampled,
             "source_hsp_to_sampled_kpoint_by_valley": (
                 source_to_sampled_by_valley
+            ),
+            "independent_source_hsp_to_sampled_kpoint": source_to_sampled,
+            "independent_source_hsp_to_sampled_kpoint_by_valley": (
+                source_to_sampled_by_valley
+            ),
+            "observed_source_hsp_to_sampled_kpoint_by_valley": (
+                observed_source_to_sampled_by_valley
             ),
             "projector_workflow_by_sampled_kpoint": projector_workflows,
             "projector_provenance_by_sampled_kpoint": projector_provenance,
@@ -661,6 +696,14 @@ def _candidate_unitary_completion_records(
                 f"source_hsp_sampled_kpoint_missing:{valley}:{source_hsp}"
             )
             sampled = None
+        record_blockers.extend(_candidate_provenance_blockers(
+            raw,
+            valley=str(valley),
+            source_hsp=source_hsp,
+            sampled=sampled,
+            irrep=irrep,
+            multiplicity=multiplicity,
+        ))
         record: dict[str, object] = {
             "completion_kind": "observed_at_sampled_kpoint",
             "target_valley": str(valley),
@@ -736,24 +779,58 @@ def _source_candidate_provenance(
     return provenance
 
 
+def _candidate_provenance_blockers(
+    raw: Mapping[str, object],
+    *,
+    valley: str,
+    source_hsp: str,
+    sampled: object,
+    irrep: str,
+    multiplicity: int,
+) -> list[str]:
+    """Require the identity and table evidence used by TR completion."""
+    missing: list[str] = []
+    source = raw.get("source")
+    workflow_path = raw.get("workflow_path")
+    source_provenance = raw.get("irrep_source_provenance")
+    if not isinstance(source, str) or not source:
+        missing.append("source")
+    if not isinstance(workflow_path, str) or not workflow_path:
+        missing.append("workflow_path")
+    if raw.get("valley") != valley:
+        missing.append("valley")
+    if not isinstance(sampled, str) or not sampled:
+        missing.append("sampled_kpoint")
+    if raw.get("matched_irrep") != irrep:
+        missing.append("irrep")
+    if raw.get("irrep_multiplicity", 1) != multiplicity:
+        missing.append("multiplicity")
+    if not isinstance(source_provenance, Mapping):
+        missing.append("irrep_source_provenance")
+    else:
+        if source_provenance.get("source_hsp_label") != source_hsp:
+            missing.append("source_hsp_label")
+        if not isinstance(source_provenance.get("source_table_spinor"), bool):
+            missing.append("source_table_spinor")
+    return [
+        "source_candidate_provenance_incomplete:"
+        f"{valley}:{source_hsp}:{field}"
+        for field in missing
+    ]
+
+
 def _apply_source_mapping_readiness(
     *,
     records_by_valley: dict[
         str, dict[str, list[dict[str, object]]]
     ],
-    independent_hsps: Sequence[object],
     source_to_sampled_by_valley: Mapping[str, Mapping[str, str]],
     blockers: Sequence[str],
 ) -> None:
     """Mark observed records whose sampled binding is missing or ambiguous."""
-    independent = {
-        value for value in independent_hsps
-        if isinstance(value, str) and value
-    }
     for valley, by_hsp in records_by_valley.items():
         mapping = source_to_sampled_by_valley.get(valley, {})
-        for source_hsp in independent:
-            records = by_hsp.get(source_hsp, [])
+        for source_hsp, records in by_hsp.items():
             if not records:
                 continue
             relevant = [
@@ -775,6 +852,80 @@ def _apply_source_mapping_readiness(
                     )
             for blocker in _deduplicate(relevant):
                 _block_completion_records(records, blocker)
+
+
+def _observed_source_hsp_to_sampled_kpoint(
+    records_by_valley: Mapping[
+        str, Mapping[str, Sequence[Mapping[str, object]]]
+    ],
+    members: Sequence[str],
+) -> tuple[dict[str, dict[str, str]], list[str]]:
+    """Resolve every directly observed source-HSP/sample binding."""
+    mappings: dict[str, dict[str, str]] = {
+        str(member): {} for member in members
+    }
+    blockers: list[str] = []
+    for valley, by_hsp in records_by_valley.items():
+        for source_hsp, records in by_hsp.items():
+            sampled_values = {
+                str(record.get("sampled_kpoint"))
+                for record in records
+                if isinstance(record.get("sampled_kpoint"), str)
+                and record.get("sampled_kpoint")
+            }
+            if len(sampled_values) == 1:
+                mappings[str(valley)][str(source_hsp)] = next(
+                    iter(sampled_values)
+                )
+            elif not sampled_values:
+                blockers.append(
+                    "observed_source_hsp_sampled_kpoint_mapping_incomplete:"
+                    f"{valley}:{source_hsp}"
+                )
+            else:
+                blockers.append(
+                    "observed_source_hsp_sampled_kpoint_mapping_ambiguous:"
+                    f"{valley}:{source_hsp}:"
+                    + ":".join(sorted(sampled_values))
+                )
+    return mappings, _deduplicate(blockers)
+
+
+def _attach_time_reversal_consistency(
+    *,
+    observed_records: Sequence[dict[str, object]],
+    inferred_records: Sequence[dict[str, object]],
+) -> None:
+    """Preserve the reviewed inference that a redundant observation matched."""
+    remaining = list(inferred_records)
+    for observed in observed_records:
+        match_index = next((
+            index for index, inferred in enumerate(remaining)
+            if inferred.get("irrep") == observed.get("irrep")
+            and inferred.get("multiplicity") == observed.get("multiplicity")
+        ), None)
+        if match_index is None:
+            continue
+        inferred = remaining.pop(match_index)
+        observed["time_reversal_consistency"] = {
+            "evidence_valley": inferred.get("evidence_valley"),
+            "evidence_source_hsp_label": inferred.get(
+                "evidence_source_hsp_label"
+            ),
+            "evidence_sampled_kpoint": inferred.get(
+                "evidence_sampled_kpoint"
+            ),
+            "reviewed_time_reversal_relation": dict(
+                inferred.get("reviewed_time_reversal_relation", {})
+            ),
+            "source_candidate_identity": dict(
+                inferred.get("source_candidate_identity", {})
+            ),
+            "source_candidate_provenance": dict(
+                inferred.get("source_candidate_provenance", {})
+            ),
+            "status": "validated",
+        }
 
 
 def _inferred_completion_record(

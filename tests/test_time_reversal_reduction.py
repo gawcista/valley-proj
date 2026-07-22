@@ -41,7 +41,10 @@ from valleyscope.irreps.time_reversal_ebr import (
 from valleyscope.irreps.time_reversal_source import (
     derive_time_reversal_source_irrep_orbits,
 )
-from tests.reduced_ebr_promo_helpers import attach_real_certificate
+from tests.reduced_ebr_promo_helpers import (
+    attach_real_certificate,
+    real_primitive_certificate_identity,
+)
 
 
 def _operation(index: int, rotation: list[list[int]]) -> StandardTableOperation:
@@ -823,7 +826,10 @@ def _self_mapped_candidates(*, multiplicity: int):
         "valley": "v",
         "matched_irrep": "g",
         "irrep_multiplicity": multiplicity,
-        "irrep_source_provenance": {"source_hsp_label": "G"},
+        "irrep_source_provenance": {
+            "source_hsp_label": "G",
+            "source_table_spinor": False,
+        },
         "projected_hsp_classification": {
             "source_hsp_label": "G",
             "classification": "representative",
@@ -835,6 +841,7 @@ def _self_mapped_candidates(*, multiplicity: int):
         },
         "kpoint": "G",
         "workflow_path": "direct_qcut",
+        "source": "fixture/v/G",
         "ready_for_ebr_input": True,
     }]}
 
@@ -1024,7 +1031,10 @@ def test_redundant_dependent_hsp_candidate_is_checked_but_not_independent_map():
             "valley": "v",
             "matched_irrep": "q",
             "irrep_multiplicity": 1,
-            "irrep_source_provenance": {"source_hsp_label": "Q"},
+            "irrep_source_provenance": {
+                "source_hsp_label": "Q",
+                "source_table_spinor": False,
+            },
             "projected_hsp_classification": {
                 "source_hsp_label": "Q",
                 "classification": "representative",
@@ -1036,13 +1046,17 @@ def test_redundant_dependent_hsp_candidate_is_checked_but_not_independent_map():
             },
             "kpoint": "Q_sample",
             "workflow_path": "direct_qcut",
+            "source": "fixture/v/Q",
             "ready_for_ebr_input": True,
         },
         {
             "valley": "v",
             "matched_irrep": "qa",
             "irrep_multiplicity": 1,
-            "irrep_source_provenance": {"source_hsp_label": "QA"},
+            "irrep_source_provenance": {
+                "source_hsp_label": "QA",
+                "source_table_spinor": False,
+            },
             "projected_hsp_classification": {
                 "source_hsp_label": "QA",
                 "classification": "representative",
@@ -1054,6 +1068,7 @@ def test_redundant_dependent_hsp_candidate_is_checked_but_not_independent_map():
             },
             "kpoint": "QA_sample",
             "workflow_path": "direct_qcut",
+            "source": "fixture/v/QA",
             "ready_for_ebr_input": True,
         },
     ]}
@@ -1335,7 +1350,18 @@ def test_tr_enabled_problem_builder_emits_unitary_components_and_joint_grey():
     assert unitary["left"]["source_hsp_to_sampled_kpoint"] == {
         "G": "G_left", "Q": "Q_left", "M": "M_left",
     }
+    assert unitary["left"][
+        "independent_source_hsp_to_sampled_kpoint"
+    ] == {"G": "G_left", "Q": "Q_left", "M": "M_left"}
+    assert unitary["left"][
+        "observed_source_hsp_to_sampled_kpoint"
+    ] == {"G": "G_left", "Q": "Q_left", "M": "M_left"}
     assert "QA" not in unitary["left"]["source_hsp_to_sampled_kpoint"]
+    assert unitary["left"]["unitary_vector_construction"] == {
+        "kind": "time_reversal_completed_unitary_rows",
+        "source": "validated_time_reversal_valley_orbit",
+        "orbit_id": "time_reversal_valley_orbit_001",
+    }
     assert unitary["left"]["canonical_hsp_vector_ready"] is True
     assert unitary["left"][
         "unitary_irrep_completion_records_by_hsp"
@@ -1428,6 +1454,292 @@ def test_tr_unitary_promotion_revalidates_row_level_completion_provenance():
     ]["QA"][0]["source_candidate_identity"]["valley"] = "left"
     assert not _unitary_bundle_completion_evidence_valid(
         mismatched_candidate
+    )
+
+    forged_partner = deepcopy(left)
+    forged = forged_partner[
+        "unitary_irrep_completion_records_by_hsp"
+    ]["QA"][0]
+    forged["irrep"] = "qa1"
+    forged["reviewed_time_reversal_relation"]["target_irrep"] = "qa1"
+    forged_partner["irreps_by_kpoint"]["QA"] = ["qa1"]
+    assert not _unitary_bundle_completion_evidence_valid(forged_partner)
+
+    forged_evidence = deepcopy(left)
+    forged = forged_evidence[
+        "unitary_irrep_completion_records_by_hsp"
+    ]["QA"][0]
+    forged["evidence_valley"] = "left"
+    forged["reviewed_time_reversal_relation"]["evidence_valley"] = "left"
+    forged["source_candidate_identity"]["valley"] = "left"
+    assert not _unitary_bundle_completion_evidence_valid(forged_evidence)
+
+    missing_construction = deepcopy(left)
+    missing_construction.pop("unitary_vector_construction")
+    assert not _unitary_bundle_completion_evidence_valid(
+        missing_construction
+    )
+
+    empty_source = deepcopy(left)
+    record = empty_source[
+        "unitary_irrep_completion_records_by_hsp"
+    ]["QA"][0]
+    record["source_candidate_identity"]["source"] = ""
+    record["source_candidate_provenance"]["source"] = ""
+    assert not _unitary_bundle_completion_evidence_valid(empty_source)
+
+    contradictory_spin = deepcopy(left)
+    contradictory_spin[
+        "unitary_irrep_completion_records_by_hsp"
+    ]["QA"][0]["source_candidate_provenance"][
+        "irrep_source_provenance"
+    ]["source_table_spinor"] = False
+    assert not _unitary_bundle_completion_evidence_valid(
+        contradictory_spin
+    )
+
+
+def test_generated_tr_unitary_adversarial_mutations_block_promotion():
+    export = build_ebr_export_bundle(
+        ebr_problem_instances=build_ebr_problem_instances(
+            ebr_input_candidates=_orbit_candidates(),
+            time_reversal_orbit_report=_exchanged_orbit_report(),
+        )
+    )
+    left = next(
+        bundle for bundle in export["bundles"]
+        if bundle["problem_kind"] == "unitary_valley_reduced_ebr"
+        and bundle["valley"] == "left"
+    )
+    left["certificate_identity"] = real_primitive_certificate_identity(
+        75, "P4", spinor=True
+    )
+    left["subspace_sg_number"] = 75
+    table = {
+        "schema_version": "1.0.0",
+        "subspace_group_candidate": "P4",
+        "expected_hsps": ["G", "Q", "QA", "M"],
+        "irreps": ["G:g", "Q:q1", "QA:qa2", "M:m"],
+        "ebrs": [{"label": "E", "vector": [1, 1, 1, 1]}],
+        "provenance": {
+            "data_source": "irreptables",
+            "package": "irreptables",
+            "package_version": "0.0.test",
+            "space_group_number": 75,
+            "spinful": True,
+            "valleyscope_reduction": "sampled_hsp_valley_preserving",
+        },
+    }
+    assert promote_bundle_for_solve(bundle=left, table=table)["promoted"]
+
+    forged_partner = deepcopy(left)
+    forged = forged_partner[
+        "unitary_irrep_completion_records_by_hsp"
+    ]["QA"][0]
+    forged["irrep"] = "qa1"
+    forged["reviewed_time_reversal_relation"]["target_irrep"] = "qa1"
+    forged_partner["irreps_by_kpoint"]["QA"] = ["qa1"]
+
+    forged_evidence = deepcopy(left)
+    forged = forged_evidence[
+        "unitary_irrep_completion_records_by_hsp"
+    ]["QA"][0]
+    forged["evidence_valley"] = "left"
+    forged["reviewed_time_reversal_relation"]["evidence_valley"] = "left"
+    forged["source_candidate_identity"]["valley"] = "left"
+
+    missing_construction = deepcopy(left)
+    missing_construction.pop("unitary_vector_construction")
+
+    empty_candidate_source = deepcopy(left)
+    source_record = empty_candidate_source[
+        "unitary_irrep_completion_records_by_hsp"
+    ]["QA"][0]
+    source_record["source_candidate_identity"]["source"] = ""
+    source_record["source_candidate_provenance"]["source"] = ""
+
+    for mutated in (
+        forged_partner,
+        forged_evidence,
+        missing_construction,
+        empty_candidate_source,
+    ):
+        promotion = promote_bundle_for_solve(bundle=mutated, table=table)
+        assert not promotion["promoted"]
+        assert "unitary_completion_provenance_invalid" in _blocker_codes(
+            promotion
+        )
+
+
+@pytest.mark.parametrize(
+    ("problem_kind", "physical_object_kind"),
+    [
+        (
+            "unitary_valley_reduced_ebr",
+            "joint_time_reversal_valley_orbit",
+        ),
+        (
+            "valley_orbit_reduced_ebr",
+            "unitary_valley_projected_subspace",
+        ),
+    ],
+)
+def test_problem_kind_and_physical_object_kind_must_match(
+    problem_kind, physical_object_kind,
+):
+    bundle, table = _reviewed_joint_bundle_and_table()
+    forged = deepcopy(bundle)
+    forged["problem_kind"] = problem_kind
+    forged["physical_object_kind"] = physical_object_kind
+
+    promotion = promote_bundle_for_solve(bundle=forged, table=table)
+
+    assert not promotion["promoted"]
+    assert "problem_physical_object_kind_mismatch" in _blocker_codes(
+        promotion
+    )
+
+
+def test_directly_observed_dependent_hsp_uses_observed_unitary_binding():
+    candidates = _orbit_candidates()
+    candidates["candidates"].extend([
+        {
+            **deepcopy(next(
+                row for row in candidates["candidates"]
+                if row["valley"] == "left"
+                and row["irrep_source_provenance"]["source_hsp_label"] == "Q"
+            )),
+            "matched_irrep": "qa2",
+            "irrep_source_provenance": {
+                "source_hsp_label": "QA",
+                "source_table_spinor": True,
+            },
+            "kpoint": "QA_left",
+            "source": "fixture/left/QA",
+        },
+        {
+            **deepcopy(next(
+                row for row in candidates["candidates"]
+                if row["valley"] == "right"
+                and row["irrep_source_provenance"]["source_hsp_label"] == "Q"
+            )),
+            "matched_irrep": "qa1",
+            "irrep_source_provenance": {
+                "source_hsp_label": "QA",
+                "source_table_spinor": True,
+            },
+            "kpoint": "QA_right",
+            "source": "fixture/right/QA",
+        },
+    ])
+
+    report = _exchanged_orbit_report(candidates)
+    problems = build_ebr_problem_instances(
+        ebr_input_candidates=candidates,
+        time_reversal_orbit_report=report,
+    )
+    export = build_ebr_export_bundle(ebr_problem_instances=problems)
+    unitary = {
+        row["valley"]: row for row in export["bundles"]
+        if row["problem_kind"] == "unitary_valley_reduced_ebr"
+    }
+
+    assert report["status"] == "validated"
+    assert len(unitary) == 2
+    assert unitary["left"][
+        "independent_source_hsp_to_sampled_kpoint"
+    ] == {"G": "G_left", "Q": "Q_left", "M": "M_left"}
+    assert unitary["left"][
+        "observed_source_hsp_to_sampled_kpoint"
+    ] == {
+        "G": "G_left", "Q": "Q_left", "QA": "QA_left", "M": "M_left",
+    }
+    dependent = unitary["left"][
+        "unitary_irrep_completion_records_by_hsp"
+    ]["QA"][0]
+    assert dependent["completion_kind"] == "observed_at_sampled_kpoint"
+    assert dependent["sampled_kpoint"] == "QA_left"
+    assert dependent["time_reversal_consistency"][
+        "evidence_sampled_kpoint"
+    ] == "Q_right"
+    assert all(
+        _unitary_bundle_completion_evidence_valid(row)
+        for row in unitary.values()
+    )
+
+
+def test_redundant_observed_dependent_hsp_disagreement_blocks_all_dependents():
+    candidates = _orbit_candidates()
+    dependent = deepcopy(next(
+        row for row in candidates["candidates"]
+        if row["valley"] == "left"
+        and row["irrep_source_provenance"]["source_hsp_label"] == "Q"
+    ))
+    dependent.update({
+        "matched_irrep": "qa1",
+        "irrep_source_provenance": {
+            "source_hsp_label": "QA",
+            "source_table_spinor": True,
+        },
+        "kpoint": "QA_left",
+        "source": "fixture/left/QA",
+    })
+    candidates["candidates"].append(dependent)
+
+    report = _exchanged_orbit_report(candidates)
+    problems = build_ebr_problem_instances(
+        ebr_input_candidates=candidates,
+        time_reversal_orbit_report=report,
+    )
+
+    assert report["status"] == "blocked"
+    assert any(
+        blocker.startswith("time_reversal_multiplicity_or_irrep_mismatch")
+        for blocker in report["blockers"]
+    )
+    assert not any(
+        row["canonical_hsp_vector_ready"]
+        for row in problems["instances"]
+    )
+    assert build_ebr_export_bundle(
+        ebr_problem_instances=problems
+    )["bundle_count"] == 0
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["missing_source", "missing_workflow_path", "missing_spin_provenance"],
+)
+def test_candidate_provenance_is_required_for_source_and_dependent_rows(
+    mutation,
+):
+    candidates = _orbit_candidates()
+    source = next(
+        row for row in candidates["candidates"]
+        if row["valley"] == "left"
+        and row["irrep_source_provenance"]["source_hsp_label"] == "Q"
+    )
+    if mutation == "missing_source":
+        source.pop("source")
+    elif mutation == "missing_workflow_path":
+        source.pop("workflow_path")
+    else:
+        source["irrep_source_provenance"].pop("source_table_spinor")
+
+    report = _exchanged_orbit_report(candidates)
+    problems = build_ebr_problem_instances(
+        ebr_input_candidates=candidates,
+        time_reversal_orbit_report=report,
+    )
+
+    assert report["status"] == "blocked"
+    assert any(
+        blocker.startswith("source_candidate_provenance_incomplete:left:Q")
+        for blocker in report["blockers"]
+    )
+    assert not any(
+        row["canonical_hsp_vector_ready"]
+        for row in problems["instances"]
     )
 
 

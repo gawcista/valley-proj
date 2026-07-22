@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from valleyscope.analysis.reduced_ebr_mapping import (
+    _direct_unitary_bundle_construction_evidence_valid,
     _is_tr_completed_unitary_bundle,
     _unitary_bundle_completion_evidence_valid,
 )
@@ -216,6 +217,9 @@ def build_database_ingestion_record(
                     "required_source_hsp_labels",
                     "covered_source_hsp_labels",
                     "source_hsp_to_sampled_kpoint",
+                    "independent_source_hsp_to_sampled_kpoint",
+                    "observed_source_hsp_to_sampled_kpoint",
+                    "unitary_vector_construction",
                 ):
                     if key in s:
                         rec[key] = s[key]
@@ -365,6 +369,17 @@ def _extract_irrep_records(
             source_instance_id=source_instance_id,
         )
         return None
+
+    if (
+        bundle.get("problem_kind") == "unitary_valley_reduced_ebr"
+        and bundle.get("physical_object_kind")
+        == "unitary_valley_projected_subspace"
+        and not _direct_unitary_bundle_construction_evidence_valid(bundle)
+    ):
+        return (
+            f"bundle {source_bundle_id or '<unknown>'}: invalid direct "
+            "unitary construction provenance"
+        )
 
     records_by_kp = bundle.get("irrep_records_by_kpoint", {})
     if not isinstance(records_by_kp, dict):

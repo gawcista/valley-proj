@@ -232,13 +232,20 @@ def build_ebr_problem_instances(
 
         instances.append({
             "instance_id": instance_id,
+            "problem_kind": "unitary_valley_reduced_ebr",
+            "physical_object_kind": "unitary_valley_projected_subspace",
             "valley": valley,
+            "valley_orbit": [],
             "subspace_group_candidate": canonical_sg,
             "subspace_sg_number": canonical_sg_number,
             "subspace_space_group": subspace_space_group,
             "certificate_identity": cert_identity,
             "workflow_path": workflow_path,
             "workflow_paths": workflow_paths,
+            "unitary_vector_construction": {
+                "kind": "direct_observed_unitary_rows",
+                "source": "trusted_ebr_input_candidates",
+            },
             "readiness_level": readiness_level,
             "readiness_evidence": readiness_levels,
             "irreps_by_kpoint": {k: v for k, v in sorted(irreps_by_kpoint.items())},
@@ -464,6 +471,18 @@ def _build_time_reversal_problem_instances(
                 "source_hsp_to_sampled_kpoint_by_valley": raw_orbit.get(
                     "source_hsp_to_sampled_kpoint_by_valley", {}
                 ),
+                "independent_source_hsp_to_sampled_kpoint_by_valley": (
+                    raw_orbit.get(
+                        "independent_source_hsp_to_sampled_kpoint_by_valley",
+                        {},
+                    )
+                ),
+                "observed_source_hsp_to_sampled_kpoint_by_valley": (
+                    raw_orbit.get(
+                        "observed_source_hsp_to_sampled_kpoint_by_valley",
+                        {},
+                    )
+                ),
                 "unitary_valley_irrep_completion_records": raw_orbit.get(
                     "unitary_valley_irrep_completion_records", {}
                 ),
@@ -518,7 +537,11 @@ def _build_tr_unitary_component_instances(
         "unitary_valley_irrep_completion_records", {}
     )
     sampled_by_valley = raw_orbit.get(
-        "source_hsp_to_sampled_kpoint_by_valley", {}
+        "independent_source_hsp_to_sampled_kpoint_by_valley",
+        raw_orbit.get("source_hsp_to_sampled_kpoint_by_valley", {}),
+    )
+    observed_sampled_by_valley = raw_orbit.get(
+        "observed_source_hsp_to_sampled_kpoint_by_valley", {}
     )
     if not isinstance(completed, dict):
         completed = {}
@@ -526,6 +549,8 @@ def _build_tr_unitary_component_instances(
         all_records = {}
     if not isinstance(sampled_by_valley, dict):
         sampled_by_valley = {}
+    if not isinstance(observed_sampled_by_valley, dict):
+        observed_sampled_by_valley = {}
 
     instances: list[dict[str, object]] = []
     for component_index, valley in enumerate(members, start=1):
@@ -628,6 +653,11 @@ def _build_tr_unitary_component_instances(
         sampled_mapping = sampled_by_valley.get(valley, {})
         if not isinstance(sampled_mapping, dict):
             sampled_mapping = {}
+        observed_sampled_mapping = observed_sampled_by_valley.get(
+            valley, {}
+        )
+        if not isinstance(observed_sampled_mapping, dict):
+            observed_sampled_mapping = {}
         irreps_by_kpoint = {
             hsp: [
                 irrep
@@ -664,6 +694,11 @@ def _build_tr_unitary_component_instances(
             "certificate_identity": _certificate_identity(candidates),
             "workflow_path": "time_reversal_completed_unitary_valley",
             "workflow_paths": workflow_paths,
+            "unitary_vector_construction": {
+                "kind": "time_reversal_completed_unitary_rows",
+                "source": "validated_time_reversal_valley_orbit",
+                "orbit_id": raw_orbit.get("orbit_id", ""),
+            },
             "readiness_level": (
                 "trusted" if canonical_ready else "blocked"
             ),
@@ -708,6 +743,12 @@ def _build_tr_unitary_component_instances(
                 [] if canonical_ready else list(full_hsps)
             ),
             "source_hsp_to_sampled_kpoint": dict(sampled_mapping),
+            "independent_source_hsp_to_sampled_kpoint": dict(
+                sampled_mapping
+            ),
+            "observed_source_hsp_to_sampled_kpoint": dict(
+                observed_sampled_mapping
+            ),
             "source_hsp_coverage_complete": canonical_complete,
             "source_hsp_coverage_provenance": {
                 "source": "time_reversal_completed_unitary_valley",
@@ -727,6 +768,10 @@ def _build_tr_unitary_component_instances(
                 ),
                 "time_reversal_hsp_orbits": raw_orbit.get(
                     "time_reversal_hsp_orbits", []
+                ),
+                "full_unitary_source_hsp_labels": list(full_hsps),
+                "independent_time_reversal_hsp_labels": raw_orbit.get(
+                    "independent_time_reversal_hsp_labels", []
                 ),
                 "time_reversal_irrep_pairing": raw_orbit.get(
                     "time_reversal_irrep_pairing", {}

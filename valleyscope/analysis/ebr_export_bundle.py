@@ -49,6 +49,9 @@ def build_ebr_export_bundle(
                 "spinor": inst.get("spinor"),
                 "certificate_identity": inst.get("certificate_identity", {}),
                 "workflow_path": inst.get("workflow_path", ""),
+                "unitary_vector_construction": (
+                    _unitary_vector_construction(inst)
+                ),
                 "readiness_level": inst.get("readiness_level", ""),
                 "irreps_by_kpoint": inst.get("irreps_by_kpoint", {}),
                 "operations_by_kpoint": inst.get("operations_by_kpoint", {}),
@@ -77,6 +80,12 @@ def build_ebr_export_bundle(
                 ),
                 "source_hsp_to_sampled_kpoint": inst.get(
                     "source_hsp_to_sampled_kpoint", {}
+                ),
+                "independent_source_hsp_to_sampled_kpoint": inst.get(
+                    "independent_source_hsp_to_sampled_kpoint", {}
+                ),
+                "observed_source_hsp_to_sampled_kpoint": inst.get(
+                    "observed_source_hsp_to_sampled_kpoint", {}
                 ),
                 "source_hsp_coverage_complete": inst.get(
                     "source_hsp_coverage_complete", False
@@ -136,6 +145,27 @@ def build_ebr_export_bundle(
         "bundles": bundles,
         "excluded_instances": excluded,
     }
+
+
+def _unitary_vector_construction(inst: dict[str, object]) -> dict[str, object]:
+    """Preserve or derive the disjoint unitary construction contract."""
+    construction = inst.get("unitary_vector_construction")
+    if isinstance(construction, dict) and construction:
+        return dict(construction)
+    if (
+        inst.get("problem_kind", "unitary_valley_reduced_ebr")
+        == "unitary_valley_reduced_ebr"
+        and inst.get("valley_orbit") in ([], None)
+        and inst.get("time_reversal") in ({}, None)
+        and inst.get("unitary_irrep_completion_records_by_hsp") in ({}, None)
+        and isinstance(inst.get("irrep_records_by_kpoint"), dict)
+        and bool(inst.get("irrep_records_by_kpoint"))
+    ):
+        return {
+            "kind": "direct_observed_unitary_rows",
+            "source": "trusted_ebr_input_candidates",
+        }
+    return {}
 
 
 # ---------------------------------------------------------------------------

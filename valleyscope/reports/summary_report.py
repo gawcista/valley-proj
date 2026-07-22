@@ -1861,7 +1861,7 @@ def _render_ebr_problem_instances(
         lines.extend(
             _table(
                 ["id", "physical_object", "valley/orbit", "group", "status", "complete", "ready",
-                 "blocked_by", "sampled_hsp", "source_required",
+                 "blocked_by", "source_hsp_basis", "source_required",
                  "source_covered", "source_missing", "completion"],
                 rows,
             )

@@ -163,6 +163,7 @@ def _tr_validation_candidate_bundle():
         "source_instance_id": "orbit",
         "problem_kind": "valley_orbit_reduced_ebr",
         "subspace_group_candidate": "P3",
+        "spinor": True,
         "ready_for_reduced_table_validation": True,
         "workflow_path": "time_reversal_valley_orbit",
         "readiness_level": "trusted",
@@ -299,7 +300,14 @@ def _tr_completed_unitary_bundle():
         "irrep": "A",
         "multiplicity": 1,
     }
-    provenance = {"source": "fixture/K/GM", "workflow_path": "direct_qcut"}
+    provenance = {
+        "source": "fixture/K/GM",
+        "workflow_path": "direct_qcut",
+        "irrep_source_provenance": {
+            "source_hsp_label": "GM",
+            "source_table_spinor": True,
+        },
+    }
     return {
         "bundle_id": "unitary_K",
         "source_instance_id": "unitary_K_instance",
@@ -308,15 +316,53 @@ def _tr_completed_unitary_bundle():
         "valley": "K",
         "valley_orbit": ["K", "Kp"],
         "subspace_group_candidate": "P3",
+        "spinor": True,
         "workflow_path": "time_reversal_completed_unitary_valley",
+        "unitary_vector_construction": {
+            "kind": "time_reversal_completed_unitary_rows",
+            "source": "validated_time_reversal_valley_orbit",
+            "orbit_id": "time_reversal_valley_orbit_001",
+        },
         "readiness_level": "trusted",
         "ready_for_reduced_table_validation": True,
-        "expected_hsps": ["GM", "KA"],
-        "irreps_by_kpoint": {"GM": ["A"], "KA": ["B"]},
-        "source_hsp_to_sampled_kpoint": {"GM": "GammaM"},
+        "expected_hsps": ["GM", "K", "KA"],
+        "irreps_by_kpoint": {"GM": ["A"], "K": ["B"], "KA": ["B"]},
+        "source_hsp_to_sampled_kpoint": {
+            "GM": "GammaM",
+            "K": "KM_K",
+        },
+        "independent_source_hsp_to_sampled_kpoint": {
+            "GM": "GammaM",
+            "K": "KM_K",
+        },
+        "observed_source_hsp_to_sampled_kpoint": {
+            "GM": "GammaM",
+            "K": "KM_K",
+        },
         "time_reversal": {
+            "theta_square": -1,
             "mapping_type": "exchanged",
             "valley_orbit": ["K", "Kp"],
+            "time_reversal_valley_mapping": {"K": "Kp", "Kp": "K"},
+            "time_reversal_hsp_orbits": [
+                {
+                    "representative": "GM",
+                    "members": ["GM"],
+                    "self_mapped": True,
+                },
+                {
+                    "representative": "K",
+                    "members": ["K", "KA"],
+                    "self_mapped": False,
+                },
+            ],
+            "full_unitary_source_hsp_labels": ["GM", "K", "KA"],
+            "independent_time_reversal_hsp_labels": ["GM", "K"],
+            "time_reversal_irrep_pairing": {
+                "A": "A",
+                "B": "Bp",
+                "Bp": "B",
+            },
         },
         "irrep_records_by_kpoint": {},
         "unitary_irrep_completion_records_by_hsp": {
@@ -329,6 +375,32 @@ def _tr_completed_unitary_bundle():
                 "sampled_kpoint": "GammaM",
                 "source_candidate_identity": observed_identity,
                 "source_candidate_provenance": provenance,
+                "structural_status": "validated",
+                "readiness_status": "trusted",
+                "blockers": [],
+            }],
+            "K": [{
+                "completion_kind": "observed_at_sampled_kpoint",
+                "target_valley": "K",
+                "target_source_hsp_label": "K",
+                "irrep": "B",
+                "multiplicity": 1,
+                "sampled_kpoint": "KM_K",
+                "source_candidate_identity": {
+                    **observed_identity,
+                    "source": "fixture/K/K",
+                    "source_hsp_label": "K",
+                    "sampled_kpoint": "KM_K",
+                    "irrep": "B",
+                },
+                "source_candidate_provenance": {
+                    **provenance,
+                    "source": "fixture/K/K",
+                    "irrep_source_provenance": {
+                        "source_hsp_label": "K",
+                        "source_table_spinor": True,
+                    },
+                },
                 "structural_status": "validated",
                 "readiness_status": "trusted",
                 "blockers": [],
@@ -359,7 +431,12 @@ def _tr_completed_unitary_bundle():
                     "irrep": "Bp",
                 },
                 "source_candidate_provenance": {
-                    **provenance, "source": "fixture/Kp/K",
+                    **provenance,
+                    "source": "fixture/Kp/K",
+                    "irrep_source_provenance": {
+                        "source_hsp_label": "K",
+                        "source_table_spinor": True,
+                    },
                 },
                 "structural_status": "validated",
                 "readiness_status": "trusted",
@@ -377,17 +454,28 @@ def test_tr_unitary_ingestion_preserves_observed_and_inferred_rows():
         valley_ebr_export_bundle={"bundles": [unitary, legacy_joint]},
     )
 
-    assert len(record["valley_irrep_records"]) == 2
-    observed, inferred = record["valley_irrep_records"]
+    assert len(record["valley_irrep_records"]) == 3
+    observed, observed_k, inferred = record["valley_irrep_records"]
     assert observed["completion_kind"] == "observed_at_sampled_kpoint"
     assert observed["kpoint"] == "GammaM"
+    assert observed_k["completion_kind"] == "observed_at_sampled_kpoint"
+    assert observed_k["kpoint"] == "KM_K"
     assert inferred["completion_kind"] == "inferred_by_time_reversal"
     assert "kpoint" not in inferred
     assert inferred["evidence_sampled_kpoint"] == "KM_Kp"
     assert inferred["source_bundle_id"] == "unitary_K"
 
 
-@pytest.mark.parametrize("mutation", ["missing_evidence", "missing_tr_metadata"])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "missing_evidence",
+        "missing_tr_metadata",
+        "missing_construction",
+        "changed_workflow_and_missing_completion",
+        "forged_evidence_hsp",
+    ],
+)
 def test_tr_unitary_ingestion_never_uses_joint_representative_fallback(
     mutation,
 ):
@@ -396,8 +484,26 @@ def test_tr_unitary_ingestion_never_uses_joint_representative_fallback(
         unitary["unitary_irrep_completion_records_by_hsp"]["KA"][0].pop(
             "evidence_sampled_kpoint"
         )
-    else:
+    elif mutation == "missing_tr_metadata":
         unitary.pop("time_reversal")
+    elif mutation == "missing_construction":
+        unitary.pop("unitary_vector_construction")
+    elif mutation == "changed_workflow_and_missing_completion":
+        unitary["workflow_path"] = "direct_qcut"
+        unitary.pop("unitary_vector_construction")
+        unitary.pop("unitary_irrep_completion_records_by_hsp")
+    else:
+        inferred = unitary[
+            "unitary_irrep_completion_records_by_hsp"
+        ]["KA"][0]
+        inferred["evidence_source_hsp_label"] = "GM"
+        inferred["reviewed_time_reversal_relation"][
+            "evidence_source_hsp_label"
+        ] = "GM"
+        inferred["source_candidate_identity"]["source_hsp_label"] = "GM"
+        inferred["source_candidate_provenance"][
+            "irrep_source_provenance"
+        ]["source_hsp_label"] = "GM"
     record = build_database_ingestion_record(
         valley_summary={"target_kpoints": [], "iband": [], "input": {}},
         valley_ebr_export_bundle={
@@ -1013,7 +1119,7 @@ def test_database_index_input_exclusions_have_source_record():
     assert er["source_record"] == "/tmp/rec.json"
 
 
-def test_ingestion_record_schema_version_is_1_7_0():
+def test_ingestion_record_schema_version_is_1_8_0():
     """Ingestion record schema_version is now 1.8.0."""
     from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
     summary = {"target_kpoints": [], "iband": [], "input": {}}

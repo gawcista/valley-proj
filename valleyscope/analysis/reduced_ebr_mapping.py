@@ -486,9 +486,26 @@ def _validate_problem_kind_compatibility(
     unitary_kind = "unitary_valley_reduced_ebr"
     orbit_kind = "valley_orbit_reduced_ebr"
     problem_kind = bundle.get("problem_kind", unitary_kind)
+    physical_object_kind = bundle.get("physical_object_kind")
     grey_source = provenance.get("time_reversal_source")
     grey_bns_number = provenance.get("time_reversal_grey_bns_number")
     grey_unitary_sg = provenance.get("unitary_space_group_number")
+
+    expected_physical_object_kind = {
+        unitary_kind: "unitary_valley_projected_subspace",
+        orbit_kind: "joint_time_reversal_valley_orbit",
+    }.get(problem_kind)
+    if (
+        physical_object_kind is not None
+        and physical_object_kind != expected_physical_object_kind
+    ):
+        blockers.append(_blocker(
+            "problem_physical_object_kind_mismatch",
+            f"problem_kind {problem_kind!r} is inconsistent with "
+            f"physical_object_kind {physical_object_kind!r}",
+        ))
+        report["problem_kind_check"] = "failed"
+        return
 
     if problem_kind == unitary_kind:
         if grey_source is not None or grey_bns_number is not None:
@@ -505,6 +522,18 @@ def _validate_problem_kind_compatibility(
                 "unitary_completion_provenance_invalid",
                 "TR-completed unitary valley problem lacks complete, trusted "
                 "row-level observed/inferred provenance",
+            ))
+            report["problem_kind_check"] = "failed"
+            report["completion_provenance_check"] = "failed"
+        elif (
+            physical_object_kind == "unitary_valley_projected_subspace"
+            and not _is_tr_completed_unitary_bundle(bundle)
+            and not _direct_unitary_bundle_construction_evidence_valid(bundle)
+        ):
+            blockers.append(_blocker(
+                "unitary_construction_provenance_invalid",
+                "direct unitary valley problem lacks complete observed-row "
+                "construction provenance",
             ))
             report["problem_kind_check"] = "failed"
             report["completion_provenance_check"] = "failed"
@@ -652,20 +681,16 @@ def _joint_bundle_time_reversal_evidence_valid(
         sampled_by_valley = evidence.get(
             "source_hsp_to_sampled_kpoint_by_valley"
         )
+        observed_sampled_by_valley = evidence.get(
+            "observed_source_hsp_to_sampled_kpoint_by_valley"
+        )
         if (
             not isinstance(completion_by_valley, dict)
             or not isinstance(sampled_by_valley, dict)
+            or not isinstance(observed_sampled_by_valley, dict)
             or set(completion_by_valley) != orbit_members
             or set(sampled_by_valley) != orbit_members
-            or any(
-                not _unitary_completion_records_valid(
-                    valley=valley,
-                    counts_by_hsp=unitary_irreps[valley],
-                    records_by_hsp=completion_by_valley[valley],
-                    source_to_sampled=sampled_by_valley[valley],
-                )
-                for valley in valley_orbit
-            )
+            or set(observed_sampled_by_valley) != orbit_members
         ):
             return False
     expected_theta_square = -1 if table_spinful is True else 1
@@ -775,6 +800,25 @@ def _joint_bundle_time_reversal_evidence_valid(
         irrep_pairing=irrep_pairing,
     ):
         return False
+    if bundle.get("physical_object_kind") == (
+        "joint_time_reversal_valley_orbit"
+    ) and any(
+        not _unitary_completion_records_valid(
+            valley=valley,
+            counts_by_hsp=unitary_irreps[valley],
+            records_by_hsp=completion_by_valley[valley],
+            observed_source_to_sampled=(
+                observed_sampled_by_valley[valley]
+            ),
+            valley_mapping=valley_mapping,
+            hsp_mapping=hsp_mapping,
+            irrep_mapping=irrep_pairing,
+            independent_hsps=representative_hsps,
+            expected_spinor=table_spinful,
+        )
+        for valley in valley_orbit
+    ):
+        return False
 
     source_to_sampled = bundle.get("source_hsp_to_sampled_kpoint")
     representative_valley = evidence.get("representative_valley")
@@ -853,32 +897,105 @@ def _joint_bundle_time_reversal_evidence_valid(
 def _unitary_bundle_completion_evidence_valid(bundle: dict) -> bool:
     """Validate a serialized TR-completed unitary object fail closed."""
     valley = bundle.get("valley")
+    valley_orbit = bundle.get("valley_orbit")
     time_reversal = bundle.get("time_reversal")
     irreps_by_kpoint = bundle.get("irreps_by_kpoint")
     records_by_hsp = bundle.get(
         "unitary_irrep_completion_records_by_hsp"
     )
-    source_to_sampled = bundle.get("source_hsp_to_sampled_kpoint")
+    independent_source_to_sampled = bundle.get(
+        "independent_source_hsp_to_sampled_kpoint"
+    )
+    observed_source_to_sampled = bundle.get(
+        "observed_source_hsp_to_sampled_kpoint"
+    )
     expected_hsps = bundle.get("expected_hsps")
+    construction = bundle.get("unitary_vector_construction")
     if (
-        not isinstance(valley, str)
+        bundle.get("problem_kind") != "unitary_valley_reduced_ebr"
+        or bundle.get("physical_object_kind")
+        != "unitary_valley_projected_subspace"
+        or bundle.get("workflow_path")
+        != "time_reversal_completed_unitary_valley"
+        or not isinstance(construction, dict)
+        or construction.get("kind")
+        != "time_reversal_completed_unitary_rows"
+        or construction.get("source")
+        != "validated_time_reversal_valley_orbit"
+        or not isinstance(construction.get("orbit_id"), str)
+        or not construction.get("orbit_id")
+        or not isinstance(valley, str)
         or not valley
+        or not isinstance(valley_orbit, list)
+        or not valley_orbit
+        or len(set(valley_orbit)) != len(valley_orbit)
         or not isinstance(time_reversal, dict)
         or time_reversal.get("mapping_type") not in {
             "exchanged", "self_mapped",
         }
-        or not isinstance(time_reversal.get("valley_orbit"), list)
-        or valley not in time_reversal.get("valley_orbit", [])
+        or time_reversal.get("valley_orbit") != valley_orbit
+        or valley not in valley_orbit
+        or time_reversal.get("theta_square") not in (-1, 1)
         or not isinstance(irreps_by_kpoint, dict)
         or not isinstance(records_by_hsp, dict)
-        or not isinstance(source_to_sampled, dict)
+        or not isinstance(independent_source_to_sampled, dict)
+        or bundle.get("source_hsp_to_sampled_kpoint")
+        != independent_source_to_sampled
+        or not isinstance(observed_source_to_sampled, dict)
         or not isinstance(expected_hsps, list)
         or not expected_hsps
+        or len(set(expected_hsps)) != len(expected_hsps)
         or set(expected_hsps) != set(irreps_by_kpoint)
         or set(expected_hsps) != set(records_by_hsp)
+        or bundle.get("irrep_records_by_kpoint") not in ({}, None)
     ):
         return False
+
+    valley_mapping = time_reversal.get("time_reversal_valley_mapping")
+    if (
+        not _nonempty_involutive_string_mapping(valley_mapping)
+        or set(valley_mapping) != set(valley_orbit)
+        or set(valley_mapping.values()) != set(valley_orbit)
+        or (
+            time_reversal.get("mapping_type") == "exchanged"
+            and (
+                len(valley_orbit) != 2
+                or any(valley_mapping[item] == item for item in valley_orbit)
+            )
+        )
+        or (
+            time_reversal.get("mapping_type") == "self_mapped"
+            and (
+                len(valley_orbit) != 1
+                or valley_mapping.get(valley_orbit[0]) != valley_orbit[0]
+            )
+        )
+    ):
+        return False
+
+    hsp_mapping, representative_hsps = _reviewed_hsp_involution(
+        time_reversal.get("time_reversal_hsp_orbits")
+    )
+    full_hsps = time_reversal.get("full_unitary_source_hsp_labels")
+    independent_hsps = time_reversal.get(
+        "independent_time_reversal_hsp_labels"
+    )
+    if (
+        hsp_mapping is None
+        or not isinstance(full_hsps, list)
+        or set(full_hsps) != set(expected_hsps)
+        or set(hsp_mapping) != set(expected_hsps)
+        or not isinstance(independent_hsps, list)
+        or set(independent_hsps) != representative_hsps
+        or set(independent_source_to_sampled) != set(independent_hsps)
+    ):
+        return False
+
+    irrep_mapping = time_reversal.get("time_reversal_irrep_pairing")
+    if not _nonempty_involutive_string_mapping(irrep_mapping):
+        return False
     counts_by_hsp: dict[str, dict[str, int]] = {}
+    vector_irreps: set[str] = set()
     for hsp, labels in irreps_by_kpoint.items():
         if not isinstance(hsp, str) or not isinstance(labels, list):
             return False
@@ -887,21 +1004,76 @@ def _unitary_bundle_completion_evidence_valid(bundle: dict) -> bool:
             if not isinstance(label, str) or not label:
                 return False
             counts[label] = counts.get(label, 0) + 1
+            vector_irreps.add(label)
         counts_by_hsp[hsp] = counts
+    if not vector_irreps.issubset(irrep_mapping):
+        return False
     return _unitary_completion_records_valid(
         valley=valley,
         counts_by_hsp=counts_by_hsp,
         records_by_hsp=records_by_hsp,
-        source_to_sampled=source_to_sampled,
+        observed_source_to_sampled=observed_source_to_sampled,
+        valley_mapping=valley_mapping,
+        hsp_mapping=hsp_mapping,
+        irrep_mapping=irrep_mapping,
+        independent_hsps=set(independent_hsps),
+        expected_spinor=bundle.get("spinor"),
     )
 
 
 def _is_tr_completed_unitary_bundle(bundle: dict) -> bool:
-    return (
-        bundle.get("problem_kind", "unitary_valley_reduced_ebr")
-        == "unitary_valley_reduced_ebr"
-        and bundle.get("workflow_path")
-        == "time_reversal_completed_unitary_valley"
+    """Return whether a unitary bundle claims or structurally implies TR completion."""
+    if bundle.get("problem_kind", "unitary_valley_reduced_ebr") != (
+        "unitary_valley_reduced_ebr"
+    ):
+        return False
+    construction = bundle.get("unitary_vector_construction")
+    construction_kind = (
+        construction.get("kind") if isinstance(construction, dict) else None
+    )
+    return any((
+        construction_kind == "time_reversal_completed_unitary_rows",
+        bundle.get("workflow_path")
+        == "time_reversal_completed_unitary_valley",
+        bool(bundle.get("valley_orbit")),
+        bool(bundle.get("unitary_irrep_completion_records_by_hsp")),
+        bool(bundle.get("time_reversal")),
+    ))
+
+
+def _direct_unitary_bundle_construction_evidence_valid(bundle: dict) -> bool:
+    """Validate the disjoint direct-observation unitary construction path."""
+    construction = bundle.get("unitary_vector_construction")
+    records_by_kpoint = bundle.get("irrep_records_by_kpoint")
+    if (
+        bundle.get("problem_kind") != "unitary_valley_reduced_ebr"
+        or bundle.get("physical_object_kind")
+        != "unitary_valley_projected_subspace"
+        or not isinstance(bundle.get("valley"), str)
+        or not bundle.get("valley")
+        or bundle.get("valley_orbit") not in ([], None)
+        or bundle.get("time_reversal") not in ({}, None)
+        or bundle.get("unitary_irrep_completion_records_by_hsp")
+        not in ({}, None)
+        or not isinstance(construction, dict)
+        or construction.get("kind") != "direct_observed_unitary_rows"
+        or construction.get("source") != "trusted_ebr_input_candidates"
+        or not isinstance(records_by_kpoint, dict)
+        or not records_by_kpoint
+    ):
+        return False
+    return all(
+        isinstance(kpoint, str)
+        and bool(kpoint)
+        and isinstance(records, list)
+        and bool(records)
+        and all(
+            isinstance(record, dict)
+            and isinstance(record.get("matched_irrep"), str)
+            and bool(record.get("matched_irrep"))
+            for record in records
+        )
+        for kpoint, records in records_by_kpoint.items()
     )
 
 
@@ -910,12 +1082,17 @@ def _unitary_completion_records_valid(
     valley: str,
     counts_by_hsp: object,
     records_by_hsp: object,
-    source_to_sampled: object,
+    observed_source_to_sampled: object,
+    valley_mapping: object = None,
+    hsp_mapping: object = None,
+    irrep_mapping: object = None,
+    independent_hsps: set[str] | None = None,
+    expected_spinor: object = None,
 ) -> bool:
     if (
         not isinstance(counts_by_hsp, dict)
         or not isinstance(records_by_hsp, dict)
-        or not isinstance(source_to_sampled, dict)
+        or not isinstance(observed_source_to_sampled, dict)
         or set(counts_by_hsp) != set(records_by_hsp)
     ):
         return False
@@ -950,8 +1127,36 @@ def _unitary_completion_records_valid(
                 or not identity
                 or not isinstance(candidate_provenance, dict)
                 or not candidate_provenance
-                or candidate_provenance.get("source") != identity.get(
-                    "source"
+                or not _source_candidate_provenance_valid(
+                    identity=identity,
+                    provenance=candidate_provenance,
+                    expected_valley=(
+                        valley if kind == "observed_at_sampled_kpoint"
+                        else record.get("evidence_valley")
+                    ),
+                    expected_hsp=(
+                        hsp if kind == "observed_at_sampled_kpoint"
+                        else record.get("evidence_source_hsp_label")
+                    ),
+                    expected_sampled=(
+                        record.get("sampled_kpoint")
+                        if kind == "observed_at_sampled_kpoint"
+                        else record.get("evidence_sampled_kpoint")
+                    ),
+                    expected_irrep=(
+                        irrep if kind == "observed_at_sampled_kpoint"
+                        else (
+                            record.get("reviewed_time_reversal_relation", {})
+                            .get("evidence_irrep")
+                            if isinstance(
+                                record.get("reviewed_time_reversal_relation"),
+                                dict,
+                            )
+                            else None
+                        )
+                    ),
+                    expected_multiplicity=multiplicity,
+                    expected_spinor=expected_spinor,
                 )
             ):
                 return False
@@ -960,7 +1165,7 @@ def _unitary_completion_records_valid(
                 if (
                     not isinstance(sampled, str)
                     or not sampled
-                    or source_to_sampled.get(hsp) != sampled
+                    or observed_source_to_sampled.get(hsp) != sampled
                     or identity.get("valley") != valley
                     or identity.get("source_hsp_label") != hsp
                     or identity.get("sampled_kpoint") != sampled
@@ -969,6 +1174,23 @@ def _unitary_completion_records_valid(
                 ):
                     return False
                 observed_hsps.add(hsp)
+                consistency = record.get("time_reversal_consistency")
+                if (
+                    independent_hsps is not None
+                    and hsp not in independent_hsps
+                    and not _observed_time_reversal_consistency_valid(
+                        consistency=consistency,
+                        valley=valley,
+                        hsp=hsp,
+                        irrep=irrep,
+                        multiplicity=multiplicity,
+                        valley_mapping=valley_mapping,
+                        hsp_mapping=hsp_mapping,
+                        irrep_mapping=irrep_mapping,
+                        expected_spinor=expected_spinor,
+                    )
+                ):
+                    return False
             elif kind == "inferred_by_time_reversal":
                 relation = record.get("reviewed_time_reversal_relation")
                 if (
@@ -1006,13 +1228,188 @@ def _unitary_completion_records_valid(
                         "evidence_irrep"
                     )
                     or identity.get("multiplicity") != multiplicity
+                    or not _reviewed_time_reversal_relation_valid(
+                        relation=relation,
+                        evidence_valley=record.get("evidence_valley"),
+                        target_valley=valley,
+                        evidence_hsp=record.get(
+                            "evidence_source_hsp_label"
+                        ),
+                        target_hsp=hsp,
+                        evidence_irrep=relation.get("evidence_irrep"),
+                        target_irrep=irrep,
+                        valley_mapping=valley_mapping,
+                        hsp_mapping=hsp_mapping,
+                        irrep_mapping=irrep_mapping,
+                    )
                 ):
                     return False
             else:
                 return False
             target[irrep] = target.get(irrep, 0) + multiplicity
         rebuilt[hsp] = target
-    return rebuilt == counts_by_hsp and set(source_to_sampled) == observed_hsps
+    return (
+        rebuilt == counts_by_hsp
+        and set(observed_source_to_sampled) == observed_hsps
+    )
+
+
+def _nonempty_involutive_string_mapping(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and bool(value)
+        and all(
+            isinstance(key, str)
+            and bool(key)
+            and isinstance(partner, str)
+            and bool(partner)
+            and value.get(partner) == key
+            for key, partner in value.items()
+        )
+        and set(value) == set(value.values())
+    )
+
+
+def _reviewed_hsp_involution(
+    rows: object,
+) -> tuple[dict[str, str] | None, set[str]]:
+    if not isinstance(rows, list) or not rows:
+        return None, set()
+    mapping: dict[str, str] = {}
+    representatives: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            return None, set()
+        members = row.get("members")
+        representative = row.get("representative")
+        self_mapped = row.get("self_mapped")
+        if (
+            not isinstance(members, list)
+            or len(members) not in (1, 2)
+            or any(not isinstance(item, str) or not item for item in members)
+            or len(set(members)) != len(members)
+            or representative not in members
+            or self_mapped != (len(members) == 1)
+            or set(members).intersection(mapping)
+        ):
+            return None, set()
+        representatives.add(str(representative))
+        if len(members) == 1:
+            mapping[members[0]] = members[0]
+        else:
+            mapping[members[0]] = members[1]
+            mapping[members[1]] = members[0]
+    return mapping, representatives
+
+
+def _source_candidate_provenance_valid(
+    *,
+    identity: dict,
+    provenance: dict,
+    expected_valley: object,
+    expected_hsp: object,
+    expected_sampled: object,
+    expected_irrep: object,
+    expected_multiplicity: object,
+    expected_spinor: object,
+) -> bool:
+    source = identity.get("source")
+    source_irrep = provenance.get("irrep_source_provenance")
+    return (
+        isinstance(source, str)
+        and bool(source)
+        and provenance.get("source") == source
+        and isinstance(provenance.get("workflow_path"), str)
+        and bool(provenance.get("workflow_path"))
+        and identity.get("valley") == expected_valley
+        and identity.get("source_hsp_label") == expected_hsp
+        and identity.get("sampled_kpoint") == expected_sampled
+        and identity.get("irrep") == expected_irrep
+        and identity.get("multiplicity") == expected_multiplicity
+        and isinstance(source_irrep, dict)
+        and source_irrep.get("source_hsp_label") == expected_hsp
+        and isinstance(source_irrep.get("source_table_spinor"), bool)
+        and isinstance(expected_spinor, bool)
+        and source_irrep.get("source_table_spinor") == expected_spinor
+    )
+
+
+def _reviewed_time_reversal_relation_valid(
+    *,
+    relation: object,
+    evidence_valley: object,
+    target_valley: object,
+    evidence_hsp: object,
+    target_hsp: object,
+    evidence_irrep: object,
+    target_irrep: object,
+    valley_mapping: object,
+    hsp_mapping: object,
+    irrep_mapping: object,
+) -> bool:
+    return (
+        isinstance(relation, dict)
+        and isinstance(valley_mapping, dict)
+        and isinstance(hsp_mapping, dict)
+        and isinstance(irrep_mapping, dict)
+        and relation.get("evidence_valley") == evidence_valley
+        and relation.get("target_valley") == target_valley
+        and relation.get("evidence_source_hsp_label") == evidence_hsp
+        and relation.get("target_source_hsp_label") == target_hsp
+        and relation.get("evidence_irrep") == evidence_irrep
+        and relation.get("target_irrep") == target_irrep
+        and valley_mapping.get(evidence_valley) == target_valley
+        and hsp_mapping.get(evidence_hsp) == target_hsp
+        and irrep_mapping.get(evidence_irrep) == target_irrep
+    )
+
+
+def _observed_time_reversal_consistency_valid(
+    *,
+    consistency: object,
+    valley: str,
+    hsp: str,
+    irrep: str,
+    multiplicity: int,
+    valley_mapping: object,
+    hsp_mapping: object,
+    irrep_mapping: object,
+    expected_spinor: object,
+) -> bool:
+    if not isinstance(consistency, dict) or consistency.get("status") != (
+        "validated"
+    ):
+        return False
+    relation = consistency.get("reviewed_time_reversal_relation")
+    evidence_irrep = (
+        relation.get("evidence_irrep") if isinstance(relation, dict) else None
+    )
+    return (
+        isinstance(consistency.get("evidence_sampled_kpoint"), str)
+        and bool(consistency.get("evidence_sampled_kpoint"))
+        and _reviewed_time_reversal_relation_valid(
+            relation=relation,
+            evidence_valley=consistency.get("evidence_valley"),
+            target_valley=valley,
+            evidence_hsp=consistency.get("evidence_source_hsp_label"),
+            target_hsp=hsp,
+            evidence_irrep=evidence_irrep,
+            target_irrep=irrep,
+            valley_mapping=valley_mapping,
+            hsp_mapping=hsp_mapping,
+            irrep_mapping=irrep_mapping,
+        )
+        and _source_candidate_provenance_valid(
+            identity=consistency.get("source_candidate_identity", {}),
+            provenance=consistency.get("source_candidate_provenance", {}),
+            expected_valley=consistency.get("evidence_valley"),
+            expected_hsp=consistency.get("evidence_source_hsp_label"),
+            expected_sampled=consistency.get("evidence_sampled_kpoint"),
+            expected_irrep=evidence_irrep,
+            expected_multiplicity=multiplicity,
+            expected_spinor=expected_spinor,
+        )
+    )
 
 
 def _source_hsp_sampled_mappings_valid(
@@ -2283,6 +2680,15 @@ def build_reduced_ebr_mapping(
             ),
             "source_hsp_to_sampled_kpoint": bundle.get(
                 "source_hsp_to_sampled_kpoint", {}
+            ),
+            "independent_source_hsp_to_sampled_kpoint": bundle.get(
+                "independent_source_hsp_to_sampled_kpoint", {}
+            ),
+            "observed_source_hsp_to_sampled_kpoint": bundle.get(
+                "observed_source_hsp_to_sampled_kpoint", {}
+            ),
+            "unitary_vector_construction": bundle.get(
+                "unitary_vector_construction", {}
             ),
             "unitary_irrep_completion_records_by_hsp": bundle.get(
                 "unitary_irrep_completion_records_by_hsp", {}
