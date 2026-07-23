@@ -1026,10 +1026,11 @@ def _candidate_source_hsp_to_sampled_kpoint(
     representative: str,
 ) -> tuple[dict[str, str], dict[str, dict[str, str]], list[str]]:
     """Resolve representative and lossless per-valley sampled-HSP maps."""
-    independent = {
+    independent = _deduplicate([
         str(value) for value in independent_hsps
         if isinstance(value, str) and value
-    }
+    ])
+    independent_set = set(independent)
     sampled_by_valley: dict[str, dict[str, str]] = {
         member: {} for member in members
     }
@@ -1054,7 +1055,7 @@ def _candidate_source_hsp_to_sampled_kpoint(
         sampled = raw.get("kpoint")
         if not isinstance(source_hsp, str) or not source_hsp:
             continue
-        if source_hsp not in independent:
+        if source_hsp not in independent_set:
             continue
         if not isinstance(sampled, str) or not sampled:
             blockers.append(

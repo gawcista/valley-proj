@@ -20,6 +20,7 @@ from valleyscope.analysis.unitary_provenance import (
 )
 
 from valleyscope.analysis.time_reversal_orbits import (
+    _candidate_source_hsp_to_sampled_kpoint,
     _decompose_grey_counts,
     build_time_reversal_valley_orbit_report,
     derive_time_reversal_valley_mapping,
@@ -1493,6 +1494,21 @@ def test_cross_valley_completion_records_observed_and_inferred_provenance():
     )
     assert inferred["structural_status"] == "validated"
     assert inferred["readiness_status"] == "trusted"
+
+
+def test_missing_source_hsp_blockers_preserve_reviewed_basis_order():
+    _, _, blockers = _candidate_source_hsp_to_sampled_kpoint(
+        [],
+        ["left"],
+        independent_hsps=["GM", "V", "Y"],
+        representative="left",
+    )
+
+    assert blockers == [
+        "source_hsp_sampled_kpoint_mapping_incomplete:left:GM",
+        "source_hsp_sampled_kpoint_mapping_incomplete:left:V",
+        "source_hsp_sampled_kpoint_mapping_incomplete:left:Y",
+    ]
 
 
 def test_tr_enabled_problem_builder_emits_unitary_components_and_joint_grey():

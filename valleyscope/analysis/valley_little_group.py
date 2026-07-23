@@ -346,6 +346,7 @@ def _compute_valley_orbits(
     # Find connected components
     visited: set[str] = set()
     orbits: list[dict[str, Any]] = []
+    valley_order = {name: index for index, name in enumerate(valley_names)}
 
     for valley_name in valley_names:
         if valley_name in visited:
@@ -359,7 +360,10 @@ def _compute_valley_orbits(
                 continue
             visited.add(v)
             component.append(v)
-            for neighbor in adjacency.get(v, set()):
+            for neighbor in sorted(
+                adjacency.get(v, set()),
+                key=lambda name: (valley_order.get(name, len(valley_order)), name),
+            ):
                 if neighbor not in visited:
                     queue.append(neighbor)
 

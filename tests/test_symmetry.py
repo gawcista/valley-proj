@@ -1339,7 +1339,11 @@ class TestV11PerValleySubgroup:
         # Valley orbits: one orbit with all three M valleys
         orbits = report["valley_orbits"]
         assert len(orbits) == 1
-        assert set(orbits[0]["valleys"]) == {"M1_valley", "M2_valley", "M3_valley"}
+        assert orbits[0]["valleys"] == [
+            "M1_valley",
+            "M2_valley",
+            "M3_valley",
+        ]
         # C3 should appear as a coset/valley-orbit operation
         assert 1 in orbits[0]["valley_permuting_operation_ids"]
         assert 1 in orbits[0]["coset_representative_operation_ids"]  # legacy alias
