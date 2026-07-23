@@ -1430,6 +1430,27 @@ def test_database_index_directory_provenance_removes_source_record_alias():
         )
 
 
+@pytest.mark.parametrize(
+    "source_inputs",
+    [
+        [{}],
+        [{"kind": "unknown", "path": "/tmp/input"}],
+        [{"kind": "ingestion_record_file"}],
+        [],
+    ],
+)
+def test_database_index_builder_rejects_invalid_typed_source_inputs(
+    source_inputs,
+):
+    from valleyscope.analysis.database_index import build_database_index
+
+    with pytest.raises(ValueError):
+        build_database_index(
+            [_make_ingestion_record()],
+            source_inputs=source_inputs,
+        )
+
+
 def test_database_index_loader_is_byte_deterministic_across_hash_seeds(
     tmp_path,
 ):

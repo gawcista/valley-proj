@@ -37,10 +37,42 @@ _CLASSIFICATION_FIELDS = (
     "outside_integer_span",
     "indeterminate_truncated",
 )
+_SOURCE_INPUT_KINDS = {
+    "ingestion_record_file",
+    "analyze_output_directory",
+}
 
 
 def _is_nonnegative_integer(value: object) -> bool:
     return type(value) is int and value >= 0
+
+
+def _validate_source_inputs(
+    source_inputs: list[dict[str, str]],
+    *,
+    record_count: int,
+) -> list[dict[str, str]]:
+    if len(source_inputs) != record_count:
+        raise ValueError(
+            "source_inputs must contain exactly one entry per ingestion record"
+        )
+
+    validated: list[dict[str, str]] = []
+    for idx, source_input in enumerate(source_inputs):
+        if not isinstance(source_input, dict):
+            raise ValueError(f"source_inputs[{idx}] must be an object")
+        kind = source_input.get("kind")
+        path = source_input.get("path")
+        if kind not in _SOURCE_INPUT_KINDS:
+            raise ValueError(
+                f"source_inputs[{idx}].kind is not recognized: {kind!r}"
+            )
+        if not isinstance(path, str) or not path.strip():
+            raise ValueError(
+                f"source_inputs[{idx}].path must be a nonempty string"
+            )
+        validated.append({"kind": kind, "path": path})
+    return validated
 
 
 def _validate_ingestion_record(record: object) -> list[str]:
@@ -188,7 +220,7 @@ def build_database_index(
     all_final_mapping_excluded_records: list[dict[str, Any]] = []
     ebr_export_status_counts: dict[str, int] = {}
     typed_source_inputs = (
-        [dict(source_input) for source_input in source_inputs]
+        _validate_source_inputs(source_inputs, record_count=len(records))
         if source_inputs is not None
         else [
             {"kind": "ingestion_record_file", "path": path}
