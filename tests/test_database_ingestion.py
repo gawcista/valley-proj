@@ -2226,3 +2226,43 @@ def test_tmote2_ingestion_compact_reduced_ebr_records():
     }
     assert all("kpoint" not in row for row in inferred)
     assert all(row["evidence_sampled_kpoint"] == "KM" for row in inferred)
+
+
+def test_joint_ingestion_does_not_import_optional_irrep_runtime():
+    fixture = (
+        Path(__file__).parent.parent
+        / "real_tests"
+        / "tMoTe2"
+        / "output"
+        / "valley_analysis_wave"
+    )
+    script = f"""
+import builtins
+from pathlib import Path
+
+real_import = builtins.__import__
+
+def guarded_import(name, *args, **kwargs):
+    if name == "irrep" or name.startswith("irrep."):
+        raise AssertionError(f"optional irrep runtime imported: {{name}}")
+    if name == "valleyscope.irreps.tables":
+        raise AssertionError(f"heavy irrep tables imported: {{name}}")
+    return real_import(name, *args, **kwargs)
+
+builtins.__import__ = guarded_import
+from valleyscope.analysis.database_ingestion_record import (
+    load_database_ingestion_record_from_directory,
+)
+record = load_database_ingestion_record_from_directory(Path({str(fixture)!r}))
+assert record["final_reduced_ebr_result_count"] == 3
+assert record["validation_errors"] == []
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).parent.parent,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
