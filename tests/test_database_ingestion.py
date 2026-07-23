@@ -1,5 +1,8 @@
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 
 import numpy as np
 import pytest
@@ -865,6 +868,38 @@ def _make_ingestion_record(
     }
 
 
+def _write_blocked_public_run(run_dir: Path) -> Path:
+    run_dir.mkdir()
+    (run_dir / "valley_summary.json").write_text(
+        json.dumps({
+            "target_kpoints": ["GammaM"],
+            "iband": [1],
+            "input": {"spinor_convention_verified": False},
+            "symmetry_analysis": {
+                "international": "P1",
+                "spacegroup_number": 1,
+            },
+        }),
+        encoding="utf-8",
+    )
+    (run_dir / "valley_ebr_export_bundle.json").write_text(
+        json.dumps({
+            "status": "no_bundles",
+            "bundles": [],
+            "excluded_instances": [{
+                "source_instance_id": "blocked_001",
+                "valley": "valley_a",
+                "status": "blocked",
+                "canonical_hsp_vector_complete": True,
+                "canonical_hsp_vector_ready": False,
+                "exclusion_reasons": ["spinor_convention_unverified"],
+            }],
+        }),
+        encoding="utf-8",
+    )
+    return run_dir
+
+
 def test_database_index_builder_two_records():
     """Pure builder with final-result and no-input records."""
     from valleyscope.analysis.database_index import build_database_index
@@ -998,6 +1033,356 @@ def test_database_index_cli_invalid_input(tmp_path):
     assert idx["status_counts"]["invalid_missing_summary"] == 1
     assert idx["validation_errors"]
     assert "FileNotFoundError" in idx["validation_errors"][0]
+
+
+def test_database_index_cli_accepts_directory_only(tmp_path):
+    from valleyscope.cli import main
+
+    run_dir = _write_blocked_public_run(tmp_path / "blocked_run")
+    output = tmp_path / "index.json"
+
+    rc = main([
+        "collect-database-index",
+        str(run_dir),
+        "--output",
+        str(output),
+    ])
+
+    assert rc == 0
+    index = json.loads(output.read_text(encoding="utf-8"))
+    assert index["record_count"] == 1
+    assert index["runs"][0]["record_status"] == "no_reduced_ebr_input"
+    assert index["runs"][0]["source"] == str(run_dir.resolve())
+
+
+def test_database_index_cli_accepts_mixed_file_and_directory(tmp_path):
+    from valleyscope.cli import main
+
+    record_path = tmp_path / "success.json"
+    record_path.write_text(
+        json.dumps(_make_ingestion_record()),
+        encoding="utf-8",
+    )
+    run_dir = _write_blocked_public_run(tmp_path / "blocked_run")
+    output = tmp_path / "index.json"
+
+    rc = main([
+        "collect-database-index",
+        str(record_path),
+        str(run_dir),
+        "--output",
+        str(output),
+    ])
+
+    assert rc == 0
+    index = json.loads(output.read_text(encoding="utf-8"))
+    assert index["record_count"] == 2
+    assert index["final_reduced_ebr_result_count_total"] == 1
+    assert [run["record_status"] for run in index["runs"]] == [
+        "has_final_reduced_ebr_results",
+        "no_reduced_ebr_input",
+    ]
+    assert index["validation_errors"] == []
+
+
+def test_database_index_cli_duplicate_input_is_nonzero_without_double_count(
+    tmp_path,
+):
+    from valleyscope.cli import main
+
+    run_dir = _write_blocked_public_run(tmp_path / "blocked_run")
+    output = tmp_path / "index.json"
+
+    rc = main([
+        "collect-database-index",
+        str(run_dir),
+        str(run_dir),
+        "--output",
+        str(output),
+    ])
+
+    assert rc == 1
+    index = json.loads(output.read_text(encoding="utf-8"))
+    assert index["record_count"] == 1
+    assert index["input_excluded_instance_count_total"] == 1
+    assert index["validation_errors"] == [
+        f"duplicate resolved input: {run_dir.resolve()}"
+    ]
+
+
+def test_database_index_cli_malformed_directory_is_nonzero(tmp_path):
+    from valleyscope.cli import main
+
+    run_dir = tmp_path / "malformed_run"
+    run_dir.mkdir()
+    (run_dir / "valley_summary.json").write_text(
+        "{not-json",
+        encoding="utf-8",
+    )
+    output = tmp_path / "index.json"
+
+    rc = main([
+        "collect-database-index",
+        str(run_dir),
+        "--output",
+        str(output),
+    ])
+
+    assert rc == 1
+    index = json.loads(output.read_text(encoding="utf-8"))
+    assert index["record_count"] == 1
+    assert index["status_counts"]["invalid_missing_summary"] == 1
+    assert "JSONDecodeError" in index["validation_errors"][0]
+
+
+def test_database_index_cli_help_describes_mixed_inputs(capsys):
+    from valleyscope.cli import main
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["collect-database-index", "--help"])
+
+    assert exc_info.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "database_ingestion_record.json" in help_text
+    assert "analyze-hsp output directory" in help_text
+
+
+def test_database_collector_cli_does_not_import_physics_workflows(tmp_path):
+    run_dir = _write_blocked_public_run(tmp_path / "blocked_run")
+    output = tmp_path / "index.json"
+    script = """
+import importlib.abc
+import sys
+
+blocked = {
+    "valleyscope.workflows.analyze_hsp",
+    "valleyscope.workflows.extract_wavecar",
+    "valleyscope.analysis.reduced_ebr_mapping",
+}
+
+class BlockPhysicsImports(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in blocked:
+            raise RuntimeError(f"unexpected physics import: {fullname}")
+        return None
+
+sys.meta_path.insert(0, BlockPhysicsImports())
+from valleyscope.cli import main
+
+try:
+    main(["--help"])
+except SystemExit as exc:
+    assert exc.code == 0
+
+raise SystemExit(main([
+    "collect-database-index",
+    sys.argv[1],
+    "--output",
+    sys.argv[2],
+]))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script, str(run_dir), str(output)],
+        cwd=Path(__file__).parent.parent,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(output.read_text())["record_count"] == 1
+
+
+def test_database_index_loader_accepts_run_directory(tmp_path):
+    from valleyscope.analysis.database_index import (
+        load_database_index_from_inputs,
+    )
+
+    run_dir = _write_blocked_public_run(tmp_path / "blocked_run")
+    index = load_database_index_from_inputs([str(run_dir)])
+
+    resolved = str(run_dir.resolve())
+    assert index["record_count"] == 1
+    assert index["source_files"] == [resolved]
+    assert index["runs"] == [{
+        "run_id": "run_0000",
+        "record_status": "no_reduced_ebr_input",
+        "space_group_international": "P1",
+        "space_group_number": 1,
+        "reduced_table_validation_candidate_bundle_count": 0,
+        "final_reduced_ebr_result_count": 0,
+        "final_mapping_excluded_bundle_count": 0,
+        "input_excluded_instance_count": 1,
+        "valley_irrep_record_count": 0,
+        "reduced_ebr_mapping_status": "not_available",
+        "reduced_ebr_table_status": "not_available",
+        "ebr_export_status": "no_bundles",
+        "source": resolved,
+    }]
+    assert index["validation_errors"] == []
+    assert index["input_excluded_ebr_records"][0]["source_record"] == resolved
+
+
+def test_database_index_loader_mixes_record_file_and_run_directory_in_order(
+    tmp_path,
+):
+    from valleyscope.analysis.database_index import (
+        load_database_index_from_inputs,
+    )
+
+    blocked_dir = _write_blocked_public_run(tmp_path / "blocked_run")
+    success_path = tmp_path / "success_record.json"
+    success_path.write_text(
+        json.dumps(_make_ingestion_record()),
+        encoding="utf-8",
+    )
+
+    index = load_database_index_from_inputs([
+        str(blocked_dir),
+        str(success_path),
+    ])
+
+    assert index["record_count"] == 2
+    assert [run["run_id"] for run in index["runs"]] == [
+        "run_0000", "run_0001",
+    ]
+    assert [run["source"] for run in index["runs"]] == [
+        str(blocked_dir.resolve()),
+        str(success_path.resolve()),
+    ]
+    assert index["runs"][0]["record_status"] == "no_reduced_ebr_input"
+    assert index["runs"][0]["final_reduced_ebr_result_count"] == 0
+    assert index["runs"][1]["record_status"] == (
+        "has_final_reduced_ebr_results"
+    )
+    assert index["runs"][1]["final_reduced_ebr_result_count"] == 1
+    assert index["status_counts"]["no_reduced_ebr_input"] == 1
+    assert index["status_counts"]["has_final_reduced_ebr_results"] == 1
+    assert index["final_reduced_ebr_result_count_total"] == 1
+    assert index["validation_errors"] == []
+
+
+def test_database_index_loader_rejects_duplicate_resolved_input(tmp_path):
+    from valleyscope.analysis.database_index import (
+        load_database_index_from_inputs,
+    )
+
+    run_dir = _write_blocked_public_run(tmp_path / "blocked_run")
+    index = load_database_index_from_inputs([str(run_dir), str(run_dir)])
+
+    assert index["record_count"] == 1
+    assert index["source_files"] == [str(run_dir.resolve())]
+    assert index["input_excluded_instance_count_total"] == 1
+    assert index["validation_errors"] == [
+        f"duplicate resolved input: {run_dir.resolve()}"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("summary_text", "expected_error"),
+    [
+        (None, "valley_summary.json is missing"),
+        ("{not-json", "JSONDecodeError"),
+    ],
+)
+def test_database_index_loader_directory_errors_fail_closed(
+    tmp_path,
+    summary_text,
+    expected_error,
+):
+    from valleyscope.analysis.database_index import (
+        load_database_index_from_inputs,
+    )
+
+    run_dir = tmp_path / "invalid_run"
+    run_dir.mkdir()
+    if summary_text is not None:
+        (run_dir / "valley_summary.json").write_text(
+            summary_text,
+            encoding="utf-8",
+        )
+
+    index = load_database_index_from_inputs([str(run_dir)])
+
+    assert index["record_count"] == 1
+    assert index["status_counts"]["invalid_missing_summary"] == 1
+    assert index["runs"][0]["source"] == str(run_dir.resolve())
+    assert any(
+        expected_error in error for error in index["validation_errors"]
+    )
+
+
+def test_database_index_loader_preserves_all_flattened_source_provenance(
+    tmp_path,
+):
+    from valleyscope.analysis.database_index import (
+        load_database_index_from_inputs,
+    )
+
+    record = _make_ingestion_record()
+    record["input_excluded_instance_count"] = 1
+    record["input_excluded_ebr_records"] = [{
+        "source_instance_id": "input_blocked",
+    }]
+    record["final_mapping_excluded_bundle_count"] = 1
+    record["final_mapping_excluded_records"] = [{
+        "bundle_id": "mapping_blocked",
+    }]
+    record_path = tmp_path / "record.json"
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    index = load_database_index_from_inputs([str(record_path)])
+    resolved = str(record_path.resolve())
+
+    for collection in (
+        "valley_irrep_records",
+        "reduced_ebr_records",
+        "input_excluded_ebr_records",
+        "final_mapping_excluded_records",
+    ):
+        assert index[collection]
+        assert all(
+            row["run_id"] == "run_0000"
+            and row["source_record"] == resolved
+            for row in index[collection]
+        )
+
+
+def test_database_index_loader_is_byte_deterministic_across_hash_seeds(
+    tmp_path,
+):
+    blocked_dir = _write_blocked_public_run(tmp_path / "blocked_run")
+    record_path = tmp_path / "record.json"
+    record_path.write_text(
+        json.dumps(_make_ingestion_record()),
+        encoding="utf-8",
+    )
+    outputs = []
+    for seed in ("1", "41"):
+        output = tmp_path / f"index_{seed}.json"
+        env = dict(os.environ)
+        env["PYTHONHASHSEED"] = seed
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "valleyscope.cli",
+                "collect-database-index",
+                str(blocked_dir),
+                str(record_path),
+                "--output",
+                str(output),
+            ],
+            cwd=Path(__file__).parent.parent,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr
+        outputs.append(output.read_bytes())
+
+    assert outputs[0] == outputs[1]
 
 
 def test_database_index_module_no_material_names():

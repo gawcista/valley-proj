@@ -315,12 +315,16 @@ valleyscope collect-database-record ./valley_analysis --output record.json
 Generic irrep rows in this record preserve `irrep_source_provenance`, including
 `standard_setting_hsp_mapping.standard_setting_certificate` when available.
 
-Build a multi-run database index:
+Build a multi-run database index directly from any explicit mixture of
+ingestion-record files and `analyze-hsp` output directories:
 
 ```bash
-valleyscope collect-database-index run1/record.json run2/record.json \
+valleyscope collect-database-index run1/record.json run2/valley_analysis \
   --output database_index.json
 ```
+
+Inputs are consumed in command-line order. Directories are not scanned
+recursively and do not produce an intermediate ingestion-record file.
 
 ### Minimal Example
 

@@ -5,17 +5,6 @@ import json
 import sys
 from pathlib import Path
 
-from valleyscope.workflows.extract_wavecar import extract_wavecar_to_h5
-from valleyscope.workflows.analyze_hsp import analyze_hsp
-from valleyscope.analysis.reduced_ebr_mapping import (
-    load_reduced_ebr_table,
-    build_reduced_ebr_mapping,
-)
-from valleyscope.reports.json_report import write_json
-from valleyscope.analysis.database_ingestion_record import (
-    load_database_ingestion_record_from_directory,
-)
-
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="valleyscope")
@@ -33,11 +22,17 @@ def main(argv: list[str] | None = None) -> int:
     _add_validate_spec_parser(subparsers)
     args = parser.parse_args(argv)
     if args.command == "analyze-hsp":
+        from valleyscope.workflows.analyze_hsp import analyze_hsp
+
         outputs = analyze_hsp(args.config)
         if outputs.get("summary_stdout", True):
             print(str(outputs["summary_text"]), end="")
         return 0
     if args.command == "extract-wavecar":
+        from valleyscope.workflows.extract_wavecar import (
+            extract_wavecar_to_h5,
+        )
+
         output = extract_wavecar_to_h5(args.config)
         print(f"Wrote selected wavefunctions to {output}")
         return 0
@@ -95,6 +90,12 @@ def _add_map_reduced_ebr_parser(subparsers) -> None:
 
 
 def _map_reduced_ebr(args) -> int:
+    from valleyscope.analysis.reduced_ebr_mapping import (
+        build_reduced_ebr_mapping,
+        load_reduced_ebr_table,
+    )
+    from valleyscope.reports.json_report import write_json
+
     bundle_path = Path(args.bundle)
     output_path = Path(args.output)
     max_coeff = int(args.max_coefficient)
@@ -197,6 +198,11 @@ def _add_collect_database_record_parser(subparsers) -> None:
 
 
 def _collect_database_record(args) -> int:
+    from valleyscope.analysis.database_ingestion_record import (
+        load_database_ingestion_record_from_directory,
+    )
+    from valleyscope.reports.json_report import write_json
+
     run_dir = Path(args.run_dir)
     output_path = Path(args.output)
 
@@ -243,13 +249,19 @@ def _collect_database_record(args) -> int:
 def _add_collect_database_index_parser(subparsers) -> None:
     p = subparsers.add_parser(
         "collect-database-index",
-        help="Build a compact multi-run database index from ingestion records",
+        help=(
+            "Build a compact multi-run database index from ingestion records "
+            "and analyze-hsp output directories"
+        ),
     )
     p.add_argument(
-        "records",
+        "inputs",
         nargs="+",
         type=Path,
-        help="One or more database_ingestion_record.json file paths",
+        help=(
+            "One or more database_ingestion_record.json file paths or "
+            "analyze-hsp output directory paths"
+        ),
     )
     p.add_argument(
         "--output", "-o",
@@ -260,11 +272,13 @@ def _add_collect_database_index_parser(subparsers) -> None:
 
 
 def _collect_database_index(args) -> int:
-    from valleyscope.analysis.database_index import load_database_index_from_files
+    from valleyscope.analysis.database_index import (
+        load_database_index_from_inputs,
+    )
     from valleyscope.reports.json_report import write_json
 
-    record_paths = [str(p) for p in args.records]
-    index = load_database_index_from_files(record_paths)
+    input_paths = [str(path) for path in args.inputs]
+    index = load_database_index_from_inputs(input_paths)
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     write_json(output_path, index)
@@ -339,6 +353,10 @@ def _build_reduced_ebr_table(args) -> int:
     from valleyscope.analysis.irreptables_runtime_table_builder import (
         build_reduced_table_from_spec_file,
     )
+    from valleyscope.analysis.reduced_ebr_mapping import (
+        load_reduced_ebr_table,
+    )
+    from valleyscope.reports.json_report import write_json
 
     spec_path = Path(args.spec)
     output_path = Path(args.output)

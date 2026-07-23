@@ -285,12 +285,15 @@ valleyscope collect-database-record ./valley_analysis --output record.json
 该记录中的 generic irrep 行会保留 `irrep_source_provenance`，包括可用时的
 `standard_setting_hsp_mapping.standard_setting_certificate`。
 
-从多个采集记录生成多运行数据库索引：
+从显式指定的采集记录文件和 `analyze-hsp` 输出目录的任意混合输入，直接生成
+多运行数据库索引：
 
 ```bash
-valleyscope collect-database-index run1/record.json run2/record.json \
+valleyscope collect-database-index run1/record.json run2/valley_analysis \
   --output database_index.json
 ```
+
+输入按命令行顺序消费；目录不会被递归扫描，也不会生成中间采集记录文件。
 
 ### 最小可运行配置
 

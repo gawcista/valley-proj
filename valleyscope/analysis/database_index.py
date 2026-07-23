@@ -198,22 +198,56 @@ def load_database_index_from_files(
 ) -> dict[str, Any]:
     """Load ingestion records from file paths and build a database index.
 
+    This compatibility entry point delegates to the mixed-input loader.
+    """
+    return load_database_index_from_inputs(record_paths)
+
+
+def load_database_index_from_inputs(
+    input_paths: list[str],
+) -> dict[str, Any]:
+    """Load explicit ingestion-record files or analyze-hsp output directories.
+
     Invalid JSON files are recorded as validation errors with a synthetic
-    ``invalid_missing_summary`` run entry.  Missing files are recorded
-    similarly.
+    ``invalid_missing_summary`` run entry. Missing inputs and malformed public
+    output directories are recorded similarly. Duplicate resolved inputs are
+    rejected without adding a second run.
     """
     records: list[dict[str, Any]] = []
-    source_files: list[str] = []
+    source_inputs: list[str] = []
+    loader_errors: list[str] = []
+    seen: set[Path] = set()
 
-    for path in record_paths:
-        source_files.append(str(Path(path).resolve()))
+    for raw_path in input_paths:
+        resolved = Path(raw_path).resolve()
+        if resolved in seen:
+            loader_errors.append(f"duplicate resolved input: {resolved}")
+            continue
+        seen.add(resolved)
+        source_inputs.append(str(resolved))
         try:
-            records.append(json.loads(Path(path).read_text(encoding="utf-8")))
-        except (FileNotFoundError, json.JSONDecodeError) as exc:
+            if resolved.is_dir():
+                from valleyscope.analysis.database_ingestion_record import (
+                    load_database_ingestion_record_from_directory,
+                )
+
+                record = load_database_ingestion_record_from_directory(
+                    resolved
+                )
+            else:
+                record = json.loads(resolved.read_text(encoding="utf-8"))
+                if not isinstance(record, dict):
+                    raise ValueError(
+                        "ingestion record JSON must be an object"
+                    )
+            records.append(record)
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
             records.append({
                 "schema_version": "?",
                 "record_status": "invalid_missing_summary",
-                "validation_errors": [f"{path}: {type(exc).__name__}: {exc}"],
+                "validation_errors": [f"{type(exc).__name__}: {exc}"],
             })
 
-    return build_database_index(records, source_files=source_files)
+    index = build_database_index(records, source_files=source_inputs)
+    index["validation_errors"].extend(loader_errors)
+    return index
