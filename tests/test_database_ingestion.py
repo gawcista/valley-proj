@@ -924,12 +924,25 @@ def test_database_index_builder_two_records():
     assert index["runs"][0]["run_id"] == "run_0000"
     assert index["runs"][1]["run_id"] == "run_0001"
     assert index["runs"][0]["source"].endswith("/run_a/database_ingestion_record.json")
+    assert index["source_inputs"] == [
+        {
+            "kind": "ingestion_record_file",
+            "path": "/tmp/run_a/database_ingestion_record.json",
+        },
+        {
+            "kind": "ingestion_record_file",
+            "path": "/tmp/run_b/database_ingestion_record.json",
+        },
+    ]
+    assert index["runs"][0]["source_input"] == index["source_inputs"][0]
     for ir in index["valley_irrep_records"]:
         assert "run_id" in ir
         assert "source_record" in ir
+        assert ir["source_input"]["kind"] == "ingestion_record_file"
     for rr in index["reduced_ebr_records"]:
         assert "run_id" in rr
         assert "source_record" in rr
+        assert rr["source_input"]["kind"] == "ingestion_record_file"
     assert len(index["reduced_ebr_records"]) == 2
 
 
@@ -960,6 +973,7 @@ def test_database_index_uses_stage_owned_aggregates_only():
     from valleyscope.analysis.database_index import build_database_index
 
     record = {
+        "schema_version": "1.8.0",
         "record_status": "has_final_reduced_ebr_results",
         "reduced_table_validation_candidate_bundle_count": 2,
         "final_reduced_ebr_result_count": 1,
@@ -975,7 +989,7 @@ def test_database_index_uses_stage_owned_aggregates_only():
 
     index = build_database_index([record])
 
-    assert index["schema_version"] == "1.1.0"
+    assert index["schema_version"] == "1.2.0"
     assert index["status_counts"]["has_final_reduced_ebr_results"] == 1
     assert index[
         "reduced_table_validation_candidate_bundle_count_total"
@@ -991,71 +1005,7 @@ def test_database_index_uses_stage_owned_aggregates_only():
     assert "excluded_ebr_records" not in index
 
 
-def test_database_index_cli_writes_json(tmp_path):
-    """CLI collect-database-index writes database_index.json."""
-    from valleyscope.cli import main
-    rec1_path = tmp_path / "rec1.json"
-    rec1_path.write_text(json.dumps(_make_ingestion_record(
-        "has_final_reduced_ebr_results"
-    )))
-    rec2_path = tmp_path / "rec2.json"
-    rec2_path.write_text(json.dumps(_make_ingestion_record(
-        "no_reduced_ebr_input"
-    )))
-    out = tmp_path / "index.json"
-    rc = main(["collect-database-index", str(rec1_path), str(rec2_path),
-               "-o", str(out)])
-    assert rc == 0
-    assert out.exists()
-    idx = json.loads(out.read_text())
-    assert idx["record_count"] == 2
-    assert idx[
-        "reduced_table_validation_candidate_bundle_count_total"
-    ] == 4
-    assert idx["final_reduced_ebr_result_count_total"] == 2
-
-
-def test_database_index_cli_invalid_input(tmp_path):
-    """CLI returns nonzero on missing input file."""
-    from valleyscope.cli import main
-    rec1_path = tmp_path / "rec1.json"
-    rec1_path.write_text(json.dumps(_make_ingestion_record(
-        "has_final_reduced_ebr_results"
-    )))
-    out = tmp_path / "index.json"
-    rc = main(["collect-database-index", str(rec1_path), "/nonexistent/path.json",
-               "-o", str(out)])
-    assert rc != 0
-    assert out.exists()
-    idx = json.loads(out.read_text())
-    assert idx["record_count"] == 2
-    assert idx["status_counts"]["has_final_reduced_ebr_results"] == 1
-    assert idx["status_counts"]["invalid_missing_summary"] == 1
-    assert idx["validation_errors"]
-    assert "FileNotFoundError" in idx["validation_errors"][0]
-
-
-def test_database_index_cli_accepts_directory_only(tmp_path):
-    from valleyscope.cli import main
-
-    run_dir = _write_blocked_public_run(tmp_path / "blocked_run")
-    output = tmp_path / "index.json"
-
-    rc = main([
-        "collect-database-index",
-        str(run_dir),
-        "--output",
-        str(output),
-    ])
-
-    assert rc == 0
-    index = json.loads(output.read_text(encoding="utf-8"))
-    assert index["record_count"] == 1
-    assert index["runs"][0]["record_status"] == "no_reduced_ebr_input"
-    assert index["runs"][0]["source"] == str(run_dir.resolve())
-
-
-def test_database_index_cli_accepts_mixed_file_and_directory(tmp_path):
+def test_database_index_cli_mixed_inputs_write_fail_closed_index(tmp_path):
     from valleyscope.cli import main
 
     record_path = tmp_path / "success.json"
@@ -1064,75 +1014,40 @@ def test_database_index_cli_accepts_mixed_file_and_directory(tmp_path):
         encoding="utf-8",
     )
     run_dir = _write_blocked_public_run(tmp_path / "blocked_run")
-    output = tmp_path / "index.json"
-
-    rc = main([
-        "collect-database-index",
-        str(record_path),
-        str(run_dir),
-        "--output",
-        str(output),
-    ])
-
-    assert rc == 0
-    index = json.loads(output.read_text(encoding="utf-8"))
-    assert index["record_count"] == 2
-    assert index["final_reduced_ebr_result_count_total"] == 1
-    assert [run["record_status"] for run in index["runs"]] == [
-        "has_final_reduced_ebr_results",
-        "no_reduced_ebr_input",
-    ]
-    assert index["validation_errors"] == []
-
-
-def test_database_index_cli_duplicate_input_is_nonzero_without_double_count(
-    tmp_path,
-):
-    from valleyscope.cli import main
-
-    run_dir = _write_blocked_public_run(tmp_path / "blocked_run")
-    output = tmp_path / "index.json"
-
-    rc = main([
-        "collect-database-index",
-        str(run_dir),
-        str(run_dir),
-        "--output",
-        str(output),
-    ])
-
-    assert rc == 1
-    index = json.loads(output.read_text(encoding="utf-8"))
-    assert index["record_count"] == 1
-    assert index["input_excluded_instance_count_total"] == 1
-    assert index["validation_errors"] == [
-        f"duplicate resolved input: {run_dir.resolve()}"
-    ]
-
-
-def test_database_index_cli_malformed_directory_is_nonzero(tmp_path):
-    from valleyscope.cli import main
-
-    run_dir = tmp_path / "malformed_run"
-    run_dir.mkdir()
-    (run_dir / "valley_summary.json").write_text(
-        "{not-json",
+    invalid_path = tmp_path / "invalid.json"
+    invalid_path.write_text(
+        json.dumps({"hello": "world"}),
         encoding="utf-8",
     )
     output = tmp_path / "index.json"
 
     rc = main([
         "collect-database-index",
+        str(record_path),
         str(run_dir),
+        str(invalid_path),
         "--output",
         str(output),
     ])
 
     assert rc == 1
     index = json.loads(output.read_text(encoding="utf-8"))
-    assert index["record_count"] == 1
-    assert index["status_counts"]["invalid_missing_summary"] == 1
-    assert "JSONDecodeError" in index["validation_errors"][0]
+    assert index["schema_version"] == "1.2.0"
+    assert index["record_count"] == 3
+    assert index["final_reduced_ebr_result_count_total"] == 1
+    assert [run["record_status"] for run in index["runs"]] == [
+        "has_final_reduced_ebr_results",
+        "no_reduced_ebr_input",
+        "invalid_missing_summary",
+    ]
+    assert [source["kind"] for source in index["source_inputs"]] == [
+        "ingestion_record_file",
+        "analyze_output_directory",
+        "ingestion_record_file",
+    ]
+    assert "schema_version must be a nonempty string" in (
+        index["validation_errors"][0]
+    )
 
 
 def test_database_index_cli_help_describes_mixed_inputs(capsys):
@@ -1203,7 +1118,12 @@ def test_database_index_loader_accepts_run_directory(tmp_path):
 
     resolved = str(run_dir.resolve())
     assert index["record_count"] == 1
-    assert index["source_files"] == [resolved]
+    assert index["schema_version"] == "1.2.0"
+    assert index["source_files"] == []
+    assert index["source_inputs"] == [{
+        "kind": "analyze_output_directory",
+        "path": resolved,
+    }]
     assert index["runs"] == [{
         "run_id": "run_0000",
         "record_status": "no_reduced_ebr_input",
@@ -1217,10 +1137,15 @@ def test_database_index_loader_accepts_run_directory(tmp_path):
         "reduced_ebr_mapping_status": "not_available",
         "reduced_ebr_table_status": "not_available",
         "ebr_export_status": "no_bundles",
-        "source": resolved,
+        "source_input": {
+            "kind": "analyze_output_directory",
+            "path": resolved,
+        },
     }]
     assert index["validation_errors"] == []
-    assert index["input_excluded_ebr_records"][0]["source_record"] == resolved
+    excluded = index["input_excluded_ebr_records"][0]
+    assert excluded["source_input"] == index["source_inputs"][0]
+    assert "source_record" not in excluded
 
 
 def test_database_index_loader_mixes_record_file_and_run_directory_in_order(
@@ -1246,10 +1171,22 @@ def test_database_index_loader_mixes_record_file_and_run_directory_in_order(
     assert [run["run_id"] for run in index["runs"]] == [
         "run_0000", "run_0001",
     ]
-    assert [run["source"] for run in index["runs"]] == [
-        str(blocked_dir.resolve()),
-        str(success_path.resolve()),
+    assert index["source_inputs"] == [
+        {
+            "kind": "analyze_output_directory",
+            "path": str(blocked_dir.resolve()),
+        },
+        {
+            "kind": "ingestion_record_file",
+            "path": str(success_path.resolve()),
+        },
     ]
+    assert index["source_files"] == [str(success_path.resolve())]
+    assert [run["source_input"] for run in index["runs"]] == (
+        index["source_inputs"]
+    )
+    assert "source" not in index["runs"][0]
+    assert index["runs"][1]["source"] == str(success_path.resolve())
     assert index["runs"][0]["record_status"] == "no_reduced_ebr_input"
     assert index["runs"][0]["final_reduced_ebr_result_count"] == 0
     assert index["runs"][1]["record_status"] == (
@@ -1271,7 +1208,11 @@ def test_database_index_loader_rejects_duplicate_resolved_input(tmp_path):
     index = load_database_index_from_inputs([str(run_dir), str(run_dir)])
 
     assert index["record_count"] == 1
-    assert index["source_files"] == [str(run_dir.resolve())]
+    assert index["source_files"] == []
+    assert index["source_inputs"] == [{
+        "kind": "analyze_output_directory",
+        "path": str(run_dir.resolve()),
+    }]
     assert index["input_excluded_instance_count_total"] == 1
     assert index["validation_errors"] == [
         f"duplicate resolved input: {run_dir.resolve()}"
@@ -1306,7 +1247,107 @@ def test_database_index_loader_directory_errors_fail_closed(
 
     assert index["record_count"] == 1
     assert index["status_counts"]["invalid_missing_summary"] == 1
-    assert index["runs"][0]["source"] == str(run_dir.resolve())
+    assert index["runs"][0]["source_input"] == {
+        "kind": "analyze_output_directory",
+        "path": str(run_dir.resolve()),
+    }
+    assert "source" not in index["runs"][0]
+    assert any(
+        expected_error in error for error in index["validation_errors"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("filename", "payload"),
+    [
+        ("valley_summary.json", []),
+        ("valley_ebr_export_bundle.json", []),
+        ("valley_reduced_ebr_mapping.json", []),
+    ],
+)
+def test_database_index_loader_rejects_non_object_public_payloads(
+    tmp_path,
+    filename,
+    payload,
+):
+    from valleyscope.analysis.database_index import (
+        load_database_index_from_inputs,
+    )
+
+    run_dir = _write_blocked_public_run(tmp_path / "invalid_run")
+    (run_dir / filename).write_text(
+        json.dumps(payload),
+        encoding="utf-8",
+    )
+
+    index = load_database_index_from_inputs([str(run_dir)])
+
+    assert index["record_count"] == 1
+    assert index["runs"][0]["record_status"] == "invalid_missing_summary"
+    assert index["status_counts"]["invalid_missing_summary"] == 1
+    assert any(
+        f"{filename} must contain a JSON object" in error
+        for error in index["validation_errors"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid_value", "expected_error"),
+    [
+        (None, None, "schema_version must be a nonempty string"),
+        (
+            "final_reduced_ebr_result_count",
+            "three",
+            "final_reduced_ebr_result_count must be a nonnegative integer",
+        ),
+        (
+            "final_reduced_ebr_result_count",
+            True,
+            "final_reduced_ebr_result_count must be a nonnegative integer",
+        ),
+        (
+            "valley_irrep_records",
+            {},
+            "valley_irrep_records must be a list",
+        ),
+        (
+            "validation_errors",
+            "not-a-list",
+            "validation_errors must be a list",
+        ),
+        (
+            "reduced_ebr_classification_counts",
+            {"outside_integer_span": True},
+            "outside_integer_span must be a nonnegative integer",
+        ),
+        (
+            "ebr_export_status",
+            [],
+            "ebr_export_status must be a string",
+        ),
+    ],
+)
+def test_database_index_loader_rejects_semantically_invalid_record_files(
+    tmp_path,
+    field,
+    invalid_value,
+    expected_error,
+):
+    from valleyscope.analysis.database_index import (
+        load_database_index_from_inputs,
+    )
+
+    record = {"hello": "world"} if field is None else _make_ingestion_record()
+    if field is not None:
+        record[field] = invalid_value
+    record_path = tmp_path / "invalid_record.json"
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    index = load_database_index_from_inputs([str(record_path)])
+
+    assert index["record_count"] == 1
+    assert index["runs"][0]["record_status"] == "invalid_missing_summary"
+    assert index["status_counts"]["invalid_missing_summary"] == 1
     assert any(
         expected_error in error for error in index["validation_errors"]
     )
@@ -1344,6 +1385,47 @@ def test_database_index_loader_preserves_all_flattened_source_provenance(
         assert all(
             row["run_id"] == "run_0000"
             and row["source_record"] == resolved
+            and row["source_input"] == {
+                "kind": "ingestion_record_file",
+                "path": resolved,
+            }
+            for row in index[collection]
+        )
+
+
+def test_database_index_directory_provenance_removes_source_record_alias():
+    from valleyscope.analysis.database_index import build_database_index
+
+    record = _make_ingestion_record()
+    record["input_excluded_instance_count"] = 1
+    record["input_excluded_ebr_records"] = [{"source_record": "/forged"}]
+    record["final_mapping_excluded_bundle_count"] = 1
+    record["final_mapping_excluded_records"] = [{"source_record": "/forged"}]
+    for collection in (
+        "valley_irrep_records",
+        "reduced_ebr_records",
+    ):
+        record[collection][0]["source_record"] = "/forged"
+    source_input = {
+        "kind": "analyze_output_directory",
+        "path": "/tmp/valley_analysis",
+    }
+
+    index = build_database_index(
+        [record],
+        source_inputs=[source_input],
+    )
+
+    for collection in (
+        "valley_irrep_records",
+        "reduced_ebr_records",
+        "input_excluded_ebr_records",
+        "final_mapping_excluded_records",
+    ):
+        assert index[collection]
+        assert all(
+            row["source_input"] == source_input
+            and "source_record" not in row
             for row in index[collection]
         )
 
@@ -1456,6 +1538,7 @@ def test_database_index_input_excluded_records_aggregated():
         "reduced_ebr_mapping_status": "?",
         "reduced_ebr_table_status": "?",
         "ebr_export_status": "partial_export",
+        "final_mapping_excluded_records": [],
         "input_excluded_ebr_records": [
             {"source_instance_id": "ebr_001", "valley": "M3_valley",
              "exclusion_reasons": ["spinor_convention_unverified"]},
@@ -1472,6 +1555,7 @@ def test_database_index_input_exclusions_have_source_record():
     """Input exclusions carry source_record when source_files are provided."""
     from valleyscope.analysis.database_index import build_database_index
     rec = {
+        "schema_version": "1.8.0",
         "record_status": "no_reduced_ebr_input",
         "reduced_table_validation_candidate_bundle_count": 0,
         "final_reduced_ebr_result_count": 0,
@@ -1483,15 +1567,21 @@ def test_database_index_input_exclusions_have_source_record():
         "reduced_ebr_mapping_status": "?",
         "reduced_ebr_table_status": "?",
         "ebr_export_status": "no_bundles",
+        "final_mapping_excluded_records": [],
         "input_excluded_ebr_records": [
             {"source_instance_id": "ebr_x", "valley": "M1_valley",
              "exclusion_reasons": ["low_seed_overlap"]},
         ],
+        "validation_errors": [],
     }
     idx = build_database_index([rec], source_files=["/tmp/rec.json"])
     er = idx["input_excluded_ebr_records"][0]
     assert er["run_id"] == "run_0000"
     assert er["source_record"] == "/tmp/rec.json"
+    assert er["source_input"] == {
+        "kind": "ingestion_record_file",
+        "path": "/tmp/rec.json",
+    }
 
 
 def test_ingestion_record_schema_version_is_1_8_0():
@@ -1699,6 +1789,10 @@ def test_database_index_preserves_generic_irrep_fields_with_run_provenance():
     ir = index["valley_irrep_records"][0]
     assert ir["run_id"] == "run_0000"
     assert ir["source_record"] == "/tmp/database_ingestion_record.json"
+    assert ir["source_input"] == {
+        "kind": "ingestion_record_file",
+        "path": "/tmp/database_ingestion_record.json",
+    }
     assert ir["irrep_multiplicity"] == 2
     assert ir["matching_strategy"] == "bilbao_restricted_character"
     assert ir["subspace_space_group"] == {"candidate_space_group_symbol": "P3"}

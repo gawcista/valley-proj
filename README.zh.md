@@ -294,6 +294,9 @@ valleyscope collect-database-index run1/record.json run2/valley_analysis \
 ```
 
 输入按命令行顺序消费；目录不会被递归扫描，也不会生成中间采集记录文件。
+数据库索引 schema `1.2.0` 将每个输入记录为带类型的 `source_input`；
+兼容字段 `source_files` 和 `source_record` 仍仅表示采集记录文件，绝不会写入
+分析输出目录。
 
 ### 最小可运行配置
 

@@ -325,6 +325,9 @@ valleyscope collect-database-index run1/record.json run2/valley_analysis \
 
 Inputs are consumed in command-line order. Directories are not scanned
 recursively and do not produce an intermediate ingestion-record file.
+Database-index schema `1.2.0` records every input as a typed `source_input`;
+legacy `source_files` and `source_record` provenance remain file-only and
+never contain an analysis output directory.
 
 ### Minimal Example
 

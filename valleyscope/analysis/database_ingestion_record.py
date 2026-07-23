@@ -22,6 +22,13 @@ from valleyscope.analysis.unitary_provenance import (
 _SCHEMA_VERSION = "1.8.0"
 
 
+def _load_json_object(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"{path.name} must contain a JSON object")
+    return payload
+
+
 def build_database_ingestion_record(
     *,
     valley_summary: dict[str, Any] | None = None,
@@ -316,21 +323,21 @@ def load_database_ingestion_record_from_directory(
     summary_path = root / "valley_summary.json"
     if not summary_path.is_file():
         return build_database_ingestion_record(output_profile=output_profile)
-    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary = _load_json_object(summary_path)
     source_files["valley_summary"] = str(summary_path.resolve())
 
     # valley_ebr_export_bundle.json (optional)
     bundle = None
     bundle_path = root / "valley_ebr_export_bundle.json"
     if bundle_path.is_file():
-        bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+        bundle = _load_json_object(bundle_path)
         source_files["valley_ebr_export_bundle"] = str(bundle_path.resolve())
 
     # valley_reduced_ebr_mapping.json (optional)
     mapping = None
     mapping_path = root / "valley_reduced_ebr_mapping.json"
     if mapping_path.is_file():
-        mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+        mapping = _load_json_object(mapping_path)
         source_files["valley_reduced_ebr_mapping"] = str(mapping_path.resolve())
 
     return build_database_ingestion_record(
