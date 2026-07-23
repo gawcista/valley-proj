@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 import yaml
 
+from valleyscope.cli import main
 from valleyscope.io.config import load_config
 from valleyscope.workflows.analyze_hsp import analyze_hsp
 from valleyscope.reports.analysis_outputs import write_analysis_outputs
@@ -82,6 +83,26 @@ def test_debug_profile_writes_all_detailed_files(tmp_path):
 
     summary_json = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     assert summary_json.get("output_profile") == "debug"
+
+
+@pytest.mark.parametrize("profile", ["standard", "debug"])
+def test_cli_stdout_matches_written_summary_for_selected_profile(
+    tmp_path, capsys, profile,
+):
+    h5_path = tmp_path / "wf.h5"
+    config_path = tmp_path / "config.yaml"
+    out_dir = tmp_path / "out"
+    write_fixture(h5_path)
+    write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["output"]["profile"] = profile
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    assert main(["analyze-hsp", str(config_path)]) == 0
+
+    assert capsys.readouterr().out == (
+        out_dir / "valley_summary.txt"
+    ).read_text(encoding="utf-8")
 
 
 def test_write_detailed_files_false_maps_to_standard_with_warning(tmp_path):

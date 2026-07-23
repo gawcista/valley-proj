@@ -305,6 +305,7 @@ def test_reduced_ebr_classifier_payload_written_consistently_to_public_outputs(t
     assert mapping_json == mapping
     assert summary_json["valley_reduced_ebr_mapping"] == mapping
     assert "classifications: atomic-compatible=1, in integer span, no nonnegative witness=1, outside integer span=1" in summary_text
+    assert "reviewed table source: irreptables" in summary_text
     assert "b_atom K: atomic-compatible" in summary_text
     assert "b_frag K: in integer span, no nonnegative witness" in summary_text
     assert "b_stab K: outside integer span (outside integer span)" in summary_text

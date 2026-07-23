@@ -48,6 +48,227 @@ def _analysis_output_file_keys() -> set[str]:
 # summary rendering
 # ---------------------------------------------------------------------------
 
+def _concise_summary_contract_payload() -> dict[str, object]:
+    return {
+        "input": {
+            "wavefunction_h5": "fixture.h5",
+            "operation_structure_file": "structure.vasp",
+            "operation_detection_backend": "spglib",
+            "spinor_convention": "vasp",
+            "spinor_convention_verified": True,
+            "spinor_benchmark": "reviewed",
+        },
+        "target_kpoints": ["H0"],
+        "iband": [7],
+        "valley_subspaces": [
+            {"label": "alpha", "centers": ["A"]},
+            {"label": "beta", "centers": ["B"]},
+        ],
+        "qcut": {
+            "projector_mode": "fixed_center",
+            "mode": "relative_min_valley_distance",
+            "value_Ainv": 0.125,
+            "fraction": 0.25,
+        },
+        "valley_projection_summary": [{
+            "kpoint": "H0",
+            "band_vasp": 7,
+            "valley_weights": {"alpha": 0.7, "beta": 0.2},
+            "W_val": 0.9,
+            "P_v": 0.7 / 0.9,
+            "W_overlap": 0.0,
+            "W_res": 0.1,
+            "status": "mixed",
+        }],
+        "valley_subspace_analysis": [],
+        "valley_projector_quality": [{"kpoint": "H0"}],
+        "symmetry_analysis": {
+            "status": "ok",
+            "international": "parent",
+            "spacegroup_number": 99,
+            "detected_operations": [{"operation_id": 0, "kind": "identity"}],
+            "by_kpoint": {},
+        },
+        "symmetry_eigenvalues": [{
+            "kpoint": "H0",
+            "target_valley": "alpha",
+            "operation_id": 0,
+            "order": 1,
+            "state_index": 0,
+            "phase_2pi": 0.0,
+            "nearest_root_of_unity": "1",
+            "root_deviation": 0.0,
+        }],
+        "projector_symmetry": {"status": "ok", "by_kpoint": {}},
+        "symmetry_adapted_valley_analysis": {"status": "not_needed"},
+        "target_subspace_closure": {"status": "ok", "by_kpoint": {}},
+        "hsp_star_conjugation": {"status": "ok", "by_source_kpoint": {}},
+        "hsp_star_derived_characters": {"status": "ok", "entries": []},
+        "irrep_workflow_decisions": {"workflow_paths": [], "readiness_levels": []},
+        "valley_ebr_input_candidates": {
+            "status": "ready",
+            "candidate_count": 1,
+            "blocked": [{"reason": "source HSP coverage incomplete"}],
+        },
+        "valley_ebr_problem_instances": {
+            "status": "ready",
+            "instance_count": 1,
+            "instances": [{
+                "status": "complete_but_blocked",
+                "blocked_by": ["canonical HSP vector not ready"],
+            }],
+        },
+        "valley_resolved_irreps": {
+            "status": "ok",
+            "matched_count": 1,
+            "blocked_count": 1,
+            "diagnostic_count": 0,
+            "non_source_count": 0,
+            "rows": [{
+                "kpoint": "H0",
+                "valley": "alpha",
+                "subspace_space_group": "SgX",
+                "hsp_little_group_operation_ids": [0, 4],
+                "valley_preserving_operation_ids": [0],
+                "matching_status": "matched",
+                "irrep_multiplicities": {"rho": 1},
+                "readiness_level": "trusted",
+                "diagnostic_only": False,
+                "reason": "",
+            }, {
+                "kpoint": "H0",
+                "valley": "beta",
+                "subspace_space_group": "SgX",
+                "hsp_little_group_operation_ids": [0, 4],
+                "valley_preserving_operation_ids": [0],
+                "matching_status": "blocked",
+                "irrep_multiplicities": {},
+                "readiness_level": "blocked",
+                "diagnostic_only": True,
+                "reason": "seed projector symmetry-consistency failed",
+            }],
+        },
+        "valley_projected_representations": {
+            "trusted_representation_count": 1,
+            "blocked_representation_count": 1,
+            "diagnostic_only_count": 1,
+            "subspace_space_group_counts": {"SgX": 2},
+            "rows": [{
+                "kpoint": "H0",
+                "valley": "beta",
+                "blocking_reasons": [
+                    "seed projector symmetry-consistency failed",
+                ],
+            }],
+        },
+        "valley_ebr_export_bundle": {
+            "status": "ready_for_reduced_table_validation",
+            "bundle_count": 1,
+            "excluded_count": 0,
+            "bundles": [],
+            "excluded_instances": [],
+        },
+        "valley_reduced_ebr_mapping": {
+            "status": "solved_exact",
+            "table_status": "loaded",
+            "reduced_ebr_input": {
+                "table_input_provenance_by_bundle": {
+                    "bundle-1": {
+                        "data_source": "reviewed-source",
+                        "package_version": "1.2.3",
+                    },
+                },
+            },
+            "solutions": [{
+                "bundle_id": "bundle-1",
+                "physical_object_kind": "unitary_valley_projected_subspace",
+                "valley": "alpha",
+                "valley_orbit": ["alpha"],
+                "classification": "atomic-compatible-candidate",
+                "ebr_decomposition": [{"label": "E@1a", "coefficient": 1}],
+            }],
+            "excluded_bundles": [],
+        },
+        "warnings": ["projection overlap requires review"],
+        "output_profile": "standard",
+        "output_files": {
+            "valley_summary_txt": "out/valley_summary.txt",
+            "valley_summary_json": "out/valley_summary.json",
+            "valley_reduced_ebr_mapping_json":
+                "out/valley_reduced_ebr_mapping.json",
+        },
+    }
+
+
+def test_standard_summary_is_concise_result_first_and_preserves_payload():
+    from valleyscope.reports.summary_report import render_summary_text
+
+    summary = _concise_summary_contract_payload()
+    before = json.dumps(summary, sort_keys=True)
+
+    text = render_summary_text(summary)
+
+    assert json.dumps(summary, sort_keys=True) == before
+    required_in_order = [
+        "Run and projection context",
+        "qcut value: 0.125 A^-1",
+        "qcut fraction: 0.25",
+        "Valley projection by sampled state",
+        "alpha",
+        "beta",
+        "Valley-projected subspace space group and trusted HSP irreps",
+        "SgX",
+        "rho:1",
+        "Authoritative reduced EBR results",
+        "unitary_valley_projected_subspace",
+        "reviewed-source 1.2.3",
+        "atomic-compatible-candidate",
+        "E@1a x 1",
+        "Readiness blockers and warnings",
+        "canonical HSP vector not ready",
+        "seed projector symmetry-consistency failed",
+        "source HSP coverage incomplete",
+        "Public output files",
+    ]
+    positions = [text.index(value) for value in required_in_order]
+    assert positions == sorted(positions)
+
+    detailed_sections = [
+        "Detected operations:",
+        "Symmetry eigenvalues",
+        "Projected q-cut seed projector quality",
+        "Projector symmetry-consistency",
+        "Symmetry-adapted valley analysis",
+        "Target-subspace symmetry closure",
+        "HSP-star conjugation",
+        "HSP-star derived characters",
+        "Irrep workflow decisions",
+        "EBR input candidates",
+        "EBR problem instances",
+    ]
+    assert not any(section in text for section in detailed_sections)
+
+
+def test_debug_summary_retains_detailed_diagnostic_report():
+    from valleyscope.reports.summary_report import render_summary_text
+
+    summary = _concise_summary_contract_payload()
+    summary["output_profile"] = "debug"
+
+    text = render_summary_text(summary)
+
+    assert "Detected operations:" in text
+    assert "Symmetry eigenvalues" in text
+    assert "Projected q-cut seed projector quality" in text
+    assert "Projector symmetry-consistency" in text
+    assert "Target-subspace symmetry closure" in text
+    assert "HSP-star conjugation" in text
+    assert "HSP-star derived characters" in text
+    assert "Irrep workflow decisions" in text
+    assert "EBR input candidates" in text
+    assert "EBR problem instances" in text
+
+
 def test_summary_distinguishes_unitary_and_joint_tr_ebr_objects():
     from valleyscope.reports.summary_report import _render_ebr_problem_instances
 

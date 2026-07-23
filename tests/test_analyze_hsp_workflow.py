@@ -411,10 +411,19 @@ def test_write_analysis_outputs_plumbs_hsp_star_reports_to_summary(tmp_path):
     assert payload["valley_ebr_input_candidates"] == ebr_input_candidates
     assert payload["valley_ebr_problem_instances"] == ebr_problem_instances
     assert payload["valley_ebr_export_bundle"] == ebr_export_bundle
-    assert "Valley-resolved irreps" in outputs["summary_text"]
+    assert (
+        "Valley-projected subspace space group and trusted HSP irreps"
+        in outputs["summary_text"]
+    )
     assert "Valley irrep matching" not in outputs["summary_text"]
-    assert "EBR export bundle" in outputs["summary_text"]
-    assert "bundle_ebr_instance_001" in outputs["summary_text"]
+    assert "Authoritative reduced EBR results" in outputs["summary_text"]
+    assert (
+        "mapping payload absent; "
+        "export status=ready_for_reduced_table_validation, bundles=1"
+        in outputs["summary_text"]
+    )
+    assert "\nEBR export bundle\n" not in outputs["summary_text"]
+    assert "bundle_ebr_instance_001" not in outputs["summary_text"]
 
 
 def test_single_band_and_not_degenerate_no_subspace_valley_status_mislabel(tmp_path):

@@ -138,6 +138,393 @@ def build_summary_payload(
 
 
 def render_summary_text(summary: dict[str, Any]) -> str:
+    """Render the selected public text profile from the shared summary payload."""
+    if summary.get("output_profile", "standard") == "debug":
+        return _render_debug_summary_text(summary)
+    return _render_standard_summary_text(summary)
+
+
+def _render_standard_summary_text(summary: dict[str, Any]) -> str:
+    lines: list[str] = []
+    _section(lines, "Run and projection context")
+    input_summary = summary.get("input", {})
+    lines.append(f"wavefunction: {input_summary.get('wavefunction_h5', '')}")
+    lines.append(
+        "spinor convention: "
+        f"{input_summary.get('spinor_convention', '')} "
+        f"(verified={input_summary.get('spinor_convention_verified', False)})"
+    )
+    lines.append(
+        "sampled k-points: "
+        + (", ".join(str(value) for value in summary.get("target_kpoints", []))
+           or "none")
+    )
+    lines.append(
+        "bands (VASP): "
+        + (", ".join(str(value) for value in summary.get("iband", []))
+           or "none")
+    )
+    qcut = summary.get("qcut", {})
+    lines.append(f"projector mode: {qcut.get('projector_mode', 'fixed_center')}")
+    lines.append(f"qcut mode: {qcut.get('mode', '')}")
+    lines.append(f"qcut value: {_fmt(qcut.get('value_Ainv'))} A^-1")
+    if qcut.get("fraction") is not None:
+        lines.append(f"qcut fraction: {_fmt(qcut.get('fraction'))}")
+    lines.append("")
+
+    _render_standard_projection(lines, summary)
+    _render_standard_irreps(lines, summary)
+    _render_standard_reduced_ebr(lines, summary)
+    _render_standard_blockers(lines, summary)
+
+    _section(lines, "Public output files")
+    output_files = summary.get("output_files", {})
+    if isinstance(output_files, dict) and output_files:
+        for name, path in output_files.items():
+            lines.append(f"{_output_file_label(name)}: {path}")
+    else:
+        lines.append("(none)")
+    lines.append("")
+    lines.append(
+        "Debug/detail outputs suppressed (output.profile: standard). "
+        "Set output.profile: debug for full diagnostic tables and artifacts."
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_standard_projection(
+    lines: list[str],
+    summary: dict[str, Any],
+) -> None:
+    _section(lines, "Valley projection by sampled state")
+    rows = summary.get("valley_projection_summary", [])
+    if not isinstance(rows, list):
+        rows = []
+    valley_labels: list[str] = []
+    for valley in summary.get("valley_subspaces", []):
+        if not isinstance(valley, dict):
+            continue
+        label = valley.get("label")
+        if isinstance(label, str) and label not in valley_labels:
+            valley_labels.append(label)
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        weights = row.get("valley_weights", {})
+        if not isinstance(weights, dict):
+            continue
+        for label in weights:
+            text = str(label)
+            if text not in valley_labels:
+                valley_labels.append(text)
+    headers = ["kpoint", "band", *valley_labels, "W_val", "P_v", "status"]
+    table_rows: list[list[Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        weights = row.get("valley_weights", {})
+        if not isinstance(weights, dict):
+            weights = {}
+        table_rows.append([
+            row.get("kpoint", ""),
+            row.get("band_vasp", ""),
+            *[_fmt(weights.get(label)) for label in valley_labels],
+            _fmt(row.get("W_val")),
+            _fmt(row.get("P_v")),
+            row.get("status", ""),
+        ])
+    lines.extend(_table(headers, table_rows))
+    lines.append("")
+
+
+def _render_standard_irreps(
+    lines: list[str],
+    summary: dict[str, Any],
+) -> None:
+    _section(
+        lines,
+        "Valley-projected subspace space group and trusted HSP irreps",
+    )
+    report = summary.get("valley_resolved_irreps", {})
+    if not isinstance(report, dict):
+        report = {}
+    lines.append(
+        "irrep status: "
+        f"matched={report.get('matched_count', 0)}, "
+        f"blocked={report.get('blocked_count', 0)}, "
+        f"diagnostic_only={report.get('diagnostic_count', 0)}, "
+        f"non_source={report.get('non_source_count', 0)}"
+    )
+    projected = summary.get("valley_projected_representations", {})
+    sg_counts = (
+        projected.get("subspace_space_group_counts", {})
+        if isinstance(projected, dict) else {}
+    )
+    if isinstance(sg_counts, dict) and sg_counts:
+        lines.append(
+            "valley-projected subspace space groups: "
+            + ", ".join(
+                f"{label}={count}" for label, count in sorted(sg_counts.items())
+            )
+        )
+    rows = report.get("rows", [])
+    trusted_rows: list[list[Any]] = []
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            if (
+                row.get("matching_status") != "matched"
+                or bool(row.get("diagnostic_only", False))
+                or row.get("readiness_level") != "trusted"
+            ):
+                continue
+            trusted_rows.append([
+                row.get("kpoint", ""),
+                row.get("valley", ""),
+                row.get("subspace_space_group") or "?",
+                _short_list(row.get("hsp_little_group_operation_ids", [])),
+                _short_list(row.get("valley_preserving_operation_ids", [])),
+                _short_irrep_multiplicities(row.get("irrep_multiplicities")),
+            ])
+    if trusted_rows:
+        lines.extend(_table(
+            [
+                "kpoint",
+                "valley",
+                "subspace_sg",
+                "HSP little group",
+                "valley-preserving subgroup",
+                "valley-preserving irrep",
+            ],
+            trusted_rows,
+        ))
+    else:
+        lines.append(
+            "trusted HSP valley-preserving-irrep results: none"
+        )
+    lines.append("")
+
+
+def _render_standard_reduced_ebr(
+    lines: list[str],
+    summary: dict[str, Any],
+) -> None:
+    _section(lines, "Authoritative reduced EBR results")
+    mapping = summary.get("valley_reduced_ebr_mapping")
+    if not isinstance(mapping, dict):
+        bundle = summary.get("valley_ebr_export_bundle", {})
+        if not isinstance(bundle, dict):
+            bundle = {}
+        lines.append(
+            "no authoritative reduced EBR result: "
+            "mapping payload absent; "
+            f"export status={bundle.get('status', 'not_available')}, "
+            f"bundles={bundle.get('bundle_count', 0)}, "
+            f"excluded={bundle.get('excluded_count', 0)}"
+        )
+        lines.append("")
+        return
+
+    solutions = mapping.get("solutions", [])
+    if not isinstance(solutions, list) or not solutions:
+        lines.append(
+            "no authoritative reduced EBR result: "
+            f"mapping status={mapping.get('status', 'no_data')}, "
+            f"table status={mapping.get('table_status', 'not_available')}"
+        )
+        excluded = mapping.get("excluded_bundles", [])
+        if isinstance(excluded, list) and excluded:
+            lines.append(f"excluded bundles: {len(excluded)}")
+        lines.append("")
+        return
+
+    provenance_by_bundle: dict[str, Any] = {}
+    reduced_input = mapping.get("reduced_ebr_input", {})
+    if isinstance(reduced_input, dict):
+        candidate = reduced_input.get("table_input_provenance_by_bundle", {})
+        if isinstance(candidate, dict):
+            provenance_by_bundle = candidate
+    lines.append(
+        f"mapping status: {mapping.get('status', 'no_data')}; "
+        f"table status: {mapping.get('table_status', '')}"
+    )
+    classifications = [
+        solution.get("classification")
+        for solution in solutions if isinstance(solution, dict)
+    ]
+    lines.append(
+        "classifications: "
+        f"atomic-compatible={classifications.count('atomic-compatible-candidate')}, "
+        "in integer span, no nonnegative witness="
+        f"{classifications.count('in_integer_span_no_nonnegative_witness')}, "
+        f"outside integer span={classifications.count('outside_integer_span')}"
+    )
+    for solution in solutions:
+        if not isinstance(solution, dict):
+            continue
+        bundle_id = str(solution.get("bundle_id", ""))
+        table_provenance = solution.get("table_provenance")
+        if not isinstance(table_provenance, dict):
+            table_provenance = provenance_by_bundle.get(bundle_id)
+        if not isinstance(table_provenance, dict):
+            table_provenance = reduced_input
+        lines.append(
+            f"- physical object: {solution.get('physical_object_kind', '')}; "
+            f"valley/orbit: {_standard_valley_orbit(solution)}; "
+            "reviewed table source: "
+            f"{_standard_table_source(table_provenance)}"
+        )
+        lines.append(
+            f"  classification: {solution.get('classification', '')}; "
+            f"exact result: {_standard_exact_ebr_result(solution)}"
+        )
+    lines.append("")
+
+
+def _standard_valley_orbit(solution: dict[str, Any]) -> str:
+    valley = solution.get("valley")
+    if valley:
+        return str(valley)
+    orbit = solution.get("valley_orbit", [])
+    return _short_list(orbit) if orbit else ""
+
+
+def _standard_table_source(value: Any) -> str:
+    if not isinstance(value, dict):
+        return "not recorded"
+    source = value.get("data_source") or value.get("package") or value.get(
+        "source"
+    )
+    version = value.get("package_version")
+    return " ".join(
+        str(item) for item in (source, version) if item not in (None, "")
+    ) or "not recorded"
+
+
+def _standard_exact_ebr_result(solution: dict[str, Any]) -> str:
+    classification = solution.get("classification")
+    result_label = " ".join(
+        value for value in (
+            str(solution.get("bundle_id", "")),
+            _standard_valley_orbit(solution),
+        ) if value
+    )
+    prefix = f"{result_label}: " if result_label else ""
+    if classification == "atomic-compatible-candidate":
+        decomposition = solution.get("ebr_decomposition", [])
+        if isinstance(decomposition, list) and decomposition:
+            terms = ", ".join(
+                f"{term.get('label', '')} x {term.get('coefficient', '')}"
+                for term in decomposition if isinstance(term, dict)
+            )
+            return f"{prefix}atomic-compatible [{terms}]"
+        return f"{prefix}atomic-compatible (no decomposition recorded)"
+    if classification == "in_integer_span_no_nonnegative_witness":
+        witness = solution.get("integer_solution", [])
+        if isinstance(witness, list) and witness:
+            terms = ", ".join(
+                f"{term.get('label', '')}: {term.get('coefficient', '')}"
+                for term in witness if isinstance(term, dict)
+            )
+            return (
+                f"{prefix}in integer span, no nonnegative witness "
+                f"[signed integer witness: {terms}]"
+            )
+        return (
+            f"{prefix}in integer span, no nonnegative witness "
+            "(in integer span)"
+        )
+    if classification == "outside_integer_span":
+        return f"{prefix}outside integer span (outside integer span)"
+    if solution.get("search_status") == "truncated_by_max_coefficient":
+        return f"{prefix}search truncated by max_coefficient"
+    return f"{prefix}no exact decomposition"
+
+
+def _render_standard_blockers(
+    lines: list[str],
+    summary: dict[str, Any],
+) -> None:
+    _section(lines, "Readiness blockers and warnings")
+    blocker_counts: dict[str, int] = {}
+
+    resolved = summary.get("valley_resolved_irreps", {})
+    if isinstance(resolved, dict):
+        for row in resolved.get("rows", []):
+            if not isinstance(row, dict):
+                continue
+            if (
+                row.get("matching_status") == "matched"
+                and not row.get("diagnostic_only", False)
+                and row.get("readiness_level") == "trusted"
+            ):
+                continue
+            _count_reason(blocker_counts, row.get("reason"))
+
+    projected = summary.get("valley_projected_representations", {})
+    if isinstance(projected, dict):
+        for row in projected.get("rows", []):
+            if not isinstance(row, dict):
+                continue
+            for reason in row.get("blocking_reasons", []):
+                _count_reason(blocker_counts, reason)
+
+    candidates = summary.get("valley_ebr_input_candidates", {})
+    if isinstance(candidates, dict):
+        for row in candidates.get("blocked", []):
+            if isinstance(row, dict):
+                _count_reason(blocker_counts, row.get("reason"))
+
+    instances = summary.get("valley_ebr_problem_instances", {})
+    if isinstance(instances, dict):
+        for row in instances.get("instances", []):
+            if not isinstance(row, dict):
+                continue
+            for reason in row.get("blocked_by", []):
+                _count_reason(blocker_counts, reason)
+
+    bundle = summary.get("valley_ebr_export_bundle", {})
+    if isinstance(bundle, dict):
+        for row in bundle.get("excluded_instances", []):
+            if not isinstance(row, dict):
+                continue
+            for reason in row.get("exclusion_reasons", []):
+                _count_reason(blocker_counts, reason)
+
+    mapping = summary.get("valley_reduced_ebr_mapping", {})
+    if isinstance(mapping, dict):
+        for row in mapping.get("excluded_bundles", []):
+            if isinstance(row, dict):
+                _count_reason(blocker_counts, row.get("reason"))
+
+    if blocker_counts:
+        lines.append(
+            f"distinct blocker reasons: {len(blocker_counts)} "
+            f"({sum(blocker_counts.values())} occurrences)"
+        )
+        for reason in sorted(blocker_counts):
+            lines.append(f"- [{blocker_counts[reason]}] {reason}")
+    else:
+        lines.append("readiness blockers: none")
+
+    warnings = summary.get("warnings", [])
+    if isinstance(warnings, list) and warnings:
+        distinct_warnings = sorted({str(item) for item in warnings})
+        lines.append(f"distinct warnings: {len(distinct_warnings)}")
+        lines.extend(f"- {warning}" for warning in distinct_warnings)
+    else:
+        lines.append("warnings: none")
+    lines.append("")
+
+
+def _count_reason(counts: dict[str, int], value: Any) -> None:
+    reason = str(value).strip() if value is not None else ""
+    if reason:
+        counts[reason] = counts.get(reason, 0) + 1
+
+
+def _render_debug_summary_text(summary: dict[str, Any]) -> str:
     lines: list[str] = []
     _section(lines, "Input")
     input_summary = summary["input"]

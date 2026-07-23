@@ -1020,7 +1020,7 @@ def test_summary_text_generic_first_legacy_explicit():
         "symmetry_characters": [],
         "rotation_readiness_thresholds": {},
         "warnings": [],
-        "output_profile": "standard",
+        "output_profile": "debug",
         "output_files": {},
         "legend": {"topology_input_ready": "explanation"},
         "valley_irrep_matching": {
