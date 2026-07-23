@@ -333,15 +333,6 @@ def test_center_weights_are_raw_window_weights():
     assert result.sector_weights["AB"] == pytest.approx(1.0)
 
 
-def test_deprecated_alias_still_works():
-    """adjust_centers_for_folded_family is callable alias."""
-    from valleyscope.projection.sector_projectors import adjust_centers_for_folded_family
-    centers = [ValleyCenter("V0", np.array([0.0, 0.0, 0.0]))]
-    k_cart = np.array([0.0, 0.0, 0.0])
-    result = adjust_centers_for_folded_family(centers, k_cart, MOIRE_RECIP)
-    assert result[0].name == "V0"
-
-
 def test_short_valley_status_maps_fixed_center_not_captured():
     """_short_valley_status maps fixed_center_not_captured explicitly."""
     from valleyscope.reports.summary_report import _short_valley_status

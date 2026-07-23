@@ -14,8 +14,6 @@ the certificate validates the coordinate convention.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from typing import Any
-
 import numpy as np
 
 

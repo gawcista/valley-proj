@@ -217,31 +217,6 @@ def _optional_string_set(
     return out
 
 
-def normalize_irrep_ebr_data_to_source_payload(
-    ebr_data: Mapping[str, object],
-    *,
-    hsp_name_map: Mapping[str, str] | None = None,
-    irrep_key_map: Mapping[str, str] | None = None,
-    source: Mapping[str, object] | None = None,
-) -> dict[str, Any]:
-    """Compatibility wrapper for the initial normalizer name.
-
-    New code should call ``build_runtime_source_payload_from_ebr_data`` and use
-    explicit full-source-label maps.  This wrapper keeps the old import working
-    while still requiring explicit maps.
-    """
-    if hsp_name_map is None:
-        raise ValueError("hsp_name_map is required; implicit HSP mapping is forbidden")
-    if irrep_key_map is None:
-        raise ValueError("irrep_key_map is required; implicit irrep-key mapping is forbidden")
-    return build_runtime_source_payload_from_ebr_data(
-        ebr_data=ebr_data,
-        source_hsp_by_irrep=hsp_name_map,
-        valleyscope_key_by_source_irrep=irrep_key_map,
-        source=source,
-    )
-
-
 def _basis_irrep_labels(ebr_data: Mapping[str, object]) -> list[str]:
     if not isinstance(ebr_data, Mapping):
         raise ValueError("ebr_data must be a mapping")

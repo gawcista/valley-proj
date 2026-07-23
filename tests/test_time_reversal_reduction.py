@@ -1438,7 +1438,22 @@ def test_cross_valley_completion_records_observed_and_inferred_provenance():
     report = _exchanged_orbit_report()
 
     assert report["status"] == "validated"
-    records = report["valley_orbits"][0][
+    orbit = report["valley_orbits"][0]
+    assert orbit["independent_time_reversal_hsp_labels"] == ["G", "Q", "M"]
+    assert orbit["time_reversal_completed_unitary_valley_irreps"]["left"][
+        "QA"
+    ] == {"qa2": 1}
+    assert orbit["time_reversal_completed_unitary_valley_irreps"]["right"][
+        "QA"
+    ] == {"qa1": 1}
+    assert orbit["source_hsp_to_sampled_kpoint"] == {
+        "G": "G_left", "Q": "Q_left", "M": "M_left",
+    }
+    assert orbit["source_hsp_to_sampled_kpoint_by_valley"] == {
+        "left": {"G": "G_left", "Q": "Q_left", "M": "M_left"},
+        "right": {"G": "G_right", "Q": "Q_right", "M": "M_right"},
+    }
+    records = orbit[
         "unitary_valley_irrep_completion_records"
     ]
     observed = records["left"]["Q"][0]
@@ -1537,6 +1552,11 @@ def test_tr_enabled_problem_builder_emits_unitary_components_and_joint_grey():
         "Q": ["q1_corep", "q2_corep"],
         "M": ["m_corep"],
     }
+    orbit = report["valley_orbits"][0]
+    assert joint[0]["canonical_hsp_vector_ready"] is True
+    assert joint[0]["time_reversal"][
+        "source_hsp_to_sampled_kpoint_by_valley"
+    ] == orbit["source_hsp_to_sampled_kpoint_by_valley"]
 
 
 def test_tr_unitary_completion_provenance_survives_export_without_fake_sample():
@@ -1575,6 +1595,11 @@ def test_tr_unitary_completion_provenance_survives_export_without_fake_sample():
     assert joint["time_reversal"][
         "unitary_valley_irrep_completion_records"
     ]["left"]["QA"][0]["evidence_sampled_kpoint"] == "Q_right"
+    assert joint["time_reversal"][
+        "source_hsp_to_sampled_kpoint_by_valley"
+    ] == report["valley_orbits"][0][
+        "source_hsp_to_sampled_kpoint_by_valley"
+    ]
 
 
 def test_tr_unitary_promotion_revalidates_row_level_completion_provenance():
@@ -2141,64 +2166,6 @@ def test_self_mapped_inferred_unitary_arm_requires_antiunitary_sewing():
     )
     assert unitary["canonical_hsp_vector_complete"] is True
     assert unitary["canonical_hsp_vector_ready"] is False
-
-
-def test_cross_valley_tr_completion_needs_no_separately_sampled_minus_k_row():
-    source = _synthetic_source_orbit_report()
-    grey = _synthetic_grey_report()
-    report = build_time_reversal_valley_orbit_report(
-        valley_mapping_report={
-            "status": "validated", "theta_square": -1,
-            "time_reversal_valley_mapping": {"left": "right", "right": "left"},
-            "valley_orbits": [{
-                "representative": "left", "members": ["left", "right"],
-                "mapping_type": "exchanged",
-            }],
-        },
-        source_irrep_orbits_by_valley={"left": source, "right": source},
-        grey_source_by_valley={"left": grey, "right": grey},
-        ebr_input_candidates=_orbit_candidates(),
-    )
-
-    assert report["status"] == "validated"
-    orbit = report["valley_orbits"][0]
-    assert orbit["independent_time_reversal_hsp_labels"] == ["G", "Q", "M"]
-    assert orbit["time_reversal_completed_unitary_valley_irreps"]["left"][
-        "QA"
-    ] == {"qa2": 1}
-    assert orbit["time_reversal_completed_unitary_valley_irreps"]["right"][
-        "QA"
-    ] == {"qa1": 1}
-    assert orbit["irreps_by_kpoint"] == {
-        "G": ["g_corep"],
-        "Q": ["q1_corep", "q2_corep"],
-        "M": ["m_corep"],
-    }
-    assert orbit["source_hsp_to_sampled_kpoint"] == {
-        "G": "G_left", "Q": "Q_left", "M": "M_left",
-    }
-    assert orbit["source_hsp_to_sampled_kpoint_by_valley"] == {
-        "left": {"G": "G_left", "Q": "Q_left", "M": "M_left"},
-        "right": {
-            "G": "G_right", "Q": "Q_right", "M": "M_right",
-        },
-    }
-
-    problems = build_ebr_problem_instances(
-        ebr_input_candidates=_orbit_candidates(),
-        time_reversal_orbit_report=report,
-    )
-    instance = problems["instances"][0]
-    assert instance["canonical_hsp_vector_ready"] is True
-    assert instance["time_reversal"][
-        "source_hsp_to_sampled_kpoint_by_valley"
-    ] == orbit["source_hsp_to_sampled_kpoint_by_valley"]
-    bundle = build_ebr_export_bundle(
-        ebr_problem_instances=problems,
-    )["bundles"][0]
-    assert bundle["time_reversal"][
-        "source_hsp_to_sampled_kpoint_by_valley"
-    ] == orbit["source_hsp_to_sampled_kpoint_by_valley"]
 
 
 def test_cross_valley_tr_completion_rejects_missing_sampled_kpoint_binding():

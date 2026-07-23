@@ -1579,18 +1579,6 @@ def test_tmote2_representation_records_subspace_first():
             assert rec["valley_sewing_operation_ids"] == [3, 4, 5]
 
 
-def test_tmote2_ebr_mm_is_candidate():
-    """tMoTe2: MM matched to -M2 becomes a trusted EBR input candidate."""
-    s = _read_fixture_summary()
-    candidates = s.get("valley_ebr_input_candidates", {})
-    mm_cands = [c for c in candidates.get("candidates", [])
-                if c.get("kpoint") == "MM"]
-    assert len(mm_cands) == 2, f"MM must be an EBR candidate when matched, got {mm_cands}"
-    for c in mm_cands:
-        assert c["matched_irrep"] == "-M2"
-        assert c["readiness_level"] == "trusted"
-
-
 def test_tmote2_projected_source_hsp_coverage_and_tr_orbit_are_explicit():
     s = _read_fixture_summary()
     coverage = s["sampled_k_coverage"][
@@ -1613,6 +1601,16 @@ def test_tmote2_projected_source_hsp_coverage_and_tr_orbit_are_explicit():
 
     assert s["valley_ebr_input_candidates"]["candidate_count"] == 6
     assert s["valley_ebr_input_candidates"]["blocked_count"] == 0
+    mm_candidates = [
+        row for row in s["valley_ebr_input_candidates"]["candidates"]
+        if row.get("kpoint") == "MM"
+    ]
+    assert len(mm_candidates) == 2
+    assert all(
+        row["matched_irrep"] == "-M2"
+        and row["readiness_level"] == "trusted"
+        for row in mm_candidates
+    )
     time_reversal = coverage["time_reversal"]
     assert time_reversal["status"] == "validated"
     assert time_reversal["theta_square"] == -1
@@ -1897,16 +1895,9 @@ def test_tmote2_reduced_ebr_auto_canonical_provenance():
         assert set(sol["unitary_valley_irreps"]) == {
             "K_valley", "Kp_valley",
         }
-
-
-def test_tmote2_reduced_ebr_preserves_unitary_mm_components():
-    """The joint result retains both valley-resolved unitary M rows."""
-    r = _read_fixture_reduced_ebr()
-    assert len(r.get("solutions", [])) == 3
-    joint = next(
-        sol for sol in r["solutions"]
-        if sol["problem_kind"] == "valley_orbit_reduced_ebr"
-    )
-    components = joint["unitary_valley_irreps"]
-    assert components["K_valley"]["M"] == {"-M2": 1}
-    assert components["Kp_valley"]["M"] == {"-M2": 1}
+        assert sol["unitary_valley_irreps"]["K_valley"]["M"] == {
+            "-M2": 1,
+        }
+        assert sol["unitary_valley_irreps"]["Kp_valley"]["M"] == {
+            "-M2": 1,
+        }

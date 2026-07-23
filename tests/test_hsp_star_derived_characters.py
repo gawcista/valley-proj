@@ -4,7 +4,6 @@ import numpy as np
 from valleyscope.analysis.hsp_star_derived_characters import (
     build_hsp_star_derived_characters,
     collect_derived_characters_by_target,
-    has_derived_character_for,
 )
 from valleyscope.analysis.target_subspace_closure import (
     build_target_subspace_closure_report,
@@ -226,18 +225,6 @@ def test_collect_derived_characters_by_target():
     assert 9 in by_target["MM3"]["M3"]
 
 
-def test_has_derived_character_for():
-    report = build_hsp_star_derived_characters(
-        conjugation_report=_make_conjugation_report(),
-        source_character_diagnostics=_make_source_char_diagnostics(),
-    )
-
-    assert has_derived_character_for(report, "MM2", "M1", 7) is True
-    assert has_derived_character_for(report, "MM3", "M3", 9) is True
-    assert has_derived_character_for(report, "MM2", "M2", 3) is False
-    assert has_derived_character_for(report, "XX", "M1", 7) is False
-
-
 def test_closure_failed_blocks_derived():
     d_bad = np.array([[2.0, 0.0], [0.0, 1.0]], dtype=np.complex128)
     closure_report = build_target_subspace_closure_report(
@@ -321,25 +308,6 @@ def test_source_character_merge_multiple_subspaces():
     assert len(derived) == 1
     assert derived[0]["source_valley"] == "M3"
     assert derived[0]["target_kpoint_key"] == "derived:[0.0, 0.5, 0.0]"
-
-
-def test_derived_gate_exact_matching():
-    """Derived character for one target/op/valley should not unblock others."""
-    from valleyscope.analysis.hsp_star_derived_characters import has_derived_character_for
-
-    report = build_hsp_star_derived_characters(
-        conjugation_report=_make_conjugation_report(),
-        source_character_diagnostics=_make_source_char_diagnostics(),
-    )
-
-    # MM2/M1/op=7 has derived character
-    assert has_derived_character_for(report, "MM2", "M1", 7) is True
-    # MM2/M2/op=3 does NOT (source is missing_operation_product)
-    assert has_derived_character_for(report, "MM2", "M2", 3) is False
-    # MM2/M3/op=7 is a different valley
-    assert has_derived_character_for(report, "MM2", "M3", 7) is False
-    # Different kpoint
-    assert has_derived_character_for(report, "XX", "M1", 7) is False
 
 
 def test_blocked_by_no_hsp_star_character_derived():
@@ -512,11 +480,5 @@ def test_workflow_two_targets_only_one_unlocked():
     assert 7 in by_target["MM2"].get("M1", {})
     assert 8 in by_target["MM3"].get("M3", {})
 
-    # MM2/M1/op=7 should be accessible
-    assert has_derived_character_for(report, "MM2", "M1", 7) is True
-    # MM3/M3/op=8 should be accessible
-    assert has_derived_character_for(report, "MM3", "M3", 8) is True
-    # MM3/M1/op=8 should NOT be accessible (wrong valley)
-    assert has_derived_character_for(report, "MM3", "M1", 8) is False
-    # MM2/M1/op=8 should NOT be accessible (wrong op at this target)
-    assert has_derived_character_for(report, "MM2", "M1", 8) is False
+    assert 8 not in by_target["MM2"]["M1"]
+    assert "M1" not in by_target["MM3"]

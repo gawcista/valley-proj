@@ -123,20 +123,6 @@ def inspect_irreptables_source_basis(
     }
 
 
-def inspect_irreptables_source_basis_from_args(
-    space_group_number: int,
-    *,
-    spinful: bool = True,
-    source_loader: Callable[[int, bool], Mapping[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """Convenience wrapper for CLI — same as inspect_irreptables_source_basis."""
-    return inspect_irreptables_source_basis(
-        space_group_number=space_group_number,
-        spinful=spinful,
-        source_loader=source_loader,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Internal
 # ---------------------------------------------------------------------------

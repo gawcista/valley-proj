@@ -15,8 +15,6 @@ which are not represented in the current spglib unitary operation list.
 
 from __future__ import annotations
 
-import numpy as np
-
 from valleyscope.analysis.target_subspace_closure import (
     check_target_subspace_closure_blocked_for_operation,
 )
@@ -205,20 +203,6 @@ def collect_derived_characters_by_target(
             "derivation_status": str(entry.get("status", "")),
         }
     return result
-
-
-def has_derived_character_for(
-    derived_report: dict[str, object],
-    target_kpoint_key: str,
-    valley: str,
-    operation_id: object,
-) -> bool:
-    """Check if a trusted derived character exists for a given (target_key, valley, op)."""
-    by_target = collect_derived_characters_by_target(derived_report)
-    kp_data = by_target.get(target_kpoint_key, {})
-    valley_data = kp_data.get(valley, {})
-    entry = valley_data.get(operation_id)
-    return entry is not None and bool(entry.get("trusted_for_ebr_input", False))
 
 
 # ---------------------------------------------------------------------------

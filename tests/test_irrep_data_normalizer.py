@@ -7,13 +7,10 @@ from pathlib import Path
 import pytest
 
 from valleyscope.analysis.irrep_availability_probe import (
-    probe_irrep_availability,
-    probe_irrep_is_importable,
     probe_irrep_runtime_sources,
 )
 from valleyscope.analysis.irrep_data_normalizer import (
     build_runtime_source_payload_from_ebr_data,
-    normalize_irrep_ebr_data_to_source_payload,
 )
 from valleyscope.analysis.irrep_runtime_reducer import (
     build_reduced_table_from_runtime_source,
@@ -166,11 +163,6 @@ def test_missing_explicit_valleyscope_key_mapping_rejected():
         )
 
 
-def test_compatibility_wrapper_still_requires_explicit_maps():
-    with pytest.raises(ValueError, match="hsp_name_map is required"):
-        normalize_irrep_ebr_data_to_source_payload(_SAMPLE_EBR_DATA)
-
-
 def test_normalizer_output_feeds_reducer_and_table_loader(tmp_path):
     source_payload = _payload()
     table = build_reduced_table_from_runtime_source(
@@ -245,20 +237,6 @@ def test_probe_can_opt_into_irrep_ebrs_native_import(monkeypatch):
     assert any("irrep.ebrs" in script for script in calls)
     assert info["submodules"]["irrep.ebrs"]["available"] is True
     assert info["submodules"]["irrep.ebrs"]["probe_skipped_reason"] is None
-
-
-def test_probe_compatibility_wrappers_return_expected_shapes():
-    info = probe_irrep_availability()
-    for key in [
-        "irrep_available",
-        "irrep_version",
-        "spacegroup_irreps_available",
-        "ebrs_available",
-        "errors",
-        "runtime_sources",
-    ]:
-        assert key in info
-    assert isinstance(probe_irrep_is_importable(), bool)
 
 
 def test_adapter_sources_do_not_import_irrep2_or_call_raw_decomposition():

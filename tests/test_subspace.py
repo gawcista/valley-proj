@@ -2,8 +2,6 @@ import numpy as np
 import pytest
 
 from valleyscope.subspace.valley_basis import (
-    build_two_valley_adapted_basis,
-    diagnose_multivalley_subspace,
     build_valley_subspace_matrices,
     build_valley_adapted_basis,
     diagnose_valley_separability,
@@ -12,11 +10,11 @@ from valleyscope.subspace.valley_basis import (
 
 
 # -----------------------------------------------------------------------
-# A. two-valley compatibility
+# A. two-valley canonical path
 # -----------------------------------------------------------------------
 
 def test_degenerate_two_valley_subspace_recovers_pure_valley_basis():
-    """Legacy two-valley test — new API should recover eta_adapted ≈ ±1."""
+    """The canonical API recovers eta_adapted ≈ ±1."""
     inv_sqrt2 = 1.0 / np.sqrt(2.0)
     coefficients = np.array(
         [
@@ -30,13 +28,6 @@ def test_degenerate_two_valley_subspace_recovers_pure_valley_basis():
         "Kp_valley": np.array([False, True]),
     }
 
-    # Legacy API
-    legacy = build_two_valley_adapted_basis(coefficients, masks, "K_valley", "Kp_valley")
-    assert np.round(legacy.eta.real, 8).tolist() == [1.0, -1.0]
-    assert legacy.transform.shape == (2, 2)
-    assert np.allclose(legacy.transform.conj().T @ legacy.transform, np.eye(2))
-
-    # New general API
     result = build_valley_adapted_basis(coefficients, masks)
     assert result.eta_adapted is not None
     assert np.round(result.eta_adapted.real, 8).tolist() == [1.0, -1.0]
@@ -114,19 +105,8 @@ def test_three_valley_mixed_subspace_lowers_concentration():
 # D. non-commuting valley matrices diagnostic
 # -----------------------------------------------------------------------
 
-def test_multivalley_diagnostic_rejects_non_commuting_sector_projectors():
-    """Legacy test — should still pass with new internals."""
-    m1 = np.array([[1.0, 0.0], [0.0, 0.0]], dtype=np.complex128)
-    m2 = np.array([[0.5, 0.5], [0.5, 0.5]], dtype=np.complex128)
-    diagnostic = diagnose_multivalley_subspace({"A": m1, "B": m2}, eig_tol=1e-6, commutator_tol=1e-6)
-
-    assert diagnostic.stably_separable is False
-    assert diagnostic.reason == "non_commuting_sector_projectors"
-    assert diagnostic.max_commutator_norm > 0.0
-
-
 def test_non_commuting_valley_matrices_detected_in_diagnose():
-    """New diagnostic API detects non-commuting matrices."""
+    """The canonical diagnostic rejects non-commuting valley matrices."""
     # Construct raw states so that projected matrices don't commute
     coeffs = np.zeros((2, 1, 4), dtype=np.complex128)
     coeffs[0, 0, 0] = 1.0 / np.sqrt(2.0)
@@ -140,10 +120,16 @@ def test_non_commuting_valley_matrices_detected_in_diagnose():
         "valley_B": np.array([False, True, True, False]),
     }
 
-    subspaces = build_valley_subspace_matrices(coeffs, masks)
-    # The commutator check is diagnostic — depending on overlap it may or may not exceed tol
-    assert subspaces.commutator_norm_max >= 0.0
-    assert subspaces.idempotency_deviation_max >= 0.0
+    result = build_valley_adapted_basis(coeffs, masks)
+    diagnosed = diagnose_valley_separability(
+        result,
+        w_val_min=0.0,
+        concentration_threshold=0.0,
+        commutator_tol=1e-6,
+    )
+    assert diagnosed.stably_separable is False
+    assert diagnosed.reason == "non_commuting_valley_projectors"
+    assert diagnosed.commutator_norm_max == pytest.approx(1 / np.sqrt(2))
 
 
 # -----------------------------------------------------------------------
@@ -303,15 +289,3 @@ def test_idempotency_diagnostic_note_absent_when_deviation_small():
     )
     assert diagnosed.stably_separable
     assert not any("idempotency" in note for note in diagnosed.diagnostic_notes)
-
-
-def test_legacy_diagnose_multivalley_subspace_still_rejects_non_idempotent():
-    """Legacy diagnose_multivalley_subspace keeps its hard idempotency gate
-    for backward compatibility."""
-    m1 = np.array([[1.0, 0.0], [0.0, 0.0]], dtype=np.complex128)
-    m2 = np.array([[0.6, 0.4], [0.4, 0.6]], dtype=np.complex128)
-    diagnostic = diagnose_multivalley_subspace(
-        {"A": m1, "B": m2}, eig_tol=1e-6, commutator_tol=1.0,
-    )
-    assert diagnostic.stably_separable is False
-    assert "idempotent" in diagnostic.reason

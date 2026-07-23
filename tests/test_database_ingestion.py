@@ -619,6 +619,7 @@ def test_ingestion_record_missing_reduced_ebr_is_not_an_error():
         "outside_integer_span": 0,
         "indeterminate_truncated": 0,
     }
+    assert record["reduced_ebr_records"] == []
     assert len(record["validation_errors"]) == 0
 
 
@@ -828,18 +829,6 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
         assert len(r["ebr_decomposition"]) == 1
         assert r["ebr_decomposition"][0]["coefficient"] == 1
 
-
-def test_reduced_ebr_records_empty_when_mapping_missing():
-    """Missing mapping gives empty reduced_ebr_records."""
-    from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
-    summary = {"target_kpoints": [], "iband": [], "input": {}}
-    record = build_database_ingestion_record(valley_summary=summary)
-    assert record["reduced_ebr_records"] == []
-
-
-# -----------------------------------------------------------------------
-# Multi-run database index collector
-# -----------------------------------------------------------------------
 
 def _make_ingestion_record(
     status="has_final_reduced_ebr_results", run_id="run_0000"
@@ -1483,43 +1472,6 @@ def test_reduced_ebr_records_no_table_provenance_still_works():
     assert r["bundle_id"] == "b_001"
     assert "table_source" not in r
     assert "table_provenance" not in r
-
-
-def test_reduced_ebr_records_from_directory_with_table_provenance(tmp_path):
-    """Directory loading preserves compact table_provenance in records."""
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    summary = {"target_kpoints": ["GammaM", "KM"], "iband": [1, 2], "input": {}}
-    mapping = {
-        "status": "solved_exact", "table_status": "loaded",
-        "solutions": [{
-            "bundle_id": "b_001", "valley": "K_valley",
-            "subspace_group_candidate": "P3",
-            "subspace_space_group": {"candidate_space_group_symbol": "P3"},
-            "status": "solved_exact",
-            "classification": "atomic-compatible-candidate",
-            "integer_span_status": "in_integer_span",
-            "nonnegative_solution_status": "solved_exact",
-            "irrep_vector": [1, 0],
-            "ebr_decomposition": [{"label": "E@1a", "coefficient": 1}],
-            "table_provenance": _auto_table_provenance(),
-            "table_status": "loaded",
-        }],
-    }
-    (run_dir / "valley_summary.json").write_text(json.dumps(summary), encoding="utf-8")
-    (run_dir / "valley_reduced_ebr_mapping.json").write_text(
-        json.dumps(mapping), encoding="utf-8"
-    )
-
-    record = load_database_ingestion_record_from_directory(run_dir)
-    recs = record["reduced_ebr_records"]
-    assert len(recs) == 1
-    r = recs[0]
-    assert r["table_source"] == "auto_canonical"
-    assert r["space_group_number"] == 143
-    assert r["expected_hsps"] == ["GammaM", "KM"]
-    assert r["reduction_basis_count"] == 6
-    assert r["dropped_source_rows"] == ["label1", "label2"]
 
 
 def test_tmote2_ingestion_compact_reduced_ebr_records():

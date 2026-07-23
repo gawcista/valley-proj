@@ -153,7 +153,3 @@ def adjust_centers_for_parent_valley(
             )
         )
     return adjusted
-
-
-# Deprecated alias — use adjust_centers_for_parent_valley.
-adjust_centers_for_folded_family = adjust_centers_for_parent_valley

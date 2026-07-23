@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from fractions import Fraction
 from math import gcd
-from typing import Any, Mapping, Sequence
+from typing import Mapping, Sequence
 
 import numpy as np
 

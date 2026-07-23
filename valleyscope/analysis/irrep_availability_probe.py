@@ -67,29 +67,6 @@ def probe_irrep_runtime_sources(
     return result
 
 
-def probe_irrep_availability() -> dict[str, Any]:
-    """Compatibility wrapper returning the earlier flat status fields."""
-    runtime = probe_irrep_runtime_sources()
-    irrep_mod = runtime["submodules"]["irrep.ebrs"]
-    sg_mod = runtime["submodules"]["irrep.spacegroup_irreps"]
-    irrep_pkg = runtime["irrep"]
-    return {
-        "package": "irrep",
-        "irrep_available": bool(irrep_pkg["available"]),
-        "irrep_version": irrep_pkg["version"],
-        "irrep_path": irrep_pkg["path"],
-        "spacegroup_irreps_available": bool(sg_mod["available"]),
-        "ebrs_available": bool(irrep_mod["available"]),
-        "errors": list(runtime["errors"]),
-        "runtime_sources": runtime,
-    }
-
-
-def probe_irrep_is_importable() -> bool:
-    """Return True if the irrep top-level package can be imported."""
-    return bool(probe_irrep_runtime_sources()["irrep"]["available"])
-
-
 def _probe_package(package_name: str) -> dict[str, Any]:
     status: dict[str, Any] = {
         "available": False,
