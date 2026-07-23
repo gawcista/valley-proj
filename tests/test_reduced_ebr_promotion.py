@@ -121,12 +121,57 @@ def _identity(**over):
     return cert
 
 
-def _spin_records(spinful):
+def _direct_record(*, sampled, source_hsp, irrep, multiplicity, spinful, cert):
+    source = f"fixture/K/{source_hsp}/{irrep}"
+    identity = {
+        "source": source,
+        "workflow_path": "direct_qcut",
+        "valley": "K",
+        "source_hsp_label": source_hsp,
+        "sampled_kpoint": sampled,
+        "irrep": irrep,
+        "multiplicity": multiplicity,
+    }
+    irrep_provenance = {
+        "source_hsp_label": source_hsp,
+        "source_table_spinor": spinful,
+    }
     return {
-        "GammaM": [{"matched_irrep": "A", "irrep_multiplicity": 1,
-                    "irrep_source_provenance": {"source_table_spinor": spinful}}],
-        "KM": [{"matched_irrep": "A", "irrep_multiplicity": 1,
-                "irrep_source_provenance": {"source_table_spinor": spinful}}],
+        "matched_irrep": irrep,
+        "irrep_multiplicity": multiplicity,
+        "valley": "K",
+        "sampled_kpoint": sampled,
+        "source_hsp_label": source_hsp,
+        "workflow_path": "direct_qcut",
+        "readiness_level": "trusted",
+        "source": source,
+        "certificate_identity": cert,
+        "irrep_source_provenance": irrep_provenance,
+        "source_candidate_identity": identity,
+        "source_candidate_provenance": {
+            "source": source,
+            "workflow_path": "direct_qcut",
+            "irrep_source_provenance": irrep_provenance,
+        },
+    }
+
+
+def _spin_records(spinful, cert):
+    return {
+        "GammaM": [_direct_record(
+            sampled="GammaM", source_hsp="GammaM", irrep="A",
+            multiplicity=2, spinful=spinful, cert=cert,
+        )],
+        "KM": [
+            _direct_record(
+                sampled="KM", source_hsp="KM", irrep="A",
+                multiplicity=1, spinful=spinful, cert=cert,
+            ),
+            _direct_record(
+                sampled="KM", source_hsp="KM", irrep="B",
+                multiplicity=1, spinful=spinful, cert=cert,
+            ),
+        ],
     }
 
 
@@ -171,17 +216,35 @@ def _table(*, sg_number=143, symbol="P3", spinful=False, **over):
 
 
 def _bundle(*, sg_number=143, symbol="P3", spinful=False, cert=None, **over):
+    certificate = cert if cert is not None else _identity()
     bundle = {
-        "bundle_id": "b1", "valley": "K",
+        "bundle_id": "b1", "source_instance_id": "i1", "valley": "K",
+        "problem_kind": "unitary_valley_reduced_ebr",
+        "physical_object_kind": "unitary_valley_projected_subspace",
         "subspace_group_candidate": symbol, "subspace_sg_number": sg_number,
         "subspace_space_group": {"status": "resolved",
                                  "candidate_space_group_number": sg_number,
                                  "candidate_space_group_symbol": symbol},
+        "spinor": spinful,
+        "workflow_path": "direct_qcut",
+        "readiness_level": "trusted",
+        "valley_orbit": [],
+        "time_reversal": {},
+        "unitary_irrep_completion_records_by_hsp": {},
+        "unitary_vector_construction": {
+            "kind": "direct_observed_unitary_rows",
+            "source": "trusted_ebr_input_candidates",
+        },
         "ready_for_reduced_table_validation": True,
         "expected_hsps": ["GammaM", "KM"],
+        "required_source_hsp_labels": ["GammaM", "KM"],
+        "source_hsp_to_sampled_kpoint": {
+            "GammaM": "GammaM",
+            "KM": "KM",
+        },
         "irreps_by_kpoint": {"GammaM": ["A", "A"], "KM": ["A", "B"]},
-        "irrep_records_by_kpoint": _spin_records(spinful),
-        "certificate_identity": cert if cert is not None else _identity(),
+        "irrep_records_by_kpoint": _spin_records(spinful, certificate),
+        "certificate_identity": certificate,
     }
     bundle.update(over)
     return bundle

@@ -1,5 +1,6 @@
 import json
 import os
+from copy import deepcopy
 from pathlib import Path
 import subprocess
 import sys
@@ -31,15 +32,16 @@ def test_ingestion_record_requires_summary():
 
 def test_ingestion_uses_stage_owned_counts_and_final_result_status():
     summary = {"target_kpoints": ["GammaM"], "iband": [1], "input": {}}
-    export = {
+    export, mapping = _authoritative_unitary_ingestion_payload(
+        bundle_id="b_candidate",
+        solution_over={
+            "status": "no_exact_solution",
+            "classification": "in_integer_span_no_nonnegative_witness",
+            "nonnegative_solution_status": "no_nonnegative_solution",
+        },
+    )
+    export.update({
         "status": "partial_export",
-        "bundles": [{
-            "bundle_id": "b_candidate",
-            "ready_for_reduced_table_validation": True,
-            "irrep_records_by_kpoint": {
-                "GammaM": [{"valley": "K", "matched_irrep": "A"}],
-            },
-        }],
         "excluded_instances": [{
             "source_instance_id": "i_blocked",
             "status": "canonical_hsp_vector_complete_but_untrusted",
@@ -47,21 +49,15 @@ def test_ingestion_uses_stage_owned_counts_and_final_result_status():
             "canonical_hsp_vector_ready": False,
             "exclusion_reasons": ["source_hsp_coverage_not_ready"],
         }],
-    }
-    mapping = {
+    })
+    mapping.update({
         "status": "partial",
-        "table_status": "loaded",
-        "solutions": [{
-            "bundle_id": "b_candidate",
-            "status": "no_exact_solution",
-            "classification": "in_integer_span_no_nonnegative_witness",
-        }],
         "excluded_bundles": [{
             "bundle_id": "b_other",
             "reason": "validation blocked",
             "blocker_reasons": [{"code": "certificate_unresolved"}],
         }],
-    }
+    })
 
     record = build_database_ingestion_record(
         valley_summary=summary,
@@ -74,7 +70,7 @@ def test_ingestion_uses_stage_owned_counts_and_final_result_status():
     assert record["final_reduced_ebr_result_count"] == 1
     assert record["final_mapping_excluded_bundle_count"] == 1
     assert record["input_excluded_instance_count"] == 1
-    assert len(record["valley_irrep_records"]) == 1
+    assert len(record["valley_irrep_records"]) == 3
     assert record["reduced_ebr_records"][0]["status"] == "no_exact_solution"
     assert record["input_excluded_ebr_records"][0][
         "canonical_hsp_vector_complete"
@@ -139,14 +135,14 @@ def test_evaluated_nonexact_solution_is_a_final_result(
     }
     if search_status is not None:
         solution["search_status"] = search_status
+    export, mapping = _authoritative_unitary_ingestion_payload(
+        bundle_id="b",
+        solution_over=solution,
+    )
     record = build_database_ingestion_record(
         valley_summary={"target_kpoints": [], "iband": [], "input": {}},
-        valley_reduced_ebr_mapping={
-            "status": solution_status,
-            "table_status": "loaded",
-            "solutions": [solution],
-            "excluded_bundles": [],
-        },
+        valley_ebr_export_bundle=export,
+        valley_reduced_ebr_mapping=mapping,
     )
 
     assert record["record_status"] == "has_final_reduced_ebr_results"
@@ -158,6 +154,91 @@ def test_evaluated_nonexact_solution_is_a_final_result(
         assert record["reduced_ebr_records"][0]["search_status"] == (
             search_status
         )
+
+
+def test_ingestion_rejects_mapping_solution_without_current_export_bundle():
+    record = build_database_ingestion_record(
+        valley_summary={"target_kpoints": [], "iband": [], "input": {}},
+        valley_reduced_ebr_mapping={
+            "status": "solved_exact",
+            "table_status": "loaded",
+            "solutions": [{
+                "bundle_id": "stale_bundle",
+                "classification": "atomic-compatible-candidate",
+            }],
+            "excluded_bundles": [],
+        },
+    )
+
+    assert record["record_status"] == "no_reduced_ebr_input"
+    assert record["final_reduced_ebr_result_count"] == 0
+    assert record["reduced_ebr_records"] == []
+    assert record["reduced_ebr_classification_counts"] == {
+        "atomic_compatible": 0,
+        "in_integer_span_no_nonnegative_witness": 0,
+        "outside_integer_span": 0,
+        "indeterminate_truncated": 0,
+    }
+    assert record["validation_errors"] == [
+        "mapping solution stale_bundle: no matching ready export bundle"
+    ]
+
+
+def test_ingestion_rejects_matching_solution_without_promotion_evidence():
+    record = build_database_ingestion_record(
+        valley_summary={"target_kpoints": [], "iband": [], "input": {}},
+        valley_ebr_export_bundle={
+            "bundles": [{
+                "bundle_id": "b",
+                "ready_for_reduced_table_validation": True,
+                "irrep_records_by_kpoint": {},
+            }],
+        },
+        valley_reduced_ebr_mapping={
+            "status": "solved_exact",
+            "table_status": "loaded",
+            "solutions": [{
+                "bundle_id": "b",
+                "classification": "atomic-compatible-candidate",
+            }],
+            "excluded_bundles": [],
+        },
+    )
+
+    assert record["record_status"] == (
+        "has_reduced_table_validation_candidates"
+    )
+    assert record["final_reduced_ebr_result_count"] == 0
+    assert record["reduced_ebr_records"] == []
+    assert record["validation_errors"] == [
+        "mapping solution b: missing passed promotion provenance"
+    ]
+
+
+def test_ingestion_rejects_promoted_solution_changed_after_export():
+    export, mapping = _authoritative_unitary_ingestion_payload(
+        bundle_id="b",
+    )
+    mapping["solutions"][0]["time_reversal"] = {
+        **mapping["solutions"][0]["time_reversal"],
+        "theta_square": 1,
+    }
+
+    record = build_database_ingestion_record(
+        valley_summary={"target_kpoints": [], "iband": [], "input": {}},
+        valley_ebr_export_bundle=export,
+        valley_reduced_ebr_mapping=mapping,
+    )
+
+    assert record["record_status"] == (
+        "has_reduced_table_validation_candidates"
+    )
+    assert record["final_reduced_ebr_result_count"] == 0
+    assert record["reduced_ebr_records"] == []
+    assert record["validation_errors"] == [
+        "mapping solution b: promotion provenance does not match current "
+        "export bundle"
+    ]
 
 
 def _tr_validation_candidate_bundle():
@@ -450,6 +531,103 @@ def _tr_completed_unitary_bundle():
     }
 
 
+def _authoritative_unitary_ingestion_payload(
+    *,
+    bundle_id="unitary_K",
+    solution_over=None,
+    table_provenance=None,
+):
+    """Current export/promotion pair for compact-ingestion unit tests."""
+    bundle = _tr_completed_unitary_bundle()
+    bundle["bundle_id"] = bundle_id
+    bundle["certificate_identity"] = {"fixture_certificate": bundle_id}
+    bundle["subspace_space_group"] = {
+        "candidate_space_group_symbol": "P3",
+    }
+    report = {
+        check: "passed"
+        for check in (
+            "table_provenance_check",
+            "table_setting_check",
+            "sg_symbol_check",
+            "sg_number_check",
+            "certificate_check",
+            "certificate_consistency_check",
+            "cert_sg_consistency_check",
+            "affine_setting_check",
+            "hall_setting_check",
+            "spin_convention_check",
+            "problem_kind_check",
+            "hsp_basis_check",
+            "irrep_basis_check",
+            "completion_provenance_check",
+        )
+    }
+    promoted_table = deepcopy(
+        table_provenance
+        if table_provenance is not None
+        else {
+            "source": "synthetic_ingestion_fixture",
+            "data_source": "irreptables",
+            "package": "irreptables",
+            "package_version": "3.1.0",
+        }
+    )
+    identity_fields = (
+        "problem_kind",
+        "physical_object_kind",
+        "valley",
+        "valley_orbit",
+        "subspace_group_candidate",
+        "subspace_space_group",
+        "expected_hsps",
+        "required_source_hsp_labels",
+        "covered_source_hsp_labels",
+        "source_hsp_to_sampled_kpoint",
+        "independent_source_hsp_to_sampled_kpoint",
+        "observed_source_hsp_to_sampled_kpoint",
+        "unitary_vector_construction",
+        "unitary_irrep_completion_records_by_hsp",
+        "unitary_valley_irreps",
+        "time_reversal",
+        "certificate_identity",
+    )
+    solution = {
+        "bundle_id": bundle_id,
+        **{
+            field: deepcopy(bundle.get(field))
+            for field in identity_fields
+        },
+        "status": "solved_exact",
+        "classification": "atomic-compatible-candidate",
+        "integer_span_status": "in_integer_span",
+        "nonnegative_solution_status": "solved_exact",
+        "irrep_vector": [1],
+        "table_provenance": deepcopy(promoted_table),
+        "table_status": "loaded",
+        "validation_report": deepcopy(report),
+        "promotion_provenance": {
+            "source": "promote_bundle_for_solve",
+            "validation_report": deepcopy(report),
+            "table_provenance": deepcopy(promoted_table),
+            "certificate_identity": deepcopy(
+                bundle["certificate_identity"]
+            ),
+        },
+    }
+    if solution_over:
+        solution.update(deepcopy(solution_over))
+    return (
+        {"bundles": [bundle]},
+        {
+            "status": solution["status"],
+            "table_status": "loaded",
+            "solutions": [solution],
+            "excluded_bundles": [],
+        },
+    )
+
+
 def test_tr_unitary_ingestion_preserves_observed_and_inferred_rows():
     unitary = _tr_completed_unitary_bundle()
     legacy_joint = _tr_validation_candidate_bundle()
@@ -587,20 +765,36 @@ def test_ingestion_record_with_reduced_ebr_mapping():
     from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
 
     summary = {"target_kpoints": [], "iband": [], "input": {}}
+    payloads = [
+        _authoritative_unitary_ingestion_payload(
+            bundle_id=f"b_{index}",
+            solution_over={"classification": classification},
+        )
+        for index, classification in enumerate((
+            "atomic-compatible-candidate",
+            "atomic-compatible-candidate",
+            "in_integer_span_no_nonnegative_witness",
+        ))
+    ]
+    export = {
+        "bundles": [
+            payload[0]["bundles"][0]
+            for payload in payloads
+        ],
+    }
     mapping = {
         "status": "solved_exact",
         "table_status": "loaded",
         "solutions": [
-            {
-                "classification": "atomic-compatible-candidate",
-                "subspace_space_group": {"candidate_space_group_symbol": "P3"},
-            },
-            {"classification": "atomic-compatible-candidate"},
-            {"classification": "in_integer_span_no_nonnegative_witness"},
+            payload[1]["solutions"][0]
+            for payload in payloads
         ],
     }
     record = build_database_ingestion_record(
-        valley_summary=summary, valley_reduced_ebr_mapping=mapping)
+        valley_summary=summary,
+        valley_ebr_export_bundle=export,
+        valley_reduced_ebr_mapping=mapping,
+    )
     assert record["reduced_ebr_mapping_status"] == "solved_exact"
     counts = record["reduced_ebr_classification_counts"]
     assert counts["atomic_compatible"] == 2
@@ -697,7 +891,7 @@ def test_ingestion_record_no_material_names():
 
 
 def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path):
-    """Synthetic C3-like public outputs preserve reduced EBR ingestion fields."""
+    """Legacy C3-like solutions remain candidates but are not final results."""
     from valleyscope.analysis.database_ingestion_record import (
         load_database_ingestion_record_from_directory,
     )
@@ -797,9 +991,11 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
     record = load_database_ingestion_record_from_directory(run_dir)
 
     assert record["schema_version"] == "1.8.0"
-    assert record["record_status"] == "has_final_reduced_ebr_results"
+    assert record["record_status"] == (
+        "has_reduced_table_validation_candidates"
+    )
     assert record["reduced_table_validation_candidate_bundle_count"] == 2
-    assert record["final_reduced_ebr_result_count"] == 2
+    assert record["final_reduced_ebr_result_count"] == 0
     assert len(record["valley_irrep_records"]) == 8
     assert record["valley_irrep_records"][0]["valley"] == "K_valley"
     assert record["valley_irrep_records"][0]["matched_irrep"] == "C3_spinor_phase_+1/2"
@@ -807,7 +1003,7 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
     assert record["reduced_ebr_mapping_status"] == "solved_exact"
     assert record["reduced_ebr_table_status"] == "loaded"
     counts = record["reduced_ebr_classification_counts"]
-    assert counts["atomic_compatible"] == 2
+    assert counts["atomic_compatible"] == 0
     assert counts["in_integer_span_no_nonnegative_witness"] == 0
     assert counts["outside_integer_span"] == 0
     assert set(record["source_files"]) == {
@@ -816,21 +1012,11 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
         "valley_reduced_ebr_mapping",
     }
     assert all(Path(path).is_absolute() for path in record["source_files"].values())
-    # Per-bundle reduced EBR records
-    recs = record["reduced_ebr_records"]
-    assert len(recs) == 2
-    for r in recs:
-        assert r["valley"] in ("K_valley", "Kp_valley")
-        assert r["status"] == "solved_exact"
-        assert r["classification"] == "atomic-compatible-candidate"
-        assert r["integer_span_status"] == "in_integer_span"
-        assert r["nonnegative_solution_status"] == "solved_exact"
-        assert r["irrep_vector"] == [0, 2, 0, 1, 0, 1]
-        assert r["subspace_space_group"] == {
-            "candidate_space_group_symbol": "P3"
-        }
-        assert len(r["ebr_decomposition"]) == 1
-        assert r["ebr_decomposition"][0]["coefficient"] == 1
+    assert record["reduced_ebr_records"] == []
+    assert record["validation_errors"] == [
+        "mapping solution b_001: missing passed promotion provenance",
+        "mapping solution b_002: missing passed promotion provenance",
+    ]
 
 
 def _make_ingestion_record(
@@ -1848,26 +2034,22 @@ def _auto_table_provenance():
 
 def test_reduced_ebr_records_pick_up_table_provenance():
     """Compact ingestion records carry table_provenance fields when present."""
-    mapping = {
-        "status": "solved_exact",
-        "table_status": "loaded",
-        "solutions": [{
-            "bundle_id": "b_001", "valley": "K_valley",
-            "subspace_group_candidate": "P3",
-            "subspace_space_group": {"candidate_space_group_symbol": "P3"},
+    export, mapping = _authoritative_unitary_ingestion_payload(
+        bundle_id="b_001",
+        table_provenance=_auto_table_provenance(),
+        solution_over={
             "status": "solved_exact",
             "classification": "atomic-compatible-candidate",
             "integer_span_status": "in_integer_span",
             "nonnegative_solution_status": "solved_exact",
             "irrep_vector": [1, 0],
             "ebr_decomposition": [{"label": "E@1a", "coefficient": 1}],
-            "table_provenance": _auto_table_provenance(),
-            "table_status": "loaded",
-        }],
-    }
+        },
+    )
     record = build_database_ingestion_record(
         valley_summary={"target_kpoints": ["GammaM", "KM"], "iband": [1, 2],
                         "input": {}},
+        valley_ebr_export_bundle=export,
         valley_reduced_ebr_mapping=mapping,
     )
     recs = record["reduced_ebr_records"]
@@ -1892,7 +2074,7 @@ def test_reduced_ebr_records_pick_up_table_provenance():
 
 
 def test_reduced_ebr_records_preserve_joint_valley_orbit_identity():
-    """Compact ingestion keeps the physical identity of a joint TR problem."""
+    """Unpromoted legacy joint TR solutions remain fail-closed."""
     time_reversal = {
         "theta_square": -1,
         "time_reversal_valley_mapping": {
@@ -1933,25 +2115,15 @@ def test_reduced_ebr_records_preserve_joint_valley_orbit_identity():
         valley_reduced_ebr_mapping=mapping,
     )
 
-    assert record["reduced_ebr_records"] == [{
-        "bundle_id": "b_orbit",
-        "valley": "",
-        "problem_kind": "valley_orbit_reduced_ebr",
-        "valley_orbit": ["valley_a", "valley_b"],
-        "unitary_valley_irreps": unitary_valley_irreps,
-        "time_reversal": time_reversal,
-        "subspace_group_candidate": "P1",
-        "subspace_space_group": {},
-        "status": "no_exact_solution",
-        "classification": "in_integer_span_no_nonnegative_witness",
-        "integer_span_status": "in_integer_span",
-        "nonnegative_solution_status": "no_nonnegative_solution",
-        "irrep_vector": [1],
-    }]
+    assert record["reduced_ebr_records"] == []
+    assert record["final_reduced_ebr_result_count"] == 0
+    assert record["validation_errors"] == [
+        "mapping solution b_orbit: no matching ready export bundle"
+    ]
 
 
-def test_reduced_ebr_records_no_table_provenance_still_works():
-    """Records without table_provenance work (backward compat)."""
+def test_reduced_ebr_records_without_table_provenance_are_rejected():
+    """A mapping record without promotion/table evidence is not final."""
     mapping = {
         "status": "solved_exact", "table_status": "loaded",
         "solutions": [{
@@ -1968,10 +2140,11 @@ def test_reduced_ebr_records_no_table_provenance_still_works():
         valley_summary={"target_kpoints": [], "iband": [], "input": {}},
         valley_reduced_ebr_mapping=mapping,
     )
-    r = record["reduced_ebr_records"][0]
-    assert r["bundle_id"] == "b_001"
-    assert "table_source" not in r
-    assert "table_provenance" not in r
+    assert record["reduced_ebr_records"] == []
+    assert record["final_reduced_ebr_result_count"] == 0
+    assert record["validation_errors"] == [
+        "mapping solution b_001: no matching ready export bundle"
+    ]
 
 
 def test_tmote2_ingestion_compact_reduced_ebr_records():

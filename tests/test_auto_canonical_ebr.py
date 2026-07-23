@@ -21,7 +21,7 @@ from valleyscope.analysis.reduced_ebr_mapping import (
 from valleyscope.analysis.reduced_ebr_solver import classify_bundle
 from tests.helpers_io_workflow import write_fixture, write_config
 from tests.reduced_ebr_promo_helpers import (
-    attach_real_certificate, real_primitive_certificate_identity,
+    attach_real_certificate,
 )
 
 # ---------------------------------------------------------------------------
@@ -52,8 +52,7 @@ def _spin_records(irreps, spinful=True):
 def _mk_bundle(bid, sg_num, symbol, hsps, irreps, ready=True):
     # Real producer-built primitive certificate for a spglib-unique SG; None
     # for unresolved/invalid SGs so the validator blocks.
-    cert = real_primitive_certificate_identity(sg_num, symbol, spinor=True)
-    return {"bundle_id": bid, "valley": "K_valley",
+    bundle = {"bundle_id": bid, "valley": "K_valley",
             "subspace_group_candidate": symbol,
             "subspace_sg_number": sg_num,
             "subspace_space_group": {"status": "resolved",
@@ -62,7 +61,18 @@ def _mk_bundle(bid, sg_num, symbol, hsps, irreps, ready=True):
             "ready_for_reduced_table_validation": ready,
             "expected_hsps": hsps, "irreps_by_kpoint": irreps,
             "irrep_records_by_kpoint": _spin_records(irreps, spinful=True),
-            "certificate_identity": cert if cert is not None else {}}
+            "certificate_identity": {}}
+    attach_real_certificate(
+        {"bundles": [bundle]},
+        {
+            "subspace_group_candidate": symbol,
+            "provenance": {
+                "space_group_number": sg_num,
+                "spinful": True,
+            },
+        },
+    )
+    return bundle
 
 def _bm(*bundles): return build_auto_reduced_ebr_mapping(
     ebr_export_bundle={"bundles": list(bundles)}, spinor=True)

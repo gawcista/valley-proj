@@ -286,6 +286,23 @@ def test_generic_p4_table_authoritative_bundle_maps_and_rejects_mismatch():
     assert "problem_physical_object_kind_mismatch" in {
         row["code"] for row in promotion["blocker_reasons"]
     }
+
+    legacy_contract = deepcopy(bundle)
+    for field in (
+        "problem_kind",
+        "physical_object_kind",
+        "source_instance_id",
+        "unitary_vector_construction",
+    ):
+        legacy_contract.pop(field)
+    promotion = promote_bundle_for_solve(
+        bundle=legacy_contract,
+        table=matching_table,
+    )
+    assert promotion["promoted"] is False
+    assert "problem_physical_object_kind_mismatch" in {
+        row["code"] for row in promotion["blocker_reasons"]
+    }
     assert solved["solutions"][0]["irrep_vector"] == [1, 1]
 
     direct_record = bundle["irrep_records_by_kpoint"]["GammaM"][0]

@@ -490,7 +490,7 @@ def _validate_problem_kind_compatibility(
     """Keep unitary and type-II grey reduced problems physically distinct."""
     unitary_kind = "unitary_valley_reduced_ebr"
     orbit_kind = "valley_orbit_reduced_ebr"
-    problem_kind = bundle.get("problem_kind", unitary_kind)
+    problem_kind = bundle.get("problem_kind")
     physical_object_kind = bundle.get("physical_object_kind")
     grey_source = provenance.get("time_reversal_source")
     grey_bns_number = provenance.get("time_reversal_grey_bns_number")
@@ -500,19 +500,9 @@ def _validate_problem_kind_compatibility(
         unitary_kind: "unitary_valley_projected_subspace",
         orbit_kind: "joint_time_reversal_valley_orbit",
     }.get(problem_kind)
-    generated_construction_contract = (
-        "source_instance_id" in bundle
-        or "unitary_vector_construction" in bundle
-    )
     if (
-        (
-            physical_object_kind is not None
-            and physical_object_kind != expected_physical_object_kind
-        )
-        or (
-            generated_construction_contract
-            and physical_object_kind is None
-        )
+        expected_physical_object_kind is None
+        or physical_object_kind != expected_physical_object_kind
     ):
         blockers.append(_blocker(
             "problem_physical_object_kind_mismatch",
@@ -541,8 +531,7 @@ def _validate_problem_kind_compatibility(
             report["problem_kind_check"] = "failed"
             report["completion_provenance_check"] = "failed"
         elif (
-            physical_object_kind == "unitary_valley_projected_subspace"
-            and not unitary_bundle_claims_time_reversal_completion(bundle)
+            not unitary_bundle_claims_time_reversal_completion(bundle)
             and not validate_direct_unitary_bundle(bundle)
         ):
             blockers.append(_blocker(
@@ -554,8 +543,7 @@ def _validate_problem_kind_compatibility(
             report["completion_provenance_check"] = "failed"
         else:
             report["problem_kind_check"] = "passed"
-            if unitary_bundle_claims_time_reversal_completion(bundle):
-                report["completion_provenance_check"] = "passed"
+            report["completion_provenance_check"] = "passed"
         return
 
     if problem_kind != orbit_kind:

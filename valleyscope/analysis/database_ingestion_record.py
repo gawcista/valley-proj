@@ -21,6 +21,43 @@ from valleyscope.analysis.unitary_provenance import (
 
 _SCHEMA_VERSION = "1.8.0"
 
+_PROMOTION_REQUIRED_PASSED_CHECKS = frozenset({
+    "table_provenance_check",
+    "table_setting_check",
+    "sg_symbol_check",
+    "sg_number_check",
+    "certificate_check",
+    "certificate_consistency_check",
+    "cert_sg_consistency_check",
+    "affine_setting_check",
+    "hall_setting_check",
+    "spin_convention_check",
+    "problem_kind_check",
+    "hsp_basis_check",
+    "irrep_basis_check",
+    "completion_provenance_check",
+})
+
+_PROMOTED_BUNDLE_IDENTITY_FIELDS = (
+    "problem_kind",
+    "physical_object_kind",
+    "valley",
+    "valley_orbit",
+    "subspace_group_candidate",
+    "subspace_space_group",
+    "expected_hsps",
+    "required_source_hsp_labels",
+    "covered_source_hsp_labels",
+    "source_hsp_to_sampled_kpoint",
+    "independent_source_hsp_to_sampled_kpoint",
+    "observed_source_hsp_to_sampled_kpoint",
+    "unitary_vector_construction",
+    "unitary_irrep_completion_records_by_hsp",
+    "unitary_valley_irreps",
+    "time_reversal",
+    "certificate_identity",
+)
+
 
 def _load_json_object(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -149,9 +186,10 @@ def build_database_ingestion_record(
         if isinstance(reduced_ebr_input, dict):
             record["reduced_ebr_input"] = dict(reduced_ebr_input)
         solutions = valley_reduced_ebr_mapping.get("solutions", [])
-        valid_solutions = (
-            [solution for solution in solutions if isinstance(solution, dict)]
-            if isinstance(solutions, list) else []
+        valid_solutions = _authoritative_mapping_solutions(
+            solutions=solutions,
+            valley_ebr_export_bundle=valley_ebr_export_bundle,
+            errors=errors,
         )
         record["final_reduced_ebr_result_count"] = len(valid_solutions)
         mapping_excluded = valley_reduced_ebr_mapping.get(
@@ -168,16 +206,22 @@ def build_database_ingestion_record(
             compact_mapping_excluded
         )
         if isinstance(solutions, list):
-            atomic = sum(1 for s in solutions if isinstance(s, dict)
-                         and s.get("classification") == "atomic-compatible-candidate")
-            no_witness = sum(1 for s in solutions if isinstance(s, dict)
-                             and s.get("classification") == "in_integer_span_no_nonnegative_witness")
-            outside = sum(1 for s in solutions if isinstance(s, dict)
-                          and s.get("classification") == "outside_integer_span")
+            atomic = sum(
+                1 for s in valid_solutions
+                if s.get("classification") == "atomic-compatible-candidate"
+            )
+            no_witness = sum(
+                1 for s in valid_solutions
+                if s.get("classification")
+                == "in_integer_span_no_nonnegative_witness"
+            )
+            outside = sum(
+                1 for s in valid_solutions
+                if s.get("classification") == "outside_integer_span"
+            )
             truncated = sum(
-                1 for s in solutions
-                if isinstance(s, dict)
-                and s.get("classification") == "indeterminate_truncated"
+                1 for s in valid_solutions
+                if s.get("classification") == "indeterminate_truncated"
             )
             record["reduced_ebr_classification_counts"] = {
                 "atomic_compatible": atomic,
@@ -188,9 +232,7 @@ def build_database_ingestion_record(
         # --- per-bundle reduced EBR records (compact public fields) ---
         if isinstance(solutions, list):
             reduced_ebr_records: list[dict[str, Any]] = []
-            for s in solutions:
-                if not isinstance(s, dict):
-                    continue
+            for s in valid_solutions:
                 rec: dict[str, Any] = {
                     "bundle_id": s.get("bundle_id", "?"),
                     "valley": s.get("valley", "?"),
@@ -352,6 +394,119 @@ def load_database_ingestion_record_from_directory(
 # ---------------------------------------------------------------------------
 # Internal
 # ---------------------------------------------------------------------------
+
+
+def _authoritative_mapping_solutions(
+    *,
+    solutions: object,
+    valley_ebr_export_bundle: dict[str, Any] | None,
+    errors: list[str],
+) -> list[dict[str, Any]]:
+    """Keep only solutions tied to the current promoted export bundle."""
+    if not isinstance(solutions, list):
+        return []
+    bundles = (
+        valley_ebr_export_bundle.get("bundles", [])
+        if isinstance(valley_ebr_export_bundle, dict)
+        else []
+    )
+    ready_by_id: dict[str, dict[str, Any]] = {}
+    duplicate_ids: set[str] = set()
+    if isinstance(bundles, list):
+        for bundle in bundles:
+            if (
+                not isinstance(bundle, dict)
+                or bundle.get("ready_for_reduced_table_validation") is not True
+            ):
+                continue
+            bundle_id = bundle.get("bundle_id")
+            if not isinstance(bundle_id, str) or not bundle_id:
+                continue
+            if bundle_id in ready_by_id:
+                duplicate_ids.add(bundle_id)
+            ready_by_id[bundle_id] = bundle
+    for duplicate_id in duplicate_ids:
+        ready_by_id.pop(duplicate_id, None)
+
+    authoritative: list[dict[str, Any]] = []
+    for solution in solutions:
+        if not isinstance(solution, dict):
+            continue
+        bundle_id = solution.get("bundle_id")
+        display_id = bundle_id if isinstance(bundle_id, str) else "<unknown>"
+        bundle = ready_by_id.get(bundle_id) if isinstance(bundle_id, str) else None
+        if bundle is None:
+            errors.append(
+                f"mapping solution {display_id}: no matching ready export bundle"
+            )
+            continue
+        if not _has_passed_promotion_provenance(solution):
+            errors.append(
+                f"mapping solution {display_id}: "
+                "missing passed promotion provenance"
+            )
+            continue
+        if not _solution_matches_export_bundle(solution, bundle):
+            errors.append(
+                f"mapping solution {display_id}: promotion provenance does "
+                "not match current export bundle"
+            )
+            continue
+        authoritative.append(solution)
+    return authoritative
+
+
+def _has_passed_promotion_provenance(solution: dict[str, Any]) -> bool:
+    promotion = solution.get("promotion_provenance")
+    if (
+        not isinstance(promotion, dict)
+        or promotion.get("source") != "promote_bundle_for_solve"
+    ):
+        return False
+    report = promotion.get("validation_report")
+    if (
+        not isinstance(report, dict)
+        or solution.get("validation_report") != report
+        or any(
+            report.get(check) != "passed"
+            for check in _PROMOTION_REQUIRED_PASSED_CHECKS
+        )
+    ):
+        return False
+    certificate = promotion.get("certificate_identity")
+    if (
+        not isinstance(certificate, dict)
+        or not certificate
+        or solution.get("certificate_identity") != certificate
+    ):
+        return False
+    promoted_table = promotion.get("table_provenance")
+    solution_table = solution.get("table_provenance")
+    if (
+        not isinstance(promoted_table, dict)
+        or not promoted_table
+        or not isinstance(solution_table, dict)
+    ):
+        return False
+    return all(
+        key == "source" or solution_table.get(key) == value
+        for key, value in promoted_table.items()
+    )
+
+
+def _solution_matches_export_bundle(
+    solution: dict[str, Any],
+    bundle: dict[str, Any],
+) -> bool:
+    if any(
+        solution.get(field) != bundle.get(field)
+        for field in _PROMOTED_BUNDLE_IDENTITY_FIELDS
+    ):
+        return False
+    if bundle.get("problem_kind") == "unitary_valley_reduced_ebr":
+        return validate_unitary_bundle_provenance(bundle)
+    return bundle.get("problem_kind") == "valley_orbit_reduced_ebr"
+
 
 def _extract_irrep_records(
     bundle: dict[str, Any],

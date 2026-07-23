@@ -13,6 +13,9 @@ None (the caller must then expect a fail-closed blocker).
 
 from __future__ import annotations
 
+from collections import Counter
+from copy import deepcopy
+
 import numpy as np
 
 from valleyscope.analysis.standard_setting_kmap import (
@@ -166,7 +169,24 @@ def attach_real_certificate(export_bundle: dict, table: dict) -> dict | None:
         if isinstance(b, dict):
             b["certificate_identity"] = dict(cert_identity)
             b["subspace_sg_number"] = int(sg)
-            _inject_spin_records(b, spinful)
+            b.setdefault(
+                "source_instance_id",
+                f"fixture_instance_{b.get('bundle_id', 'unknown')}",
+            )
+            problem_kind = b.setdefault(
+                "problem_kind", "unitary_valley_reduced_ebr"
+            )
+            if problem_kind == "unitary_valley_reduced_ebr":
+                _inject_direct_unitary_contract(
+                    b,
+                    spinful=spinful,
+                    certificate_identity=cert_identity,
+                )
+            elif problem_kind == "valley_orbit_reduced_ebr":
+                b.setdefault(
+                    "physical_object_kind",
+                    "joint_time_reversal_valley_orbit",
+                )
     return export_bundle
 
 
@@ -194,25 +214,108 @@ def complete_table_provenance(table: dict, sg_number: int | None = None,
     return table
 
 
-def _inject_spin_records(bundle: dict, spinful: bool) -> None:
-    """Ensure every irrep row carries a consistent source_table_spinor."""
+def _inject_direct_unitary_contract(
+    bundle: dict,
+    *,
+    spinful: bool,
+    certificate_identity: dict,
+) -> None:
+    """Upgrade a synthetic unitary fixture to the current producer contract."""
     irreps = bundle.get("irreps_by_kpoint", {})
-    records = bundle.get("irrep_records_by_kpoint")
-    if not isinstance(records, dict):
-        records = {}
-        bundle["irrep_records_by_kpoint"] = records
-    if isinstance(irreps, dict):
-        for kp, labels in irreps.items():
-            row = records.get(kp)
-            if not isinstance(row, list) or not row:
-                row = [{"matched_irrep": (labels[0] if labels else ""),
-                        "irrep_multiplicity": 1,
-                        "irrep_source_provenance": {}}]
-                records[kp] = row
-            for rec in row:
-                if isinstance(rec, dict):
-                    p = rec.get("irrep_source_provenance")
-                    if not isinstance(p, dict):
-                        p = {}
-                        rec["irrep_source_provenance"] = p
-                    p["source_table_spinor"] = spinful
+    if not isinstance(irreps, dict):
+        return
+    original_records = bundle.get("irrep_records_by_kpoint")
+    if not isinstance(original_records, dict):
+        original_records = {}
+    valley = bundle.get("valley")
+    source_to_sample: dict[str, str] = {}
+    rebuilt_records: dict[str, list[dict]] = {}
+    for sampled, labels in irreps.items():
+        existing = original_records.get(sampled)
+        existing = existing if isinstance(existing, list) else []
+        first = next(
+            (row for row in existing if isinstance(row, dict)),
+            {},
+        )
+        first_provenance = first.get("irrep_source_provenance")
+        source_hsp = (
+            first_provenance.get("source_hsp_label")
+            if isinstance(first_provenance, dict)
+            else None
+        )
+        if (
+            not isinstance(source_hsp, str)
+            or not source_hsp
+            or source_hsp in source_to_sample
+        ):
+            source_hsp = sampled
+        source_to_sample[source_hsp] = sampled
+        rows: list[dict] = []
+        for irrep, multiplicity in Counter(labels).items():
+            template = next(
+                (
+                    row for row in existing
+                    if isinstance(row, dict)
+                    and row.get("matched_irrep") == irrep
+                ),
+                first,
+            )
+            row = deepcopy(template)
+            source = row.get("source")
+            if not isinstance(source, str) or not source:
+                source = f"fixture/{valley}/{source_hsp}/{irrep}"
+            irrep_provenance = row.get("irrep_source_provenance")
+            if not isinstance(irrep_provenance, dict):
+                irrep_provenance = {}
+            irrep_provenance = dict(irrep_provenance)
+            irrep_provenance["source_hsp_label"] = source_hsp
+            irrep_provenance["source_table_spinor"] = spinful
+            identity = {
+                "source": source,
+                "workflow_path": "direct_qcut",
+                "valley": valley,
+                "source_hsp_label": source_hsp,
+                "sampled_kpoint": sampled,
+                "irrep": irrep,
+                "multiplicity": multiplicity,
+            }
+            row.update({
+                "matched_irrep": irrep,
+                "irrep_multiplicity": multiplicity,
+                "valley": valley,
+                "sampled_kpoint": sampled,
+                "source_hsp_label": source_hsp,
+                "workflow_path": "direct_qcut",
+                "readiness_level": "trusted",
+                "source": source,
+                "certificate_identity": dict(certificate_identity),
+                "irrep_source_provenance": irrep_provenance,
+                "source_candidate_identity": identity,
+                "source_candidate_provenance": {
+                    "source": source,
+                    "workflow_path": "direct_qcut",
+                    "irrep_source_provenance": irrep_provenance,
+                },
+            })
+            rows.append(row)
+        rebuilt_records[sampled] = rows
+
+    bundle.update({
+        "physical_object_kind": "unitary_valley_projected_subspace",
+        "spinor": spinful,
+        "workflow_path": "direct_qcut",
+        "readiness_level": "trusted",
+        "valley_orbit": [],
+        "time_reversal": {},
+        "unitary_irrep_completion_records_by_hsp": {},
+        "unitary_vector_construction": {
+            "kind": "direct_observed_unitary_rows",
+            "source": "trusted_ebr_input_candidates",
+        },
+        "expected_hsps": bundle.get(
+            "expected_hsps", list(irreps)
+        ),
+        "required_source_hsp_labels": list(source_to_sample),
+        "source_hsp_to_sampled_kpoint": source_to_sample,
+        "irrep_records_by_kpoint": rebuilt_records,
+    })

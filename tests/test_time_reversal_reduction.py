@@ -335,6 +335,40 @@ def _reviewed_joint_bundle_and_table():
             "candidate_space_group_symbol": "P3",
         },
     )
+    def observed_completion(valley):
+        source = f"fixture/{valley}/GM"
+        identity = {
+            "source": source,
+            "workflow_path": "direct_qcut",
+            "valley": valley,
+            "source_hsp_label": "GM",
+            "sampled_kpoint": "GM",
+            "irrep": "-GM4",
+            "multiplicity": 1,
+        }
+        return {
+            "GM": [{
+                "completion_kind": "observed_at_sampled_kpoint",
+                "target_valley": valley,
+                "target_source_hsp_label": "GM",
+                "irrep": "-GM4",
+                "multiplicity": 1,
+                "sampled_kpoint": "GM",
+                "source_candidate_identity": identity,
+                "source_candidate_provenance": {
+                    "source": source,
+                    "workflow_path": "direct_qcut",
+                    "irrep_source_provenance": {
+                        "source_hsp_label": "GM",
+                        "source_table_spinor": True,
+                    },
+                },
+                "structural_status": "validated",
+                "readiness_status": "trusted",
+                "blockers": [],
+            }],
+        }
+
     bundle = {
         "bundle_id": "b_tr",
         "problem_kind": "valley_orbit_reduced_ebr",
@@ -353,6 +387,14 @@ def _reviewed_joint_bundle_and_table():
             "source_hsp_to_sampled_kpoint_by_valley": {
                 "left": {"GM": "GM"},
                 "right": {"GM": "GM"},
+            },
+            "observed_source_hsp_to_sampled_kpoint_by_valley": {
+                "left": {"GM": "GM"},
+                "right": {"GM": "GM"},
+            },
+            "unitary_valley_irrep_completion_records": {
+                "left": observed_completion("left"),
+                "right": observed_completion("right"),
             },
             "time_reversal_hsp_orbits": [{
                 "representative": "GM",
@@ -468,6 +510,7 @@ def test_problem_kind_compatibility_rejects_grey_table_for_unitary_bundle():
     unitary = dict(bundle)
     unitary.update({
         "problem_kind": "unitary_valley_reduced_ebr",
+        "physical_object_kind": "unitary_valley_projected_subspace",
         "valley": "left",
         "valley_orbit": [],
     })
@@ -542,6 +585,25 @@ def test_self_mapped_joint_problem_requires_serialized_sewing_evidence():
     self_mapped["time_reversal"][
         "source_hsp_to_sampled_kpoint_by_valley"
     ] = {"v": {"GM": "GM"}}
+    observed = deepcopy(
+        bundle["time_reversal"][
+            "unitary_valley_irrep_completion_records"
+        ]["left"]["GM"][0]
+    )
+    observed["target_valley"] = "v"
+    observed["multiplicity"] = 2
+    observed["source_candidate_identity"].update({
+        "source": "fixture/v/GM",
+        "valley": "v",
+        "multiplicity": 2,
+    })
+    observed["source_candidate_provenance"]["source"] = "fixture/v/GM"
+    self_mapped["time_reversal"][
+        "observed_source_hsp_to_sampled_kpoint_by_valley"
+    ] = {"v": {"GM": "GM"}}
+    self_mapped["time_reversal"][
+        "unitary_valley_irrep_completion_records"
+    ] = {"v": {"GM": [observed]}}
     coefficients = np.asarray([
         [[1.0 + 0.0j], [0.0 + 0.0j]],
         [[0.0 + 0.0j], [1.0 + 0.0j]],

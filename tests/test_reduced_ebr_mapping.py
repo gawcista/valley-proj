@@ -135,7 +135,7 @@ def test_exact_solution_found():
 
 def test_no_exact_solution():
     bundle_vec = {"GammaM": ["C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"],
-                  "KM": []}
+                  "KM": ["C3_spinor_phase_+1/6"]}
     b = {
         "bundles": [{
             "bundle_id": "b_001", "valley": "K",
