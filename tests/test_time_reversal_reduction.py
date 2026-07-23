@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
+import json
 
 import numpy as np
 import pytest
@@ -14,6 +16,7 @@ from valleyscope.analysis.reduced_ebr_mapping import (
     _joint_bundle_time_reversal_evidence_valid,
     build_reduced_ebr_mapping,
     promote_bundle_for_solve,
+    validate_joint_grey_bundle_provenance,
 )
 from valleyscope.analysis.unitary_provenance import (
     validate_tr_completed_unitary_bundle as _unitary_bundle_completion_evidence_valid,
@@ -463,7 +466,12 @@ def _projector_provenance_from_sewing(report):
 def test_joint_problem_promotion_requires_matching_type_ii_grey_provenance():
     bundle, table = _reviewed_joint_bundle_and_table()
 
-    assert promote_bundle_for_solve(bundle=bundle, table=table)["promoted"]
+    promotion = promote_bundle_for_solve(bundle=bundle, table=table)
+    assert promotion["promoted"]
+    assert validate_joint_grey_bundle_provenance(
+        bundle,
+        promotion["table_provenance"],
+    )
     mapping = build_reduced_ebr_mapping(
         ebr_export_bundle={"bundles": [bundle]},
         table=table,
@@ -503,6 +511,100 @@ def test_joint_problem_promotion_requires_matching_type_ii_grey_provenance():
     promotion = promote_bundle_for_solve(bundle=bundle, table=wrong)
     assert promotion["promoted"] is False
     assert "time_reversal_grey_bns_mismatch" in _blocker_codes(promotion)
+
+
+def test_joint_grey_mapping_is_authoritative_for_ingestion():
+    from valleyscope.analysis.database_ingestion_record import (
+        build_database_ingestion_record,
+    )
+
+    bundle, table = _reviewed_joint_bundle_and_table()
+    export = {"bundles": [bundle]}
+    mapping = build_reduced_ebr_mapping(
+        ebr_export_bundle=export,
+        table=table,
+        reduced_ebr_input={"source": "auto_time_reversal_grey"},
+    )
+    record = build_database_ingestion_record(
+        valley_summary={"target_kpoints": ["GM"], "iband": [1], "input": {}},
+        valley_ebr_export_bundle=export,
+        valley_reduced_ebr_mapping=mapping,
+    )
+
+    assert record["final_reduced_ebr_result_count"] == 1
+    assert record["validation_errors"] == []
+    assert record["reduced_ebr_records"][0]["table_source"] == (
+        "auto_time_reversal_grey"
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["valley_mapping", "hsp_orbit", "irrep_pairing"],
+)
+def test_ingestion_revalidates_coordinated_joint_grey_mutation(mutation):
+    from valleyscope.analysis.database_ingestion_record import (
+        build_database_ingestion_record,
+    )
+
+    bundle, table = _reviewed_joint_bundle_and_table()
+    export = {"bundles": [bundle]}
+    mapping = build_reduced_ebr_mapping(
+        ebr_export_bundle=export,
+        table=table,
+        reduced_ebr_input={"source": "auto_time_reversal_grey"},
+    )
+    solution = mapping["solutions"][0]
+    if mutation == "valley_mapping":
+        forged = {
+            "left": "left",
+            "right": "right",
+        }
+        field = "time_reversal_valley_mapping"
+    elif mutation == "hsp_orbit":
+        forged = [{
+            "representative": "GM",
+            "members": ["GM", "forged_hsp"],
+            "self_mapped": False,
+        }]
+        field = "time_reversal_hsp_orbits"
+    else:
+        forged = {"-GM4": "forged_irrep"}
+        field = "time_reversal_irrep_pairing"
+    bundle["time_reversal"][field] = deepcopy(forged)
+    solution["time_reversal"][field] = deepcopy(forged)
+
+    canonical_bundle = {
+        key: value
+        for key, value in bundle.items()
+        if key != "promotion_provenance"
+    }
+    digest = hashlib.sha256(json.dumps(
+        canonical_bundle,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")).hexdigest()
+    solution["promotion_provenance"]["promotion_input_identity"] = {
+        "schema_version": "1.0.0",
+        "algorithm": "sha256",
+        "digest": digest,
+    }
+    solution["promotion_provenance"]["irrep_vector"] = deepcopy(
+        solution["irrep_vector"]
+    )
+
+    record = build_database_ingestion_record(
+        valley_summary={"target_kpoints": ["GM"], "iband": [1], "input": {}},
+        valley_ebr_export_bundle=export,
+        valley_reduced_ebr_mapping=mapping,
+    )
+
+    assert record["final_reduced_ebr_result_count"] == 0
+    assert record["validation_errors"] == [
+        "mapping solution b_tr: current joint grey provenance is invalid"
+    ]
 
 
 def test_problem_kind_compatibility_rejects_grey_table_for_unitary_bundle():

@@ -314,6 +314,10 @@ valleyscope collect-database-record ./valley_analysis --output record.json
 
 Generic irrep rows in this record preserve `irrep_source_provenance`, including
 `standard_setting_hsp_mapping.standard_setting_certificate` when available.
+Final reduced-EBR records are accepted only when their promotion provenance
+matches the exact current export bundle, promoted irrep vector, and current
+table-input source. Duplicate solution IDs and stale or forged joint
+time-reversal grey-group evidence fail closed.
 
 Build a multi-run database index directly from any explicit mixture of
 ingestion-record files and `analyze-hsp` output directories:

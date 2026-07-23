@@ -615,8 +615,26 @@ def _authoritative_unitary_ingestion_payload(
             ),
         },
     }
+    solution["required_source_hsp_labels"] = bundle.get(
+        "required_source_hsp_labels", []
+    )
+    solution["covered_source_hsp_labels"] = bundle.get(
+        "covered_source_hsp_labels", []
+    )
+    solution["unitary_valley_irreps"] = bundle.get(
+        "unitary_valley_irreps", {}
+    )
     if solution_over:
         solution.update(deepcopy(solution_over))
+    from valleyscope.analysis.promotion_identity import (
+        build_promotion_input_identity,
+    )
+    solution["promotion_provenance"]["promotion_input_identity"] = (
+        build_promotion_input_identity(bundle)
+    )
+    solution["promotion_provenance"]["irrep_vector"] = deepcopy(
+        solution["irrep_vector"]
+    )
     return (
         {"bundles": [bundle]},
         {

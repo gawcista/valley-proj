@@ -21,6 +21,10 @@ from valleyscope.irreps.time_reversal_geometry import (
 from valleyscope.analysis.time_reversal_sewing import (
     validate_time_reversal_sewing_report,
 )
+from valleyscope.analysis.promotion_identity import (
+    build_promotion_input_identity,
+    merge_table_input_provenance,
+)
 from valleyscope.analysis.unitary_provenance import (
     unitary_bundle_claims_time_reversal_completion,
     validate_direct_unitary_bundle,
@@ -29,7 +33,7 @@ from valleyscope.analysis.unitary_provenance import (
 
 _REQUIRED_TABLE_KEYS = {"schema_version", "subspace_group_candidate",
                          "expected_hsps", "irreps", "ebrs"}
-_OUTPUT_SCHEMA_VERSION = "1.8.0"
+_OUTPUT_SCHEMA_VERSION = "1.9.0"
 _SOLVER_NAME = "smith_normal_form_plus_bounded_nonnegative_search"
 
 # Standard-setting certificate convention — REAL producer vocabulary.
@@ -379,6 +383,8 @@ def promote_bundle_for_solve(*, bundle: dict, table: dict) -> dict:
             "validation_report": dict(report),
             "table_provenance": dict(table_provenance),
             "certificate_identity": dict(cert_id),
+            "promotion_input_identity": build_promotion_input_identity(bundle),
+            "irrep_vector": list(irrep_vector or []),
         }
 
     return {
@@ -458,13 +464,10 @@ def _merge_table_input_provenance(
     table_provenance: dict,
     reduced_ebr_input: dict[str, object] | None,
 ) -> dict:
-    return {
-        **(
-            dict(reduced_ebr_input)
-            if isinstance(reduced_ebr_input, dict) else {}
-        ),
-        **table_provenance,
-    }
+    return merge_table_input_provenance(
+        table_provenance,
+        reduced_ebr_input,
+    )
 
 
 def _normalized_hsp_set(value: object) -> set[str] | None:
@@ -599,11 +602,9 @@ def _validate_problem_kind_compatibility(
             f"table SG {table_space_group_number!r}",
         ))
 
-    if not _joint_bundle_time_reversal_evidence_valid(
+    if not validate_joint_grey_bundle_provenance(
         bundle=bundle,
-        table_spinful=table_spinful,
-        expected_bns_number=expected_bns_number,
-        table_space_group_number=table_space_group_number,
+        table_provenance=provenance,
     ):
         blockers.append(_blocker(
             "time_reversal_bundle_evidence_invalid",
@@ -622,6 +623,46 @@ def _validate_problem_kind_compatibility(
             for blocker in blockers
         )
         else "failed"
+    )
+
+
+def validate_joint_grey_bundle_provenance(
+    bundle: dict,
+    table_provenance: dict,
+) -> bool:
+    """Validate a serialized joint type-II-grey bundle/table pair."""
+    if not isinstance(bundle, dict) or not isinstance(table_provenance, dict):
+        return False
+    table_spinful = table_provenance.get("spinful")
+    table_space_group_number = table_provenance.get("space_group_number")
+    grey_unitary_sg = table_provenance.get("unitary_space_group_number")
+    grey_bns_number = table_provenance.get(
+        "time_reversal_grey_bns_number"
+    )
+    if (
+        table_provenance.get("time_reversal_source")
+        != "irreptables_type_ii_grey_group"
+        or not isinstance(table_spinful, bool)
+        or not _is_positive_int(table_space_group_number)
+        or not _is_positive_int(grey_unitary_sg)
+        or int(grey_unitary_sg) != int(table_space_group_number)
+        or not isinstance(grey_bns_number, str)
+        or not grey_bns_number
+    ):
+        return False
+    try:
+        expected_bns_number = derive_type_ii_bns_number(
+            int(table_space_group_number)
+        )
+    except Exception:
+        return False
+    if grey_bns_number != expected_bns_number:
+        return False
+    return _joint_bundle_time_reversal_evidence_valid(
+        bundle=bundle,
+        table_spinful=table_spinful,
+        expected_bns_number=expected_bns_number,
+        table_space_group_number=table_space_group_number,
     )
 
 
@@ -2595,6 +2636,7 @@ def build_auto_reduced_ebr_mapping(
     solutions: list[dict] = []
     excluded: list[dict] = []
     per_bundle: list[dict[str, object]] = []
+    table_input_by_bundle: dict[str, dict[str, object]] = {}
     ready_count = 0
     loaded_count = 0
     tr_bundle_count = sum(
@@ -2666,6 +2708,7 @@ def build_auto_reduced_ebr_mapping(
 
         loaded_count += 1
         table_input = _auto_table_input(table, is_time_reversal)
+        table_input_by_bundle[bundle_id] = dict(table_input)
         bundle_result = build_reduced_ebr_mapping(
             ebr_export_bundle={"bundles": [raw_bundle]},
             table=table,
@@ -2731,6 +2774,7 @@ def build_auto_reduced_ebr_mapping(
             "reduced_table_validation_candidate_bundle_count": ready_count,
             "final_reduced_ebr_result_count": len(solutions),
             "final_mapping_excluded_bundle_count": len(excluded),
+            "table_input_provenance_by_bundle": table_input_by_bundle,
         },
         "auto_canonical_bundles": per_bundle,
     }

@@ -18,6 +18,11 @@ from valleyscope.analysis.unitary_provenance import (
     unitary_bundle_claims_time_reversal_completion,
     validate_unitary_bundle_provenance,
 )
+from valleyscope.analysis.promotion_identity import (
+    build_promotion_input_identity,
+    merge_table_input_provenance,
+    table_input_for_bundle,
+)
 
 _SCHEMA_VERSION = "1.8.0"
 
@@ -38,7 +43,7 @@ _PROMOTION_REQUIRED_PASSED_CHECKS = frozenset({
     "completion_provenance_check",
 })
 
-_PROMOTED_BUNDLE_IDENTITY_FIELDS = (
+_SOLUTION_BUNDLE_BINDING_FIELDS = (
     "problem_kind",
     "physical_object_kind",
     "valley",
@@ -57,7 +62,25 @@ _PROMOTED_BUNDLE_IDENTITY_FIELDS = (
     "time_reversal",
     "certificate_identity",
 )
-
+_SOLUTION_BUNDLE_BINDING_DEFAULTS = {
+    "problem_kind": "unitary_valley_reduced_ebr",
+    "physical_object_kind": "unitary_valley_projected_subspace",
+    "valley": "",
+    "valley_orbit": [],
+    "subspace_group_candidate": "",
+    "subspace_space_group": {},
+    "expected_hsps": [],
+    "required_source_hsp_labels": [],
+    "covered_source_hsp_labels": [],
+    "source_hsp_to_sampled_kpoint": {},
+    "independent_source_hsp_to_sampled_kpoint": {},
+    "observed_source_hsp_to_sampled_kpoint": {},
+    "unitary_vector_construction": {},
+    "unitary_irrep_completion_records_by_hsp": {},
+    "unitary_valley_irreps": {},
+    "time_reversal": {},
+    "certificate_identity": {},
+}
 
 def _load_json_object(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -189,6 +212,7 @@ def build_database_ingestion_record(
         valid_solutions = _authoritative_mapping_solutions(
             solutions=solutions,
             valley_ebr_export_bundle=valley_ebr_export_bundle,
+            reduced_ebr_input=reduced_ebr_input,
             errors=errors,
         )
         record["final_reduced_ebr_result_count"] = len(valid_solutions)
@@ -400,6 +424,7 @@ def _authoritative_mapping_solutions(
     *,
     solutions: object,
     valley_ebr_export_bundle: dict[str, Any] | None,
+    reduced_ebr_input: dict[str, Any] | None,
     errors: list[str],
 ) -> list[dict[str, Any]]:
     """Keep only solutions tied to the current promoted export bundle."""
@@ -428,12 +453,31 @@ def _authoritative_mapping_solutions(
     for duplicate_id in duplicate_ids:
         ready_by_id.pop(duplicate_id, None)
 
+    solution_counts: dict[str, int] = {}
+    for solution in solutions:
+        if not isinstance(solution, dict):
+            continue
+        bundle_id = solution.get("bundle_id")
+        if isinstance(bundle_id, str) and bundle_id:
+            solution_counts[bundle_id] = solution_counts.get(bundle_id, 0) + 1
+    duplicate_solution_ids = {
+        bundle_id
+        for bundle_id, count in solution_counts.items()
+        if count > 1
+    }
+    for bundle_id in sorted(duplicate_solution_ids):
+        errors.append(
+            f"mapping solution {bundle_id}: duplicate final solution ID"
+        )
+
     authoritative: list[dict[str, Any]] = []
     for solution in solutions:
         if not isinstance(solution, dict):
             continue
         bundle_id = solution.get("bundle_id")
         display_id = bundle_id if isinstance(bundle_id, str) else "<unknown>"
+        if bundle_id in duplicate_solution_ids:
+            continue
         bundle = ready_by_id.get(bundle_id) if isinstance(bundle_id, str) else None
         if bundle is None:
             errors.append(
@@ -446,11 +490,13 @@ def _authoritative_mapping_solutions(
                 "missing passed promotion provenance"
             )
             continue
-        if not _solution_matches_export_bundle(solution, bundle):
-            errors.append(
-                f"mapping solution {display_id}: promotion provenance does "
-                "not match current export bundle"
-            )
+        validation_error = _solution_validation_error(
+            solution=solution,
+            bundle=bundle,
+            reduced_ebr_input=reduced_ebr_input,
+        )
+        if validation_error is not None:
+            errors.append(f"mapping solution {display_id}: {validation_error}")
             continue
         authoritative.append(solution)
     return authoritative
@@ -488,24 +534,55 @@ def _has_passed_promotion_provenance(solution: dict[str, Any]) -> bool:
         or not isinstance(solution_table, dict)
     ):
         return False
-    return all(
-        key == "source" or solution_table.get(key) == value
-        for key, value in promoted_table.items()
-    )
+    return True
 
 
-def _solution_matches_export_bundle(
+def _solution_validation_error(
+    *,
     solution: dict[str, Any],
     bundle: dict[str, Any],
-) -> bool:
-    if any(
-        solution.get(field) != bundle.get(field)
-        for field in _PROMOTED_BUNDLE_IDENTITY_FIELDS
+    reduced_ebr_input: dict[str, Any] | None,
+) -> str | None:
+    promotion = solution["promotion_provenance"]
+    if promotion.get("promotion_input_identity") != (
+        build_promotion_input_identity(bundle)
     ):
-        return False
+        return "promotion input identity does not match current export bundle"
+    if any(
+        solution.get(field) != bundle.get(
+            field,
+            _SOLUTION_BUNDLE_BINDING_DEFAULTS[field],
+        )
+        for field in _SOLUTION_BUNDLE_BINDING_FIELDS
+    ):
+        return "promotion provenance does not match current export bundle"
+    if promotion.get("irrep_vector") != solution.get("irrep_vector"):
+        return "promoted irrep vector does not match solution"
+    promoted_table = promotion["table_provenance"]
+    current_input = table_input_for_bundle(
+        reduced_ebr_input,
+        str(solution.get("bundle_id", "")),
+    )
+    if solution.get("table_provenance") != merge_table_input_provenance(
+        promoted_table,
+        current_input,
+    ):
+        return "table input provenance does not match current mapping input"
     if bundle.get("problem_kind") == "unitary_valley_reduced_ebr":
-        return validate_unitary_bundle_provenance(bundle)
-    return bundle.get("problem_kind") == "valley_orbit_reduced_ebr"
+        if not validate_unitary_bundle_provenance(bundle):
+            return "current unitary provenance is invalid"
+        return None
+    if bundle.get("problem_kind") == "valley_orbit_reduced_ebr":
+        from valleyscope.analysis.reduced_ebr_mapping import (
+            validate_joint_grey_bundle_provenance,
+        )
+        if not validate_joint_grey_bundle_provenance(
+            bundle,
+            promoted_table,
+        ):
+            return "current joint grey provenance is invalid"
+        return None
+    return "current reduced EBR problem kind is invalid"
 
 
 def _extract_irrep_records(

@@ -284,6 +284,9 @@ valleyscope collect-database-record ./valley_analysis --output record.json
 
 该记录中的 generic irrep 行会保留 `irrep_source_provenance`，包括可用时的
 `standard_setting_hsp_mapping.standard_setting_certificate`。
+最终 reduced-EBR 记录只有在 promotion provenance 与当前完整 export bundle、
+被提升的 irrep vector 及当前表输入来源严格一致时才会被采纳。重复 solution
+ID、过期或伪造的联合时间反演 grey-group 证据都会 fail closed。
 
 从显式指定的采集记录文件和 `analyze-hsp` 输出目录的任意混合输入，直接生成
 多运行数据库索引：

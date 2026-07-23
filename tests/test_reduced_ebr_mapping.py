@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+from copy import deepcopy
 import pytest
 from pathlib import Path
 import numpy as np
@@ -13,6 +14,45 @@ from valleyscope.analysis.reduced_ebr_mapping import (
 from valleyscope.io.config import load_config
 from tests.reduced_ebr_promo_helpers import attach_real_certificate
 from valleyscope.analysis.reduced_ebr_solver import classify_bundle
+
+
+def _current_direct_mapping_inputs(*, source="table_file"):
+    table = deepcopy(_SAMPLE_TABLE)
+    export = {
+        "bundles": [{
+            "bundle_id": "authoritative_direct",
+            "valley": "K",
+            "subspace_group_candidate": "P3",
+            "subspace_space_group": {
+                "status": "resolved",
+                "candidate_space_group_number": 143,
+                "candidate_space_group_symbol": "P3",
+            },
+            "ready_for_reduced_table_validation": True,
+            "irreps_by_kpoint": {
+                "GammaM": [
+                    "C3_spinor_phase_+1/2",
+                    "C3_spinor_phase_+1/2",
+                ],
+                "KM": [
+                    "C3_spinor_phase_+1/6",
+                    "C3_spinor_phase_-1/6",
+                ],
+            },
+        }],
+    }
+    _ready(export, table)
+    reduced_input = {
+        "source": source,
+        f"{source}_stem": "reviewed_input",
+    }
+    mapping = build_reduced_ebr_mapping(
+        ebr_export_bundle=export,
+        table=table,
+        reduced_ebr_input=reduced_input,
+    )
+    assert len(mapping["solutions"]) == 1
+    return export, mapping
 
 def _write_table(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data), encoding="utf-8")
@@ -163,7 +203,7 @@ def test_missing_table():
 def test_null_bundle():
     r = build_reduced_ebr_mapping(ebr_export_bundle=None)
     assert r["status"] == "not_evaluated"
-    assert r["schema_version"] == "1.8.0"
+    assert r["schema_version"] == "1.9.0"
     assert "mapping_status" not in r
     assert "reduced_ebr_decomposition_status" not in r
     assert r["solutions"] == []
@@ -199,7 +239,7 @@ def test_schema_fields():
     for k in ["status", "schema_version", "table_status",
               "solutions", "excluded_bundles", "solver"]:
         assert k in r, f"missing: {k}"
-    assert r["schema_version"] == "1.8.0"
+    assert r["schema_version"] == "1.9.0"
     assert "mapping_status" not in r
     assert "reduced_ebr_decomposition_status" not in r
 
@@ -1718,3 +1758,131 @@ def test_adapter_rejects_invalid_data():
         )
 
 # Test removed after contract cleanup
+
+
+def _ingest_authoritative(export, mapping):
+    from valleyscope.analysis.database_ingestion_record import (
+        build_database_ingestion_record,
+    )
+
+    return build_database_ingestion_record(
+        valley_summary={
+            "target_kpoints": ["GammaM", "KM"],
+            "iband": [1, 2],
+            "input": {},
+        },
+        valley_ebr_export_bundle=export,
+        valley_reduced_ebr_mapping=mapping,
+    )
+
+
+@pytest.mark.parametrize("mutation", ["sg", "spin", "irrep_content"])
+def test_ingestion_rejects_current_export_semantic_mutation(mutation):
+    export, mapping = _current_direct_mapping_inputs()
+    bundle = export["bundles"][0]
+    if mutation == "sg":
+        bundle["subspace_sg_number"] = 1
+    elif mutation == "spin":
+        bundle["spinor"] = True
+    else:
+        bundle["irreps_by_kpoint"]["GammaM"] = [
+            "C3_spinor_phase_+1/2",
+            "C3_spinor_phase_+1/2",
+            "C3_spinor_phase_+1/2",
+        ]
+
+    record = _ingest_authoritative(export, mapping)
+
+    assert record["final_reduced_ebr_result_count"] == 0
+    assert record["reduced_ebr_records"] == []
+    assert (
+        "mapping solution authoritative_direct: promotion input identity "
+        "does not match current export bundle"
+    ) in record["validation_errors"]
+
+
+def test_ingestion_rejects_solution_irrep_vector_mutation():
+    export, mapping = _current_direct_mapping_inputs()
+    mapping["solutions"][0]["irrep_vector"] = [9, 9, 9]
+
+    record = _ingest_authoritative(export, mapping)
+
+    assert record["final_reduced_ebr_result_count"] == 0
+    assert record["validation_errors"] == [
+        "mapping solution authoritative_direct: promoted irrep vector "
+        "does not match solution"
+    ]
+
+
+def test_ingestion_rejects_all_duplicate_solution_ids():
+    export, mapping = _current_direct_mapping_inputs()
+    mapping["solutions"].append(deepcopy(mapping["solutions"][0]))
+
+    record = _ingest_authoritative(export, mapping)
+
+    assert record["final_reduced_ebr_result_count"] == 0
+    assert record["reduced_ebr_records"] == []
+    assert record["validation_errors"] == [
+        "mapping solution authoritative_direct: duplicate final solution ID"
+    ]
+
+
+@pytest.mark.parametrize("source", ["table_file", "spec_file"])
+def test_ingestion_rejects_forged_table_input_source(source):
+    export, mapping = _current_direct_mapping_inputs(source=source)
+    mapping["solutions"][0]["table_provenance"]["source"] = "forged_source"
+
+    record = _ingest_authoritative(export, mapping)
+
+    assert record["final_reduced_ebr_result_count"] == 0
+    assert record["validation_errors"] == [
+        "mapping solution authoritative_direct: table input provenance "
+        "does not match current mapping input"
+    ]
+
+
+@pytest.mark.parametrize("source", ["table_file", "spec_file"])
+def test_ingestion_accepts_current_explicit_table_input_source(source):
+    export, mapping = _current_direct_mapping_inputs(source=source)
+
+    record = _ingest_authoritative(export, mapping)
+
+    assert record["final_reduced_ebr_result_count"] == 1
+    assert record["validation_errors"] == []
+    assert record["reduced_ebr_records"][0]["table_source"] == source
+
+
+def test_promotion_input_identity_is_canonical_and_versioned():
+    from valleyscope.analysis.promotion_identity import (
+        build_promotion_input_identity,
+    )
+
+    first = {
+        "bundle_id": "b",
+        "irreps_by_kpoint": {"KM": ["B", "A"], "GammaM": ["G"]},
+        "nested": {"z": 2, "a": 1},
+    }
+    reordered = {
+        "nested": {"a": 1, "z": 2},
+        "irreps_by_kpoint": {"GammaM": ["G"], "KM": ["B", "A"]},
+        "bundle_id": "b",
+        "promotion_provenance": {"producer_added": True},
+    }
+
+    identity = build_promotion_input_identity(first)
+    assert identity == build_promotion_input_identity(reordered)
+    assert identity["schema_version"] == "1.0.0"
+    assert identity["algorithm"] == "sha256"
+    assert len(identity["digest"]) == 64
+
+    reordered["irreps_by_kpoint"]["KM"].reverse()
+    assert identity != build_promotion_input_identity(reordered)
+
+
+def test_mapping_serializes_exact_promotion_identity_and_vector():
+    export, mapping = _current_direct_mapping_inputs()
+    solution = mapping["solutions"][0]
+    promotion = solution["promotion_provenance"]
+
+    assert promotion["promotion_input_identity"]["algorithm"] == "sha256"
+    assert promotion["irrep_vector"] == solution["irrep_vector"]

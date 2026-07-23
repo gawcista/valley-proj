@@ -1824,7 +1824,7 @@ def test_tmote2_reduced_ebr_auto_canonical_provenance():
 
     # Top-level status
     assert r["status"] == "no_exact_solution"
-    assert r["schema_version"] == "1.8.0"
+    assert r["schema_version"] == "1.9.0"
     assert r["table_status"] == "loaded"
 
     # reduced_ebr_input self-auditing

@@ -148,6 +148,44 @@ def test_blocked_tr_bundle_keeps_grey_source_identity():
     assert r["reduced_ebr_input"]["source"] == "auto_time_reversal_grey"
 
 
+def test_auto_canonical_mapping_is_authoritative_for_ingestion():
+    from valleyscope.analysis.database_ingestion_record import (
+        build_database_ingestion_record,
+    )
+
+    export = {
+        "bundles": [
+            _mk_bundle(
+                "b1",
+                75,
+                "P4",
+                ["GammaM"],
+                {"GammaM": ["-GM5"]},
+            )
+        ]
+    }
+    mapping = build_auto_reduced_ebr_mapping(
+        ebr_export_bundle=export,
+        spinor=True,
+    )
+    record = build_database_ingestion_record(
+        valley_summary={
+            "target_kpoints": ["GammaM"],
+            "iband": [1],
+            "input": {},
+        },
+        valley_ebr_export_bundle=export,
+        valley_reduced_ebr_mapping=mapping,
+    )
+
+    assert mapping["reduced_ebr_input"]["source"] == "auto_canonical"
+    assert mapping["reduced_ebr_input"][
+        "table_input_provenance_by_bundle"
+    ]["b1"]["source"] == "auto_canonical"
+    assert record["final_reduced_ebr_result_count"] == 1
+    assert record["validation_errors"] == []
+
+
 def test_auto_table_selection_keeps_unitary_and_joint_physics_distinct():
     calls = []
 
