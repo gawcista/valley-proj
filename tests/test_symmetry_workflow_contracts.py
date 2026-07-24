@@ -412,8 +412,7 @@ def test_workflow_requests_all_valley_preserving_little_group_operations(tmp_pat
     assert calls == [False]
 
 
-def test_workflow_passes_hdf5_spinor_flag_to_subgroup_report(tmp_path, monkeypatch):
-    importlib_module = importlib.import_module("valleyscope.workflows.analyze_hsp")
+def test_workflow_rejects_hdf5_spinor_flag_coefficient_shape_conflict(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "config.yaml"
     out_dir = tmp_path / "out"
@@ -421,47 +420,12 @@ def test_workflow_passes_hdf5_spinor_flag_to_subgroup_report(tmp_path, monkeypat
     with h5py.File(h5_path, "r+") as h5:
         h5["metadata/spinor"][()] = True
     write_config(config_path, h5_path, out_dir)
-    captured: list[bool] = []
 
-    def fake_prepare_symmetry_payload(config, monolayer_recip):
-        return {
-            "status": "ok",
-            "operation_detection_backend": "spglib",
-            "structure_file": "fake-CONTCAR",
-            "spacegroup_number": 143,
-            "international": "P3",
-            "symmetry_eigenvalue_enabled": True,
-            "requested_rotation_order": "auto",
-            "resolved_rotation_order": 3,
-            "detected_operation_count": 0,
-            "detected_operations": [],
-            "candidate_rotations": [],
-            "symprec_scan_summary": [],
-            "little_group_check": {"required": True, "status": "evaluated_per_kpoint"},
-            "valley_preservation_check": {"required": True, "status": "completed"},
-        }
-
-    def fake_symmetry_diagnostic(**kwargs):
-        return []
-
-    def fake_subgroup_report(*, symmetry_payload, target_kpoints):
-        captured.append(bool(symmetry_payload["spinor_wavefunction"]))
-        report = {
-            "status": "operation_set_only",
-            "standard_group_match": None,
-            "standard_group_match_status": "not_attempted",
-            "by_kpoint": {},
-        }
-        symmetry_payload["valley_preserving_subgroup_report"] = report
-        return report
-
-    monkeypatch.setattr(importlib_module, "_prepare_symmetry_payload", fake_prepare_symmetry_payload)
-    monkeypatch.setattr(importlib_module, "symmetry_eigenvalue_diagnostics_for_kpoint", fake_symmetry_diagnostic)
-    monkeypatch.setattr(importlib_module, "build_valley_preserving_subgroup_report", fake_subgroup_report)
-
-    importlib_module.analyze_hsp(config_path)
-
-    assert captured == [True]
+    with pytest.raises(
+        ValueError,
+        match="metadata/spinor conflicts with coefficient nspinor",
+    ):
+        analyze_hsp(config_path)
 
 
 def test_workflow_writes_symmetry_consistency_report_when_no_seed_data(tmp_path, monkeypatch):

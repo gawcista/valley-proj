@@ -12,6 +12,13 @@ class PlaneWaveRepresentationResult:
     mapping_miss_count: int
 
 
+@dataclass(frozen=True)
+class PlaneWaveActionResult:
+    transformed_coefficients: np.ndarray
+    mapping: np.ndarray
+    mapping_miss_count: int
+
+
 def spin_rotation_matrix(axis: np.ndarray, angle: float) -> np.ndarray:
     vec = np.asarray(axis, dtype=float)
     norm = np.linalg.norm(vec)
@@ -39,6 +46,36 @@ def build_plane_wave_representation(
     spin_rotation: np.ndarray | None = None,
     tolerance: float = 1e-6,
 ) -> PlaneWaveRepresentationResult:
+    action = apply_plane_wave_action(
+        coefficients,
+        q_cart,
+        rotation_cart,
+        translation_cart,
+        spin_rotation=spin_rotation,
+        tolerance=tolerance,
+    )
+    coeffs = np.asarray(coefficients, dtype=np.complex128)
+    flat_original = coeffs.reshape(coeffs.shape[0], -1)
+    flat_transformed = action.transformed_coefficients.reshape(
+        coeffs.shape[0], -1
+    )
+    matrix = flat_original.conj() @ flat_transformed.T
+    return PlaneWaveRepresentationResult(
+        matrix=matrix,
+        mapping=action.mapping,
+        mapping_miss_count=action.mapping_miss_count,
+    )
+
+
+def apply_plane_wave_action(
+    coefficients: np.ndarray,
+    q_cart: np.ndarray,
+    rotation_cart: np.ndarray,
+    translation_cart: np.ndarray,
+    *,
+    spin_rotation: np.ndarray | None = None,
+    tolerance: float = 1e-6,
+) -> PlaneWaveActionResult:
     coeffs = np.asarray(coefficients, dtype=np.complex128)
     q = np.asarray(q_cart, dtype=float)
     if coeffs.ndim != 3:
@@ -70,11 +107,8 @@ def build_plane_wave_representation(
         for band in range(n_bands):
             transformed[band, :, target_idx] += phase * (spin @ coeffs[band, :, source_idx])
 
-    flat_original = coeffs.reshape(n_bands, -1)
-    flat_transformed = transformed.reshape(n_bands, -1)
-    matrix = flat_original.conj() @ flat_transformed.T
-    return PlaneWaveRepresentationResult(
-        matrix=matrix,
+    return PlaneWaveActionResult(
+        transformed_coefficients=transformed,
         mapping=mapping,
         mapping_miss_count=int(np.sum(mapping < 0)),
     )
