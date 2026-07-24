@@ -7,14 +7,27 @@ import h5py
 import numpy as np
 
 from valleyscope.geometry.lattice import Lattice
+from valleyscope.io.wavefunction_convention import (
+    COEFFICIENT_SHAPE_ORDER,
+    H5_PARSER_IDENTITY,
+    WAVECAR_H5_EXTRACTOR_IDENTITY,
+    file_payload_identity,
+    spinor_component_order,
+)
 
 
 @dataclass(frozen=True)
 class WavefunctionMetadata:
     lattice: Lattice
     spinor: bool
+    nspinor: int
     source: str
     vasp_band_index_base: int
+    coefficient_shape_order: tuple[str, ...]
+    spinor_component_order: tuple[str, ...]
+    parser_identity: str
+    extractor_identity: str
+    hdf5_payload_identity: str
 
 
 @dataclass(frozen=True)
@@ -53,20 +66,14 @@ def _read_string(dataset) -> str:
 
 def read_wavefunction_h5(path: str | Path) -> WavefunctionData:
     h5_path = Path(path)
+    payload_identity = file_payload_identity(h5_path)
     with h5py.File(h5_path, "r") as h5:
         for required in ["metadata/lattice/direct_cart", "metadata/lattice/reciprocal_cart", "kpoints"]:
             if required not in h5:
                 raise ValueError(f"HDF5 is missing required dataset/group: {required}")
-        metadata = WavefunctionMetadata(
-            lattice=Lattice(
-                direct_cart=h5["metadata/lattice/direct_cart"][()],
-                reciprocal_cart=h5["metadata/lattice/reciprocal_cart"][()],
-            ),
-            spinor=bool(h5["metadata/spinor"][()]),
-            source=_read_string(h5["metadata/source"]),
-            vasp_band_index_base=int(h5["metadata/vasp_band_index_base"][()]),
-        )
+        spinor_metadata = bool(h5["metadata/spinor"][()])
         kpoints: list[KPointData] = []
+        nspinor_values: set[int] = set()
         for key in sorted(h5["kpoints"], key=lambda item: int(item)):
             group = h5["kpoints"][key]
             for name in [
@@ -87,6 +94,7 @@ def read_wavefunction_h5(path: str | Path) -> WavefunctionData:
             bands = group["band_indices_vasp"][()]
             if coefficients.ndim != 3:
                 raise ValueError(f"coefficients for k-point {key} must have shape [nb,nspinor,nG]")
+            nspinor_values.add(int(coefficients.shape[1]))
             if coefficients.shape[2] != g_vectors_cart.shape[0]:
                 raise ValueError(f"coefficients nG does not match g_vectors_cart for k-point {key}")
             if coefficients.shape[0] != len(energies) or coefficients.shape[0] != len(bands):
@@ -103,6 +111,33 @@ def read_wavefunction_h5(path: str | Path) -> WavefunctionData:
                     band_indices_vasp=bands,
                 )
             )
+        if len(nspinor_values) != 1:
+            raise ValueError("HDF5 k-points contain inconsistent coefficient nspinor values")
+        nspinor = next(iter(nspinor_values))
+        if nspinor not in (1, 2):
+            raise ValueError(f"HDF5 coefficient layout has unsupported nspinor={nspinor}")
+        if spinor_metadata != (nspinor == 2):
+            raise ValueError("metadata/spinor conflicts with coefficient nspinor")
+        extractor_identity = (
+            _read_string(h5["metadata/extractor_identity"])
+            if "metadata/extractor_identity" in h5
+            else WAVECAR_H5_EXTRACTOR_IDENTITY
+        )
+        metadata = WavefunctionMetadata(
+            lattice=Lattice(
+                direct_cart=h5["metadata/lattice/direct_cart"][()],
+                reciprocal_cart=h5["metadata/lattice/reciprocal_cart"][()],
+            ),
+            spinor=spinor_metadata,
+            nspinor=nspinor,
+            source=_read_string(h5["metadata/source"]),
+            vasp_band_index_base=int(h5["metadata/vasp_band_index_base"][()]),
+            coefficient_shape_order=COEFFICIENT_SHAPE_ORDER,
+            spinor_component_order=spinor_component_order(nspinor),
+            parser_identity=H5_PARSER_IDENTITY,
+            extractor_identity=extractor_identity,
+            hdf5_payload_identity=payload_identity,
+        )
     seen_names: set[str] = set()
     for kp in kpoints:
         if kp.name in seen_names:

@@ -9,6 +9,11 @@ import yaml
 from valleyscope.io import resolve_config_path
 from valleyscope.io.config import _expand_iband_item
 from valleyscope.io.wavecar import WavecarReader
+from valleyscope.io.wavefunction_convention import (
+    COEFFICIENT_SHAPE_ORDER,
+    WAVECAR_H5_EXTRACTOR_IDENTITY,
+    spinor_component_order,
+)
 
 
 def extract_wavecar_to_h5(config_path: str | Path) -> Path:
@@ -52,6 +57,8 @@ def extract_wavecar_to_h5(config_path: str | Path) -> Path:
         metadata["wavecar_record_length"] = reader.header.record_length
         metadata["wavecar_nspin"] = reader.header.nspin
         metadata["g_vector_order"] = "vasp_z_y_x"
+        metadata["extractor_identity"] = WAVECAR_H5_EXTRACTOR_IDENTITY
+        metadata["coefficient_shape_order"] = ",".join(COEFFICIENT_SHAPE_ORDER)
         metadata["original_encut_eV"] = reader.header.encut_eV
         metadata["ecut_adjust_tol_eV"] = ecut_adjust_tol
         kpoints_group = h5.create_group("kpoints")
@@ -115,6 +122,10 @@ def extract_wavecar_to_h5(config_path: str | Path) -> Path:
                 group["ecut_adjust_delta_eV"] = 0.0
 
         metadata["spinor"] = bool(spinor_seen)
+        nspinor = 2 if spinor_seen else 1
+        metadata["spinor_component_order"] = ",".join(
+            spinor_component_order(nspinor)
+        )
         metadata["g_list_reconstruction_mode"] = g_list_mode
         metadata["reconstruction_encut_eV"] = representative_reconstruction_encut
         metadata["ecut_adjust_delta_eV"] = representative_delta

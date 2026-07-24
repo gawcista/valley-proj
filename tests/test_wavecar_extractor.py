@@ -181,6 +181,15 @@ def test_extract_wavecar_accepts_spinor_count_in_nplane_record(tmp_path):
 
     with h5py.File(output_h5, "r") as h5:
         assert h5["metadata/spinor"][()] == np.bool_(True)
+        assert h5["metadata/extractor_identity"][()].decode() == (
+            "valleyscope_wavecar_h5_layout_v1"
+        )
+        assert h5["metadata/coefficient_shape_order"][()].decode() == (
+            "band,spinor_component,reciprocal_grid"
+        )
+        assert h5["metadata/spinor_component_order"][()].decode() == (
+            "vasp_spinor_component_0,vasp_spinor_component_1"
+        )
         kp = h5["kpoints/0"]
         assert kp["coefficients"].shape == (1, 2, 1)
         assert kp["target_g_count"][()] == 1
