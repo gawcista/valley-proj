@@ -232,6 +232,8 @@ def test_standard_summary_is_concise_result_first_and_preserves_payload():
     ]
     positions = [text.index(value) for value in required_in_order]
     assert positions == sorted(positions)
+    assert "valley-projected subspace space group: SgX" in text
+    assert "SgX=2" not in text
 
     detailed_sections = [
         "Detected operations:",

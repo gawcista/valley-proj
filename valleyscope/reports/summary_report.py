@@ -256,16 +256,18 @@ def _render_standard_irreps(
         f"non_source={report.get('non_source_count', 0)}"
     )
     projected = summary.get("valley_projected_representations", {})
-    sg_counts = (
-        projected.get("subspace_space_group_counts", {})
-        if isinstance(projected, dict) else {}
+    subspace_space_groups = _standard_subspace_space_groups(
+        projected,
+        report.get("rows", []),
     )
-    if isinstance(sg_counts, dict) and sg_counts:
+    if subspace_space_groups:
+        label = (
+            "valley-projected subspace space group"
+            if len(subspace_space_groups) == 1
+            else "valley-projected subspace space groups"
+        )
         lines.append(
-            "valley-projected subspace space groups: "
-            + ", ".join(
-                f"{label}={count}" for label, count in sorted(sg_counts.items())
-            )
+            f"{label}: {', '.join(subspace_space_groups)}"
         )
     rows = report.get("rows", [])
     trusted_rows: list[list[Any]] = []
@@ -304,6 +306,38 @@ def _render_standard_irreps(
             "trusted HSP valley-preserving-irrep results: none"
         )
     lines.append("")
+
+
+def _standard_subspace_space_groups(
+    projected: Any,
+    irrep_rows: Any,
+) -> list[str]:
+    symbols: set[str] = set()
+    if isinstance(projected, dict):
+        for key in ("representation_records", "rows"):
+            records = projected.get(key, [])
+            if not isinstance(records, list):
+                continue
+            for record in records:
+                if not isinstance(record, dict):
+                    continue
+                subspace_group = record.get("subspace_space_group")
+                if isinstance(subspace_group, dict):
+                    symbol = subspace_group.get(
+                        "candidate_space_group_symbol"
+                    )
+                else:
+                    symbol = subspace_group
+                if symbol:
+                    symbols.add(str(symbol))
+    if isinstance(irrep_rows, list):
+        for row in irrep_rows:
+            if not isinstance(row, dict):
+                continue
+            symbol = row.get("subspace_space_group")
+            if symbol:
+                symbols.add(str(symbol))
+    return sorted(symbols)
 
 
 def _render_standard_reduced_ebr(
