@@ -7,6 +7,7 @@ physical identifier is ``subspace_space_group``.
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import Any
 
 
@@ -20,27 +21,13 @@ def build_valley_projected_representation_report(
     valley_irrep_matching: dict[str, Any] | None = None,
     symmetry_analysis: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build a representation report from computed per-row data.
+    """Build one debug representation record per ``(kpoint, valley)``.
 
-    Consumes the existing symmetry eigenvalue CSV rows, symmetry-adapted
-    valley report (for subspace_space_group data), irrep workflow
-    decisions (for readiness/blocker info), and optional valley irrep
-    matching data (for per-group irrep status).  Produces per-row records
-    with ``subspace_space_group`` as the primary identifier, plus
-    per-``(kpoint, valley)`` grouped ``representation_records``.
-
-    When ``symmetry_analysis`` is provided, every sampled ``(kpoint,
-    valley)`` with workflow or symmetry information produces a
-    ``representation_record``, including blocked and identity-only cases
-    that have no symmetry eigenvalue rows.  Full HSP little group
-    ``G_k``, valley-preserving subgroup ``G_k^(a)``, and valley-changing
-    operations are distinguished from the per-valley inventory.
+    Records include blocked and identity-only pairs without eigenvalue rows,
+    while keeping the parent HSP little group, ``G_k^(a)``, and
+    valley-changing operations distinct.
     """
     rows: list[dict[str, Any]] = []
-    subspace_space_group_counts: dict[str, int] = {}
-    trusted_count: int = 0
-    blocked_count: int = 0
-    diagnostic_count: int = 0
 
     # Build a lookup from (kpoint, valley) to subspace data.
     subspace_lookup: dict[tuple[str, str], dict[str, Any]] = {}
@@ -208,20 +195,6 @@ def build_valley_projected_representation_report(
             }
             rows.append(rec)
 
-            # Counts.
-            sg_symbol = subspace_space_group_data.get("candidate_space_group_symbol")
-            if sg_symbol:
-                key = str(sg_symbol)
-                subspace_space_group_counts[key] = (
-                    subspace_space_group_counts.get(key, 0) + 1
-                )
-            if diag_only:
-                diagnostic_count += 1
-            elif wf_data.get("readiness_level") == "trusted":
-                trusted_count += 1
-            else:
-                blocked_count += 1
-
     # --- Per-(kpoint, valley) grouped representation records ---
     representation_records = _build_representation_records(
         rows=rows,
@@ -331,34 +304,27 @@ def build_valley_projected_representation_report(
             }
             representation_records.append(record)
 
-            # Update counts for non-eigenvalue records.  These records keep the
-            # same readiness semantics as eigenvalue-derived rows.
-            sg_symbol = subspace_ssg.get("candidate_space_group_symbol")
-            if sg_symbol:
-                key = str(sg_symbol)
-                subspace_space_group_counts[key] = (
-                    subspace_space_group_counts.get(key, 0) + 1
-                )
-            if readiness == "trusted":
-                trusted_count += 1
-            elif readiness == "diagnostic_only":
-                diagnostic_count += 1
-            else:
-                blocked_count += 1
-
     # Sort records for deterministic output.
     representation_records.sort(
         key=lambda r: (str(r.get("kpoint", "")), str(r.get("valley", "")))
     )
 
+    readiness_level_counts = Counter(
+        str(record.get("readiness_level", "not_evaluated"))
+        for record in representation_records
+    )
+    space_group_symbols = [
+        ssg.get("candidate_space_group_symbol")
+        for record in representation_records
+        if isinstance((ssg := record.get("subspace_space_group")), dict)
+        and ssg.get("candidate_space_group_symbol")
+    ]
+
     return {
-        "rows": rows,
         "representation_records": representation_records,
-        "grouped_record_count": len(representation_records),
-        "subspace_space_group_counts": subspace_space_group_counts,
-        "trusted_representation_count": trusted_count,
-        "blocked_representation_count": blocked_count,
-        "diagnostic_only_count": diagnostic_count,
+        "record_count": len(representation_records),
+        "readiness_level_counts": dict(readiness_level_counts),
+        "subspace_space_group_record_counts": dict(Counter(space_group_symbols)),
         "valley_labels": sorted(set(r["valley"] for r in representation_records)),
         "kpoint_labels": sorted(set(r["kpoint"] for r in representation_records)),
     }
@@ -546,7 +512,15 @@ def _build_representation_records(
             "valley_preserving_operations": operations,
             "readiness_level": first.get("readiness_level", "?"),
             "workflow_path": first.get("workflow_path", "?"),
-            "blocking_reasons": first.get("blocking_reasons", []),
+            "blocking_reasons": _unique_strings(
+                blocker
+                for row in group_rows
+                for blocker in (
+                    row.get("blocking_reasons")
+                    if isinstance(row.get("blocking_reasons"), list)
+                    else []
+                )
+            ),
             "irrep_matching": irrep_matching,
         }
         records.append(record)

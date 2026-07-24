@@ -52,7 +52,8 @@ def test_default_standard_profile_writes_only_public_outputs(tmp_path):
 
     summary_json = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     assert summary_json.get("output_profile") == "standard"
-    assert "valley_projected_representations" in summary_json
+    assert "valley_resolved_irreps" in summary_json
+    assert "valley_projected_representations" not in summary_json
     assert "valley_irrep_matching" not in summary_json
 
 
@@ -83,6 +84,9 @@ def test_debug_profile_writes_all_detailed_files(tmp_path):
 
     summary_json = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     assert summary_json.get("output_profile") == "debug"
+    report = summary_json["valley_projected_representations"]
+    assert report["record_count"] == len(report["representation_records"])
+    assert "rows" not in report
 
 
 @pytest.mark.parametrize("profile", ["standard", "debug"])

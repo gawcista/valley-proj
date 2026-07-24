@@ -127,7 +127,8 @@ def _concise_summary_contract_payload() -> dict[str, object]:
             "rows": [{
                 "kpoint": "H0",
                 "valley": "alpha",
-                "subspace_space_group": "SgX",
+                "subspace_space_group_symbol": "SgX",
+                "subspace_space_group_number": 17,
                 "hsp_little_group_operation_ids": [0, 4],
                 "valley_preserving_operation_ids": [0],
                 "matching_status": "matched",
@@ -138,7 +139,8 @@ def _concise_summary_contract_payload() -> dict[str, object]:
             }, {
                 "kpoint": "H0",
                 "valley": "beta",
-                "subspace_space_group": "SgX",
+                "subspace_space_group_symbol": "SgX",
+                "subspace_space_group_number": 17,
                 "hsp_little_group_operation_ids": [0, 4],
                 "valley_preserving_operation_ids": [0],
                 "matching_status": "blocked",
@@ -146,16 +148,6 @@ def _concise_summary_contract_payload() -> dict[str, object]:
                 "readiness_level": "blocked",
                 "diagnostic_only": True,
                 "reason": "seed projector symmetry-consistency failed",
-            }],
-        },
-        "valley_projected_representations": {
-            "trusted_representation_count": 1,
-            "blocked_representation_count": 1,
-            "diagnostic_only_count": 1,
-            "subspace_space_group_counts": {"SgX": 2},
-            "rows": [{
-                "kpoint": "H0",
-                "valley": "beta",
                 "blocking_reasons": [
                     "seed projector symmetry-consistency failed",
                 ],
@@ -256,6 +248,14 @@ def test_debug_summary_retains_detailed_diagnostic_report():
 
     summary = _concise_summary_contract_payload()
     summary["output_profile"] = "debug"
+    summary["valley_projected_representations"] = {
+        "representation_records": [],
+        "record_count": 0,
+        "readiness_level_counts": {},
+        "subspace_space_group_record_counts": {},
+        "valley_labels": [],
+        "kpoint_labels": [],
+    }
 
     text = render_summary_text(summary)
 
@@ -267,6 +267,7 @@ def test_debug_summary_retains_detailed_diagnostic_report():
     assert "HSP-star conjugation" in text
     assert "HSP-star derived characters" in text
     assert "Irrep workflow decisions" in text
+    assert "Valley-projected representation evidence" in text
     assert "EBR input candidates" in text
     assert "EBR problem instances" in text
 
@@ -335,7 +336,7 @@ def test_summary_text_renders_qcut_fraction_for_relative_mode(tmp_path):
         output_paths={},
     )
 
-    assert summary["schema_version"] == "1.8.0"
+    assert summary["schema_version"] == "1.9.0"
     assert summary["qcut"]["fraction"] == pytest.approx(0.2)
     text = render_summary_text(summary)
     assert "qcut mode: relative_min_valley_distance" in text
@@ -506,33 +507,19 @@ def test_summary_text_renders_symmetry_adapted_valley_subspaces(tmp_path):
     assert "spinor convention unverified" in text
 
 
-def test_summary_payload_renders_valley_projected_representations(tmp_path):
+def test_debug_summary_payload_renders_valley_projected_representations(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "config.yaml"
     out_dir = tmp_path / "out"
     write_fixture(h5_path)
     write_config(config_path, h5_path, out_dir)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["output"]["profile"] = "debug"
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     config = load_config(config_path)
     from valleyscope.reports.summary_report import build_summary_payload, render_summary_text
 
     report = {
-        "rows": [
-            {
-                "kpoint": "GammaM",
-                "valley": "M1_valley",
-                "operation_id": 4,
-                "operation_order": 2,
-                "subspace_space_group": {
-                    "candidate_space_group_symbol": "P2",
-                    "valley_preserving_operation_ids": [0, 4],
-                },
-                "hsp_little_group_operation_ids": [0, 4],
-                "valley_preserving_operation_ids": [0, 4],
-                "readiness_level": "trusted",
-                "workflow_path": "direct_qcut",
-                "blocking_reasons": [],
-            },
-        ],
         "representation_records": [
             {
                 "kpoint": "GammaM",
@@ -558,11 +545,9 @@ def test_summary_payload_renders_valley_projected_representations(tmp_path):
                 "irrep_matching": None,
             },
         ],
-        "grouped_record_count": 1,
-        "subspace_space_group_counts": {"P2": 1},
-        "trusted_representation_count": 1,
-        "blocked_representation_count": 0,
-        "diagnostic_only_count": 0,
+        "record_count": 1,
+        "subspace_space_group_record_counts": {"P2": 1},
+        "readiness_level_counts": {"trusted": 1},
     }
 
     summary = build_summary_payload(
@@ -584,9 +569,11 @@ def test_summary_payload_renders_valley_projected_representations(tmp_path):
 
     assert "P2" in json.dumps(report)
     assert "C2_like" not in json.dumps(summary)
-    assert summary["valley_projected_representations"]["subspace_space_group_counts"] == {"P2": 1}
+    assert summary["valley_projected_representations"][
+        "subspace_space_group_record_counts"
+    ] == {"P2": 1}
     text = render_summary_text(summary)
-    assert "Valley-projected representations" in text
+    assert "Valley-projected representation evidence" in text
     assert "subspace space groups: P2=1" in text
     assert "GammaM" in text
     assert "M1_valley" in text
@@ -644,7 +631,8 @@ def test_summary_text_renders_generic_irrep_matching_without_legacy_rows(tmp_pat
     assert "valley_resolved_irreps" in summary
     resolved = summary["valley_resolved_irreps"]
     assert resolved["status"] == "ok"
-    assert resolved["rows"][0]["subspace_space_group"] == "P3"
+    assert resolved["rows"][0]["subspace_space_group_symbol"] == "P3"
+    assert resolved["rows"][0]["subspace_space_group_number"] is None
     assert resolved["rows"][0]["diagnostic_only"] is False
 
     text = render_summary_text(summary)
@@ -1614,7 +1602,10 @@ def test_summary_valley_resolved_irreps():
                     "matching_status": "matched",
                     "matching_strategy": "bilbao_restricted_character",
                     "irrep_multiplicities": {"-GM4": 1},
-                    "subspace_space_group": {"candidate_space_group_symbol": "P3"},
+                    "subspace_space_group": {
+                        "candidate_space_group_symbol": "P3",
+                        "candidate_space_group_number": 143,
+                    },
                     "valley_preserving_operation_ids": [0, 1, 2],
                     "hsp_little_group_operation_ids": [0, 1, 2],
                     "readiness_level": "trusted",
@@ -1625,7 +1616,10 @@ def test_summary_valley_resolved_irreps():
                     "matching_status": "diagnostic_only",
                     "matching_strategy": "bilbao_restricted_character",
                     "irrep_multiplicities": {},
-                    "subspace_space_group": {"candidate_space_group_symbol": "P3"},
+                    "subspace_space_group": {
+                        "candidate_space_group_symbol": "P3",
+                        "candidate_space_group_number": 143,
+                    },
                     "valley_preserving_operation_ids": [0],
                     "hsp_little_group_operation_ids": [0, 1, 2],
                     "readiness_level": "usable_with_caution",
@@ -1655,25 +1649,42 @@ def test_summary_valley_resolved_irreps():
             },
         },
     }
-    r = _build_valley_resolved_irreps(matching)
+    representation_evidence = {
+        "representation_records": [{
+            "kpoint": "GammaM",
+            "valley": "Kp_valley",
+            "blocking_reasons": [
+                "spinor convention unverified",
+                "seed projector symmetry-consistency failed",
+            ],
+        }],
+    }
+    r = _build_valley_resolved_irreps(
+        matching,
+        valley_projected_representation=representation_evidence,
+    )
     assert r["status"] == "ok"
     assert r["matched_count"] == 1
     assert r["diagnostic_count"] == 1
     assert r["non_source_count"] == 1
-    assert r["rows"][0]["subspace_space_group"] == "P3"
-    assert r["rows"][0]["subspace_hsp_little_group_operation_ids"] == [0, 1, 2]
+    assert r["rows"][0]["subspace_space_group_symbol"] == "P3"
+    assert r["rows"][0]["subspace_space_group_number"] == 143
     assert r["rows"][0]["hsp_little_group_operation_ids"] == [0, 1, 2]
     assert r["rows"][0]["matching_strategy"] == "bilbao_restricted_character"
     assert r["rows"][0]["irrep_multiplicities"] == {"-GM4": 1}
     assert r["rows"][0]["diagnostic_only"] is False
-    assert r["rows"][1]["subspace_hsp_little_group_operation_ids"] == [0]
     assert r["rows"][1]["hsp_little_group_operation_ids"] == [0]
     assert r["rows"][1]["valley_preserving_operation_ids"] == [0]
     assert r["rows"][1]["diagnostic_only"] is True
     assert r["rows"][1]["reason"] == "spinor_convention_unverified"
+    assert r["rows"][1]["blocking_reasons"] == [
+        "spinor convention unverified",
+        "seed projector symmetry-consistency failed",
+    ]
     assert r["rows"][2]["matching_status"] == "not_applicable"
     assert r["rows"][2]["source_hsp_membership"] is False
     assert r["rows"][2]["projected_hsp_classification"] == "generic"
+    assert r["rows"][2]["blocking_reasons"] == []
     assert "C2_like" not in json.dumps(r)
     assert "C3_like" not in json.dumps(r)
 
@@ -1718,8 +1729,8 @@ def test_tmote2_valley_resolved_irreps_compact_public_rows():
 
     # --- GammaM/K_valley: trusted, P3, subspace = [0,1,2] ---
     gm_k = rows_by_kp["GammaM"]["K_valley"]
-    assert gm_k["subspace_space_group"] == "P3"
-    assert gm_k["subspace_hsp_little_group_operation_ids"] == [0, 1, 2]
+    assert gm_k["subspace_space_group_symbol"] == "P3"
+    assert gm_k["subspace_space_group_number"] == 143
     assert gm_k["hsp_little_group_operation_ids"] == [0, 1, 2]
     assert gm_k["valley_preserving_operation_ids"] == [0, 1, 2]
     assert gm_k["matching_strategy"] == "bilbao_restricted_character"
@@ -1731,8 +1742,9 @@ def test_tmote2_valley_resolved_irreps_compact_public_rows():
 
     # --- KM/K_valley: trusted, P3 ---
     km_k = rows_by_kp["KM"]["K_valley"]
-    assert km_k["subspace_space_group"] == "P3"
-    assert km_k["subspace_hsp_little_group_operation_ids"] == [0, 1, 2]
+    assert km_k["subspace_space_group_symbol"] == "P3"
+    assert km_k["subspace_space_group_number"] == 143
+    assert km_k["hsp_little_group_operation_ids"] == [0, 1, 2]
     assert km_k["matching_status"] == "matched"
     assert km_k["readiness_level"] == "trusted"
 
@@ -1740,66 +1752,21 @@ def test_tmote2_valley_resolved_irreps_compact_public_rows():
     # G_k^(a)={E} with resolved source HSP label 'M' (P3/SG143); the single
     # source irrep -M2 matches uniquely on the identity character chi_a(E)=1.
     mm_k = rows_by_kp["MM"]["K_valley"]
-    assert mm_k["subspace_space_group"] == "P3"
-    assert mm_k["subspace_hsp_little_group_operation_ids"] == [0]
+    assert mm_k["subspace_space_group_symbol"] == "P3"
+    assert mm_k["subspace_space_group_number"] == 143
+    assert mm_k["hsp_little_group_operation_ids"] == [0]
     assert mm_k["matching_status"] == "matched"
     assert mm_k["matching_strategy"] == "bilbao_restricted_character"
     assert mm_k["irrep_multiplicities"] == {"-M2": 1}
     assert mm_k["readiness_level"] == "trusted"
 
 
-def test_tmote2_representation_records_subspace_first():
-    """tMoTe2 representation_records: all sampled HSPs, subspace first."""
+def test_tmote2_standard_summary_has_only_canonical_irrep_object():
+    """The standard fixture exposes one canonical public irrep object."""
     s = _read_fixture_summary()
-    rep = s.get("valley_projected_representations")
-    assert rep is not None
-    assert rep["grouped_record_count"] >= 6
-    assert "MM" in rep["kpoint_labels"]
-    assert "GammaM" in rep["kpoint_labels"]
-    assert "KM" in rep["kpoint_labels"]
-
-    for rec in rep["representation_records"]:
-        kp = rec["kpoint"]
-        subspace = rec.get("subspace_hsp_little_group_operation_ids", [])
-        parent = rec.get("parent_hsp_little_group_operation_ids", [])
-        sewing = rec.get("valley_sewing_operation_ids", [])
-        hsp_lg = rec.get("hsp_little_group_operation_ids", [])
-
-        # Public hsp_little_group = subspace, not parent
-        assert hsp_lg == subspace, (
-            f"{kp}/{rec['valley']}: hsp_little_group must alias subspace"
-        )
-        # subspace ⊆ parent
-        assert set(subspace).issubset(set(parent)), (
-            f"{kp}/{rec['valley']}: subspace not subset of parent"
-        )
-        # sewing ∩ subspace = {identity} only
-        identity = 0
-        sewing_non_id = [op for op in sewing if op != identity]
-        for op in sewing_non_id:
-            assert op not in subspace, (
-                f"{kp}/{rec['valley']}: sewing op {op} in subspace!"
-            )
-
-    # MM records: identity-only, not blocked
-    mm_recs = [r for r in rep["representation_records"] if r["kpoint"] == "MM"]
-    assert len(mm_recs) == 2
-    for mm in mm_recs:
-        assert mm["subspace_hsp_little_group_operation_ids"] == [0]
-        assert mm["parent_hsp_little_group_operation_ids"] == [0, 5]
-        assert mm["valley_sewing_operation_ids"] == [5]
-        assert mm["workflow_path"] != "blocked"
-        assert mm["valley_preserving_operations"] == []
-        assert "workflow_blocked" not in mm.get("blocking_reasons", [])
-
-    # GammaM/KM records: trusted, eigenvalue data
-    for kp in ("GammaM", "KM"):
-        for rec in rep["representation_records"]:
-            if rec["kpoint"] != kp:
-                continue
-            assert rec["subspace_hsp_little_group_operation_ids"] == [0, 1, 2]
-            assert rec["parent_hsp_little_group_operation_ids"] == [0, 1, 2, 3, 4, 5]
-            assert rec["valley_sewing_operation_ids"] == [3, 4, 5]
+    assert s["output_profile"] == "standard"
+    assert "valley_resolved_irreps" in s
+    assert "valley_projected_representations" not in s
 
 
 def test_tmote2_projected_source_hsp_coverage_and_tr_orbit_are_explicit():
@@ -1940,6 +1907,44 @@ def _read_centered_fixture_summary():
             f"centered fixture output not found at {_CENTERED_FIXTURE_SUMMARY}"
         )
     return json.loads(_CENTERED_FIXTURE_SUMMARY.read_text(encoding="utf-8"))
+
+
+def test_centered_fixture_separates_canonical_irreps_from_debug_evidence():
+    s = _read_centered_fixture_summary()
+    resolved = s["valley_resolved_irreps"]
+    rows = resolved["rows"]
+    pairs = {(row["kpoint"], row["valley"]) for row in rows}
+
+    assert len(rows) == len(pairs) == 9
+    assert resolved["matched_count"] == 0
+    assert resolved["blocked_count"] == 6
+    assert resolved["non_source_count"] == 3
+    assert all(row["subspace_space_group_symbol"] == "C2" for row in rows)
+    assert all(row["subspace_space_group_number"] == 5 for row in rows)
+    blocked = [row for row in rows if row["matching_status"] == "blocked"]
+    non_source = [
+        row for row in rows if row["matching_status"] == "not_applicable"
+    ]
+    assert len(blocked) == 6
+    assert all(row["blocking_reasons"] for row in blocked)
+    assert len(non_source) == 3
+    assert all(row["blocking_reasons"] == [] for row in non_source)
+
+    evidence = s["valley_projected_representations"]
+    records = evidence["representation_records"]
+    assert evidence["record_count"] == len(records) == 9
+    assert evidence["readiness_level_counts"] == {
+        "usable_with_caution": 9,
+    }
+    assert evidence["subspace_space_group_record_counts"] == {"C2": 9}
+    assert {
+        "rows",
+        "grouped_record_count",
+        "subspace_space_group_counts",
+        "trusted_representation_count",
+        "blocked_representation_count",
+        "diagnostic_only_count",
+    }.isdisjoint(evidence)
 
 
 def test_centered_fixture_projected_hsp_coverage_is_per_valley():

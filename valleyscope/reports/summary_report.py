@@ -11,7 +11,7 @@ import numpy as np
 from valleyscope.io.config import AppConfig
 from valleyscope.reports.json_report import _json_default
 
-_SCHEMA_VERSION = "1.8.0"
+_SCHEMA_VERSION = "1.9.0"
 
 
 def build_summary_payload(
@@ -114,6 +114,7 @@ def build_summary_payload(
     if valley_irrep_matching is not None:
         payload["valley_resolved_irreps"] = _build_valley_resolved_irreps(
             valley_irrep_matching,
+            valley_projected_representation=valley_projected_representation,
         )
         # Full valley_irrep_matching is a debug diagnostic; not exposed
         # in standard profile to avoid duplicating the valley_resolved_irreps
@@ -128,7 +129,10 @@ def build_summary_payload(
         payload["valley_ebr_export_bundle"] = ebr_export_bundle
     if reduced_ebr_mapping is not None:
         payload["valley_reduced_ebr_mapping"] = reduced_ebr_mapping
-    if valley_projected_representation is not None:
+    if (
+        valley_projected_representation is not None
+        and config.output.profile == "debug"
+    ):
         payload["valley_projected_representations"] = valley_projected_representation
     if folded_center_payload is not None:
         payload["folded_center_report"] = folded_center_payload
@@ -255,11 +259,12 @@ def _render_standard_irreps(
         f"diagnostic_only={report.get('diagnostic_count', 0)}, "
         f"non_source={report.get('non_source_count', 0)}"
     )
-    projected = summary.get("valley_projected_representations", {})
-    subspace_space_groups = _standard_subspace_space_groups(
-        projected,
-        report.get("rows", []),
-    )
+    rows = report.get("rows", [])
+    subspace_space_groups = sorted({
+        str(row.get("subspace_space_group_symbol"))
+        for row in rows if isinstance(row, dict)
+        and row.get("subspace_space_group_symbol")
+    }) if isinstance(rows, list) else []
     if subspace_space_groups:
         label = (
             "valley-projected subspace space group"
@@ -269,7 +274,6 @@ def _render_standard_irreps(
         lines.append(
             f"{label}: {', '.join(subspace_space_groups)}"
         )
-    rows = report.get("rows", [])
     trusted_rows: list[list[Any]] = []
     if isinstance(rows, list):
         for row in rows:
@@ -284,7 +288,7 @@ def _render_standard_irreps(
             trusted_rows.append([
                 row.get("kpoint", ""),
                 row.get("valley", ""),
-                row.get("subspace_space_group") or "?",
+                row.get("subspace_space_group_symbol") or "?",
                 _short_list(row.get("hsp_little_group_operation_ids", [])),
                 _short_list(row.get("valley_preserving_operation_ids", [])),
                 _short_irrep_multiplicities(row.get("irrep_multiplicities")),
@@ -306,39 +310,6 @@ def _render_standard_irreps(
             "trusted HSP valley-preserving-irrep results: none"
         )
     lines.append("")
-
-
-def _standard_subspace_space_groups(
-    projected: Any,
-    irrep_rows: Any,
-) -> list[str]:
-    symbols: set[str] = set()
-    if isinstance(projected, dict):
-        for key in ("representation_records", "rows"):
-            records = projected.get(key, [])
-            if not isinstance(records, list):
-                continue
-            for record in records:
-                if not isinstance(record, dict):
-                    continue
-                subspace_group = record.get("subspace_space_group")
-                if isinstance(subspace_group, dict):
-                    symbol = subspace_group.get(
-                        "candidate_space_group_symbol"
-                    )
-                else:
-                    symbol = subspace_group
-                if symbol:
-                    symbols.add(str(symbol))
-    if isinstance(irrep_rows, list):
-        for row in irrep_rows:
-            if not isinstance(row, dict):
-                continue
-            symbol = row.get("subspace_space_group")
-            if symbol:
-                symbols.add(str(symbol))
-    return sorted(symbols)
-
 
 def _render_standard_reduced_ebr(
     lines: list[str],
@@ -494,15 +465,12 @@ def _render_standard_blockers(
                 and row.get("readiness_level") == "trusted"
             ):
                 continue
-            _count_reason(blocker_counts, row.get("reason"))
-
-    projected = summary.get("valley_projected_representations", {})
-    if isinstance(projected, dict):
-        for row in projected.get("rows", []):
-            if not isinstance(row, dict):
-                continue
-            for reason in row.get("blocking_reasons", []):
-                _count_reason(blocker_counts, reason)
+            reasons = row.get("blocking_reasons", [])
+            if isinstance(reasons, list) and reasons:
+                for reason in reasons:
+                    _count_reason(blocker_counts, reason)
+            else:
+                _count_reason(blocker_counts, row.get("reason"))
 
     candidates = summary.get("valley_ebr_input_candidates", {})
     if isinstance(candidates, dict):
@@ -1857,6 +1825,8 @@ def _render_irrep_workflow_decisions(
 
 def _build_valley_resolved_irreps(
     matching: dict[str, Any],
+    *,
+    valley_projected_representation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build compact valley-resolved irrep summary from generic matching data.
 
@@ -1864,6 +1834,25 @@ def _build_valley_resolved_irreps(
     rows with subspace space group, HSP little group, valley-preserving subgroup,
     matching strategy/status, and irrep multiplicities.
     """
+    evidence_by_pair: dict[tuple[str, str], list[str]] = {}
+    if isinstance(valley_projected_representation, dict):
+        evidence_records = valley_projected_representation.get(
+            "representation_records", []
+        )
+        if isinstance(evidence_records, list):
+            for record in evidence_records:
+                if not isinstance(record, dict):
+                    continue
+                blockers = record.get("blocking_reasons", [])
+                if isinstance(blockers, list):
+                    evidence_by_pair[(
+                        str(record.get("kpoint", "")),
+                        str(record.get("valley", "")),
+                    )] = list(dict.fromkeys(
+                        str(value) for value in blockers
+                        if value not in (None, "")
+                    ))
+
     generic_by_kp = matching.get("generic_matches_by_kpoint", {})
     if not isinstance(generic_by_kp, dict) or not generic_by_kp:
         return {
@@ -1872,6 +1861,7 @@ def _build_valley_resolved_irreps(
             "blocked_count": 0,
             "diagnostic_count": 0,
             "non_source_count": 0,
+            "identity_only_count": 0,
             "rows": [],
         }
 
@@ -1896,12 +1886,34 @@ def _build_valley_resolved_irreps(
             vp_ids = gm.get("valley_preserving_operation_ids", [])
             subspace_hsp_ids = vp_ids
             classification = gm.get("projected_hsp_classification", {})
+            reason = str(gm.get("reason", "")) if gm.get("reason") else ""
+            blocking_reasons = evidence_by_pair.get(
+                (str(kp_name), str(v_name)), []
+            )
+            is_non_source = (
+                status == "not_applicable"
+                and gm.get("source_hsp_membership") is False
+            )
+            if (
+                status in {"blocked", "diagnostic_only"}
+                or bool(gm.get("diagnostic_only", False))
+            ):
+                if not blocking_reasons and reason:
+                    blocking_reasons = [reason]
+            else:
+                blocking_reasons = []
 
             row: dict[str, Any] = {
                 "kpoint": kp_name,
                 "valley": v_name,
-                "subspace_space_group": ssg.get("candidate_space_group_symbol") if isinstance(ssg, dict) else None,
-                "subspace_hsp_little_group_operation_ids": list(subspace_hsp_ids) if isinstance(subspace_hsp_ids, list) else [],
+                "subspace_space_group_symbol": (
+                    ssg.get("candidate_space_group_symbol")
+                    if isinstance(ssg, dict) else None
+                ),
+                "subspace_space_group_number": (
+                    ssg.get("candidate_space_group_number")
+                    if isinstance(ssg, dict) else None
+                ),
                 "hsp_little_group_operation_ids": list(subspace_hsp_ids) if isinstance(subspace_hsp_ids, list) else [],
                 "valley_preserving_operation_ids": list(vp_ids) if isinstance(vp_ids, list) else [],
                 "matching_strategy": gm.get("matching_strategy"),
@@ -1922,7 +1934,10 @@ def _build_valley_resolved_irreps(
                 "source_hsp_membership": gm.get(
                     "source_hsp_membership"
                 ),
-                "reason": str(gm.get("reason", ""))[:120] if gm.get("reason") else "",
+                "reason": reason,
+                "blocking_reasons": (
+                    [] if is_non_source else blocking_reasons
+                ),
             }
             rows.append(row)
             if status == "matched":
@@ -1971,7 +1986,7 @@ def _render_valley_resolved_irreps(
         table_rows.append([
             row.get("kpoint", ""),
             row.get("valley", ""),
-            row.get("subspace_space_group") or "?",
+            row.get("subspace_space_group_symbol") or "?",
             _short_list(row.get("valley_preserving_operation_ids", [])),
             row.get("matching_strategy", ""),
             row.get("matching_status", ""),
@@ -2042,50 +2057,59 @@ def _render_valley_projected_representations(
     lines: list[str],
     report: dict[str, Any],
 ) -> None:
-    _section(lines, "Valley-projected representations")
+    _section(lines, "Valley-projected representation evidence")
     lines.append(
-        "primary object: valley-projected subspace space group and HSP little-group representation"
+        "debug evidence grouped once per (kpoint, valley); canonical public "
+        "irrep results are in valley_resolved_irreps"
     )
-    lines.append(f"trusted entries: {report.get('trusted_representation_count', 0)}")
-    lines.append(f"blocked entries: {report.get('blocked_representation_count', 0)}")
-    lines.append(f"diagnostic-only entries: {report.get('diagnostic_only_count', 0)}")
-    lines.append(f"grouped records: {report.get('grouped_record_count', 0)}")
-    sg_counts = report.get("subspace_space_group_counts", {})
+    lines.append(f"records: {report.get('record_count', 0)}")
+    readiness_counts = report.get("readiness_level_counts", {})
+    if isinstance(readiness_counts, dict) and readiness_counts:
+        parts = [
+            f"{label}={count}"
+            for label, count in sorted(readiness_counts.items())
+        ]
+        lines.append(f"readiness levels: {', '.join(parts)}")
+    sg_counts = report.get("subspace_space_group_record_counts", {})
     if isinstance(sg_counts, dict) and sg_counts:
         parts = [f"{label}={count}" for label, count in sorted(sg_counts.items())]
         lines.append(f"subspace space groups: {', '.join(parts)}")
-    rows = report.get("rows", [])
-    if isinstance(rows, list) and rows:
+    records = report.get("representation_records", [])
+    if isinstance(records, list) and records:
         table_rows: list[list[Any]] = []
-        for row in rows[:12]:
-            if not isinstance(row, dict):
+        for record in records[:12]:
+            if not isinstance(record, dict):
                 continue
-            subspace_sg = row.get("subspace_space_group", {})
+            subspace_sg = record.get("subspace_space_group", {})
             if not isinstance(subspace_sg, dict):
                 subspace_sg = {}
             table_rows.append([
-                row.get("kpoint", ""),
-                row.get("valley", ""),
-                row.get("operation_id", ""),
+                record.get("kpoint", ""),
+                record.get("valley", ""),
                 subspace_sg.get("candidate_space_group_symbol", ""),
-                _short_list(row.get("hsp_little_group_operation_ids")),
-                _short_list(row.get("valley_preserving_operation_ids")),
-                row.get("readiness_level", ""),
-                row.get("workflow_path", ""),
-                _short_list(row.get("blocking_reasons")),
+                _short_list(record.get("hsp_little_group_operation_ids")),
+                _short_list(record.get("valley_preserving_operation_ids")),
+                len(record.get("valley_preserving_operations", [])),
+                record.get("readiness_level", ""),
+                record.get("workflow_path", ""),
+                _short_list(record.get("blocking_reasons")),
             ])
         if table_rows:
             lines.extend(
                 _table(
                     [
-                        "kpoint", "valley", "op", "subspace_sg", "hsp_ops",
-                        "vp_ops", "readiness", "path", "blockers",
+                        "kpoint", "valley", "subspace_sg", "hsp_ops",
+                        "vp_ops", "operation evidence", "readiness",
+                        "path", "blockers",
                     ],
                     table_rows,
                 )
             )
-            if len(rows) > len(table_rows):
-                lines.append(f"... {len(rows) - len(table_rows)} additional rows omitted")
+            if len(records) > len(table_rows):
+                lines.append(
+                    f"... {len(records) - len(table_rows)} "
+                    "additional records omitted"
+                )
     lines.append("")
 
 

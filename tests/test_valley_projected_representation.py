@@ -49,11 +49,11 @@ def test_resolved_matching_group_overlays_unresolved_subspace_report():
         }}},
     )
 
-    row = report["rows"][0]
-    assert row["subspace_space_group"]["candidate_space_group_symbol"] == "P3"
-    assert row["subspace_space_group"]["candidate_space_group_number"] == 143
-    assert row["valley_sewing_operation_ids"] == [3, 4, 5]
-    assert report["representation_records"][0]["subspace_space_group"][
+    record = report["representation_records"][0]
+    assert record["subspace_space_group"]["candidate_space_group_symbol"] == "P3"
+    assert record["subspace_space_group"]["candidate_space_group_number"] == 143
+    assert record["valley_sewing_operation_ids"] == [3, 4, 5]
+    assert record["subspace_space_group"][
         "candidate_space_group_symbol"
     ] == "P3"
 
@@ -113,19 +113,9 @@ def test_representation_report_uses_subspace_space_group_as_primary():
         },
     )
 
-    # Per-row fields.
-    row = report["rows"][0]
-    assert row["subspace_space_group"]["candidate_space_group_symbol"] == "P2"
-    assert row["hsp_little_group_operation_ids"] == [0, 4]
-    assert row["subspace_hsp_little_group_operation_ids"] == [0, 4]
-    assert row["valley_preserving_operation_ids"] == [0, 4]
-    assert row["valley_sewing_operation_ids"] == [5]
-    # removed
-    assert report["subspace_space_group_counts"] == {"P2": 1}
-    # removed
-
-    # Grouped representation records.
-    assert report["grouped_record_count"] == 1
+    assert report["record_count"] == 1
+    assert report["subspace_space_group_record_counts"] == {"P2": 1}
+    assert report["readiness_level_counts"] == {"trusted": 1}
     recs = report["representation_records"]
     assert len(recs) == 1
     rec = recs[0]
@@ -138,7 +128,6 @@ def test_representation_report_uses_subspace_space_group_as_primary():
     assert rec["valley_sewing_operation_ids"] == [5]
     assert rec["readiness_level"] == "trusted"
     assert rec["workflow_path"] == "direct_qcut"
-    # removed
     assert len(rec["valley_preserving_operations"]) == 1
     op = rec["valley_preserving_operations"][0]
     assert op["operation_id"] == 4
@@ -209,7 +198,7 @@ def test_representation_records_group_by_kpoint_valley():
         },
     )
 
-    assert report["grouped_record_count"] == 1
+    assert report["record_count"] == 1
     rec = report["representation_records"][0]
     assert len(rec["valley_preserving_operations"]) == 2
     op_ids = {op["operation_id"] for op in rec["valley_preserving_operations"]}
@@ -438,11 +427,10 @@ def test_representation_records_p4_order4_group_agnostic():
         },
     )
 
-    assert report["subspace_space_group_counts"] == {"P4": 1}
-    assert report["grouped_record_count"] == 1
+    assert report["subspace_space_group_record_counts"] == {"P4": 1}
+    assert report["record_count"] == 1
     rec = report["representation_records"][0]
     assert rec["subspace_space_group"]["candidate_space_group_symbol"] == "P4"
-    # removed
     assert rec["kpoint"] == "GammaM"
     assert rec["valley"] == "M_valley"
     assert rec["valley_preserving_operation_ids"] == [0, 3]
@@ -615,7 +603,10 @@ def test_blocked_identity_only_pair_produces_record_without_eigenvalue_rows():
     # kpoint_labels includes all sampled kpoints.
     assert "MM" in report["kpoint_labels"]
     assert "GammaM" in report["kpoint_labels"]
-    assert report["blocked_representation_count"] >= 2  # MM K + MM K'
+    assert report["readiness_level_counts"] == {
+        "trusted": 1,
+        "usable_with_caution": 2,
+    }
 
 
 def test_subspace_hsp_little_group_is_public_irrep_group():
@@ -771,7 +762,7 @@ def test_identity_only_gka_no_false_irrep_no_ebr_candidate():
         }),
     )
 
-    assert report["grouped_record_count"] == 1
+    assert report["record_count"] == 1
     rec = report["representation_records"][0]
     assert rec["kpoint"] == "MM"
     assert rec["valley"] == "K_valley"
@@ -919,8 +910,10 @@ def test_target_kpoints_not_silently_dropped_from_records():
     assert "GammaM" in rec_kpoints
     assert "KM" in rec_kpoints
     assert sorted(report["kpoint_labels"]) == sorted(["GammaM", "KM", "MM"])
-    assert report["trusted_representation_count"] == 4
-    assert report["blocked_representation_count"] == 2
+    assert report["readiness_level_counts"] == {
+        "trusted": 4,
+        "usable_with_caution": 2,
+    }
 
     # MM records: blocked, identity-only, subspace HSP little group = [0].
     mm_recs = [r for r in report["representation_records"] if r["kpoint"] == "MM"]
@@ -952,7 +945,15 @@ def test_representation_records_empty_when_no_rows():
         kpoint_names=[],
         valley_names=[],
     )
-    assert report["grouped_record_count"] == 0
+    assert report["record_count"] == 0
     assert report["representation_records"] == []
-    assert report["rows"] == []
-    assert report["trusted_representation_count"] == 0
+    assert report["readiness_level_counts"] == {}
+    assert report["subspace_space_group_record_counts"] == {}
+    assert {
+        "rows",
+        "grouped_record_count",
+        "subspace_space_group_counts",
+        "trusted_representation_count",
+        "blocked_representation_count",
+        "diagnostic_only_count",
+    }.isdisjoint(report)

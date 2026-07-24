@@ -1152,13 +1152,11 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     assert gm["matching_status"] == "matched"
     assert gm["matching_strategy"] == "bilbao_restricted_character"
     assert "C2_like" not in json.dumps(resolved)
-    # Public output contract: representation_records use physical subspace-space-group.
-    vpr = summary.get("valley_projected_representations")
-    assert isinstance(vpr, dict) and vpr
-    rep_recs = vpr.get("representation_records", [])
-    assert len(rep_recs) == 1
-    assert rep_recs[0]["subspace_space_group"]["candidate_space_group_symbol"] == "P2"
-    assert rep_recs[0]["irrep_matching"]["matching_strategy"] == "bilbao_restricted_character"
+    # Standard output has one canonical public irrep object; operation-level
+    # representation evidence is debug-only.
+    assert "valley_projected_representations" not in summary
+    assert gm["subspace_space_group_symbol"] == "P2"
+    assert gm["subspace_space_group_number"] == 3
     # Public summary must not emit deprecated Cn-like provenance.
     raw_summary = json.dumps(summary)
     assert "legacy_subspace_group_candidate" not in raw_summary
