@@ -9,11 +9,26 @@ import yaml
 
 from valleyscope.analysis.reduced_ebr_mapping import (
     load_reduced_ebr_table,
-    build_reduced_ebr_mapping,
+    build_reduced_ebr_mapping as _build_reduced_ebr_mapping,
 )
 from valleyscope.io.config import load_config
-from tests.reduced_ebr_promo_helpers import attach_real_certificate
+from tests.reduced_ebr_promo_helpers import (
+    attach_real_certificate,
+    cprime_summary_for_export,
+    cprime_validation_context_for_export,
+)
 from valleyscope.analysis.reduced_ebr_solver import classify_bundle
+
+
+def build_reduced_ebr_mapping(**kwargs):
+    export = kwargs.get("ebr_export_bundle")
+    if isinstance(export, dict):
+        context = cprime_validation_context_for_export(export)
+        kwargs.setdefault(
+            "cprime_validation_context",
+            dict(context["_by_identity"]),
+        )
+    return _build_reduced_ebr_mapping(**kwargs)
 
 
 def _current_direct_mapping_inputs(*, source="table_file"):
@@ -203,7 +218,7 @@ def test_missing_table():
 def test_null_bundle():
     r = build_reduced_ebr_mapping(ebr_export_bundle=None)
     assert r["status"] == "not_evaluated"
-    assert r["schema_version"] == "1.9.0"
+    assert r["schema_version"] == "2.0.0"
     assert "mapping_status" not in r
     assert "reduced_ebr_decomposition_status" not in r
     assert r["solutions"] == []
@@ -239,7 +254,7 @@ def test_schema_fields():
     for k in ["status", "schema_version", "table_status",
               "solutions", "excluded_bundles", "solver"]:
         assert k in r, f"missing: {k}"
-    assert r["schema_version"] == "1.9.0"
+    assert r["schema_version"] == "2.0.0"
     assert "mapping_status" not in r
     assert "reduced_ebr_decomposition_status" not in r
 
@@ -732,8 +747,8 @@ def test_cli_respects_max_coefficient(tmp_path):
     # Production path rejects minimal table without provenance.
     assert mapping["status"] == "blocked"
 
-def test_cli_analyze_hsp_reduced_ebr_unchanged(tmp_path):
-    """Existing analyze-hsp reduced-EBR behavior is unchanged by CLI addition."""
+def test_cli_analyze_hsp_omits_not_evaluated_mapping_file(tmp_path):
+    """Enabled mapping remains summary-only until a bundle is evaluable."""
     h5_path = tmp_path / "wf.h5"
     import h5py, numpy as np
     with h5py.File(h5_path, "w") as h5:
@@ -768,10 +783,12 @@ def test_cli_analyze_hsp_reduced_ebr_unchanged(tmp_path):
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
     from valleyscope.workflows.analyze_hsp import analyze_hsp
     outputs = analyze_hsp(config_path)
-    # With a real analyze-hsp run, reduced EBR mapping is present when enabled.
-    assert "valley_reduced_ebr_mapping_json" in outputs, (
-        "analyze-hsp must still write valley_reduced_ebr_mapping.json when enabled"
-    )
+    assert "valley_reduced_ebr_mapping_json" not in outputs
+    assert not (
+        tmp_path / "out" / "valley_reduced_ebr_mapping.json"
+    ).exists()
+    summary = json.loads(outputs["valley_summary_json"].read_text())
+    assert summary["valley_reduced_ebr_mapping"]["status"] == "not_evaluated"
 
 def test_cli_module_entrypoint_help_lists_map_reduced_ebr():
     """python -m valleyscope.cli must dispatch to argparse, not silently exit."""
@@ -1122,7 +1139,7 @@ def test_top_level_status_preserves_indeterminate_truncation():
     assert solution["search_status"] == "truncated_by_max_coefficient"
 
 
-def test_cli_distinguishes_truncated_search_from_no_exact_solution(
+def test_cli_blocks_export_without_producer_cprime_context(
     tmp_path, capsys,
 ):
     from valleyscope.cli import main
@@ -1159,11 +1176,56 @@ def test_cli_distinguishes_truncated_search_from_no_exact_solution(
     assert rc == 0
     output = capsys.readouterr().out
     assert "input bundles:       1" in output
-    assert "evaluated results:   1" in output
+    assert "evaluated results:   0" in output
     assert "total bundles:" not in output
     assert "no exact solution:   0" in output
-    assert "indeterminate:       1" in output
-    assert "indeterminate-truncated:            1" in output
+    assert "indeterminate:       0" in output
+    assert "excluded:            1" in output
+    result = json.loads(output_path.read_text())
+    assert any(
+        row["code"] == "cprime_producer_context_missing"
+        for row in result["excluded_bundles"][0]["blocker_reasons"]
+    )
+
+
+def test_malformed_cprime_producer_inputs_block_instead_of_raising():
+    export = _ready(_bundle(), _SAMPLE_TABLE)
+    context = cprime_validation_context_for_export(export)
+    by_identity = dict(context["_by_identity"])
+    entry = next(iter(by_identity.values()))
+    entry["raw_inputs"] = {}
+
+    result = _build_reduced_ebr_mapping(
+        ebr_export_bundle=export,
+        table=_SAMPLE_TABLE,
+        cprime_validation_context=by_identity,
+    )
+
+    assert result["status"] == "blocked"
+    assert any(
+        row["code"] == "cprime_producer_context_invalid"
+        for row in result["excluded_bundles"][0]["blocker_reasons"]
+    )
+
+
+def test_joint_bundle_cannot_bypass_missing_cprime_producer_context():
+    export = _ready(_bundle(), _SAMPLE_TABLE)
+    export["bundles"][0]["problem_kind"] = "valley_orbit_reduced_ebr"
+    from tests.reduced_ebr_promo_helpers import (
+        attach_cprime_fixture_contract,
+    )
+    attach_cprime_fixture_contract(export)
+
+    result = _build_reduced_ebr_mapping(
+        ebr_export_bundle=export,
+        table=_SAMPLE_TABLE,
+    )
+
+    assert any(
+        row["code"] == "cprime_producer_context_missing"
+        for row in result["excluded_bundles"][0]["blocker_reasons"]
+    )
+
 
 def test_classification_fields_on_existing_tests():
     """All solutions must carry classification, integer_span_status,
@@ -1510,8 +1572,6 @@ def test_config_reduced_ebr_default_off(tmp_path):
 
 def test_table_file_and_spec_file_equivalent_outputs():
     """Same table data via table_file produces identical solutions as spec_file."""
-    from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
-
     bundle_vec = {
         "GammaM": ["C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"],
         "KM": ["C3_spinor_phase_+1/6", "C3_spinor_phase_-1/6"],
@@ -1766,11 +1826,11 @@ def _ingest_authoritative(export, mapping):
     )
 
     return build_database_ingestion_record(
-        valley_summary={
-            "target_kpoints": ["GammaM", "KM"],
-            "iband": [1, 2],
-            "input": {},
-        },
+        valley_summary=cprime_summary_for_export(
+            export,
+            target_kpoints=["GammaM", "KM"],
+            iband=[1, 2],
+        ),
         valley_ebr_export_bundle=export,
         valley_reduced_ebr_mapping=mapping,
     )

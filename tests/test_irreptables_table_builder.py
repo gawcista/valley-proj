@@ -5,7 +5,10 @@ import json
 from pathlib import Path
 
 import pytest
-from tests.reduced_ebr_promo_helpers import attach_real_certificate
+from tests.reduced_ebr_promo_helpers import (
+    attach_real_certificate,
+    cprime_validation_context_for_export,
+)
 
 from valleyscope.analysis.irreptables_runtime_table_builder import (
     _load_ebr_data_from_irreptables,
@@ -13,9 +16,20 @@ from valleyscope.analysis.irreptables_runtime_table_builder import (
     build_reduced_table_from_spec_file,
 )
 from valleyscope.analysis.reduced_ebr_mapping import (
-    build_reduced_ebr_mapping,
+    build_reduced_ebr_mapping as _build_reduced_ebr_mapping,
     load_reduced_ebr_table,
 )
+
+
+def build_reduced_ebr_mapping(**kwargs):
+    export = kwargs.get("ebr_export_bundle")
+    if isinstance(export, dict):
+        context = cprime_validation_context_for_export(export)
+        kwargs.setdefault(
+            "cprime_validation_context",
+            dict(context["_by_identity"]),
+        )
+    return _build_reduced_ebr_mapping(**kwargs)
 
 
 _SAMPLE_EBR_DATA = {
@@ -2333,9 +2347,6 @@ def test_c3_real_source_mapping_e2e_solved_exact(tmp_path):
     from valleyscope.analysis.irreptables_runtime_table_builder import (
         build_reduced_table_from_spec_file,
     )
-    from valleyscope.analysis.reduced_ebr_mapping import (
-        build_reduced_ebr_mapping,
-    )
     spec = {
         "schema_version": "1.1.0", "data_source": "irreptables",
         "space_group_number": 150, "spinful": True,
@@ -2477,9 +2488,6 @@ def test_c2_mm_m3_dry_run_mapping_e2e_solved_exact():
     _require_irreptables_sg149()
     from valleyscope.analysis.irreptables_runtime_table_builder import (
         build_reduced_table_from_spec_file,
-    )
-    from valleyscope.analysis.reduced_ebr_mapping import (
-        build_reduced_ebr_mapping,
     )
 
     spec_path = Path("docs/reduced_ebr_c2_mm_m3_external_mapping_spec_dry_run.json")

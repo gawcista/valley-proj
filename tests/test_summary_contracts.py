@@ -96,8 +96,6 @@ def _concise_summary_contract_payload() -> dict[str, object]:
             "order": 1,
             "state_index": 0,
             "phase_2pi": 0.0,
-            "nearest_root_of_unity": "1",
-            "root_deviation": 0.0,
         }],
         "projector_symmetry": {"status": "ok", "by_kpoint": {}},
         "symmetry_adapted_valley_analysis": {"status": "not_needed"},
@@ -336,7 +334,7 @@ def test_summary_text_renders_qcut_fraction_for_relative_mode(tmp_path):
         output_paths={},
     )
 
-    assert summary["schema_version"] == "1.9.0"
+    assert summary["schema_version"] == "2.0.0"
     assert summary["qcut"]["fraction"] == pytest.approx(0.2)
     text = render_summary_text(summary)
     assert "qcut mode: relative_min_valley_distance" in text
@@ -772,7 +770,7 @@ def test_summary_text_renders_hsp_star_coverage(tmp_path):
     assert "[0, 0.5, 0] via ops [2]" in text
 
 
-def test_summary_marks_spinor_rotation_as_diagnostic_only(tmp_path):
+def test_summary_marks_unpromoted_representation_as_diagnostic_only(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "config.yaml"
     out_dir = tmp_path / "out"
@@ -812,13 +810,10 @@ def test_summary_marks_spinor_rotation_as_diagnostic_only(tmp_path):
                 "basis": "valley_adapted",
                 "state_index": 0,
                 "phase_2pi": 0.5,
-                "nearest_root_of_unity": "exp(2pii*1/2)",
-                "root_deviation": 0.0,
                 "rotation_ready": True,
                 "topology_input_ready": False,
                 "topology_ready": False,
                 "spinor_rotation_applied": True,
-                "spinor_convention_verified": False,
                 "diagnostic_only": True,
                 "D_valley_offdiag_norm": 0.0,
             }
@@ -826,7 +821,10 @@ def test_summary_marks_spinor_rotation_as_diagnostic_only(tmp_path):
         output_paths={},
     )
 
-    assert any("Spinor rotation is applied" in warning for warning in summary["warnings"])
+    assert any(
+        "diagnostic-only" in warning
+        for warning in summary["warnings"]
+    )
     text = render_summary_text(summary)
     assert "topology_input_ready" in text
     assert "diagnostic-only" in text
@@ -1030,8 +1028,6 @@ def test_symmetry_analysis_distinguishes_computed_from_diagnostic_only(tmp_path)
                 "basis": "valley_adapted",
                 "state_index": 0,
                 "phase_2pi": 1.0 / 6.0,
-                "nearest_root_of_unity": "exp(2pii*1/6)",
-                "root_deviation": 0.0,
                 "rotation_ready": True,
                 "topology_input_ready": False,
                 "diagnostic_only": True,
@@ -1044,8 +1040,7 @@ def test_symmetry_analysis_distinguishes_computed_from_diagnostic_only(tmp_path)
 
     text = render_summary_text(summary)
     assert "two-valley D_valley offdiag diagnostic too large" in text
-    assert "exp(i*pi/3)" in text
-    assert "exp(2pii*1/6)" not in text
+    assert "0.166667" in text
     assert "valley_adapted" not in text
     assert "skipped (two-valley D_valley offdiag diagnostic too large)" not in text
 
@@ -1355,7 +1350,7 @@ def test_summary_exposes_symmetry_characters_as_first_class_rows(tmp_path):
     ]
 
 
-def test_summary_exposes_rotation_readiness_thresholds(tmp_path):
+def test_summary_exposes_representation_readiness_thresholds(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "config.yaml"
     out_dir = tmp_path / "out"
@@ -1382,9 +1377,10 @@ def test_summary_exposes_rotation_readiness_thresholds(tmp_path):
         output_paths={},
     )
 
-    thresholds = summary["rotation_readiness_thresholds"]
+    thresholds = summary["representation_readiness_thresholds"]
     assert thresholds["readiness_preset"] == "normal"
-    assert thresholds["root_deviation_tol"] == pytest.approx(1.0e-5)
+    assert "root_deviation_tol" not in thresholds
+    assert thresholds["unitarity_tol"] == pytest.approx(1.0e-4)
     assert thresholds["D_valley_offdiag_tol"] == pytest.approx(1.0e-3)
     assert thresholds["irrep_weight_tol"] == pytest.approx(5.0e-5)
     assert "not universal physical constants" in thresholds["interpretation"]
@@ -1430,19 +1426,19 @@ def test_readme_symmetry_example_uses_parser_schema(tmp_path):
     assert "P3 No.143" not in readme
     assert "Benchmark:" not in readme
     assert "double-valued" in readme
-    assert "`root_deviation_tol`, `D_valley_offdiag_tol`, and `irrep_weight_tol` are numerical readiness thresholds" in readme
-    assert "`strict`, `normal`, and `loose`" in readme
+    assert "root_deviation_tol" not in readme
+    assert "symmetry.filters" not in readme
 
     match = re.search(
-        r"For a `generate_hexagonal_210\(9, 5, \.\.\.\)` style cell:\n\n```yaml\n(.*?)\n```",
+        r"Create `analyze.yaml`:\n\n```yaml\n(.*?)\n```",
         readme,
         flags=re.DOTALL,
     )
     assert match is not None
 
     h5_path = tmp_path / "wave.h5"
-    mono = tmp_path / "2dm-5370.vasp"
-    structure = tmp_path / "2dm-5370-7.34.vasp"
+    mono = tmp_path / "monolayer.vasp"
+    structure = tmp_path / "moire.vasp"
     out_dir = tmp_path / "valley_analysis"
     write_fixture(h5_path)
     write_simple_poscar(mono)
@@ -1452,9 +1448,9 @@ def test_readme_symmetry_example_uses_parser_schema(tmp_path):
     # Material-specific benchmark names must not appear in example YAML blocks.
     # Physics descriptions in prose may mention tMoTe2/tZrSe2 as benchmarks.
     assert "tMoTe2" not in yaml_text
-    yaml_text = yaml_text.replace("./wave.h5", str(h5_path))
-    yaml_text = yaml_text.replace("./2dm-5370.vasp", str(mono))
-    yaml_text = yaml_text.replace("./2dm-5370-7.34.vasp", str(structure))
+    yaml_text = yaml_text.replace("./wavefunctions.h5", str(h5_path))
+    yaml_text = yaml_text.replace("./monolayer.vasp", str(mono))
+    yaml_text = yaml_text.replace("./moire.vasp", str(structure))
     yaml_text = yaml_text.replace("./valley_analysis", str(out_dir))
     config_path = tmp_path / "readme_example.yaml"
     config_path.write_text(yaml_text, encoding="utf-8")
@@ -1464,8 +1460,7 @@ def test_readme_symmetry_example_uses_parser_schema(tmp_path):
     assert config.symmetry.operations.structure_file == structure
     assert config.symmetry.operations.backend == "spglib"
     assert config.symmetry.tolerance.symprec == pytest.approx(1.0e-3)
-    assert config.symmetry.filters.allowed_orders == [2, 3, 4, 6]
-    assert config.symmetry.filters.rotation_order == "auto"
+    assert not hasattr(config.symmetry, "filters")
 
 
 def test_chinese_readme_uses_public_valley_vocabulary():
@@ -1498,8 +1493,8 @@ def test_chinese_readme_uses_public_valley_vocabulary():
     assert "double-valued" in readme
     assert "valley_weights_adapted" in readme
     assert "assigned_valleys" in readme
-    assert "`root_deviation_tol`、`D_valley_offdiag_tol` 和 `irrep_weight_tol` 是 numerical readiness thresholds" in readme
-    assert "`strict`、`normal`、`loose`" in readme
+    assert "root_deviation_tol" not in readme
+    assert "symmetry.filters" not in readme
     assert "header-only" in readme
 
 
@@ -1853,29 +1848,29 @@ def test_tmote2_projected_source_hsp_coverage_and_tr_orbit_are_explicit():
             assert target["projector_fingerprint"].startswith("sha256:")
 
     export = s["valley_ebr_export_bundle"]
-    assert export["bundle_count"] == 3
-    assert s["valley_ebr_export_bundle"]["schema_version"] == "1.8.0"
-    by_kind_and_valley = {
-        (bundle["problem_kind"], bundle["valley"]): bundle
-        for bundle in export["bundles"]
+    assert export["schema_version"] == "2.0.0"
+    assert export["bundle_count"] == 0
+    assert export["excluded_count"] == 5
+    excluded = export["excluded_instances"]
+    assert {
+        row["source_instance_id"] for row in excluded
+    } == {
+        "local_ebr_instance_001",
+        "local_ebr_instance_002",
+        "tr_ebr_instance_001",
+        "tr_ebr_instance_001_unitary_001",
+        "tr_ebr_instance_001_unitary_002",
     }
-    joint = by_kind_and_valley[("valley_orbit_reduced_ebr", "")]
-    assert joint["valley_orbit"] == ["K_valley", "Kp_valley"]
-    for valley, expected_ka in (
-        ("K_valley", "-KA5"), ("Kp_valley", "-KA6")
-    ):
-        unitary = by_kind_and_valley[
-            ("unitary_valley_reduced_ebr", valley)
-        ]
-        assert unitary["expected_hsps"] == ["GM", "K", "KA", "M"]
-        inferred = unitary[
-            "unitary_irrep_completion_records_by_hsp"
-        ]["KA"][0]
-        assert inferred["irrep"] == expected_ka
-        assert inferred["completion_kind"] == "inferred_by_time_reversal"
-        assert "sampled_kpoint" not in inferred
-        assert inferred["evidence_valley"] != valley
-        assert inferred["evidence_sampled_kpoint"] == "KM"
+    blockers = {
+        blocker
+        for row in excluded
+        for blocker in row["exclusion_reasons"]
+    }
+    assert "source_hsp_coverage_incomplete" in blockers
+    assert (
+        "tr_completed_scoped_representation_evidence_missing"
+        in blockers
+    )
 
 
 def test_tmote2_public_output_no_cn_like_and_production_no_material_names():
@@ -1919,8 +1914,26 @@ def test_centered_fixture_separates_canonical_irreps_from_debug_evidence():
     assert resolved["matched_count"] == 0
     assert resolved["blocked_count"] == 6
     assert resolved["non_source_count"] == 3
-    assert all(row["subspace_space_group_symbol"] == "C2" for row in rows)
-    assert all(row["subspace_space_group_number"] == 5 for row in rows)
+    assert all(
+        row["subspace_space_group_symbol"] == "C2"
+        for row in rows
+        if row["matching_status"] == "not_applicable"
+    )
+    assert all(
+        row["subspace_space_group_symbol"] is None
+        for row in rows
+        if row["matching_status"] == "blocked"
+    )
+    assert all(
+        row["subspace_space_group_number"] == 5
+        for row in rows
+        if row["matching_status"] == "not_applicable"
+    )
+    assert all(
+        row["subspace_space_group_number"] is None
+        for row in rows
+        if row["matching_status"] == "blocked"
+    )
     blocked = [row for row in rows if row["matching_status"] == "blocked"]
     non_source = [
         row for row in rows if row["matching_status"] == "not_applicable"
@@ -1991,9 +2004,13 @@ def test_centered_fixture_projected_hsp_coverage_is_per_valley():
     )
     sewing = time_reversal["antiunitary_sewing_evidence"]
     assert sewing["status"] == "blocked"
-    assert "spinor_convention_unverified_for_time_reversal" in sewing[
+    assert "spinor_convention_unverified_for_time_reversal" not in sewing[
         "blockers"
     ]
+    assert any(
+        blocker.startswith("trusted_projector_workflow_blocked:")
+        for blocker in sewing["blockers"]
+    )
     assert "ambiguous_time_reversal_kpoint_partner:KM:[]" in sewing[
         "blockers"
     ]
@@ -2005,15 +2022,18 @@ def test_centered_fixture_projected_hsp_coverage_is_per_valley():
     ]
 
 
-def test_centered_fixture_star_and_generic_rows_do_not_become_false_blockers():
+def test_centered_fixture_cprime_blocks_source_rows_but_not_generic_rows():
     s = _read_centered_fixture_summary()
     matches = s["valley_irrep_matching"]["generic_matches_by_kpoint"]
 
-    m1 = matches["MM"]["M1_valley"]["projected_hsp_classification"]
-    assert m1["classification"] == "star_equivalent"
-    assert m1["source_hsp_label"] == "V"
-    assert m1["standard_operation_witness"]["table_index"] == 2
-    assert m1["representation_transport_status"] == "validated"
+    for kpoint in ("GammaM", "MM"):
+        for valley in ("M1_valley", "M2_valley", "M3_valley"):
+            blocked = matches[kpoint][valley]
+            assert blocked["matching_status"] == "blocked"
+            assert blocked["reason"] == (
+                "C-prime representation evidence blocked"
+            )
+            assert "projected_hsp_classification" not in blocked
 
     for valley in ("M1_valley", "M2_valley", "M3_valley"):
         generic = matches["KM"][valley]
@@ -2031,101 +2051,23 @@ def test_centered_fixture_star_and_generic_rows_do_not_become_false_blockers():
 
 
 # ---------------------------------------------------------------------------
-# Auto-canonical reduced EBR provenance regression (tMoTe2)
+# C-prime reduced EBR fail-closed regression (tMoTe2)
 # ---------------------------------------------------------------------------
 
-_FIXTURE_REDUCED_EBR = Path(
-    __file__
-).parent.parent / "real_tests" / "tMoTe2" / "output" / "valley_analysis_wave" / "valley_reduced_ebr_mapping.json"
+def test_tmote2_reduced_ebr_stays_embedded_and_not_evaluated():
+    s = _read_fixture_summary()
+    mapping = s["valley_reduced_ebr_mapping"]
 
-
-def _read_fixture_reduced_ebr():
-    """Read tMoTe2 reduced EBR mapping JSON, skipping if not available."""
-    if not _FIXTURE_REDUCED_EBR.exists():
-        pytest.skip(f"tMoTe2 reduced EBR fixture not found at {_FIXTURE_REDUCED_EBR}")
-    return json.loads(_FIXTURE_REDUCED_EBR.read_text(encoding="utf-8"))
-
-
-def test_tmote2_reduced_ebr_auto_canonical_provenance():
-    """The TR valley orbit uses the reviewed type-II grey source."""
-    r = _read_fixture_reduced_ebr()
-
-    # Top-level status
-    assert r["status"] == "no_exact_solution"
-    assert r["schema_version"] == "1.9.0"
-    assert r["table_status"] == "loaded"
-
-    # reduced_ebr_input self-auditing
-    inp = r.get("reduced_ebr_input", {})
-    assert inp["source"] == "auto_unitary_and_time_reversal"
-    assert inp["spinful"] is True
-    assert inp["reduced_table_validation_candidate_bundle_count"] == 3
-    assert inp["final_reduced_ebr_result_count"] == 3
-    assert inp["final_mapping_excluded_bundle_count"] == 0
-
-    # auto_canonical_bundles
-    bundles = r.get("auto_canonical_bundles", [])
-    assert len(bundles) == 3
-    for b in bundles:
-        assert b["sg_number"] == 143
-        assert b["status"] == "no_exact_solution"
-        assert b["table_status"] == "loaded"
-
-    # Solutions
-    solutions = r.get("solutions", [])
-    assert len(solutions) == 3
-    joint = next(
-        sol for sol in solutions
-        if sol["problem_kind"] == "valley_orbit_reduced_ebr"
+    assert mapping["schema_version"] == "2.0.0"
+    assert mapping["status"] == "not_evaluated"
+    assert mapping["table_status"] == "not_applicable"
+    assert mapping["solutions"] == []
+    output_dir = (
+        Path(__file__).parent.parent
+        / "real_tests"
+        / "tMoTe2"
+        / "output"
+        / "valley_analysis_wave"
     )
-    assert joint["valley_orbit"] == ["K_valley", "Kp_valley"]
-    assert joint["classification"] == "in_integer_span_no_nonnegative_witness"
-    assert joint["nonnegative_solution_status"] == "no_nonnegative_solution"
-    unitary = {
-        sol["valley"]: sol for sol in solutions
-        if sol["problem_kind"] == "unitary_valley_reduced_ebr"
-    }
-    assert set(unitary) == {"K_valley", "Kp_valley"}
-    assert all(
-        sol["classification"] == "outside_integer_span"
-        and sol["expected_hsps"] == ["GM", "K", "KA", "M"]
-        and sol["table_provenance"]["source"] == "auto_canonical"
-        for sol in unitary.values()
-    )
-
-    for sol in [joint]:
-
-        # table_provenance injected per solution
-        tp = sol.get("table_provenance", {})
-        assert tp["source"] == "auto_time_reversal_grey"
-        assert tp["space_group_number"] == 143
-        assert tp["spinful"] is True
-        assert tp["data_source"] == "irreptables"
-        assert tp["package"] == "irreptables"
-        assert isinstance(tp.get("package_version"), str) and tp["package_version"]
-        assert tp["valleyscope_reduction"] == "sampled_hsp_valley_preserving"
-        assert tp["source_basis_count"] > 0
-        assert tp["reduction_basis_count"] > 0
-        assert tp["source_basis_count"] > tp["reduction_basis_count"]
-        assert tp["filtered_zero_vector_ebr_count"] == 0
-        assert tp["filtered_zero_vector_ebrs"] == []
-        assert tp["dropped_source_row_count"] == 0
-        assert tp["dropped_source_rows"] == []
-        assert tp["time_reversal_grey_bns_number"] == "143.2"
-        assert tp["time_reversal_source"] == (
-            "irreptables_type_ii_grey_group"
-        )
-
-        # subspace group
-        assert sol["subspace_group_candidate"] == "P3"
-
-        assert sol["time_reversal"]["grey_bns_number"] == "143.2"
-        assert set(sol["unitary_valley_irreps"]) == {
-            "K_valley", "Kp_valley",
-        }
-        assert sol["unitary_valley_irreps"]["K_valley"]["M"] == {
-            "-M2": 1,
-        }
-        assert sol["unitary_valley_irreps"]["Kp_valley"]["M"] == {
-            "-M2": 1,
-        }
+    assert not (output_dir / "valley_ebr_export_bundle.json").exists()
+    assert not (output_dir / "valley_reduced_ebr_mapping.json").exists()

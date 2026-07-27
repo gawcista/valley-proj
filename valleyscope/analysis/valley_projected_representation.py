@@ -189,7 +189,6 @@ def build_valley_projected_representation_report(
                 "eigenvalue_real": row.get("eigenvalue_real"),
                 "eigenvalue_imag": row.get("eigenvalue_imag"),
                 "phase_2pi": row.get("phase_2pi"),
-                "root_deviation": row.get("root_deviation"),
                 "basis": row.get("basis", ""),
                 "blocking_reasons": _blocking_reasons(row, wf_data, diag_only),
             }
@@ -445,12 +444,6 @@ def _build_representation_records(
                     else []
                 )
             )
-            root_deviations = [
-                value for value in (
-                    _optional_float(r.get("root_deviation")) for r in sorted_rows
-                )
-                if value is not None
-            ]
             op_entry: dict[str, Any] = {
                 "operation_id": row.get("operation_id"),
                 "operation_order": row.get("operation_order"),
@@ -466,8 +459,6 @@ def _build_representation_records(
                 ),
                 "source_row_count": len(sorted_rows),
             }
-            if root_deviations:
-                op_entry["max_root_deviation"] = max(root_deviations)
             basis = _nonempty_or_none(row.get("basis"))
             if basis is not None:
                 op_entry["basis"] = basis

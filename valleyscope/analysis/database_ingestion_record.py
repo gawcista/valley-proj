@@ -23,8 +23,9 @@ from valleyscope.analysis.promotion_identity import (
     merge_table_input_provenance,
     table_input_for_bundle,
 )
+from valleyscope.io.wavefunction_convention import valid_sha256_identity
 
-_SCHEMA_VERSION = "1.8.0"
+_SCHEMA_VERSION = "2.0.0"
 
 _PROMOTION_REQUIRED_PASSED_CHECKS = frozenset({
     "table_provenance_check",
@@ -32,6 +33,7 @@ _PROMOTION_REQUIRED_PASSED_CHECKS = frozenset({
     "sg_symbol_check",
     "sg_number_check",
     "certificate_check",
+    "cprime_identity_check",
     "certificate_consistency_check",
     "cert_sg_consistency_check",
     "affine_setting_check",
@@ -61,6 +63,7 @@ _SOLUTION_BUNDLE_BINDING_FIELDS = (
     "unitary_valley_irreps",
     "time_reversal",
     "certificate_identity",
+    "cprime_identity_by_kpoint",
 )
 _SOLUTION_BUNDLE_BINDING_DEFAULTS = {
     "problem_kind": "unitary_valley_reduced_ebr",
@@ -80,6 +83,7 @@ _SOLUTION_BUNDLE_BINDING_DEFAULTS = {
     "unitary_valley_irreps": {},
     "time_reversal": {},
     "certificate_identity": {},
+    "cprime_identity_by_kpoint": {},
 }
 
 def _load_json_object(path: Path) -> dict[str, Any]:
@@ -150,7 +154,25 @@ def build_database_ingestion_record(
     sym = valley_summary.get("symmetry_analysis", {}) if isinstance(valley_summary.get("symmetry_analysis"), dict) else {}
     record["space_group_international"] = sym.get("international")
     record["space_group_number"] = sym.get("spacegroup_number")
-    record["spinor_convention_verified"] = valley_summary.get("input", {}).get("spinor_convention_verified", False)
+    cprime = (
+        valley_summary.get("cprime", {})
+        if isinstance(valley_summary.get("cprime"), dict)
+        else {}
+    )
+    source_basis = (
+        cprime.get("spinor_source_basis", {})
+        if isinstance(cprime.get("spinor_source_basis"), dict)
+        else {}
+    )
+    record["spinor_source_basis_status"] = source_basis.get(
+        "status", "not_evaluated"
+    )
+    record["spinor_source_basis_certificate_identity"] = source_basis.get(
+        "identity"
+    )
+    record["cprime_acceptance_matrix"] = cprime.get(
+        "acceptance_matrix", []
+    )
 
     # --- valley_ebr_export_bundle (optional) ---
     validation_candidate_count = 0
@@ -171,6 +193,16 @@ def build_database_ingestion_record(
                     bundle.get("ready_for_reduced_table_validation") is True
                 )
                 if is_validation_candidate:
+                    cprime_error = _validate_bundle_cprime_against_summary(
+                        bundle=bundle,
+                        source_basis=source_basis,
+                        acceptance_matrix=record[
+                            "cprime_acceptance_matrix"
+                        ],
+                    )
+                    if cprime_error is not None:
+                        errors.append(cprime_error)
+                        continue
                     validation_candidate_count += 1
                     # Validation candidates contain trusted valley-preserving
                     # irreps; preserve them independently of EBR readiness.
@@ -398,6 +430,8 @@ def load_database_ingestion_record_from_directory(
     if bundle_path.is_file():
         bundle = _load_json_object(bundle_path)
         source_files["valley_ebr_export_bundle"] = str(bundle_path.resolve())
+    elif isinstance(summary.get("valley_ebr_export_bundle"), dict):
+        bundle = dict(summary["valley_ebr_export_bundle"])
 
     # valley_reduced_ebr_mapping.json (optional)
     mapping = None
@@ -405,6 +439,8 @@ def load_database_ingestion_record_from_directory(
     if mapping_path.is_file():
         mapping = _load_json_object(mapping_path)
         source_files["valley_reduced_ebr_mapping"] = str(mapping_path.resolve())
+    elif isinstance(summary.get("valley_reduced_ebr_mapping"), dict):
+        mapping = dict(summary["valley_reduced_ebr_mapping"])
 
     return build_database_ingestion_record(
         valley_summary=summary,
@@ -418,6 +454,63 @@ def load_database_ingestion_record_from_directory(
 # ---------------------------------------------------------------------------
 # Internal
 # ---------------------------------------------------------------------------
+
+
+def _validate_bundle_cprime_against_summary(
+    *,
+    bundle: dict[str, Any],
+    source_basis: dict[str, Any],
+    acceptance_matrix: object,
+) -> str | None:
+    source_identity = source_basis.get("identity")
+    if (
+        source_basis.get("status") != "passed"
+        or not valid_sha256_identity(source_identity)
+    ):
+        return "summary C-prime source-basis evidence is not passed"
+    if not isinstance(acceptance_matrix, list):
+        return "summary C-prime acceptance matrix is malformed"
+    valley = str(bundle.get("valley", ""))
+    by_scope: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in acceptance_matrix:
+        if not isinstance(row, dict):
+            continue
+        key = (str(row.get("kpoint", "")), str(row.get("valley", "")))
+        if key in by_scope:
+            return "summary C-prime acceptance matrix has duplicate scope"
+        by_scope[key] = row
+    bundle_links = bundle.get("cprime_identity_by_kpoint")
+    irreps = bundle.get("irreps_by_kpoint")
+    if (
+        not isinstance(bundle_links, dict)
+        or not isinstance(irreps, dict)
+        or set(bundle_links) != set(irreps)
+    ):
+        return "bundle C-prime identity inventory is incomplete"
+    for kpoint, identity in bundle_links.items():
+        row = by_scope.get((str(kpoint), valley))
+        if not isinstance(row, dict) or not isinstance(identity, dict):
+            return f"summary C-prime scope missing for {kpoint}/{valley}"
+        expected = {
+            "spinor_source_basis_certificate_identity": source_identity,
+            "double_space_group_lift_certificate_identity": row.get(
+                "double_space_group_lift_identity"
+            ),
+            "scoped_representation_evidence_identity": row.get(
+                "scoped_representation_evidence_identity"
+            ),
+        }
+        if (
+            row.get("double_space_group_lift_status") != "passed"
+            or row.get("scoped_representation_status") != "passed"
+            or identity != expected
+            or not all(
+                valid_sha256_identity(value)
+                for value in expected.values()
+            )
+        ):
+            return f"C-prime identity mismatch for {kpoint}/{valley}"
+    return None
 
 
 def _authoritative_mapping_solutions(

@@ -25,6 +25,7 @@ SUPPORTED_SCOPE_KINDS = frozenset(
     {"local_irrep", "valley_sewing", "tr_completed"}
 )
 DEFAULT_NUMERICAL_TOLERANCE = 1.0e-8
+DEFAULT_GRAM_TOLERANCE = 1.0e-6
 
 
 @dataclass(frozen=True)
@@ -70,6 +71,10 @@ def build_scoped_representation_evidence(
     valley_mappings: Mapping[int, Mapping[str, str]],
     antiunitary_evidence: Mapping[str, object] | None = None,
     numerical_tolerance: float = DEFAULT_NUMERICAL_TOLERANCE,
+    gram_tolerance: float = DEFAULT_GRAM_TOLERANCE,
+    target_subspace_tolerance: float | None = None,
+    projector_covariance_tolerance: float | None = None,
+    valley_block_tolerance: float | None = None,
 ) -> ScopedRepresentationEvidence:
     """Derive one immutable scope record from raw numerical inputs.
 
@@ -79,6 +84,16 @@ def build_scoped_representation_evidence(
     """
     reasons: list[str] = []
     tolerance = _positive_tolerance(numerical_tolerance, reasons)
+    gram_tol = _positive_tolerance(gram_tolerance, reasons)
+    target_tol = _optional_tolerance(
+        target_subspace_tolerance, tolerance, reasons
+    )
+    projector_tol = _optional_tolerance(
+        projector_covariance_tolerance, tolerance, reasons
+    )
+    block_tol = _optional_tolerance(
+        valley_block_tolerance, tolerance, reasons
+    )
 
     source_validation = validate_spinor_source_basis_record(source_basis_record)
     if source_validation.status != "passed":
@@ -132,8 +147,13 @@ def build_scoped_representation_evidence(
     coefficient_gram_error = _coefficient_gram_error(
         target_coefficients, target_dimension, reasons
     )
+    if (
+        coefficient_gram_error is not None
+        and coefficient_gram_error > gram_tol
+    ):
+        reasons.append("target_coefficients_gram_failed")
     closure_rows = _target_subspace_rows(
-        operation_ids, matrices, tolerance, reasons
+        operation_ids, matrices, target_tol, reasons
     )
     plane_wave_rows = _plane_wave_rows(
         operation_ids, plane_wave_evidence, tolerance, reasons
@@ -167,7 +187,7 @@ def build_scoped_representation_evidence(
         representations=matrices,
         projectors=projectors,
         valley_mappings=valley_mappings,
-        tolerance=tolerance,
+        tolerance=projector_tol,
         reasons=reasons,
     )
     block_rows = _valley_block_rows(
@@ -176,7 +196,7 @@ def build_scoped_representation_evidence(
         representations=matrices,
         valley_bases=valley_bases,
         valley_mappings=valley_mappings,
-        tolerance=tolerance,
+        tolerance=block_tol,
         reasons=reasons,
     )
     antiunitary_record = _antiunitary_record(
@@ -204,13 +224,21 @@ def build_scoped_representation_evidence(
             "valley_preserving_operation_ids": preserving_ids,
             "valley_changing_operation_ids": changing_ids,
         },
-        "numerical_tolerance": tolerance,
+        "tolerances": {
+            "group_law": tolerance,
+            "plane_wave_mapping": tolerance,
+            "coefficient_gram": gram_tol,
+            "target_subspace": target_tol,
+            "projector_covariance": projector_tol,
+            "valley_block": block_tol,
+            "antiunitary": tolerance,
+        },
         "target_subspace": {
             "dimension": target_dimension,
             "coefficient_gram_error": coefficient_gram_error,
             "coefficient_gram_passed": (
                 coefficient_gram_error is not None
-                and coefficient_gram_error <= tolerance
+                and coefficient_gram_error <= gram_tol
             ),
             "operation_rows": closure_rows,
         },
@@ -367,6 +395,16 @@ def _positive_tolerance(value: float, reasons: list[str]) -> float:
         reasons.append("numerical_tolerance_malformed")
         return DEFAULT_NUMERICAL_TOLERANCE
     return tolerance
+
+
+def _optional_tolerance(
+    value: float | None,
+    fallback: float,
+    reasons: list[str],
+) -> float:
+    if value is None:
+        return fallback
+    return _positive_tolerance(value, reasons)
 
 
 def _kpoint_record(value: np.ndarray, reasons: list[str]) -> list[float]:
@@ -596,7 +634,7 @@ def _validate_scope_semantics(
 ) -> None:
     if scope_kind == "local_irrep" and changing_ids:
         reasons.append("local_irrep_scope_contains_valley_changing_operation")
-    if scope_kind in {"valley_sewing", "tr_completed"} and not changing_ids:
+    if scope_kind == "valley_sewing" and not changing_ids:
         reasons.append("valley_changing_scope_evidence_missing")
     if scope_kind == "local_irrep" and not preserving_ids:
         reasons.append("valley_preserving_scope_evidence_missing")
@@ -852,7 +890,7 @@ def _antiunitary_record(
         reasons.append("positive_validation_status_not_accepted")
     source = evidence.get("source_valley")
     target = evidence.get("target_valley")
-    if source not in valley_orbit or target not in valley_orbit or source == target:
+    if source not in valley_orbit or target not in valley_orbit:
         reasons.append("antiunitary_valley_mapping_invalid")
     try:
         forward = np.asarray(

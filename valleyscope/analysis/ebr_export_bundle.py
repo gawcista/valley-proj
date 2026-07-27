@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-_SCHEMA_VERSION = "1.8.0"
+_SCHEMA_VERSION = "2.0.0"
 
 
 def build_ebr_export_bundle(
@@ -48,6 +48,9 @@ def build_ebr_export_bundle(
                 "subspace_space_group": inst.get("subspace_space_group", {}),
                 "spinor": inst.get("spinor"),
                 "certificate_identity": inst.get("certificate_identity", {}),
+                "cprime_identity_by_kpoint": inst.get(
+                    "cprime_identity_by_kpoint", {}
+                ),
                 "workflow_path": inst.get("workflow_path", ""),
                 "unitary_vector_construction": (
                     _unitary_vector_construction(inst)

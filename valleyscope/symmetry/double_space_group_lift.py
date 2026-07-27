@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
+from itertools import product
 from typing import Any
 
 import numpy as np
@@ -22,6 +23,7 @@ from valleyscope.geometry.lattice import (
 
 DOUBLE_SPACE_GROUP_LIFT_SCHEMA_VERSION = "1.0.0"
 _TOLERANCE = 1.0e-8
+_SOURCE_SPIN_TOLERANCE = 5.0e-5
 
 
 @dataclass(frozen=True)
@@ -684,6 +686,15 @@ def _derive_source_and_setting_identities(
         setting_reasons.append("source_operation_coverage_incomplete")
 
     transform_inverse = np.linalg.inv(transform)
+    common_spin_basis = _derive_common_spin_basis_transform(
+        operations=operations,
+        lifts=lifts,
+        operation_map=operation_map,
+        source_operations=source_operations,
+    )
+    if common_spin_basis is None:
+        source_reasons.append("source_spin_common_basis_failed")
+        common_spin_basis = np.eye(2, dtype=np.complex128)
     source_operation_signs: dict[str, int] = {}
     spatial_mapping_rows: list[dict[str, object]] = []
     spin_mapping_rows: list[dict[str, object]] = []
@@ -750,11 +761,20 @@ def _derive_source_and_setting_identities(
         if source_spin is None or parent_spin is None:
             source_reasons.append("source_spin_rotation_malformed")
             continue
-        plus_residual = float(np.linalg.norm(source_spin - parent_spin))
-        minus_residual = float(np.linalg.norm(source_spin + parent_spin))
+        transformed_parent_spin = (
+            common_spin_basis
+            @ parent_spin
+            @ common_spin_basis.conj().T
+        )
+        plus_residual = float(
+            np.linalg.norm(source_spin - transformed_parent_spin)
+        )
+        minus_residual = float(
+            np.linalg.norm(source_spin + transformed_parent_spin)
+        )
         sign = 1 if plus_residual <= minus_residual else -1
         residual = min(plus_residual, minus_residual)
-        if residual > _TOLERANCE:
+        if residual > _SOURCE_SPIN_TOLERANCE:
             source_reasons.append("source_spin_common_basis_failed")
         source_operation_signs[str(parent_id)] = sign
         spin_mapping_rows.append(
@@ -786,7 +806,7 @@ def _derive_source_and_setting_identities(
             }
         ),
         "common_spin_basis_transform": _complex_matrix_record(
-            np.eye(2, dtype=np.complex128)
+            common_spin_basis
         ),
         "spin_mapping_rows": spin_mapping_rows,
         "status": "passed" if not source_reasons else "blocked",
@@ -822,6 +842,201 @@ def _derive_source_and_setting_identities(
     )
 
 
+def _derive_common_spin_basis_transform(
+    *,
+    operations: Sequence[Mapping[str, object]],
+    lifts: Mapping[int, np.ndarray],
+    operation_map: Mapping[int, int],
+    source_operations: Mapping[int, Mapping[str, object]],
+) -> np.ndarray | None:
+    """Solve one SU(2) basis transform for the complete mapped inventory."""
+    pairs: list[tuple[np.ndarray, np.ndarray]] = []
+    axes: list[tuple[np.ndarray, np.ndarray]] = []
+    for operation in operations:
+        operation_id = int(operation["operation_id"])
+        table_index = operation_map.get(operation_id)
+        source_operation = (
+            source_operations.get(table_index)
+            if table_index is not None
+            else None
+        )
+        parent_spin = lifts.get(operation_id)
+        source_spin = (
+            _complex_matrix_from_record(source_operation["spin_rotation"])
+            if isinstance(source_operation, Mapping)
+            else None
+        )
+        if parent_spin is None or source_spin is None:
+            continue
+        parent_unitary = _nearest_unitary(parent_spin)
+        source_unitary = _nearest_unitary(source_spin)
+        if parent_unitary is None or source_unitary is None:
+            continue
+        pairs.append((parent_unitary, source_unitary))
+        parent_axis = _proper_rotation_axis(_su2_adjoint(parent_unitary))
+        source_axis = _proper_rotation_axis(_su2_adjoint(source_unitary))
+        if parent_axis is not None and source_axis is not None:
+            axes.append((parent_axis, source_axis))
+    if not pairs:
+        return None
+
+    rotation_candidates: list[np.ndarray] = [np.eye(3)]
+    for parent_axis, source_axis in axes:
+        for sign in (-1.0, 1.0):
+            candidate = _align_unit_vectors(
+                parent_axis, sign * source_axis
+            )
+            if candidate is not None:
+                rotation_candidates.append(candidate)
+
+    independent_axes: list[tuple[np.ndarray, np.ndarray]] = []
+    for pair in axes:
+        rank = np.linalg.matrix_rank(
+            np.stack(
+                [item[0] for item in independent_axes] + [pair[0]],
+                axis=1,
+            ),
+            tol=1.0e-7,
+        )
+        if rank > len(independent_axes):
+            independent_axes.append(pair)
+        if len(independent_axes) == 3:
+            break
+    if len(independent_axes) >= 2:
+        parent_vectors = np.stack(
+            [item[0] for item in independent_axes], axis=1
+        )
+        source_vectors = np.stack(
+            [item[1] for item in independent_axes], axis=1
+        )
+        for signs in product((-1.0, 1.0), repeat=len(independent_axes)):
+            target_vectors = source_vectors * np.asarray(signs)[None, :]
+            correlation = target_vectors @ parent_vectors.T
+            left, _, right_t = np.linalg.svd(correlation)
+            orientation = np.eye(3)
+            orientation[-1, -1] = np.linalg.det(left @ right_t)
+            rotation_candidates.append(left @ orientation @ right_t)
+
+    best_basis: np.ndarray | None = None
+    best_residual = float("inf")
+    for rotation in rotation_candidates:
+        if (
+            not np.allclose(rotation.T @ rotation, np.eye(3), atol=1.0e-7)
+            or not np.isclose(np.linalg.det(rotation), 1.0, atol=1.0e-7)
+        ):
+            continue
+        basis = spin_lift_from_orthogonal(rotation)
+        residual = max(
+            min(
+                float(np.linalg.norm(
+                    source - basis @ parent @ basis.conj().T
+                )),
+                float(np.linalg.norm(
+                    source + basis @ parent @ basis.conj().T
+                )),
+            )
+            for parent, source in pairs
+        )
+        if residual < best_residual:
+            best_residual = residual
+            best_basis = basis
+    if best_basis is None or best_residual > _SOURCE_SPIN_TOLERANCE:
+        return None
+    return best_basis
+
+
+def _nearest_unitary(matrix: np.ndarray) -> np.ndarray | None:
+    value = np.asarray(matrix, dtype=np.complex128)
+    if value.shape != (2, 2) or not np.all(np.isfinite(value)):
+        return None
+    left, singular_values, right_h = np.linalg.svd(value)
+    if np.min(singular_values) <= 0.0:
+        return None
+    unitary = left @ right_h
+    determinant = np.linalg.det(unitary)
+    if abs(determinant) <= _TOLERANCE:
+        return None
+    return unitary / np.sqrt(determinant)
+
+
+def _su2_adjoint(matrix: np.ndarray) -> np.ndarray:
+    sigma = (
+        np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128),
+        np.array([[0.0, -1.0j], [1.0j, 0.0]], dtype=np.complex128),
+        np.array([[1.0, 0.0], [0.0, -1.0]], dtype=np.complex128),
+    )
+    unitary = np.asarray(matrix, dtype=np.complex128)
+    return np.asarray(
+        [
+            [
+                0.5
+                * np.trace(
+                    sigma[row]
+                    @ unitary
+                    @ sigma[column]
+                    @ unitary.conj().T
+                ).real
+                for column in range(3)
+            ]
+            for row in range(3)
+        ],
+        dtype=float,
+    )
+
+
+def _proper_rotation_axis(rotation: np.ndarray) -> np.ndarray | None:
+    matrix = np.asarray(rotation, dtype=float)
+    if np.linalg.norm(matrix - np.eye(3)) <= 1.0e-7:
+        return None
+    _, _, right_h = np.linalg.svd(matrix - np.eye(3))
+    axis = right_h[-1]
+    norm = float(np.linalg.norm(axis))
+    if norm <= 1.0e-10:
+        return None
+    return axis / norm
+
+
+def _align_unit_vectors(
+    source: np.ndarray,
+    target: np.ndarray,
+) -> np.ndarray | None:
+    left = np.asarray(source, dtype=float)
+    right = np.asarray(target, dtype=float)
+    left_norm = float(np.linalg.norm(left))
+    right_norm = float(np.linalg.norm(right))
+    if left_norm <= 1.0e-10 or right_norm <= 1.0e-10:
+        return None
+    left = left / left_norm
+    right = right / right_norm
+    cross = np.cross(left, right)
+    sine = float(np.linalg.norm(cross))
+    cosine = float(np.clip(np.dot(left, right), -1.0, 1.0))
+    if sine <= 1.0e-10:
+        if cosine > 0.0:
+            return np.eye(3)
+        basis_vectors = np.eye(3)
+        perpendicular = min(
+            basis_vectors,
+            key=lambda vector: abs(float(np.dot(vector, left))),
+        )
+        axis = np.cross(left, perpendicular)
+        axis /= np.linalg.norm(axis)
+        return 2.0 * np.outer(axis, axis) - np.eye(3)
+    axis = cross / sine
+    skew = np.array(
+        [
+            [0.0, -axis[2], axis[1]],
+            [axis[2], 0.0, -axis[0]],
+            [-axis[1], axis[0], 0.0],
+        ]
+    )
+    return (
+        np.eye(3)
+        + sine * skew
+        + (1.0 - cosine) * (skew @ skew)
+    )
+
+
 def _normalize_source_operation(
     value: object,
 ) -> dict[str, object] | None:
@@ -840,17 +1055,21 @@ def _normalize_source_operation(
         or spin_rotation is None
     ):
         return None
-    if not np.allclose(
-        spin_rotation.conj().T @ spin_rotation,
-        np.eye(2),
-        atol=_TOLERANCE,
-    ) or not np.isclose(np.linalg.det(spin_rotation), 1.0, atol=_TOLERANCE):
+    normalized_spin_rotation = _nearest_unitary(spin_rotation)
+    if (
+        normalized_spin_rotation is None
+        or np.linalg.norm(
+            spin_rotation - normalized_spin_rotation
+        ) > _SOURCE_SPIN_TOLERANCE
+    ):
         return None
     return {
         "table_index": table_index,
         "rotation_frac": rotation_raw.astype(int).tolist(),
         "translation_frac": np.mod(translation, 1.0).tolist(),
-        "spin_rotation": _complex_matrix_record(spin_rotation),
+        "spin_rotation": _complex_matrix_record(
+            normalized_spin_rotation
+        ),
     }
 
 

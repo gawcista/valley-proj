@@ -18,6 +18,16 @@ from valleyscope.analysis.database_ingestion_record import (
 )
 
 from tests.helpers_io_workflow import write_fixture, write_config
+from tests.reduced_ebr_promo_helpers import (
+    attach_cprime_fixture_contract,
+    cprime_summary_for_export,
+)
+
+
+def _cprime_export(*bundles):
+    export = {"bundles": list(bundles)}
+    attach_cprime_fixture_contract(export)
+    return export
 
 # Database ingestion record tests
 # -----------------------------------------------------------------------
@@ -31,7 +41,6 @@ def test_ingestion_record_requires_summary():
 
 
 def test_ingestion_uses_stage_owned_counts_and_final_result_status():
-    summary = {"target_kpoints": ["GammaM"], "iband": [1], "input": {}}
     export, mapping = _authoritative_unitary_ingestion_payload(
         bundle_id="b_candidate",
         solution_over={
@@ -60,7 +69,9 @@ def test_ingestion_uses_stage_owned_counts_and_final_result_status():
     })
 
     record = build_database_ingestion_record(
-        valley_summary=summary,
+        valley_summary=cprime_summary_for_export(
+            export, target_kpoints=["GammaM"], iband=[1]
+        ),
         valley_ebr_export_bundle=export,
         valley_reduced_ebr_mapping=mapping,
     )
@@ -92,15 +103,16 @@ def test_ingestion_uses_stage_owned_counts_and_final_result_status():
 
 
 def test_ingestion_candidate_without_mapping_has_candidate_status():
+    export = _cprime_export({
+        "bundle_id": "b",
+        "valley": "K",
+        "ready_for_reduced_table_validation": True,
+        "irreps_by_kpoint": {},
+        "irrep_records_by_kpoint": {},
+    })
     record = build_database_ingestion_record(
-        valley_summary={"target_kpoints": [], "iband": [], "input": {}},
-        valley_ebr_export_bundle={
-            "bundles": [{
-                "bundle_id": "b",
-                "ready_for_reduced_table_validation": True,
-                "irrep_records_by_kpoint": {},
-            }],
-        },
+        valley_summary=cprime_summary_for_export(export),
+        valley_ebr_export_bundle=export,
     )
 
     assert record["record_status"] == (
@@ -140,7 +152,7 @@ def test_evaluated_nonexact_solution_is_a_final_result(
         solution_over=solution,
     )
     record = build_database_ingestion_record(
-        valley_summary={"target_kpoints": [], "iband": [], "input": {}},
+        valley_summary=cprime_summary_for_export(export),
         valley_ebr_export_bundle=export,
         valley_reduced_ebr_mapping=mapping,
     )
@@ -185,15 +197,16 @@ def test_ingestion_rejects_mapping_solution_without_current_export_bundle():
 
 
 def test_ingestion_rejects_matching_solution_without_promotion_evidence():
+    export = _cprime_export({
+        "bundle_id": "b",
+        "valley": "K",
+        "ready_for_reduced_table_validation": True,
+        "irreps_by_kpoint": {},
+        "irrep_records_by_kpoint": {},
+    })
     record = build_database_ingestion_record(
-        valley_summary={"target_kpoints": [], "iband": [], "input": {}},
-        valley_ebr_export_bundle={
-            "bundles": [{
-                "bundle_id": "b",
-                "ready_for_reduced_table_validation": True,
-                "irrep_records_by_kpoint": {},
-            }],
-        },
+        valley_summary=cprime_summary_for_export(export),
+        valley_ebr_export_bundle=export,
         valley_reduced_ebr_mapping={
             "status": "solved_exact",
             "table_status": "loaded",
@@ -225,7 +238,7 @@ def test_ingestion_rejects_promoted_solution_changed_after_export():
     }
 
     record = build_database_ingestion_record(
-        valley_summary={"target_kpoints": [], "iband": [], "input": {}},
+        valley_summary=cprime_summary_for_export(export),
         valley_ebr_export_bundle=export,
         valley_reduced_ebr_mapping=mapping,
     )
@@ -247,6 +260,7 @@ def _tr_validation_candidate_bundle():
         "source_instance_id": "orbit",
         "problem_kind": "valley_orbit_reduced_ebr",
         "subspace_group_candidate": "P3",
+        "valley": "K",
         "spinor": True,
         "ready_for_reduced_table_validation": True,
         "workflow_path": "time_reversal_valley_orbit",
@@ -265,16 +279,20 @@ def _tr_validation_candidate_bundle():
             "K": {"GM": {"A": 1}, "K": {"B": 2}},
             "Kp": {"GM": {"A": 1}},
         },
+        "irreps_by_kpoint": {
+            "GammaM": ["A"],
+            "KM": ["B", "B"],
+            "GammaM_Kp": ["A"],
+        },
         "irrep_records_by_kpoint": {},
     }
 
 
 def test_tr_validation_candidate_unitary_irreps_survive_without_mapping():
+    export = _cprime_export(_tr_validation_candidate_bundle())
     record = build_database_ingestion_record(
-        valley_summary={"target_kpoints": [], "iband": [], "input": {}},
-        valley_ebr_export_bundle={
-            "bundles": [_tr_validation_candidate_bundle()],
-        },
+        valley_summary=cprime_summary_for_export(export),
+        valley_ebr_export_bundle=export,
     )
 
     assert record["record_status"] == (
@@ -362,9 +380,10 @@ def test_tr_ingestion_fallback_requires_complete_valley_resolved_binding(
     else:
         bundle["source_hsp_to_sampled_kpoint"]["GM"] = "wrong_GammaM"
 
+    export = _cprime_export(bundle)
     record = build_database_ingestion_record(
-        valley_summary={"target_kpoints": [], "iband": [], "input": {}},
-        valley_ebr_export_bundle={"bundles": [bundle]},
+        valley_summary=cprime_summary_for_export(export),
+        valley_ebr_export_bundle=export,
     )
 
     assert record["valley_irrep_records"] == []
@@ -544,6 +563,7 @@ def _authoritative_unitary_ingestion_payload(
     bundle["subspace_space_group"] = {
         "candidate_space_group_symbol": "P3",
     }
+    export = _cprime_export(bundle)
     report = {
         check: "passed"
         for check in (
@@ -552,6 +572,7 @@ def _authoritative_unitary_ingestion_payload(
             "sg_symbol_check",
             "sg_number_check",
             "certificate_check",
+            "cprime_identity_check",
             "certificate_consistency_check",
             "cert_sg_consistency_check",
             "affine_setting_check",
@@ -591,6 +612,7 @@ def _authoritative_unitary_ingestion_payload(
         "unitary_valley_irreps",
         "time_reversal",
         "certificate_identity",
+        "cprime_identity_by_kpoint",
     )
     solution = {
         "bundle_id": bundle_id,
@@ -636,7 +658,7 @@ def _authoritative_unitary_ingestion_payload(
         solution["irrep_vector"]
     )
     return (
-        {"bundles": [bundle]},
+        export,
         {
             "status": solution["status"],
             "table_status": "loaded",
@@ -649,9 +671,10 @@ def _authoritative_unitary_ingestion_payload(
 def test_tr_unitary_ingestion_preserves_observed_and_inferred_rows():
     unitary = _tr_completed_unitary_bundle()
     legacy_joint = _tr_validation_candidate_bundle()
+    export = _cprime_export(unitary, legacy_joint)
     record = build_database_ingestion_record(
-        valley_summary={"target_kpoints": [], "iband": [], "input": {}},
-        valley_ebr_export_bundle={"bundles": [unitary, legacy_joint]},
+        valley_summary=cprime_summary_for_export(export),
+        valley_ebr_export_bundle=export,
     )
 
     assert len(record["valley_irrep_records"]) == 3
@@ -704,11 +727,10 @@ def test_tr_unitary_ingestion_never_uses_joint_representative_fallback(
         inferred["source_candidate_provenance"][
             "irrep_source_provenance"
         ]["source_hsp_label"] = "GM"
+    export = _cprime_export(unitary, _tr_validation_candidate_bundle())
     record = build_database_ingestion_record(
-        valley_summary={"target_kpoints": [], "iband": [], "input": {}},
-        valley_ebr_export_bundle={
-            "bundles": [unitary, _tr_validation_candidate_bundle()],
-        },
+        valley_summary=cprime_summary_for_export(export),
+        valley_ebr_export_bundle=export,
     )
 
     assert record["valley_irrep_records"] == []
@@ -721,14 +743,15 @@ def test_ingestion_record_with_ready_bundle():
     """Ready export bundle produces trusted irrep records."""
     from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
 
-    summary = {"target_kpoints": ["GammaM"], "iband": [1],
-               "input": {"spinor_convention_verified": True},
-               "symmetry_analysis": {"international": "P321", "spacegroup_number": 150}}
     bundle = {
         "bundles": [{
             "bundle_id": "b_001", "source_instance_id": "ebr_001",
+            "valley": "K_valley",
             "subspace_group_candidate": "P3",
                 "ready_for_reduced_table_validation": True,
+            "irreps_by_kpoint": {
+                "GammaM": ["C3_spinor_phase_+1/2"],
+            },
             "irrep_records_by_kpoint": {
                 "GammaM": [{"valley": "K_valley", "operation_id": 1,
                             "operation_order": 3,
@@ -739,6 +762,13 @@ def test_ingestion_record_with_ready_bundle():
                             "source": "valley_irrep_matching/GammaM/K_valley"}],
             },
         }],
+    }
+    attach_cprime_fixture_contract(bundle)
+    summary = cprime_summary_for_export(
+        bundle, target_kpoints=["GammaM"], iband=[1]
+    )
+    summary["symmetry_analysis"] = {
+        "international": "P321", "spacegroup_number": 150
     }
 
     record = build_database_ingestion_record(
@@ -916,7 +946,6 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
 
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    summary = {"target_kpoints": ["GammaM", "KM"], "iband": [101, 102], "input": {}}
     c3_records = {
         "GammaM": [
             {"valley": "K_valley", "operation_id": "C3", "operation_order": 3,
@@ -958,6 +987,13 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
                 "subspace_group_candidate": "P3",
                 "subspace_space_group": {"candidate_space_group_symbol": "P3"},
                 "ready_for_reduced_table_validation": True,
+                "irreps_by_kpoint": {
+                    "GammaM": ["C3_spinor_phase_+1/2"],
+                    "KM": [
+                        "C3_spinor_phase_+1/6",
+                        "C3_spinor_phase_-1/6",
+                    ],
+                },
                 "irrep_records_by_kpoint": c3_records,
             },
             {
@@ -966,11 +1002,23 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
                 "subspace_group_candidate": "P3",
                 "subspace_space_group": {"candidate_space_group_symbol": "P3"},
                 "ready_for_reduced_table_validation": True,
+                "irreps_by_kpoint": {
+                    "GammaM": ["C3_spinor_phase_+1/2"],
+                    "KM": [
+                        "C3_spinor_phase_+1/6",
+                        "C3_spinor_phase_-1/6",
+                    ],
+                },
                 "irrep_records_by_kpoint": c3p_records,
             },
         ],
         "excluded_instances": [],
     }
+    summary = cprime_summary_for_export(
+        bundle,
+        target_kpoints=["GammaM", "KM"],
+        iband=[101, 102],
+    )
     mapping = {
         "status": "solved_exact", "table_status": "loaded",
         "solutions": [
@@ -1008,7 +1056,7 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
 
     record = load_database_ingestion_record_from_directory(run_dir)
 
-    assert record["schema_version"] == "1.8.0"
+    assert record["schema_version"] == "2.0.0"
     assert record["record_status"] == (
         "has_reduced_table_validation_candidates"
     )
@@ -1809,12 +1857,12 @@ def test_database_index_input_exclusions_have_source_record():
     }
 
 
-def test_ingestion_record_schema_version_is_1_8_0():
-    """Ingestion record schema_version is now 1.8.0."""
+def test_ingestion_record_schema_version_is_2_0_0():
+    """Ingestion record schema reflects the C-prime breaking reset."""
     from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
     summary = {"target_kpoints": [], "iband": [], "input": {}}
     record = build_database_ingestion_record(valley_summary=summary)
-    assert record["schema_version"] == "1.8.0"
+    assert record["schema_version"] == "2.0.0"
 
 
 # -----------------------------------------------------------------------
@@ -1823,12 +1871,13 @@ def test_ingestion_record_schema_version_is_1_8_0():
 def test_irrep_records_preserve_generic_fields():
     """Generic irrep provenance fields survive ingestion flattening."""
     from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
-    summary = {"target_kpoints": ["GammaM"], "iband": [1], "input": {}}
     bundle = {
         "bundles": [{
             "bundle_id": "b_001",
+            "valley": "K_valley",
             "subspace_group_candidate": "P3",
                 "ready_for_reduced_table_validation": True,
+            "irreps_by_kpoint": {"GammaM": ["-GM5", "-GM5"]},
             "irrep_records_by_kpoint": {
                 "GammaM": [{
                     "valley": "K_valley",
@@ -1861,8 +1910,12 @@ def test_irrep_records_preserve_generic_fields():
             },
         }],
     }
+    attach_cprime_fixture_contract(bundle)
     record = build_database_ingestion_record(
-        valley_summary=summary, valley_ebr_export_bundle=bundle,
+        valley_summary=cprime_summary_for_export(
+            bundle, target_kpoints=["GammaM"], iband=[1]
+        ),
+        valley_ebr_export_bundle=bundle,
     )
     recs = record["valley_irrep_records"]
     assert len(recs) == 1
@@ -1907,9 +1960,11 @@ def test_ingestion_preserves_centered_certificate_identity_from_bundle():
         "bundles": [{
             "bundle_id": "b_centered",
             "source_instance_id": "i_centered",
+            "valley": "K_valley",
             "subspace_group_candidate": "C2",
                 "ready_for_reduced_table_validation": True,
             "certificate_identity": certificate_identity,
+            "irreps_by_kpoint": {"GM": ["GM1"]},
             "irrep_records_by_kpoint": {
                 "GM": [{
                     "valley": "K_valley",
@@ -1919,56 +1974,18 @@ def test_ingestion_preserves_centered_certificate_identity_from_bundle():
             },
         }],
     }
+    attach_cprime_fixture_contract(bundle)
     record = build_database_ingestion_record(
-        valley_summary={"target_kpoints": ["GM"], "iband": [1], "input": {}},
+        valley_summary=cprime_summary_for_export(
+            bundle, target_kpoints=["GM"], iband=[1]
+        ),
         valley_ebr_export_bundle=bundle,
     )
 
-    assert record["schema_version"] == "1.8.0"
+    assert record["schema_version"] == "2.0.0"
     assert record["valley_irrep_records"][0]["certificate_identity"] == (
         certificate_identity
     )
-
-
-def test_legacy_records_still_ingest_without_generic_fields():
-    """Legacy records without generic fields ingest successfully."""
-    from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
-    summary = {"target_kpoints": ["GammaM"], "iband": [1], "input": {}}
-    bundle = {
-        "bundles": [{
-            "bundle_id": "b_001",
-            "subspace_group_candidate": "P3",
-                "ready_for_reduced_table_validation": True,
-            "irrep_records_by_kpoint": {
-                "GammaM": [{
-                    "valley": "K_valley",
-                    "operation_id": 1,
-                    "operation_order": 3,
-                    "matched_irrep": "C3_spinor_phase_+1/2",
-                    "eigenphases": [0.5],
-                    "workflow_path": "direct_qcut",
-                    "readiness_level": "trusted",
-                    "source": "legacy/GammaM/K_valley",
-                }],
-            },
-        }],
-    }
-    record = build_database_ingestion_record(
-        valley_summary=summary, valley_ebr_export_bundle=bundle,
-    )
-    assert record["final_reduced_ebr_result_count"] == 0
-    assert record["reduced_table_validation_candidate_bundle_count"] == 1
-    r = record["valley_irrep_records"][0]
-    assert r["matched_irrep"] == "C3_spinor_phase_+1/2"
-    for key in [
-        "irrep_multiplicity",
-        "matching_strategy",
-        "subspace_space_group",
-        "legacy_subspace_group_candidate",
-        "valley_preserving_operation_ids",
-        "source_operation_map",
-    ]:
-        assert key not in r
 
 
 def test_database_index_preserves_generic_irrep_fields_with_run_provenance():
@@ -2228,7 +2245,7 @@ def test_tmote2_ingestion_compact_reduced_ebr_records():
     assert all(row["evidence_sampled_kpoint"] == "KM" for row in inferred)
 
 
-def test_joint_ingestion_does_not_import_optional_irrep_runtime():
+def test_summary_only_ingestion_does_not_import_optional_irrep_runtime():
     fixture = (
         Path(__file__).parent.parent
         / "real_tests"
@@ -2254,7 +2271,11 @@ from valleyscope.analysis.database_ingestion_record import (
     load_database_ingestion_record_from_directory,
 )
 record = load_database_ingestion_record_from_directory(Path({str(fixture)!r}))
-assert record["final_reduced_ebr_result_count"] == 3
+assert record["record_status"] == "no_reduced_ebr_input"
+assert record["final_reduced_ebr_result_count"] == 0
+assert record["ebr_export_status"] == "no_bundles"
+assert record["input_excluded_instance_count"] == 5
+assert record["reduced_ebr_mapping_status"] == "not_evaluated"
 assert record["validation_errors"] == []
 """
     completed = subprocess.run(

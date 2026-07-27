@@ -53,8 +53,11 @@ def test_full_pipeline_c3_mstar_success():
     assert report["local_irrep_ready"] is True
     assert report["diagnostic_only"] is False
     assert report["status"] == "ok"
-    assert report["irrep_matching_input_ready"] is True
-    assert report["irrep_matching_input_status"] == "ready"
+    assert report["irrep_matching_input_ready"] is False
+    assert report["irrep_matching_input_status"] == "blocked"
+    assert "scoped_representation_evidence" in report[
+        "irrep_matching_input_reason"
+    ]
 
     # All sub-reports present
     for key in [
@@ -105,8 +108,8 @@ def test_compact_summary_serializable():
     assert summary["feature_status"] == "formal"
     assert summary["workflow_integration_status"] == "integrated"
     assert summary["trusted_irrep_label"] is False
-    assert summary["irrep_matching_input_ready"] is True
-    assert summary["irrep_matching_input_status"] == "ready"
+    assert summary["irrep_matching_input_ready"] is False
+    assert summary["irrep_matching_input_status"] == "blocked"
     assert "valley_sewing_matrices_summary" not in json.dumps(
         summary["valley_preserving_representations"]
     )
@@ -130,7 +133,6 @@ def test_subspace_group_uses_operation_order_not_matrix_rank():
         rank=1,
         operation_orders={0: 1, 7: 2},
         spinor_wavefunction=False,
-        spinor_convention_verified=True,
     )
 
     assert report["subspace_group"]["effective_point_group"] is None
@@ -151,7 +153,6 @@ def test_ebr_mapping_uses_configurable_seed_overlap_threshold():
         rank=1,
         operation_orders={0: 1},
         spinor_wavefunction=False,
-        spinor_convention_verified=True,
         seed_overlap_fail_tol=0.1,
         seed_overlap_warn_tol=0.1,
         ebr_seed_overlap_min=0.9,
@@ -211,7 +212,7 @@ def test_projector_warning_propagates_without_marking_diagnostic_only():
     assert "projector_warning" in report["reason"]
 
 
-def test_spinor_unverified_blocks_irrep_matching_input():
+def test_numerically_ready_report_awaits_scoped_representation_evidence():
     seeds, reps, mappings, orbit = _c3_mstar_setup()
 
     report = build_symmetry_adapted_valley_report(
@@ -222,14 +223,15 @@ def test_spinor_unverified_blocks_irrep_matching_input():
         reference_valley="M1",
         rank=1,
         spinor_wavefunction=True,
-        spinor_convention_verified=False,
     )
 
     assert report["local_irrep_ready"] is True
     assert report["diagnostic_only"] is False
     assert report["irrep_matching_input_ready"] is False
     assert report["irrep_matching_input_status"] == "blocked"
-    assert "spinor convention unverified" in report["irrep_matching_input_reason"]
+    assert "scoped_representation_evidence" in report[
+        "irrep_matching_input_reason"
+    ]
 
 
 def test_ambiguous_representatives_expose_candidate_wise_summary():
@@ -525,8 +527,7 @@ def test_disabled_no_symmetry_adapted_valley_output(tmp_path):
         ],
         "projection": {"qcut_mode":"absolute","qcut_Ainv":0.3,"overlap_policy":"warn_exclude",
                         "thresholds":{"W_val_min":0.5}},
-        "symmetry": {"operations":{"structure_file":str(struct)},"tolerance":{"symprec":1e-3},
-                      "filters":{"rotation_order":"auto"}},
+        "symmetry": {"operations":{"structure_file":str(struct)},"tolerance":{"symprec":1e-3}},
         "output": {"directory": str(out_dir), "profile": "debug"},
     }
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
@@ -570,8 +571,7 @@ def test_default_writes_symmetry_adapted_valley_analysis(tmp_path):
         ],
         "projection": {"qcut_mode":"absolute","qcut_Ainv":0.3,"overlap_policy":"warn_exclude",
                         "thresholds":{"W_val_min":0.5}},
-        "symmetry": {"operations":{"structure_file":str(struct)},"tolerance":{"symprec":1e-3},
-                      "filters":{"rotation_order":"auto"}},
+        "symmetry": {"operations":{"structure_file":str(struct)},"tolerance":{"symprec":1e-3}},
         "output": {"directory": str(out_dir), "profile": "debug"},
     }
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
@@ -692,7 +692,6 @@ def test_valley_preserving_subspace_reports_keep_three_mstar_p2_subspaces():
         unitarity_tol=1e-8,
         modulus_tol=1e-8,
         spinor_wavefunction=False,
-        spinor_convention_verified=True,
         operation_orders_by_id={0: 1, 3: 2, 4: 2, 5: 2},
     )
 
@@ -742,7 +741,6 @@ def test_subspace_space_group_uses_full_valley_mapping_beyond_current_hsp():
         unitarity_tol=1e-8,
         modulus_tol=1e-8,
         spinor_wavefunction=False,
-        spinor_convention_verified=True,
         operation_orders_by_id={0: 1, 5: 2},
         space_group_valley_mappings={
             0: {"M1": "M1", "M2": "M2", "M3": "M3"},
@@ -789,7 +787,6 @@ def test_valley_preserving_subspace_reports_use_modulus_tolerance():
         unitarity_tol=1e-3,
         modulus_tol=1e-3,
         spinor_wavefunction=False,
-        spinor_convention_verified=True,
     )
 
     assert reports[0]["local_irrep_ready"] is True

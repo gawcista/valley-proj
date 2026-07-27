@@ -1,7 +1,19 @@
 import json
 
-from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
-from tests.reduced_ebr_promo_helpers import real_primitive_certificate_dict
+from valleyscope.analysis.ebr_problem_instances import (
+    build_ebr_problem_instances as _build_ebr_problem_instances,
+)
+from tests.reduced_ebr_promo_helpers import (
+    attach_cprime_fixture_to_candidates,
+    real_primitive_certificate_dict,
+)
+
+
+def build_ebr_problem_instances(**kwargs):
+    candidates = kwargs.get("ebr_input_candidates")
+    if isinstance(candidates, dict):
+        attach_cprime_fixture_to_candidates(candidates)
+    return _build_ebr_problem_instances(**kwargs)
 
 
 def _make_c3_preserving_candidates():

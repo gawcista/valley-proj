@@ -7,15 +7,19 @@ import json
 import numpy as np
 import pytest
 
-from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
-from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
+from valleyscope.analysis.ebr_export_bundle import (
+    build_ebr_export_bundle as _build_ebr_export_bundle,
+)
+from valleyscope.analysis.ebr_problem_instances import (
+    build_ebr_problem_instances as _build_ebr_problem_instances,
+)
 from valleyscope.analysis.irreptables_runtime_table_builder import (
     build_auto_time_reversal_reduced_ebr_table,
 )
 from valleyscope.analysis.reduced_ebr_mapping import (
     _joint_bundle_time_reversal_evidence_valid,
-    build_reduced_ebr_mapping,
-    promote_bundle_for_solve,
+    build_reduced_ebr_mapping as _build_reduced_ebr_mapping,
+    promote_bundle_for_solve as _promote_bundle_for_solve,
     validate_joint_grey_bundle_provenance,
 )
 from valleyscope.analysis.unitary_provenance import (
@@ -33,6 +37,7 @@ from valleyscope.analysis.time_reversal_sewing import (
     build_time_reversal_sewing_report,
 )
 from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector
+from valleyscope.io.wavefunction_convention import canonical_identity
 from valleyscope.irreps.tables import (
     StandardIrrep,
     StandardIrrepTable,
@@ -49,8 +54,118 @@ from valleyscope.irreps.time_reversal_source import (
 )
 from tests.reduced_ebr_promo_helpers import (
     attach_real_certificate,
+    attach_cprime_fixture_to_candidates,
+    attach_cprime_fixture_contract,
+    cprime_summary_for_export,
+    cprime_validation_context_for_export,
     real_primitive_certificate_identity,
 )
+
+
+def build_ebr_problem_instances(**kwargs):
+    candidates = kwargs.get("ebr_input_candidates")
+    if isinstance(candidates, dict):
+        attach_cprime_fixture_to_candidates(candidates)
+    orbit_report = kwargs.get("time_reversal_orbit_report")
+    if isinstance(orbit_report, dict):
+        for orbit in orbit_report.get("valley_orbits", []):
+            if not isinstance(orbit, dict):
+                continue
+            full_hsps = {
+                str(value)
+                for value in orbit.get(
+                    "full_unitary_source_hsp_labels", []
+                )
+                if isinstance(value, str) and value
+            }
+            joint_hsps = {
+                str(value)
+                for value in orbit.get("expected_hsps", [])
+                if isinstance(value, str) and value
+            }
+
+            def identities(hsps):
+                return {
+                    hsp: {
+                        "spinor_source_basis_certificate_identity": (
+                            canonical_identity({
+                                "fixture": "tr_source_basis",
+                            })
+                        ),
+                        "double_space_group_lift_certificate_identity": (
+                            canonical_identity({
+                                "fixture": "tr_lift", "hsp": hsp,
+                            })
+                        ),
+                        "scoped_representation_evidence_identity": (
+                            canonical_identity({
+                                "fixture": "tr_completed_scope",
+                                "hsp": hsp,
+                            })
+                        ),
+                    }
+                    for hsp in hsps
+                }
+
+            orbit["tr_completed_cprime_identity_by_hsp"] = identities(
+                full_hsps
+            )
+            orbit["joint_cprime_identity_by_hsp"] = identities(
+                joint_hsps
+            )
+    return _build_ebr_problem_instances(**kwargs)
+
+
+def build_ebr_export_bundle(**kwargs):
+    export = _build_ebr_export_bundle(**kwargs)
+    attach_cprime_fixture_contract(export)
+    return export
+
+
+def _fixture_cprime_context(export):
+    context = cprime_validation_context_for_export(export)
+    return dict(context["_by_identity"])
+
+
+def build_reduced_ebr_mapping(**kwargs):
+    export = kwargs.get("ebr_export_bundle")
+    if isinstance(export, dict):
+        kwargs.setdefault(
+            "cprime_validation_context",
+            _fixture_cprime_context(export),
+        )
+    return _build_reduced_ebr_mapping(**kwargs)
+
+
+def promote_bundle_for_solve(*, bundle, table):
+    return _promote_bundle_for_solve(
+        bundle=bundle,
+        table=table,
+        cprime_validation_context=_fixture_cprime_context(
+            {"bundles": [bundle]}
+        ),
+    )
+    return export
+
+
+def test_tr_completed_problem_requires_scoped_cprime_identity_inventory():
+    candidates = _orbit_candidates()
+    attach_cprime_fixture_to_candidates(candidates)
+    problems = _build_ebr_problem_instances(
+        ebr_input_candidates=candidates,
+        time_reversal_orbit_report=_exchanged_orbit_report(),
+    )
+
+    assert problems["ready_instance_count"] == 0
+    assert all(
+        any(
+            str(blocker).startswith(
+                "tr_completed_scoped_representation_evidence_missing"
+            )
+            for blocker in instance["blocked_by"]
+        )
+        for instance in problems["instances"]
+    )
 
 
 def _operation(index: int, rotation: list[list[int]]) -> StandardTableOperation:
@@ -526,7 +641,9 @@ def test_joint_grey_mapping_is_authoritative_for_ingestion():
         reduced_ebr_input={"source": "auto_time_reversal_grey"},
     )
     record = build_database_ingestion_record(
-        valley_summary={"target_kpoints": ["GM"], "iband": [1], "input": {}},
+        valley_summary=cprime_summary_for_export(
+            export, target_kpoints=["GM"], iband=[1]
+        ),
         valley_ebr_export_bundle=export,
         valley_reduced_ebr_mapping=mapping,
     )
@@ -596,7 +713,9 @@ def test_ingestion_revalidates_coordinated_joint_grey_mutation(mutation):
     )
 
     record = build_database_ingestion_record(
-        valley_summary={"target_kpoints": ["GM"], "iband": [1], "input": {}},
+        valley_summary=cprime_summary_for_export(
+            export, target_kpoints=["GM"], iband=[1]
+        ),
         valley_ebr_export_bundle=export,
         valley_reduced_ebr_mapping=mapping,
     )
@@ -725,7 +844,6 @@ def test_self_mapped_joint_problem_requires_serialized_sewing_evidence():
         projector_selection_blockers=[],
         time_reversal_valley_mapping={"v": "v"},
         spinor=True,
-        spinor_convention_verified=True,
     )
     self_mapped["time_reversal"]["antiunitary_sewing_evidence"] = sewing
     self_mapped["time_reversal"][
@@ -745,6 +863,7 @@ def test_self_mapped_joint_problem_requires_serialized_sewing_evidence():
         "source_hsp_representative_k_frac": [0.0, 0.0, 0.0],
         "standard_operation_index": None,
     }}}
+    attach_cprime_fixture_contract({"bundles": [self_mapped]})
 
     assert promote_bundle_for_solve(bundle=self_mapped, table=table)["promoted"]
 
@@ -862,7 +981,6 @@ def test_self_mapped_joint_problem_requires_serialized_sewing_evidence():
         projector_selection_blockers=[],
         time_reversal_valley_mapping={"v": "v"},
         spinor=True,
-        spinor_convention_verified=True,
     )
     adapted_exact = deepcopy(self_mapped)
     adapted_exact["time_reversal"][
@@ -1029,7 +1147,6 @@ def _scalar_self_mapped_sewing_report():
         projector_selection_blockers=[],
         time_reversal_valley_mapping={"v": "v"},
         spinor=False,
-        spinor_convention_verified=True,
     )
 
 
@@ -1086,7 +1203,6 @@ def test_self_mapped_valley_rejects_malformed_or_blocked_sewing_evidence():
         projector_selection_blockers=[],
         time_reversal_valley_mapping={"v": "v"},
         spinor=True,
-        spinor_convention_verified=True,
     )
 
     report = build_time_reversal_valley_orbit_report(
@@ -1174,7 +1290,6 @@ def _self_mapped_nontrim_sewing_report():
         projector_selection_blockers=[],
         time_reversal_valley_mapping={"v": "v"},
         spinor=False,
-        spinor_convention_verified=True,
     )
 
 

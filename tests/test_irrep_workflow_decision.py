@@ -17,40 +17,39 @@ from valleyscope.analysis.irrep_workflow_decision import (
 # 1. Direct q-cut path
 # -----------------------------------------------------------------------
 
-def test_direct_qcut_trusted():
+def test_direct_qcut_waits_for_cprime_evidence():
     d = decide_irrep_workflow(
         seed_symmetry_status="passed",
         seed_symmetry_failed_count=0,
         closure_quality="ok",
         qcut_eigenvalue_ready_count=3,
         qcut_eigenvalue_total_count=3,
-        spinor_convention_verified=True,
     )
     assert d["workflow_path"] == PATH_DIRECT_QCUT
-    assert d["readiness_level"] == READINESS_TRUSTED
+    assert d["readiness_level"] == READINESS_USABLE_WITH_CAUTION
+    assert "scoped_representation_evidence" in d["reason"]
     assert d["uses_symmetry_adapted_projector"] is False
     assert d["direct_qcut_allowed"] is True
 
 
-def test_direct_qcut_usable_with_caution_spinor():
+def test_direct_qcut_is_cautious_before_cprime_promotion():
     d = decide_irrep_workflow(
         seed_symmetry_status="passed",
         seed_symmetry_failed_count=0,
         closure_quality="ok",
         qcut_eigenvalue_ready_count=2,
         qcut_eigenvalue_total_count=2,
-        spinor_convention_verified=False,
     )
     assert d["workflow_path"] == PATH_DIRECT_QCUT
     assert d["readiness_level"] == READINESS_USABLE_WITH_CAUTION
-    assert "spinor" in d["reason"].lower()
+    assert "scoped_representation_evidence" in d["reason"]
 
 
 # -----------------------------------------------------------------------
 # 2. Symmetry-adapted path
 # -----------------------------------------------------------------------
 
-def test_symmetry_adapted_trusted():
+def test_symmetry_adapted_waits_for_cprime_evidence():
     d = decide_irrep_workflow(
         seed_symmetry_status="failed",
         seed_symmetry_failed_count=1,
@@ -60,14 +59,13 @@ def test_symmetry_adapted_trusted():
         sym_adapted_proj_status="ok",
         sym_adapted_local_irrep_ready=True,
         sym_adapted_diagnostic_only=False,
-        spinor_convention_verified=True,
     )
     assert d["workflow_path"] == PATH_SYMMETRY_ADAPTED
-    assert d["readiness_level"] == READINESS_TRUSTED
+    assert d["readiness_level"] == READINESS_USABLE_WITH_CAUTION
     assert d["uses_symmetry_adapted_projector"] is True
 
 
-def test_symmetry_adapted_usable_spinor():
+def test_symmetry_adapted_numerical_path_is_cautious():
     d = decide_irrep_workflow(
         seed_symmetry_status="failed",
         seed_symmetry_failed_count=1,
@@ -77,7 +75,6 @@ def test_symmetry_adapted_usable_spinor():
         sym_adapted_proj_status="ok",
         sym_adapted_local_irrep_ready=True,
         sym_adapted_diagnostic_only=False,
-        spinor_convention_verified=False,
     )
     assert d["workflow_path"] == PATH_SYMMETRY_ADAPTED
     assert d["readiness_level"] == READINESS_USABLE_WITH_CAUTION
@@ -146,19 +143,18 @@ def test_blocked_all_closed():
 @pytest.mark.parametrize("kwargs,expected_readiness", [
     (dict(seed_symmetry_status="passed", seed_symmetry_failed_count=0,
           closure_quality="ok", qcut_eigenvalue_ready_count=1,
-          qcut_eigenvalue_total_count=1, spinor_convention_verified=True),
-     READINESS_TRUSTED),
+          qcut_eigenvalue_total_count=1),
+     READINESS_USABLE_WITH_CAUTION),
     (dict(seed_symmetry_status="passed", seed_symmetry_failed_count=0,
           closure_quality="ok", qcut_eigenvalue_ready_count=1,
-          qcut_eigenvalue_total_count=1, spinor_convention_verified=False),
+          qcut_eigenvalue_total_count=1),
      READINESS_USABLE_WITH_CAUTION),
     (dict(seed_symmetry_status="failed", seed_symmetry_failed_count=1,
           closure_quality="usable_with_caution",
           qcut_eigenvalue_ready_count=0, qcut_eigenvalue_total_count=1,
           sym_adapted_proj_status="ok", sym_adapted_local_irrep_ready=True,
-          sym_adapted_diagnostic_only=False,
-          spinor_convention_verified=True),
-     READINESS_TRUSTED),
+          sym_adapted_diagnostic_only=False),
+     READINESS_USABLE_WITH_CAUTION),
     (dict(seed_symmetry_status="failed", seed_symmetry_failed_count=1,
           closure_quality="blocked",
           qcut_eigenvalue_ready_count=0, qcut_eigenvalue_total_count=1),
@@ -187,12 +183,11 @@ def test_usable_with_caution_never_trusted():
         sym_adapted_proj_status="warn",
         sym_adapted_local_irrep_ready=False,
         sym_adapted_diagnostic_only=True,
-        spinor_convention_verified=False,
     )
     assert d["readiness_level"] != READINESS_TRUSTED
 
 
-def test_seed_warning_with_verified_spinor_stays_cautious():
+def test_seed_warning_stays_cautious():
     d = decide_irrep_workflow(
         seed_symmetry_status="warn",
         seed_symmetry_max_epsilon=0.05,
@@ -201,7 +196,6 @@ def test_seed_warning_with_verified_spinor_stays_cautious():
         closure_quality="clean",
         qcut_eigenvalue_ready_count=2,
         qcut_eigenvalue_total_count=2,
-        spinor_convention_verified=True,
     )
     assert d["workflow_path"] == PATH_DIRECT_QCUT
     assert d["readiness_level"] == READINESS_USABLE_WITH_CAUTION
@@ -215,7 +209,6 @@ def test_partial_qcut_readiness_does_not_take_direct_path():
         closure_quality="clean",
         qcut_eigenvalue_ready_count=1,
         qcut_eigenvalue_total_count=2,
-        spinor_convention_verified=True,
     )
     assert d["workflow_path"] == PATH_BLOCKED
     assert d["readiness_level"] == READINESS_BLOCKED
@@ -284,15 +277,15 @@ def test_build_decisions_direct_qcut_toy():
         },
         symmetry_rows=[
             {"kpoint": "Gamma", "target_valley": "K",
-             "operation_id": 1, "topology_input_ready": True},
+             "operation_id": 1, "numerical_input_ready": True},
         ],
         valley_names=["K"],
-        spinor_convention_verified=True,
     )
     assert "Gamma" in result["by_kpoint"]
     d = result["by_kpoint"]["Gamma"]["K"]
     assert d["workflow_path"] == PATH_DIRECT_QCUT
-    assert d["readiness_level"] == READINESS_TRUSTED
+    assert d["readiness_level"] == READINESS_USABLE_WITH_CAUTION
+    assert "scoped_representation_evidence" in d["reason"]
 
 
 def test_build_decisions_blocked_toy():
@@ -447,12 +440,11 @@ def test_identity_only_seed_path_stays_direct_qcut_without_nonidentity_phase():
         },
         symmetry_rows=[],
         valley_names=["K"],
-        spinor_convention_verified=True,
     )
 
     decision = result["by_kpoint"]["MM"]["K"]
     assert decision["workflow_path"] == PATH_DIRECT_QCUT
-    assert decision["readiness_level"] == READINESS_TRUSTED
+    assert decision["readiness_level"] == READINESS_USABLE_WITH_CAUTION
     assert decision["uses_symmetry_adapted_projector"] is False
     assert decision["direct_qcut_allowed"] is True
     assert decision["identity_only_valley_preserving_subgroup"] is True
@@ -470,7 +462,6 @@ def test_schema_json_serializable():
         closure_quality="ok",
         qcut_eigenvalue_ready_count=2,
         qcut_eigenvalue_total_count=2,
-        spinor_convention_verified=True,
     )
     encoded = json.dumps(d)
     assert len(encoded) > 0

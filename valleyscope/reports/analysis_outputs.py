@@ -100,21 +100,31 @@ def write_analysis_outputs(
     valley_projected_representation: dict[str, object] | None = None,
     folded_center_payload: dict[str, object] | None = None,
     sampled_k_coverage: dict[str, object] | None = None,
+    spinor_source_basis_certificate: dict[str, object] | None = None,
+    double_space_group_lift_certificates: dict[str, object] | None = None,
+    scoped_representation_evidence: dict[str, object] | None = None,
 ) -> dict[str, object]:
     output_dir = config.output.directory
     prepare_analysis_output_directory(config)
     outputs: dict[str, object] = {}
     is_debug = config.output.profile == "debug"
 
-    # --- Public / always-write outputs ---
-    # EBR export bundle is a public downstream entry (when payload exists).
-    if ebr_export_bundle is not None:
+    # --- Public outputs ---
+    # Optional downstream files exist only when they contain actionable
+    # payloads. The compact blocked/not-evaluated status remains in summary.
+    if (
+        isinstance(ebr_export_bundle, dict)
+        and int(ebr_export_bundle.get("bundle_count", 0)) > 0
+    ):
         outputs["valley_ebr_export_bundle_json"] = write_json(
             output_dir / "valley_ebr_export_bundle.json",
             ebr_export_bundle,
         )
-    # Reduced EBR mapping is public when enabled and payload exists.
-    if reduced_ebr_mapping is not None:
+    if (
+        config.reduced_ebr.enabled
+        and isinstance(reduced_ebr_mapping, dict)
+        and reduced_ebr_mapping.get("status") != "not_evaluated"
+    ):
         outputs["valley_reduced_ebr_mapping_json"] = write_json(
             output_dir / "valley_reduced_ebr_mapping.json",
             reduced_ebr_mapping,
@@ -156,6 +166,11 @@ def write_analysis_outputs(
             valley_projected_representation=valley_projected_representation,
             folded_center_payload=folded_center_payload,
             sampled_k_coverage=sampled_k_coverage,
+            spinor_source_basis_certificate=spinor_source_basis_certificate,
+            double_space_group_lift_certificates=(
+                double_space_group_lift_certificates
+            ),
+            scoped_representation_evidence=scoped_representation_evidence,
         )
     # --- Summary outputs (always written) ---
     _write_summary_outputs(
@@ -181,6 +196,11 @@ def write_analysis_outputs(
         valley_projected_representation=valley_projected_representation,
         folded_center_payload=folded_center_payload,
         sampled_k_coverage=sampled_k_coverage,
+        spinor_source_basis_certificate=spinor_source_basis_certificate,
+        double_space_group_lift_certificates=(
+            double_space_group_lift_certificates
+        ),
+        scoped_representation_evidence=scoped_representation_evidence,
     )
     return outputs
 
@@ -213,6 +233,9 @@ def _write_detailed_outputs(
     valley_projected_representation: dict[str, object] | None = None,
     folded_center_payload: dict[str, object] | None = None,
     sampled_k_coverage: dict[str, object] | None = None,
+    spinor_source_basis_certificate: dict[str, object] | None = None,
+    double_space_group_lift_certificates: dict[str, object] | None = None,
+    scoped_representation_evidence: dict[str, object] | None = None,
 ) -> None:
     if config.output.write_csv:
         if symmetry_payload.get("symmetry_eigenvalue_enabled", False):
@@ -292,6 +315,17 @@ def _write_detailed_outputs(
         symmetry_payload,
         projector_mode=config.projection.projector_mode,
         center_weight_rows=weight_rows if config.projection.projector_mode == "k_resolved_parent_valley" else None,
+        cprime_records={
+            "spinor_source_basis_certificate": (
+                spinor_source_basis_certificate or {}
+            ),
+            "double_space_group_lift_certificates": (
+                double_space_group_lift_certificates or {}
+            ),
+            "scoped_representation_evidence": (
+                scoped_representation_evidence or {}
+            ),
+        },
     )
     if config.output.write_hdf5_basis_transform:
         outputs["valley_basis_transform_h5"] = write_basis_transform_h5(
@@ -324,6 +358,9 @@ def _write_summary_outputs(
     valley_projected_representation: dict[str, object] | None = None,
     folded_center_payload: dict[str, object] | None = None,
     sampled_k_coverage: dict[str, object] | None = None,
+    spinor_source_basis_certificate: dict[str, object] | None = None,
+    double_space_group_lift_certificates: dict[str, object] | None = None,
+    scoped_representation_evidence: dict[str, object] | None = None,
 ) -> None:
     # valley_summary.txt/json are the main user entry.  In standard profile
     # they are always written.  In debug profile the write_summary_* flags
@@ -362,6 +399,11 @@ def _write_summary_outputs(
         valley_projected_representation=valley_projected_representation,
         folded_center_payload=folded_center_payload,
         sampled_k_coverage=sampled_k_coverage,
+        spinor_source_basis_certificate=spinor_source_basis_certificate,
+        double_space_group_lift_certificates=(
+            double_space_group_lift_certificates
+        ),
+        scoped_representation_evidence=scoped_representation_evidence,
     )
     summary_text = render_summary_text(summary_payload)
     if "valley_summary_txt" in summary_path_plan:

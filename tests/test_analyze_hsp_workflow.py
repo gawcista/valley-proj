@@ -23,6 +23,10 @@ from tests.helpers_io_workflow import (
     write_simple_poscar,
     write_square_poscar,
 )
+from tests.reduced_ebr_promo_helpers import (
+    attach_cprime_fixture_to_candidates,
+    cprime_summary_for_export,
+)
 
 
 def test_analyze_hsp_writes_csv_json_and_diagnostics_h5(tmp_path):
@@ -504,32 +508,6 @@ def test_single_band_and_not_degenerate_no_subspace_valley_status_mislabel(tmp_p
         assert "basis_status" not in summary_text
 
 
-def test_rotation_order_none_yields_not_requested_symmetry_status(tmp_path):
-    """P1-3: rotation_order: none should give symmetry_status = not_requested."""
-    h5_path = tmp_path / "wf.h5"
-    write_fixture(h5_path)
-    config_path = tmp_path / "config.yaml"
-    out_dir = tmp_path / "out"
-    structure = tmp_path / "CONTCAR"
-    write_square_poscar(structure)
-    write_config(config_path, h5_path, out_dir)
-    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    raw["symmetry"]["filters"]["rotation_order"] = "none"
-    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
-
-    outputs = analyze_hsp(config_path)
-
-    subspace = json.loads(outputs["valley_subspace_json"].read_text(encoding="utf-8"))
-    kp_data = subspace["kpoints"]["GammaM"]
-    assert kp_data.get("symmetry_status") == "not_requested"
-
-    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
-    assert summary["symmetry_analysis"]["symmetry_eigenvalue_enabled"] is False
-    assert summary["symmetry_eigenvalues"] == []
-    assert "symmetry_eigenvalues_csv" not in outputs
-    assert not (out_dir / "symmetry_eigenvalues.csv").exists()
-
-
 def test_subspace_projector_unreliable_when_band_overlap_exceeds_threshold(tmp_path):
     """P2-4: adapted subspace with band W_overlap > threshold -> projector_unreliable."""
     h5_path = tmp_path / "wf.h5"
@@ -871,7 +849,6 @@ def test_generic_irrep_source_blocked_negative_toy_fixture(tmp_path):
         "symmetry": {
             "operations": {"mode": "auto", "structure_file": str(structure), "backend": "spglib"},
             "tolerance": {"symprec": 1.0e-5, "angle_tolerance": -1.0},
-            "filters": {"rotation_order": 2},
         },
         "output": {"directory": str(out_dir), "profile": "standard"},
     }
@@ -882,7 +859,8 @@ def test_generic_irrep_source_blocked_negative_toy_fixture(tmp_path):
 
     # Standard: public files exist, no debug leaks.
     assert outputs["valley_summary_json"].exists()
-    assert outputs["valley_ebr_export_bundle_json"].exists()
+    assert "valley_ebr_export_bundle_json" not in outputs
+    assert not (out_dir / "valley_ebr_export_bundle.json").exists()
     written = {p.name for p in out_dir.iterdir() if p.is_file()}
     debug_only = {"valley_subspace.json", "diagnostics.h5", "symmetry_report.json",
                   "hsp_star_conjugation.json", "hsp_star_derived_characters.json"}
@@ -1126,7 +1104,6 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
                     "backend": "spglib",
                 },
                 "tolerance": {"symprec": 1.0e-5, "angle_tolerance": -1.0},
-                "filters": {"rotation_order": 2},
             },
             "output": {"directory": str(out_dir), "profile": "standard"},
         }
@@ -1139,8 +1116,8 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     outputs = analyze_hsp(config_path)
 
     assert outputs["valley_summary_json"].exists()
-    assert outputs["valley_reduced_ebr_mapping_json"].exists()
-    assert captured_decision_kwargs["spinor_wavefunction"] is False
+    assert "valley_reduced_ebr_mapping_json" not in outputs
+    assert not (out_dir / "valley_reduced_ebr_mapping.json").exists()
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     # Standard summary uses compact valley_resolved_irreps, not raw matching.
     resolved = summary["valley_resolved_irreps"]
@@ -1469,7 +1446,6 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
             "operations": {"mode": "auto", "structure_file": str(structure),
                            "backend": "spglib"},
             "tolerance": {"symprec": 1.0e-5, "angle_tolerance": -1.0},
-            "filters": {"rotation_order": 2},
         },
         "output": {"directory": str(out_table), "profile": "standard"},
     }), encoding="utf-8")
@@ -1509,7 +1485,6 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
             "operations": {"mode": "auto", "structure_file": str(structure),
                            "backend": "spglib"},
             "tolerance": {"symprec": 1.0e-5, "angle_tolerance": -1.0},
-            "filters": {"rotation_order": 2},
         },
         "output": {"directory": str(out_spec), "profile": "standard"},
     }), encoding="utf-8")
@@ -1522,8 +1497,8 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
     # --- Equivalence assertions ---
     # Both paths use auto-canonical first; external-table fallback may differ
     # if one path's table lacks provenance.
-    assert mapping_spec["status"] == "blocked"
-    assert mapping_table["status"] == "blocked"
+    assert mapping_spec["status"] == "not_evaluated"
+    assert mapping_table["status"] == "not_evaluated"
     # Solutions and excluded must agree when statuses agree.
     if mapping_spec["status"] == mapping_table["status"]:
         assert mapping_spec["solutions"] == mapping_table["solutions"]
@@ -1549,26 +1524,22 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
     del mapping_spec_stripped["reduced_ebr_input"]
     # Both stripped dicts must be valid states.
     for ms in (mapping_spec_stripped, mapping_table_stripped):
-        assert ms["status"] == "blocked"
+        assert ms["status"] == "not_evaluated"
 
     # Ingestion records also equivalent modulo reduced_ebr_input.
     rec_table = load_database_ingestion_record_from_directory(str(out_table))
     rec_spec = load_database_ingestion_record_from_directory(str(out_spec))
     # Both records have valid status; auto-canonical may differ from external.
-    assert rec_table["record_status"] == (
-        "has_reduced_table_validation_candidates"
-    )
-    assert rec_spec["record_status"] == (
-        "has_reduced_table_validation_candidates"
-    )
+    assert rec_table["record_status"] == "no_reduced_ebr_input"
+    assert rec_spec["record_status"] == "no_reduced_ebr_input"
     assert rec_table["reduced_ebr_input"]["source"] == "table_file"
     assert rec_spec["reduced_ebr_input"]["source"] == "spec_file"
 
     # Summary embeddings agree on status and key fields.
     summary_emb_table = dict(summary_table["valley_reduced_ebr_mapping"])
     summary_emb_spec = dict(summary_spec["valley_reduced_ebr_mapping"])
-    assert summary_emb_spec["status"] == "blocked"
-    assert summary_emb_table["status"] == "blocked"
+    assert summary_emb_spec["status"] == "not_evaluated"
+    assert summary_emb_table["status"] == "not_evaluated"
 
 
 # -----------------------------------------------------------------------
@@ -1657,7 +1628,7 @@ def test_strict_auto_p4_subgroup_match(tmp_path, monkeypatch):
         "valley_subspaces": [{"name": "K_valley", "centers": ["K"]}],
         "projection": {"qcut_mode": "absolute", "qcut_Ainv": 0.25, "overlap_policy": "warn_exclude"},
         "symmetry": {"operations": {"mode": "auto", "structure_file": str(structure), "backend": "spglib"},
-                     "tolerance": {"symprec": 1e-5, "angle_tolerance": -1.0}, "filters": {"rotation_order": 2}},
+                     "tolerance": {"symprec": 1e-5, "angle_tolerance": -1.0}},
         "output": {"directory": str(out_dir), "profile": "standard"},
     }), encoding="utf-8")
 
@@ -1926,6 +1897,26 @@ def test_missing_characters_block_match():
     assert "incomplete" in result["reason"]
 
 
+def test_group_wide_lift_map_uses_opaque_source_table_indices():
+    from valleyscope.irreps.tables import load_standard_irrep_table
+    from valleyscope.workflows.analyze_hsp import (
+        _group_wide_standard_operation_map,
+    )
+    from tests.reduced_ebr_promo_helpers import (
+        real_primitive_certificate_dict,
+    )
+
+    certificate = real_primitive_certificate_dict(
+        3, "P2", spinor=True
+    )
+    table = load_standard_irrep_table(3, spinor=True)
+
+    assert certificate["affine_operation_map"] == {"0": 0, "1": 1}
+    assert _group_wide_standard_operation_map(
+        certificate, table
+    ) == {0: 1, 1: 2}
+
+
 def test_unmock_generic_source_adapter_positive_full_pipeline():
     """Unmock: real load_standard_irrep_table + build_source_payload
     feed through matcher -> EBR -> reduced mapping -> database ingestion."""
@@ -2048,6 +2039,7 @@ def test_unmock_generic_source_adapter_positive_full_pipeline():
         irrep_workflow_decisions=workflow,
         valley_irrep_matching=matching,
     )
+    attach_cprime_fixture_to_candidates(candidates)
     assert candidates["candidate_count"] == 2
     assert sorted(c["matched_irrep"] for c in candidates["candidates"]) == [
         "-K5",
@@ -2107,7 +2099,11 @@ def test_unmock_generic_source_adapter_positive_full_pipeline():
     assert "certificate_unresolved" in excl_codes
 
     # 6. Database ingestion.
-    summary_in = {"target_kpoints": ["GammaM"], "iband": [101], "input": {}}
+    summary_in = cprime_summary_for_export(
+        ebr_bundle,
+        target_kpoints=["GammaM"],
+        iband=[101],
+    )
     record = build_database_ingestion_record(
         valley_summary=summary_in,
         valley_ebr_export_bundle=ebr_bundle,
@@ -2171,7 +2167,6 @@ def test_spinful_p3_analyze_hsp_unmocked_feasibility(tmp_path):
         "symmetry": {
             "operations": {"mode": "auto", "structure_file": str(structure), "backend": "spglib"},
             "tolerance": {"symprec": 1.0e-3, "angle_tolerance": -1.0},
-            "filters": {"rotation_order": 3},
         },
         "output": {"directory": str(out_dir), "profile": "standard"},
     }
@@ -2196,14 +2191,14 @@ def test_spinful_p3_analyze_hsp_unmocked_feasibility(tmp_path):
         "generic matches - fully unmocked E2E may now be feasible"
     )
 
-    # The one-atom hexagonal toy structure is higher symmetry than SG143/P3,
-    # and the spinor convention is intentionally unverified.
+    # The one-atom hexagonal toy structure is higher symmetry than SG143/P3.
     symmetry = summary["symmetry_analysis"]
     assert symmetry["spacegroup_number"] == 191
-    assert summary["input"]["spinor_convention_verified"] is False
+    assert summary["input"]["spinor_input_profile"] == (
+        "vasp_nonmagnetic_soc_default_saxis_v1"
+    )
 
-    # All eigenphase rows are diagnostic-only because the spinor convention is
-    # intentionally unverified.
+    # No row is trusted without passed exact-scope C-prime evidence.
     for row in summary.get("symmetry_eigenvalues", []):
         assert row.get("diagnostic_only") is True, (
             "BLOCKER CLEARED: toy fixture has trusted eigenphase rows"
@@ -2214,7 +2209,8 @@ def test_spinful_p3_analyze_hsp_unmocked_feasibility(tmp_path):
 
     # Standard outputs exist.
     assert outputs["valley_summary_json"].exists()
-    assert outputs["valley_ebr_export_bundle_json"].exists()
+    assert "valley_ebr_export_bundle_json" not in outputs
+    assert not (out_dir / "valley_ebr_export_bundle.json").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -2375,7 +2371,6 @@ def test_refine_ebr_mapping_does_not_invent_missing_local_character_for_nonident
 
     ebr_mapping = {
         "blocked_by": [
-            "spinor_convention_unverified",
             "subspace_group_candidate_missing",
         ],
         "notes": "base note.",
@@ -2390,7 +2385,6 @@ def test_refine_ebr_mapping_does_not_invent_missing_local_character_for_nonident
     assert ebr_mapping["subspace_space_group_candidate"] == "C2"
     assert "subspace_group_candidate_missing" not in ebr_mapping["blocked_by"]
     assert "hsp_local_preserving_character_missing" not in ebr_mapping["blocked_by"]
-    assert "spinor_convention_unverified" in ebr_mapping["blocked_by"]
     assert "does not contain a non-identity" not in ebr_mapping["notes"]
 
 
@@ -2413,131 +2407,6 @@ def test_refine_ebr_mapping_marks_identity_only_gka_as_missing_local_character()
 
     assert ebr_mapping["blocked_by"] == ["hsp_local_preserving_character_missing"]
     assert "does not contain a non-identity" in ebr_mapping["notes"]
-
-
-# ---------------------------------------------------------------------------
-# Scalar / non-SOC generic irrep path validation
-# ---------------------------------------------------------------------------
-
-def test_scalar_wavefunction_no_spinor_blockers():
-    """Scalar (nspinor=1) wavefunction: no spinor_convention_unverified blockers."""
-    from valleyscope.analysis.irrep_workflow_decision import (
-        build_irrep_workflow_decisions,
-    )
-    result = build_irrep_workflow_decisions(
-        projector_symmetry_report={
-            "by_kpoint": {
-                "GammaM": {
-                    "seed_projector_symmetry": [{
-                        "operation_id": 1, "status": "passed",
-                        "source_valley": "M1_valley",
-                        "mapped_valley": "M1_valley",
-                        "epsilon_seed": 0.001,
-                    }],
-                },
-            },
-        },
-        target_subspace_closure_report={
-            "by_kpoint": {
-                "GammaM": [{
-                    "operation_id": 1,
-                    "kpoint": "GammaM",
-                    "little_group_passed": True,
-                    "closure_quality": "ok",
-                }],
-            },
-        },
-        symmetry_adapted_valley_report={
-            "by_kpoint": {
-                "GammaM": {
-                    "valley_preserving_subspaces": [{
-                        "orbit": ["M1_valley"],
-                        "local_irrep_ready": True,
-                        "diagnostic_only": False,
-                        "hsp_preserving_operation_ids": [0, 1],
-                        "symmetry_adapted_projectors": {
-                            "status": "ok",
-                            "seed_overlap": {"M1_valley": 0.9},
-                        },
-                    }],
-                },
-            },
-        },
-        symmetry_rows=[{
-            "kpoint": "GammaM", "target_valley": "M1_valley",
-            "operation_id": 1, "order": 4,
-            "topology_input_ready": True,
-            "diagnostic_only": False,
-        }],
-        valley_names=["M1_valley"],
-        spinor_convention_verified=False,
-        spinor_wavefunction=False,
-    )
-    d = result["by_kpoint"]["GammaM"]["M1_valley"]
-    # Scalar workflow: spinor_convention_unverified must NOT block.
-    assert "spinor convention" not in d.get("reason", "")
-    assert d["workflow_path"] == "direct_qcut"
-    assert d["readiness_level"] == "trusted"
-
-
-def test_spinful_unverified_spinor_convention_blocks_trusted_irrep():
-    """Spinor wavefunction with unverified convention must gate trusted readiness."""
-    from valleyscope.analysis.irrep_workflow_decision import (
-        build_irrep_workflow_decisions,
-    )
-    result = build_irrep_workflow_decisions(
-        projector_symmetry_report={
-            "by_kpoint": {
-                "GammaM": {
-                    "seed_projector_symmetry": [{
-                        "operation_id": 1, "status": "passed",
-                        "source_valley": "M1_valley",
-                        "mapped_valley": "M1_valley",
-                        "epsilon_seed": 0.001,
-                    }],
-                },
-            },
-        },
-        target_subspace_closure_report={
-            "by_kpoint": {
-                "GammaM": [{
-                    "operation_id": 1,
-                    "kpoint": "GammaM",
-                    "little_group_passed": True,
-                    "closure_quality": "ok",
-                }],
-            },
-        },
-        symmetry_adapted_valley_report={
-            "by_kpoint": {
-                "GammaM": {
-                    "valley_preserving_subspaces": [{
-                        "orbit": ["M1_valley"],
-                        "local_irrep_ready": True,
-                        "diagnostic_only": False,
-                        "hsp_preserving_operation_ids": [0, 1],
-                        "symmetry_adapted_projectors": {
-                            "status": "ok",
-                            "seed_overlap": {"M1_valley": 0.9},
-                        },
-                    }],
-                },
-            },
-        },
-        symmetry_rows=[{
-            "kpoint": "GammaM", "target_valley": "M1_valley",
-            "operation_id": 1, "order": 4,
-            "topology_input_ready": True,
-            "diagnostic_only": False,
-        }],
-        valley_names=["M1_valley"],
-        spinor_convention_verified=False,
-        spinor_wavefunction=True,
-    )
-    d = result["by_kpoint"]["GammaM"]["M1_valley"]
-    # Spinful + unverified: readiness must be gated.
-    assert "spinor convention" in d.get("reason", "")
-    assert d["readiness_level"] != "trusted"
 
 
 def test_local_symmetry_adapted_projector_is_preserved_for_runtime_sewing(
@@ -2576,7 +2445,6 @@ def test_local_symmetry_adapted_projector_is_preserved_for_runtime_sewing(
         unitarity_tol=1e-3,
         modulus_tol=1e-3,
         spinor_wavefunction=False,
-        spinor_convention_verified=True,
         operation_orders_by_id={0: 1},
         runtime_projectors=runtime_projectors,
     )

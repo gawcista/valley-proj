@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import h5py
 import numpy as np
@@ -16,6 +17,7 @@ def write_diagnostics_h5(
     symmetry_payload: dict[str, object] | None = None,
     projector_mode: str = "fixed_center",
     center_weight_rows: list[dict[str, object]] | None = None,
+    cprime_records: dict[str, object] | None = None,
 ) -> Path:
     out = Path(path)
     with h5py.File(out, "w") as h5:
@@ -84,7 +86,20 @@ def write_diagnostics_h5(
             )
             symmetry_group.attrs["structure_file"] = str(symmetry_payload.get("structure_file", ""))
             symmetry_group.attrs["detected_operation_count"] = int(symmetry_payload.get("detected_operation_count", 0))
-            symmetry_group.attrs["candidate_rotation_count"] = len(symmetry_payload.get("candidate_rotations", []))
+        if cprime_records is not None:
+            cprime_group = h5.create_group("cprime")
+            string_dtype = h5py.string_dtype(encoding="utf-8")
+            for name, record in cprime_records.items():
+                cprime_group.create_dataset(
+                    str(name),
+                    data=json.dumps(
+                        record,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    ),
+                    dtype=string_dtype,
+                )
     return out
 
 

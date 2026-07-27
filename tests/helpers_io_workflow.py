@@ -74,10 +74,6 @@ def write_config(path: Path, h5_path: Path, out_dir: Path):
                 "angle_tolerance": -1.0,
                 "symprec_scan": [1.0e-5, 1.0e-3],
             },
-            "filters": {
-                "proper_rotations_only": True,
-                "allowed_orders": [2, 3, 4, 6],
-            },
         },
         "output": {"directory": str(out_dir), "profile": "debug", "write_json": True, "write_csv": True, "write_hdf5_basis_transform": True},
     }
@@ -169,8 +165,6 @@ def _p3_fake_symmetry_payload() -> dict:
         "spacegroup_number": 143,
         "international": "P3",
         "symmetry_eigenvalue_enabled": True,
-        "requested_rotation_order": "auto",
-        "resolved_rotation_order": 3,
         "detected_operation_count": len(operations),
         "detected_operations": operations,
         "candidate_rotations": [1, 2],

@@ -6,8 +6,6 @@ from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector
 from valleyscope.symmetry.little_group import is_little_group_operation
 from valleyscope.symmetry.operation_classifier import classify_operation, operation_order, rotation_axis_angle
 from valleyscope.symmetry.plane_wave_action import build_plane_wave_representation, spin_rotation_matrix
-from valleyscope.symmetry.rotation_eigenvalues import nearest_root_of_unity
-from valleyscope.symmetry.rotation_selection import mark_rotation_generators, resolve_rotation_order
 from valleyscope.symmetry.spglib_finder import find_symmetry_operations
 from valleyscope.symmetry.valley_preservation import map_valley_sectors
 from valleyscope.analysis.symmetry_eigenvalue_diagnostic import symmetry_eigenvalue_diagnostics_for_kpoint
@@ -267,7 +265,7 @@ def test_plane_wave_action_recovers_c3_angular_momentum_eigenvalue():
     np.testing.assert_allclose(result.matrix, [[np.exp(-1.0j * angle)]], atol=1e-12)
 
 
-def test_spinor_symmetry_rows_are_diagnostic_only_without_convention_benchmark():
+def test_spinor_symmetry_rows_require_scoped_evidence_for_readiness():
     coefficients = np.array(
         [
             [
@@ -306,91 +304,10 @@ def test_spinor_symmetry_rows_are_diagnostic_only_without_convention_benchmark()
 
     assert rows
     assert rows[0]["spinor_rotation_applied"] is True
-    assert rows[0]["spinor_convention_verified"] is False
+    assert "spinor_convention_verified" not in rows[0]
     assert rows[0]["diagnostic_only"] is True
     assert rows[0]["topology_input_ready"] is False
     assert rows[0]["topology_ready"] is False
-
-
-def test_spinful_c3_root_diagnostic_uses_double_group_order():
-    angle = 2.0 * np.pi / 3.0
-    rotation_cart = np.array(
-        [
-            [np.cos(angle), -np.sin(angle), 0.0],
-            [np.sin(angle), np.cos(angle), 0.0],
-            [0.0, 0.0, 1.0],
-        ]
-    )
-    coefficients = np.array([[[1.0 + 0.0j], [0.0 + 0.0j]]], dtype=np.complex128)
-    symmetry_payload = {
-        "detected_operations": [
-            {
-                "operation_id": 0,
-                "candidate_rotation": True,
-                "rotation_frac": np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]]),
-                "rotation_cart": rotation_cart,
-                "translation_cart": np.zeros(3),
-                "preserved": {"K_sector": True},
-                "order": 3,
-                "kind": "C3",
-            }
-        ]
-    }
-    representation_payload: dict[str, object] = {}
-
-    rows = symmetry_eigenvalue_diagnostics_for_kpoint(
-        kpoint_name="GammaM",
-        k_frac=np.zeros(3),
-        q_cart=np.zeros((1, 3)),
-        coefficients=coefficients,
-        symmetry_payload=symmetry_payload,
-        basis_payload=None,
-        representation_payload=representation_payload,
-    )
-
-    assert rows[0]["nearest_root_of_unity"] == "exp(2pii*5/6)"
-    assert rows[0]["root_deviation"] == pytest.approx(0.0, abs=1e-12)
-
-
-def test_spinor_convention_benchmark_marks_spinor_rows_verified():
-    angle = 2.0 * np.pi / 3.0
-    rotation_cart = np.array(
-        [
-            [np.cos(angle), -np.sin(angle), 0.0],
-            [np.sin(angle), np.cos(angle), 0.0],
-            [0.0, 0.0, 1.0],
-        ]
-    )
-    coefficients = np.array([[[1.0 + 0.0j], [0.0 + 0.0j]]], dtype=np.complex128)
-    symmetry_payload = {
-        "detected_operations": [
-            {
-                "operation_id": 0,
-                "candidate_rotation": True,
-                "rotation_frac": np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]]),
-                "rotation_cart": rotation_cart,
-                "translation_cart": np.zeros(3),
-                "preserved": {"K_sector": True},
-                "order": 3,
-                "kind": "C3",
-            }
-        ]
-    }
-
-    rows = symmetry_eigenvalue_diagnostics_for_kpoint(
-        kpoint_name="GammaM",
-        k_frac=np.zeros(3),
-        q_cart=np.zeros((1, 3)),
-        coefficients=coefficients,
-        symmetry_payload=symmetry_payload,
-        basis_payload=None,
-        representation_payload={},
-        spinor_convention_verified=True,
-    )
-
-    assert rows[0]["spinor_rotation_applied"] is True
-    assert rows[0]["spinor_convention_verified"] is True
-    assert rows[0]["reason"] == "not valley-adapted"
 
 
 def test_rotation_ready_tolerates_small_truncation_unitarity_error():
@@ -476,100 +393,6 @@ def test_plane_wave_mapping_default_tolerance_handles_real_wavecar_roundoff():
     assert result.mapping[0] == 1
 
 
-def test_rotation_order_selection_from_user_value_and_spacegroup():
-    assert resolve_rotation_order(3, international="P422", candidate_orders=[2, 3, 4]) == 3
-    assert resolve_rotation_order("none", international="P321", candidate_orders=[3]) is None
-    assert resolve_rotation_order("None", international="P321", candidate_orders=[3]) is None
-    assert resolve_rotation_order("auto", international="P321", candidate_orders=[2, 3]) == 3
-    assert resolve_rotation_order("AUTO", international="P312", candidate_orders=[2, 3]) == 3
-    assert resolve_rotation_order("auto", international="P422", candidate_orders=[2, 4]) == 4
-
-
-@pytest.mark.parametrize(
-    "international,candidate_orders,expected",
-    [
-        ("P321", [2, 3], 3),
-        ("P312", [2, 3, 4], 4),
-        ("P422", [2, 3], 3),
-        ("arbitrary", [2], 2),
-        ("arbitrary", [2, 3, 4, 6], 6),
-        ("arbitrary", [], None),
-    ],
-)
-def test_auto_rotation_order_depends_only_on_candidate_operation_content(
-    international, candidate_orders, expected,
-):
-    assert resolve_rotation_order(
-        "auto", international=international, candidate_orders=candidate_orders,
-    ) == expected
-
-
-def test_rotation_generator_filter_keeps_one_cyclic_generator():
-    c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]])
-    c3_squared = c3 @ c3
-    operations = [
-        {"operation_id": 1, "rotation_frac": c3, "order": 3, "candidate_rotation": True},
-        {"operation_id": 2, "rotation_frac": c3_squared, "order": 3, "candidate_rotation": True},
-        {"operation_id": 3, "rotation_frac": np.diag([-1, -1, 1]), "order": 2, "candidate_rotation": False},
-    ]
-
-    mark_rotation_generators(operations)
-
-    assert [op["operation_id"] for op in operations if op["candidate_rotation"]] == [1]
-    assert operations[0]["rotation_generator_operation_id"] == 1
-    assert operations[0]["rotation_power_of_generator"] == 1
-    assert operations[1]["rotation_generator_operation_id"] == 1
-    assert operations[1]["rotation_power_of_generator"] == 2
-    assert operations[1]["candidate_rotation"] is False
-    assert operations[1]["candidate_rejection_reason"] == "power_of_rotation_generator"
-
-
-@pytest.mark.parametrize(
-    "malformed_id",
-    [0.5, "0", False, np.float64(0.0)],
-    ids=["float", "string", "boolean", "numpy_float"],
-)
-def test_rotation_generator_rejects_malformed_operation_id(malformed_id):
-    operations = [{
-        "operation_id": malformed_id,
-        "rotation_frac": np.diag([-1, -1, 1]),
-        "order": 2,
-        "candidate_rotation": True,
-    }]
-
-    with pytest.raises(ValueError, match="operation_id"):
-        mark_rotation_generators(operations)
-
-
-def test_rotation_generator_rejects_malformed_power_operation_id():
-    c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]])
-    operations = [
-        {
-            "operation_id": 4,
-            "rotation_frac": c3,
-            "order": 3,
-            "candidate_rotation": True,
-        },
-        {
-            "operation_id": "5",
-            "rotation_frac": c3 @ c3,
-            "order": 3,
-            "candidate_rotation": True,
-        },
-    ]
-
-    with pytest.raises(ValueError, match="operation_id"):
-        mark_rotation_generators(operations)
-
-
-def test_nearest_root_of_unity_diagnostic():
-    index, root, deviation = nearest_root_of_unity(1.001 * np.exp(2.0j * np.pi / 3.0), order=3)
-
-    assert index == 1
-    assert root == pytest.approx(np.exp(2.0j * np.pi / 3.0))
-    assert deviation == pytest.approx(0.001)
-
-
 def test_spglib_finds_c3_candidate_for_simple_hexagonal_cell():
     lattice = np.array(
         [
@@ -593,8 +416,7 @@ class TestLittleGroupExtendedDiagnostics:
     def _toy_symmetry_payload(self, operations):
         return {"status": "ok", "detected_operations": operations, "little_group_check": {}, "valley_preservation_check": {}}
 
-    def test_generators_only_default_behavior_unchanged(self):
-        """Default generators_only=False enumerates all proper rotations. generators_only=True matches old behavior."""
+    def test_all_little_group_operations_are_evaluated(self):
         from valleyscope.analysis.symmetry_eigenvalue_diagnostic import symmetry_eigenvalue_diagnostics_for_kpoint
         coeffs = np.array([[[1.0 + 0.0j]]], dtype=np.complex128)
         ops = [
@@ -613,13 +435,11 @@ class TestLittleGroupExtendedDiagnostics:
         rows = symmetry_eigenvalue_diagnostics_for_kpoint(
             kpoint_name="GM", k_frac=np.zeros(3), q_cart=np.zeros((1, 3)),
             coefficients=coeffs, symmetry_payload=self._toy_symmetry_payload(ops),
-            basis_payload=None, representation_payload={}, generators_only=True,
+            basis_payload=None, representation_payload={},
         )
-        assert len(rows) > 0
-        assert all(row["operation_id"] == 0 for row in rows)
+        assert {row["operation_id"] for row in rows} == {0, 1}
 
-    def test_generators_only_false_includes_all_proper_rotations(self):
-        """With generators_only=False, C3 (order=3, non-candidate) should be included."""
+    def test_operation_inclusion_does_not_use_candidate_flags(self):
         from valleyscope.analysis.symmetry_eigenvalue_diagnostic import symmetry_eigenvalue_diagnostics_for_kpoint
         coeffs = np.array([[[1.0 + 0.0j]]], dtype=np.complex128)
         ops = [
@@ -638,10 +458,10 @@ class TestLittleGroupExtendedDiagnostics:
         rows = symmetry_eigenvalue_diagnostics_for_kpoint(
             kpoint_name="GM", k_frac=np.zeros(3), q_cart=np.zeros((1, 3)),
             coefficients=coeffs, symmetry_payload=self._toy_symmetry_payload(ops),
-            basis_payload=None, representation_payload={}, generators_only=False,
+            basis_payload=None, representation_payload={},
         )
         op_ids = {row["operation_id"] for row in rows}
-        assert 1 in op_ids, "C3 should be included with generators_only=False"
+        assert 1 in op_ids
 
     def test_non_little_group_skipped_with_reason(self):
         """Operations not in little group should be skipped with clear reason."""
@@ -659,7 +479,7 @@ class TestLittleGroupExtendedDiagnostics:
             kpoint_name="K", k_frac=np.array([1.0/3.0, 0.0, 0.0]),
             q_cart=np.zeros((1, 3)), coefficients=coeffs,
             symmetry_payload=self._toy_symmetry_payload(ops),
-            basis_payload=None, representation_payload={}, generators_only=False,
+            basis_payload=None, representation_payload={},
         )
         assert rows == []
 
@@ -778,14 +598,12 @@ class TestLittleGroupExtendedDiagnostics:
                 "eta": np.array([1.0, -1.0]),
             },
             representation_payload=representation_payload,
-            spinor_convention_verified=True,
         )
 
-        assert {row["nearest_root_of_unity"] for row in rows} == {
-            "exp(2pii*1/6)",
-            "exp(2pii*5/6)",
-        }
-        assert all(row["topology_input_ready"] for row in rows)
+        assert sorted(row["phase_2pi"] for row in rows) == pytest.approx(
+            [-1.0 / 6.0, 1.0 / 6.0]
+        )
+        assert all(not row["topology_input_ready"] for row in rows)
         assert rows[0]["character_valley"] == "1.000000+0.000000j"
 
 
@@ -1192,7 +1010,7 @@ def test_valley_preserving_subgroup_report_records_missing_products():
 
 class TestV11PerValleySubgroup:
     """V1.1 per-valley subgroup tests: three-valley orbit, per-valley gates,
-    block-leakage diagnostic, and rotation_order independence."""
+    block-leakage diagnostic, and operation-inventory independence."""
 
     @staticmethod
     def _c3_cart():
@@ -1581,43 +1399,7 @@ class TestV11PerValleySubgroup:
         assert block_clean.shape == (2, 2)
         assert leakage_clean == 0.0
 
-    def test_block_leakage_makes_topology_input_not_ready(self):
-        """When D_block_leakage_norm exceeds D_valley_offdiag_tol,
-        topology_input_ready should be False."""
-        from valleyscope.analysis.symmetry_eigenvalue_diagnostic import _topology_input_ready
-
-        # All other gates pass
-        ready = _topology_input_ready(
-            rotation_ready=True,
-            basis="valley_adapted",
-            valid_valley_subspace=True,
-            spinor_convention_verified=True,
-            root_deviation=1e-10,
-            d_valley_offdiag_norm=None,
-            d_block_leakage_norm=0.5,
-            root_deviation_tol=1e-6,
-            d_valley_offdiag_tol=1e-4,
-        )
-        assert ready is False
-
-        # With small leakage it should pass
-        ready_small = _topology_input_ready(
-            rotation_ready=True,
-            basis="valley_adapted",
-            valid_valley_subspace=True,
-            spinor_convention_verified=True,
-            root_deviation=1e-10,
-            d_valley_offdiag_norm=None,
-            d_block_leakage_norm=1e-8,
-            root_deviation_tol=1e-6,
-            d_valley_offdiag_tol=1e-4,
-        )
-        assert ready_small is True
-
-    def test_operation_inclusion_independent_of_rotation_order(self):
-        """V1.1: all proper little-group operations (order 2,3,4,6) enter
-        the analysis regardless of rotation_order.  Non-candidate operations
-        are not excluded."""
+    def test_operation_inclusion_uses_exact_little_group_inventory(self):
         c3_angle = 2.0 * np.pi / 3.0
         c3_cart = np.array([
             [np.cos(c3_angle), -np.sin(c3_angle), 0.0],
@@ -1648,7 +1430,7 @@ class TestV11PerValleySubgroup:
             kpoint_name="GM", k_frac=np.zeros(3), q_cart=np.zeros((1, 3)),
             coefficients=coefficients, symmetry_payload=symmetry_payload,
             basis_payload=None, representation_payload={},
-            valley_names=["K"], generators_only=False,
+            valley_names=["K"],
         )
 
         # Both C3 (candidate) and C2 (non-candidate) are included

@@ -11,7 +11,7 @@ import numpy as np
 from valleyscope.io.config import AppConfig
 from valleyscope.reports.json_report import _json_default
 
-_SCHEMA_VERSION = "1.9.0"
+_SCHEMA_VERSION = "2.0.0"
 
 
 def build_summary_payload(
@@ -37,6 +37,9 @@ def build_summary_payload(
     valley_projected_representation: dict[str, Any] | None = None,
     folded_center_payload: dict[str, Any] | None = None,
     sampled_k_coverage: dict[str, Any] | None = None,
+    spinor_source_basis_certificate: dict[str, Any] | None = None,
+    double_space_group_lift_certificates: dict[str, Any] | None = None,
+    scoped_representation_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     eigen_rows = [] if symmetry_rows is None else symmetry_rows
     warnings = _collect_warnings(subspace_payload, symmetry_payload, eigen_rows)
@@ -56,9 +59,9 @@ def build_summary_payload(
             if config.symmetry.operations.structure_file is None
             else str(config.symmetry.operations.structure_file),
             "operation_detection_backend": config.symmetry.operations.backend,
-            "spinor_convention": config.spinor.convention,
-            "spinor_convention_verified": config.spinor.convention_verified,
-            "spinor_benchmark": config.spinor.benchmark,
+            "spinor_input_profile": (
+                "vasp_nonmagnetic_soc_default_saxis_v1"
+            ),
         },
         "target_kpoints": list(config.analysis.kpoints),
         "iband": list(config.analysis.iband),
@@ -73,7 +76,9 @@ def build_summary_payload(
         "symmetry_analysis": _symmetry_analysis(symmetry_payload, config.analysis.kpoints),
         "symmetry_eigenvalues": eigen_rows,
         "symmetry_characters": _symmetry_character_rows(eigen_rows),
-        "rotation_readiness_thresholds": _rotation_readiness_thresholds(config),
+        "representation_readiness_thresholds": (
+            _representation_readiness_thresholds(config)
+        ),
         "warnings": warnings,
         "output_profile": config.output.profile,
         "output_files": {name: str(path) for name, path in output_paths.items()},
@@ -97,6 +102,11 @@ def build_summary_payload(
             ),
         },
     }
+    payload["cprime"] = _compact_cprime_records(
+        source_basis=spinor_source_basis_certificate,
+        lift_by_scope=double_space_group_lift_certificates,
+        representation_by_scope=scoped_representation_evidence,
+    )
     if symmetry_eigenvalue_summary:
         payload["symmetry_eigenvalue_summary"] = symmetry_eigenvalue_summary
     if projector_symmetry_report is not None:
@@ -141,6 +151,82 @@ def build_summary_payload(
     return payload
 
 
+def _compact_cprime_records(
+    *,
+    source_basis: dict[str, Any] | None,
+    lift_by_scope: dict[str, Any] | None,
+    representation_by_scope: dict[str, Any] | None,
+) -> dict[str, Any]:
+    source = source_basis if isinstance(source_basis, dict) else {}
+    lifts = lift_by_scope if isinstance(lift_by_scope, dict) else {}
+    representations = (
+        representation_by_scope
+        if isinstance(representation_by_scope, dict)
+        else {}
+    )
+    scopes = sorted(
+        {
+            (str(kpoint), str(valley))
+            for collection in (lifts, representations)
+            for kpoint, valleys in collection.items()
+            if isinstance(valleys, dict)
+            for valley in valleys
+        }
+    )
+    acceptance_matrix: list[dict[str, Any]] = []
+    for kpoint, valley in scopes:
+        lift = lifts.get(kpoint, {}).get(valley, {})
+        evidence = representations.get(kpoint, {}).get(valley, {})
+        lift = lift if isinstance(lift, dict) else {}
+        evidence = evidence if isinstance(evidence, dict) else {}
+        acceptance_matrix.append(
+            {
+                "kpoint": kpoint,
+                "valley": valley,
+                "scope_kind": (
+                    evidence.get("scope", {}).get("scope_kind")
+                    if isinstance(evidence.get("scope"), dict)
+                    else None
+                ),
+                "double_space_group_lift_status": lift.get(
+                    "status", "not_evaluated"
+                ),
+                "double_space_group_lift_identity": lift.get(
+                    "certificate_identity"
+                ),
+                "double_space_group_lift_blockers": list(
+                    lift.get("reason_codes", [])
+                )
+                if isinstance(lift.get("reason_codes", []), list)
+                else ["reason_codes_malformed"],
+                "scoped_representation_status": evidence.get(
+                    "status", "not_evaluated"
+                ),
+                "scoped_representation_evidence_identity": evidence.get(
+                    "evidence_identity"
+                ),
+                "scoped_representation_blockers": list(
+                    evidence.get("reason_codes", [])
+                )
+                if isinstance(evidence.get("reason_codes", []), list)
+                else ["reason_codes_malformed"],
+            }
+        )
+    return {
+        "spinor_source_basis": {
+            "profile_identity": source.get("profile_identity"),
+            "applicability": source.get("applicability", "not_evaluated"),
+            "status": source.get("status", "not_evaluated"),
+            "identity": source.get("certificate_identity"),
+            "blockers": list(source.get("reason_codes", []))
+            if isinstance(source.get("reason_codes", []), list)
+            else ["reason_codes_malformed"],
+        },
+        "acceptance_matrix": acceptance_matrix,
+        "full_records": "diagnostics.h5:/cprime",
+    }
+
+
 def render_summary_text(summary: dict[str, Any]) -> str:
     """Render the selected public text profile from the shared summary payload."""
     if summary.get("output_profile", "standard") == "debug":
@@ -153,10 +239,11 @@ def _render_standard_summary_text(summary: dict[str, Any]) -> str:
     _section(lines, "Run and projection context")
     input_summary = summary.get("input", {})
     lines.append(f"wavefunction: {input_summary.get('wavefunction_h5', '')}")
+    source = summary.get("cprime", {}).get("spinor_source_basis", {})
     lines.append(
-        "spinor convention: "
-        f"{input_summary.get('spinor_convention', '')} "
-        f"(verified={input_summary.get('spinor_convention_verified', False)})"
+        "spinor input profile: "
+        f"{input_summary.get('spinor_input_profile', '')} "
+        f"(status={source.get('status', 'not_evaluated')})"
     )
     lines.append(
         "sampled k-points: "
@@ -533,11 +620,12 @@ def _render_debug_summary_text(summary: dict[str, Any]) -> str:
     lines.append(f"wavefunction_h5: {input_summary['wavefunction_h5']}")
     lines.append(f"operation structure: {input_summary['operation_structure_file']}")
     lines.append(f"operation-detection backend: {input_summary['operation_detection_backend']}")
+    source = summary.get("cprime", {}).get("spinor_source_basis", {})
     lines.append(
-        "spinor convention: "
-        f"{input_summary['spinor_convention']} "
-        f"(verified={input_summary['spinor_convention_verified']}, "
-        f"benchmark={input_summary['spinor_benchmark']})"
+        "spinor input profile: "
+        f"{input_summary.get('spinor_input_profile', '')} "
+        f"(status={source.get('status', 'not_evaluated')}, "
+        f"identity={source.get('identity', '')})"
     )
     lines.append(f"target k-points: {', '.join(summary['target_kpoints'])}")
     lines.append(f"iband (VASP): {', '.join(str(v) for v in summary['iband'])}")
@@ -683,8 +771,6 @@ def _render_debug_summary_text(summary: dict[str, Any]) -> str:
                                           orbit.get("coset_representative_operation_ids", []))
                     if vals:
                         lines.append(f"valley orbit: {vals} (permuting ops: {permuting})")
-    lines.append(f"requested operation order: {sym.get('requested_rotation_order')}")
-    lines.append(f"selected proper-rotation order: {sym.get('resolved_rotation_order')}")
     lines.append("")
     lines.append("Detected operations:")
     lines.extend(
@@ -794,8 +880,6 @@ def _render_debug_summary_text(summary: dict[str, Any]) -> str:
                 "order",
                 "state",
                 "phase",
-                "root",
-                "root_dev",
                 "ready",
                 "input_ready",
                 "diagnostic",
@@ -811,8 +895,6 @@ def _render_debug_summary_text(summary: dict[str, Any]) -> str:
                     row["order"],
                     row["state_index"],
                     _fmt(row["phase_2pi"]),
-                    _format_root_label(row["nearest_root_of_unity"]),
-                    _fmt(row["root_deviation"]),
                     row.get("rotation_ready", ""),
                     row.get("topology_input_ready", row.get("topology_ready", "")),
                     row.get("diagnostic_only", ""),
@@ -1150,11 +1232,8 @@ def _symmetry_analysis(symmetry_payload: dict[str, Any], target_kpoints: list[st
         "structure_file": symmetry_payload.get("structure_file"),
         "spacegroup_number": symmetry_payload.get("spacegroup_number"),
         "international": symmetry_payload.get("international"),
-        "requested_rotation_order": symmetry_payload.get("requested_rotation_order"),
-        "resolved_rotation_order": symmetry_payload.get("resolved_rotation_order"),
         "symmetry_eigenvalue_enabled": symmetry_payload.get("symmetry_eigenvalue_enabled"),
         "detected_operation_count": symmetry_payload.get("detected_operation_count", 0),
-        "candidate_rotations": symmetry_payload.get("candidate_rotations", []),
         "symprec_scan_summary": symmetry_payload.get("symprec_scan_summary", []),
         "hsp_little_group_inventory": symmetry_payload.get("hsp_little_group_inventory", {}),
         "hsp_star_report": symmetry_payload.get("hsp_star_report", {}),
@@ -1201,18 +1280,17 @@ def _symmetry_character_rows(symmetry_rows: list[dict[str, Any]]) -> list[dict[s
     return list(grouped.values())
 
 
-def _rotation_readiness_thresholds(config: AppConfig) -> dict[str, Any]:
+def _representation_readiness_thresholds(config: AppConfig) -> dict[str, Any]:
     return {
         "readiness_preset": config.rotation.readiness_preset,
         "unitarity_tol": config.rotation.unitarity_tol,
-        "root_deviation_tol": config.rotation.root_deviation_tol,
         "D_valley_offdiag_tol": config.rotation.D_valley_offdiag_tol,
         "irrep_weight_tol": config.rotation.irrep_weight_tol,
         "interpretation": (
             "These are numerical readiness thresholds, not universal physical constants."
         ),
         "recommended_action": (
-            "Check qcut stability, valley purity, spinor benchmark, plane-wave mapping, "
+            "Check qcut stability, valley purity, C-prime identities, plane-wave mapping, "
             "and representation quality; do not loosen thresholds only to obtain "
             "topology_input_ready=True or an irrep label."
         ),
@@ -1249,14 +1327,6 @@ def _collect_warnings(
                 )
     if any(row.get("basis") != "valley_adapted" for row in symmetry_rows):
         warnings.append("Some symmetry eigenvalues are not valley-adapted and are diagnostic-only")
-    if any(
-        bool(row.get("spinor_rotation_applied", False)) and not bool(row.get("spinor_convention_verified", False))
-        for row in symmetry_rows
-    ):
-        warnings.append(
-            "Spinor rotation is applied, but the VASP spinor convention is not benchmark-verified; "
-            "spinful symmetry eigenvalues are diagnostic-only"
-        )
     if any(bool(row.get("diagnostic_only", False)) for row in symmetry_rows):
         warnings.append(
             "Some symmetry eigenvalues are diagnostic-only and are not topology_input_ready"

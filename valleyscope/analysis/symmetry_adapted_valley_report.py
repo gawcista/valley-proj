@@ -45,7 +45,6 @@ def build_symmetry_adapted_valley_report(
     modulus_tol: float = 1e-8,
     closure_mapping: dict[tuple[object, object], object] | None = None,
     spinor_wavefunction: bool = False,
-    spinor_convention_verified: bool | None = None,
     operation_orders: dict[object, int] | None = None,
     seed_overlap_warn_tol: float = 0.8,
     seed_overlap_fail_tol: float = 0.5,
@@ -116,14 +115,12 @@ def build_symmetry_adapted_valley_report(
             ),
             "subspace_group": _blocked_subspace_group(
                 reason="projector_construction_failed",
-                spinor_convention_verified=spinor_convention_verified,
             ),
             "subspace_space_group": _not_evaluated_subspace_space_group(
                 "not evaluated in orbit-level report"
             ),
             "ebr_mapping_input": _blocked_ebr_mapping_input(
                 blocked_by=["projector_construction_failed"],
-                spinor_convention_verified=spinor_convention_verified,
                 notes="Projector construction failed before EBR input could be assembled.",
             ),
         }
@@ -190,8 +187,6 @@ def build_symmetry_adapted_valley_report(
     ) = _resolve_irrep_matching_input_gate(
         local_irrep_ready=local_irrep_ready,
         diagnostic_only=diagnostic_only,
-        spinor_wavefunction=spinor_wavefunction,
-        spinor_convention_verified=spinor_convention_verified,
     )
 
     reasons: list[str] = []
@@ -242,7 +237,6 @@ def build_symmetry_adapted_valley_report(
             rep_diag=rep_diag,
             char_diag=char_diag,
             proj_status=proj_diag.status,
-            spinor_convention_verified=spinor_convention_verified,
             operation_orders=operation_orders,
         ),
         "subspace_space_group": _not_evaluated_subspace_space_group(
@@ -251,7 +245,6 @@ def build_symmetry_adapted_valley_report(
         "ebr_mapping_input": _build_ebr_mapping_input(
             local_irrep_ready=local_irrep_ready,
             diagnostic_only=diagnostic_only,
-            spinor_convention_verified=spinor_convention_verified,
             proj_diag=proj_diag,
             char_diag=char_diag,
             subspace_group_candidate=None,
@@ -414,14 +407,14 @@ def _resolve_irrep_matching_input_gate(
     *,
     local_irrep_ready: bool,
     diagnostic_only: bool,
-    spinor_wavefunction: bool,
-    spinor_convention_verified: bool | None,
 ) -> tuple[bool, str, str]:
     if diagnostic_only or not local_irrep_ready:
         return False, "blocked", "local_irrep_ready=false or diagnostic_only=true"
-    if spinor_wavefunction and spinor_convention_verified is not True:
-        return False, "blocked", "spinor convention unverified"
-    return True, "ready", "all irrep matching input gates passed"
+    return (
+        False,
+        "blocked",
+        "awaiting passed scoped_representation_evidence",
+    )
 
 
 def _failed_report(
@@ -497,14 +490,12 @@ def _failed_report(
         },
         "subspace_group": _blocked_subspace_group(
             reason=reason,
-            spinor_convention_verified=False,
         ),
         "subspace_space_group": _not_evaluated_subspace_space_group(
             "not evaluated in orbit-level report"
         ),
         "ebr_mapping_input": _blocked_ebr_mapping_input(
             blocked_by=["projector_input_invalid"],
-            spinor_convention_verified=False,
             notes="Projector input is invalid; EBR input was not assembled.",
         ),
     }
@@ -519,7 +510,6 @@ def _build_subspace_group(
     rep_diag: dict[str, object],
     char_diag: dict[str, object],
     proj_status: str,
-    spinor_convention_verified: bool,
     operation_orders: dict[object, int] | None = None,
 ) -> dict[str, object]:
     vp_ops = rep_diag.get("valley_preserving_operations", {})
@@ -541,8 +531,6 @@ def _build_subspace_group(
     # subspace-space-group identity is unresolved without a reviewed
     # or generic identification source.
     blocked = proj_status == "failed" or char_diag.get("diagnostic_only", True)
-    if not spinor_convention_verified:
-        blocked = True
     # Subspace-space-group identity is unresolved — EBR readiness blocked.
     blocked = True
     ready_for_ebr = False
@@ -552,8 +540,6 @@ def _build_subspace_group(
         reason_parts.append("projector_construction_failed")
     if char_diag.get("diagnostic_only", True):
         reason_parts.append("character_diagnostics_not_ready")
-    if not spinor_convention_verified:
-        reason_parts.append("spinor_convention_unverified")
     reason_parts.append("subspace_space_group_unresolved")
     reason = "; ".join(reason_parts) if reason_parts else "subspace_space_group_unresolved"
 
@@ -565,7 +551,6 @@ def _build_subspace_group(
         "operation_orders": {str(k): int(v) for k, v in operation_orders.items()},
         "effective_point_group": None,
         "subspace_group_candidate": None,
-        "spinor_convention_verified": spinor_convention_verified,
         "ready_for_ebr_mapping": ready_for_ebr,
         "reason": reason,
     }
@@ -574,7 +559,6 @@ def _build_ebr_mapping_input(
     *,
     local_irrep_ready: bool,
     diagnostic_only: bool,
-    spinor_convention_verified: bool,
     proj_diag,
     char_diag: dict[str, object],
     subspace_group_candidate: str | None,
@@ -590,9 +574,6 @@ def _build_ebr_mapping_input(
     if diagnostic_only:
         ready = False
         blocked_by.append("diagnostic_only")
-    if not spinor_convention_verified:
-        ready = False
-        blocked_by.append("spinor_convention_unverified")
     min_overlap = min(proj_diag.seed_overlap.values()) if proj_diag.seed_overlap else 0.0
     if min_overlap < ebr_seed_overlap_min:
         ready = False
@@ -614,7 +595,6 @@ def _build_ebr_mapping_input(
         "required_tables": ["external_reduced_ebr_table"],
         "subspace_group_candidate": subspace_group_candidate,
         "valley_preserving_characters_available": chars_available,
-        "spinor_convention_verified": spinor_convention_verified,
         "notes": (
             "Valley irrep matching is downstream in valley_irrep_matching; "
             "reduced EBR decomposition requires a user-supplied validated "
@@ -626,7 +606,6 @@ def _build_ebr_mapping_input(
 def _blocked_subspace_group(
     *,
     reason: str,
-    spinor_convention_verified: bool | None,
 ) -> dict[str, object]:
     return {
         "status": "blocked",
@@ -636,7 +615,6 @@ def _blocked_subspace_group(
         "operation_orders": {},
         "effective_point_group": "C1",
         "subspace_group_candidate": None,
-        "spinor_convention_verified": bool(spinor_convention_verified),
         "ready_for_ebr_mapping": False,
         "reason": reason,
     }
@@ -658,7 +636,6 @@ def _not_evaluated_subspace_space_group(reason: str) -> dict[str, object]:
 def _blocked_ebr_mapping_input(
     *,
     blocked_by: list[str],
-    spinor_convention_verified: bool | None,
     notes: str,
 ) -> dict[str, object]:
     return {
@@ -667,6 +644,5 @@ def _blocked_ebr_mapping_input(
         "required_tables": ["external_reduced_ebr_table"],
         "subspace_group_candidate": None,
         "valley_preserving_characters_available": False,
-        "spinor_convention_verified": bool(spinor_convention_verified),
         "notes": notes,
     }

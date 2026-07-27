@@ -30,10 +30,14 @@ from valleyscope.analysis.unitary_provenance import (
     validate_direct_unitary_bundle,
     validate_tr_completed_unitary_bundle,
 )
+from valleyscope.io.wavefunction_convention import valid_sha256_identity
+from valleyscope.analysis.scoped_representation_evidence import (
+    validate_scoped_representation_evidence_record,
+)
 
 _REQUIRED_TABLE_KEYS = {"schema_version", "subspace_group_candidate",
                          "expected_hsps", "irreps", "ebrs"}
-_OUTPUT_SCHEMA_VERSION = "1.9.0"
+_OUTPUT_SCHEMA_VERSION = "2.0.0"
 _SOLVER_NAME = "smith_normal_form_plus_bounded_nonnegative_search"
 
 # Standard-setting certificate convention — REAL producer vocabulary.
@@ -143,7 +147,12 @@ def _derive_table_standard_setting(
 # Production bundle promotion: validation candidate → validated table/bundle pair
 # ---------------------------------------------------------------------------
 
-def promote_bundle_for_solve(*, bundle: dict, table: dict) -> dict:
+def promote_bundle_for_solve(
+    *,
+    bundle: dict,
+    table: dict,
+    cprime_validation_context: dict[str, object] | None = None,
+) -> dict:
     """Validate a bundle against a reduced EBR table and promote if compatible.
 
     Fail-closed convention trust chain.  Promotion requires that the bundle's
@@ -165,6 +174,7 @@ def promote_bundle_for_solve(*, bundle: dict, table: dict) -> dict:
         "sg_symbol_check": "not_attempted",
         "sg_number_check": "not_attempted",
         "certificate_check": "not_attempted",
+        "cprime_identity_check": "not_attempted",
         "certificate_consistency_check": "not_attempted",
         "cert_sg_consistency_check": "not_attempted",
         "affine_setting_check": "not_attempted",
@@ -307,6 +317,12 @@ def promote_bundle_for_solve(*, bundle: dict, table: dict) -> dict:
         report["sg_number_check"] = "passed"
 
     # ---- C. Certificate presence, contract, and cross-checks ----
+    _validate_cprime_bundle_identity(
+        bundle,
+        blockers,
+        report,
+        cprime_validation_context=cprime_validation_context,
+    )
     cert_id = bundle.get("certificate_identity", {})
     if not isinstance(cert_id, dict) or not cert_id:
         blockers.append(_blocker("certificate_missing",
@@ -1600,6 +1616,183 @@ def _norm_symbol(value: object) -> str:
     return "".join(str(value or "").split())
 
 
+def _validate_cprime_bundle_identity(
+    bundle,
+    blockers,
+    report,
+    *,
+    cprime_validation_context,
+):
+    """Require producer-linked C-prime identities for every sampled HSP."""
+    expected_keys = {
+        "spinor_source_basis_certificate_identity",
+        "double_space_group_lift_certificate_identity",
+        "scoped_representation_evidence_identity",
+    }
+    by_kpoint = bundle.get("cprime_identity_by_kpoint")
+    irreps_by_kpoint = bundle.get("irreps_by_kpoint")
+    construction = bundle.get("unitary_vector_construction")
+    tr_completed = (
+        isinstance(construction, dict)
+        and construction.get("kind")
+        == "time_reversal_completed_unitary_rows"
+    )
+    joint_problem = (
+        bundle.get("problem_kind") == "valley_orbit_reduced_ebr"
+    )
+    records_by_kpoint = bundle.get(
+        "unitary_irrep_completion_records_by_hsp"
+        if tr_completed
+        else "irrep_records_by_kpoint"
+    )
+    ok = True
+    if (
+        not isinstance(by_kpoint, dict)
+        or not isinstance(irreps_by_kpoint, dict)
+        or set(by_kpoint) != set(irreps_by_kpoint)
+        or (
+            not joint_problem
+            and (
+                not isinstance(records_by_kpoint, dict)
+                or set(records_by_kpoint) != set(irreps_by_kpoint)
+            )
+        )
+    ):
+        blockers.append(
+            _blocker(
+                "cprime_identity_scope_mismatch",
+                "C-prime identity inventory must exactly match sampled HSPs",
+            )
+        )
+        report["cprime_identity_check"] = "failed"
+        return
+    for kpoint, identity in by_kpoint.items():
+        if (
+            not isinstance(identity, dict)
+            or set(identity) != expected_keys
+            or not all(
+                valid_sha256_identity(identity.get(key))
+                for key in expected_keys
+            )
+        ):
+            blockers.append(
+                _blocker(
+                    "cprime_identity_malformed",
+                    f"malformed C-prime identities for {kpoint}",
+                )
+            )
+            ok = False
+            continue
+        context_entry = (
+            cprime_validation_context.get(
+                identity["scoped_representation_evidence_identity"]
+            )
+            if isinstance(cprime_validation_context, dict)
+            else None
+        )
+        if not isinstance(context_entry, dict):
+            blockers.append(
+                _blocker(
+                    "cprime_producer_context_missing",
+                    f"producer validation context missing for {kpoint}",
+                )
+            )
+            ok = False
+            continue
+        scoped_record = context_entry.get("record")
+        raw_inputs = context_entry.get("raw_inputs")
+        if not isinstance(scoped_record, dict) or not isinstance(
+            raw_inputs, dict
+        ):
+            blockers.append(
+                _blocker(
+                    "cprime_producer_context_malformed",
+                    f"producer validation context malformed for {kpoint}",
+                )
+            )
+            ok = False
+            continue
+        validation = validate_scoped_representation_evidence_record(
+            scoped_record,
+            **raw_inputs,
+        )
+        expected_scope_kind = (
+            "tr_completed"
+            if tr_completed or joint_problem
+            else "local_irrep"
+        )
+        scope = scoped_record.get("scope")
+        source_basis = raw_inputs.get("source_basis_record")
+        if (
+            validation.status != "passed"
+            or scoped_record.get("status") != "passed"
+            or scoped_record.get("evidence_identity")
+            != identity["scoped_representation_evidence_identity"]
+            or scoped_record.get("source_basis_certificate_identity")
+            != identity["spinor_source_basis_certificate_identity"]
+            or scoped_record.get(
+                "double_space_group_lift_certificate_identity"
+            )
+            != identity["double_space_group_lift_certificate_identity"]
+            or not isinstance(source_basis, dict)
+            or source_basis.get("certificate_identity")
+            != identity["spinor_source_basis_certificate_identity"]
+            or not isinstance(scope, dict)
+            or scope.get("scope_kind") != expected_scope_kind
+        ):
+            blockers.append(
+                _blocker(
+                    "cprime_producer_context_invalid",
+                    f"producer validation context failed for {kpoint}",
+                )
+            )
+            ok = False
+            continue
+        if joint_problem:
+            continue
+        records = records_by_kpoint.get(kpoint)
+        if not isinstance(records, list) or not records:
+            blockers.append(
+                _blocker(
+                    "cprime_record_link_missing",
+                    f"missing irrep record links for {kpoint}",
+                )
+            )
+            ok = False
+            continue
+        for record in records:
+            if tr_completed and isinstance(record, dict):
+                candidate_provenance = record.get(
+                    "source_candidate_provenance"
+                )
+                provenance = (
+                    candidate_provenance.get("irrep_source_provenance")
+                    if isinstance(candidate_provenance, dict)
+                    else None
+                )
+            else:
+                provenance = (
+                    record.get("irrep_source_provenance")
+                    if isinstance(record, dict)
+                    else None
+                )
+            cprime = (
+                provenance.get("cprime")
+                if isinstance(provenance, dict)
+                else None
+            )
+            if cprime != identity:
+                blockers.append(
+                    _blocker(
+                        "cprime_record_link_mismatch",
+                        f"irrep record C-prime link mismatch for {kpoint}",
+                    )
+                )
+                ok = False
+                break
+    report["cprime_identity_check"] = "passed" if ok else "failed"
+
+
 def _validate_certificate_status(cert_id, blockers, report):
     """Certificate must be validated, not unresolved/rejected."""
     val_statuses = cert_id.get("certificate_validation_statuses", [])
@@ -2401,6 +2594,7 @@ def build_reduced_ebr_mapping(
     table: dict | None = None,
     max_coefficient: int = 6,
     reduced_ebr_input: dict | None = None,
+    cprime_validation_context: dict[str, object] | None = None,
 ) -> dict:
     """Exact reduced EBR decomposition of export bundle irrep vectors.
 
@@ -2461,7 +2655,11 @@ def build_reduced_ebr_mapping(
             bundle.get("ready_for_reduced_table_validation") is True
         )
         if is_validation_candidate:
-            promo = promote_bundle_for_solve(bundle=bundle, table=table)
+            promo = promote_bundle_for_solve(
+                bundle=bundle,
+                table=table,
+                cprime_validation_context=cprime_validation_context,
+            )
             if promo["promoted"] and promo["promoted_bundle"] is not None:
                 bundle = promo["promoted_bundle"]
             else:
@@ -2558,6 +2756,9 @@ def build_reduced_ebr_mapping(
                 "unitary_valley_irreps", {}
             ),
             "time_reversal": bundle.get("time_reversal", {}),
+            "cprime_identity_by_kpoint": bundle.get(
+                "cprime_identity_by_kpoint", {}
+            ),
             "subspace_group_candidate": bundle_group,
             "subspace_space_group": bundle.get("subspace_space_group", {}),
             "irrep_vector": irrep_counts,
@@ -2609,6 +2810,7 @@ def build_auto_reduced_ebr_mapping(
     ebr_export_bundle: dict[str, object] | None,
     spinor: bool,
     max_coefficient: int = 6,
+    cprime_validation_context: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Build one reviewed irreptables table per canonical bundle and solve."""
     bundles = (
@@ -2714,6 +2916,7 @@ def build_auto_reduced_ebr_mapping(
             table=table,
             max_coefficient=max_coefficient,
             reduced_ebr_input=table_input,
+            cprime_validation_context=cprime_validation_context,
         )
         before = len(solutions) + len(excluded)
         for solution in bundle_result.get("solutions", []):

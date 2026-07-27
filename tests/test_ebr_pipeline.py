@@ -13,7 +13,9 @@ from tests.helpers_io_workflow import write_fixture, write_config
 from tests.helpers_io_workflow import _E2E_SAMPLE_TABLE, e2e_write_table
 from tests.reduced_ebr_promo_helpers import (
     attach_real_certificate, add_real_certificate_to_candidates,
-    complete_table_provenance, real_primitive_certificate_identity)
+    attach_cprime_fixture_contract, complete_table_provenance,
+    cprime_summary_for_export, real_primitive_certificate_identity,
+    cprime_validation_context_for_export)
 
 from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
 from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
@@ -22,12 +24,38 @@ from valleyscope.analysis.database_ingestion_record import (
     build_database_ingestion_record,
 )
 from valleyscope.analysis.reduced_ebr_mapping import (
-    build_reduced_ebr_mapping,
+    build_reduced_ebr_mapping as _build_reduced_ebr_mapping,
     load_reduced_ebr_table,
-    promote_bundle_for_solve,
+    promote_bundle_for_solve as _promote_bundle_for_solve,
 )
 
 from tests.helpers_io_workflow import write_fixture, write_config
+
+
+def _fixture_cprime_context(export):
+    attach_cprime_fixture_contract(export)
+    context = cprime_validation_context_for_export(export)
+    return dict(context["_by_identity"])
+
+
+def build_reduced_ebr_mapping(**kwargs):
+    export = kwargs.get("ebr_export_bundle")
+    if isinstance(export, dict):
+        kwargs.setdefault(
+            "cprime_validation_context",
+            _fixture_cprime_context(export),
+        )
+    return _build_reduced_ebr_mapping(**kwargs)
+
+
+def promote_bundle_for_solve(*, bundle, table):
+    return _promote_bundle_for_solve(
+        bundle=bundle,
+        table=table,
+        cprime_validation_context=_fixture_cprime_context(
+            {"bundles": [bundle]}
+        ),
+    )
 
 
 def _complete_coverage_for_candidates(report):
@@ -357,13 +385,14 @@ def test_generic_p4_table_authoritative_bundle_maps_and_rejects_mismatch():
             row["code"] for row in rejected_promotion["blocker_reasons"]
         }
 
-        ingestion = build_database_ingestion_record(
-            valley_summary={},
-            valley_ebr_export_bundle={
+        forged_export = {
                 "status": "ready_for_reduced_table_validation",
                 "bundles": [forged],
                 "excluded_instances": [],
-            },
+        }
+        ingestion = build_database_ingestion_record(
+            valley_summary=cprime_summary_for_export(forged_export),
+            valley_ebr_export_bundle=forged_export,
         )
         assert any(
             "invalid direct unitary construction provenance" in error
@@ -411,10 +440,6 @@ _DEBUG_ONLY_FILES = frozenset({
 def test_ready_export_bundle_maps_to_public_reduced_ebr_outputs_only(tmp_path):
     """Ready export bundle plus validated table writes only public standard outputs."""
     from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
-    from valleyscope.analysis.reduced_ebr_mapping import (
-        build_reduced_ebr_mapping,
-        load_reduced_ebr_table,
-    )
     from valleyscope.reports.analysis_outputs import write_analysis_outputs
 
     h5_path = tmp_path / "wf.h5"
@@ -426,6 +451,10 @@ def test_ready_export_bundle_maps_to_public_reduced_ebr_outputs_only(tmp_path):
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     raw["output"]["profile"] = "standard"
     raw["output"].pop("write_detailed_files", None)
+    raw["analysis"]["reduced_ebr"] = {
+        "enabled": True,
+        "table_file": str(table_path),
+    }
     config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
 
     table = {
@@ -525,6 +554,7 @@ def test_ready_export_bundle_maps_to_public_reduced_ebr_outputs_only(tmp_path):
             }],
         }
     )
+    attach_cprime_fixture_contract(export_bundle)
     _loaded_414 = load_reduced_ebr_table(table_path)
     complete_table_provenance(_loaded_414, 143, spinful=True)
     mapping = build_reduced_ebr_mapping(
@@ -701,7 +731,6 @@ def test_non_trusted_rows_excluded_from_irrep_records():
 
 def test_reduced_ebr_mapping_ignores_irrep_records():
     """reduced_ebr_mapping must remain compatible and ignore irrep_records_by_kpoint."""
-    from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
 
     table = {
         "schema_version": "1.0.0",
@@ -758,7 +787,6 @@ def test_generic_ebr_builder_e2e_p4_group_agnostic(tmp_path):
     from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
     from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
     from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
-    from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
     from valleyscope.analysis.irrep_runtime_reducer import (
         build_reduced_table_from_runtime_source,
     )
@@ -923,9 +951,6 @@ def test_irreptables_loader_e2e_p4_group_agnostic(tmp_path):
     from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
     from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
     from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
-    from valleyscope.analysis.reduced_ebr_mapping import (
-        build_reduced_ebr_mapping, load_reduced_ebr_table,
-    )
     from valleyscope.analysis.irreptables_runtime_table_builder import (
         build_reduced_table_from_irreptables,
     )
@@ -1445,7 +1470,6 @@ def test_export_bundle_preserves_multi_hsp_provenance():
 
 def test_reduced_ebr_solution_preserves_multi_hsp_provenance():
     """Reduced EBR solution carries per-kpoint provenance for both HSPs."""
-    from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
 
     table = {"schema_version": "1.0.0", "subspace_group_candidate": "P4",
              "expected_hsps": ["GammaM", "KM"],
@@ -1478,7 +1502,6 @@ def test_reduced_ebr_solution_preserves_multi_hsp_provenance():
 
 def test_reduced_ebr_excluded_preserves_provenance():
     """Excluded bundle with HSP mismatch retains provenance for audit."""
-    from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
 
     table = {"schema_version": "1.0.0", "subspace_group_candidate": "P4",
              "expected_hsps": ["GammaM"],
@@ -1536,9 +1559,6 @@ def test_public_e2e_record_chain_with_certificate_provenance():
     from valleyscope.analysis.ebr_input_candidates import build_ebr_input_candidates
     from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
     from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
-    from valleyscope.analysis.reduced_ebr_mapping import (
-        build_reduced_ebr_mapping,
-    )
     from valleyscope.analysis.database_ingestion_record import (
         build_database_ingestion_record,
     )
@@ -1636,8 +1656,11 @@ def test_public_e2e_record_chain_with_certificate_provenance():
     assert solution_cert["subspace_sg_number"] == 75
 
     # --- 4. Database ingestion record ---
-    summary = {"target_kpoints": ["GammaM"], "iband": [1],
-               "input": {"spinor_convention_verified": True}}
+    summary = cprime_summary_for_export(
+        bundle,
+        target_kpoints=["GammaM"],
+        iband=[1],
+    )
     record = build_database_ingestion_record(
         valley_summary=summary,
         valley_ebr_export_bundle=bundle,

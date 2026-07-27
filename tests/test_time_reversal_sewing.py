@@ -16,7 +16,6 @@ def _report(
     coefficients: np.ndarray,
     *,
     spinor: bool,
-    spinor_convention_verified: bool = True,
 ) -> dict[str, object]:
     n_bands = coefficients.shape[0]
     return build_time_reversal_sewing_report(
@@ -38,7 +37,6 @@ def _report(
         projector_selection_blockers=[],
         time_reversal_valley_mapping={"v": "v"},
         spinor=spinor,
-        spinor_convention_verified=spinor_convention_verified,
     )
 
 
@@ -69,6 +67,50 @@ def test_spinful_complete_kramers_pair_has_theta_square_minus_one():
     assert row["overlap_singular_values"] == [1.0, 1.0]
     assert row["theta_square_residual"] == 0.0
     assert row["blockers"] == []
+    assert report["evidence_role"] == "numerical_sewing_diagnostic"
+    assert report["cprime_scope_status"] == "not_evaluated"
+    assert report["trusted_for_tr_completed_representation"] is False
+
+
+def test_spinful_exchanged_valley_sewing_validates_declared_mapping():
+    coefficients = np.asarray([
+        [[1.0 + 0.0j], [0.0 + 0.0j]],
+        [[0.0 + 0.0j], [1.0 + 0.0j]],
+    ])
+    projectors = {
+        "K": np.diag([1.0, 0.0]),
+        "Kp": np.diag([0.0, 1.0]),
+    }
+    report = build_time_reversal_sewing_report(
+        kpoint_frac_by_name={"G": np.zeros(3)},
+        g_vectors_frac_by_kpoint={"G": np.zeros((1, 3), dtype=int)},
+        coefficients_by_kpoint={"G": coefficients},
+        band_indices_by_kpoint={"G": np.asarray([1, 2])},
+        valley_projectors_by_kpoint={"G": projectors},
+        valley_projector_provenance_by_kpoint={
+            "G": {
+                valley: {
+                    "workflow_path": "direct_qcut",
+                    "projector_kind": "fixed_center_seed",
+                }
+                for valley in projectors
+            },
+        },
+        projector_selection_blockers=[],
+        time_reversal_valley_mapping={"K": "Kp", "Kp": "K"},
+        spinor=True,
+    )
+
+    assert report["status"] == "validated"
+    assert report["time_reversal_valley_mapping"] == {
+        "K": "Kp",
+        "Kp": "K",
+    }
+    assert validate_time_reversal_sewing_report(
+        report,
+        valley_members=["K", "Kp"],
+        theta_square=-1,
+    )
 
 
 def test_spinful_window_cutting_kramers_pair_fails_closed():
@@ -83,24 +125,6 @@ def test_spinful_window_cutting_kramers_pair_fails_closed():
         blocker.startswith("time_reversal_target_subspace_not_closed:G")
         for blocker in report["blockers"]
     )
-
-
-def test_unverified_spinor_convention_blocks_numerical_sewing():
-    coefficients = np.asarray([
-        [[1.0 + 0.0j], [0.0 + 0.0j]],
-        [[0.0 + 0.0j], [1.0 + 0.0j]],
-    ])
-
-    report = _report(
-        coefficients,
-        spinor=True,
-        spinor_convention_verified=False,
-    )
-
-    assert report["status"] == "blocked"
-    assert "spinor_convention_unverified_for_time_reversal" in report[
-        "blockers"
-    ]
 
 
 def test_fractional_g_vectors_are_rejected_without_integer_coercion():
@@ -120,7 +144,6 @@ def test_fractional_g_vectors_are_rejected_without_integer_coercion():
         projector_selection_blockers=[],
         time_reversal_valley_mapping={"v": "v"},
         spinor=False,
-        spinor_convention_verified=True,
     )
 
     assert report["status"] == "blocked"
@@ -151,7 +174,6 @@ def test_nonbijective_kpoint_and_valley_sewing_evidence_fails_closed():
         projector_selection_blockers=[],
         time_reversal_valley_mapping={"v": "missing"},
         spinor=False,
-        spinor_convention_verified=True,
     )
 
     assert report["status"] == "blocked"
@@ -217,18 +239,12 @@ def test_serialized_sewing_certificate_rejects_tampering(tamper: str):
     )
 
 
-def test_spinful_serialized_certificate_rechecks_convention_and_kramers_rank():
+def test_spinful_serialized_certificate_rechecks_kramers_rank():
     coefficients = np.asarray([
         [[1.0 + 0.0j], [0.0 + 0.0j]],
         [[0.0 + 0.0j], [1.0 + 0.0j]],
     ])
     evidence = _report(coefficients, spinor=True)
-
-    unverified = deepcopy(evidence)
-    unverified["spinor_convention_verified"] = False
-    assert not validate_time_reversal_sewing_report(
-        unverified, valley_members=["v"], theta_square=-1
-    )
 
     odd_rank = deepcopy(evidence)
     row = odd_rank["rows"][0]
@@ -339,7 +355,6 @@ def test_required_trim_ignores_unrelated_failed_sample():
         projector_selection_blockers=[],
         time_reversal_valley_mapping={"v": "v"},
         spinor=False,
-        spinor_convention_verified=True,
     )
 
     assert report["status"] == "blocked"
@@ -375,7 +390,6 @@ def test_required_valley_orbit_ignores_unrelated_valley_covariance_failure():
         ],
         time_reversal_valley_mapping={"v1": "v1", "v2": "v2"},
         spinor=False,
-        spinor_convention_verified=True,
     )
 
     assert report["status"] == "blocked"
@@ -426,7 +440,6 @@ def _nontrim_pair_report() -> dict[str, object]:
         projector_selection_blockers=[],
         time_reversal_valley_mapping={"v": "v"},
         spinor=False,
-        spinor_convention_verified=True,
     )
 
 

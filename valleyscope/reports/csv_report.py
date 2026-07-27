@@ -45,9 +45,6 @@ def write_symmetry_eigenvalues_csv(path: str | Path, rows: list[dict[str, object
         "topology_input_ready",
         "topology_ready",
         "spinor_rotation_applied",
-        "spinor_convention_verified",
-        "spinor_convention",
-        "spinor_benchmark",
         "diagnostic_only",
         "D_valley_offdiag_norm",
         "D_block_leakage_norm",
@@ -55,8 +52,6 @@ def write_symmetry_eigenvalues_csv(path: str | Path, rows: list[dict[str, object
         "character_raw",
         "little_group_passed",
         "valley_preserving",
-        "nearest_root_of_unity",
-        "root_deviation",
         "reason",
         "valley_eta",
     ]

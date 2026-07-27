@@ -91,6 +91,58 @@ class StandardIrrepTable:
         return None
 
 
+def build_spinful_source_table_evidence(
+    table: StandardIrrepTable,
+    *,
+    required_operation_indices: list[int],
+) -> dict[str, object]:
+    """Serialize raw irreptables spin-operation evidence for one exact scope."""
+    if not bool(getattr(table, "spinor", False)):
+        raise ValueError("spinful source-table evidence requires spinor=True")
+    if (
+        not required_operation_indices
+        or any(
+            not isinstance(index, int) or isinstance(index, bool)
+            for index in required_operation_indices
+        )
+        or len(set(required_operation_indices)) != len(required_operation_indices)
+    ):
+        raise ValueError(
+            "required_operation_indices must be unique opaque integers"
+        )
+    operations: list[dict[str, object]] = []
+    for index in required_operation_indices:
+        operation = table.operation_by_index(index)
+        operations.append(
+            {
+                "table_index": operation.table_index,
+                "rotation_frac": np.asarray(
+                    operation.rotation_frac, dtype=int
+                ).tolist(),
+                "translation_frac": np.mod(
+                    np.asarray(operation.translation_frac, dtype=float), 1.0
+                ).tolist(),
+                "spin_rotation": [
+                    [
+                        [float(value.real), float(value.imag)]
+                        for value in row
+                    ]
+                    for row in np.asarray(
+                        operation.spin_rotation, dtype=np.complex128
+                    )
+                ],
+            }
+        )
+    return {
+        "schema_version": "1.0.0",
+        "provider": "irreptables",
+        "data_source": "irreptables.StandardIrrepTable",
+        "space_group_number": table.number,
+        "spinor": True,
+        "operations": operations,
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class OperationMappingReport:
     status: str
@@ -662,16 +714,6 @@ def _match_one_operation(
             continue
         if _translation_matches(translation, table_operation.translation_frac, tolerance):
             return table_operation.table_index
-    return None
-
-
-def _rotation_order(rotation: np.ndarray, max_order: int = 12) -> int | None:
-    matrix = np.asarray(rotation, dtype=int)
-    product = np.eye(3, dtype=int)
-    for order in range(1, max_order + 1):
-        product = product @ matrix
-        if np.array_equal(product, np.eye(3, dtype=int)):
-            return order
     return None
 
 

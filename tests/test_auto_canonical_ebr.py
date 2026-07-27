@@ -14,15 +14,42 @@ from valleyscope.analysis.irreptables_runtime_table_builder import (
 )
 from valleyscope.analysis.reduced_ebr_mapping import (
     _build_auto_table_for_bundle,
-    build_auto_reduced_ebr_mapping,
-    build_reduced_ebr_mapping,
+    build_auto_reduced_ebr_mapping as _build_auto_reduced_ebr_mapping,
+    build_reduced_ebr_mapping as _build_reduced_ebr_mapping,
     load_reduced_ebr_table,
 )
 from valleyscope.analysis.reduced_ebr_solver import classify_bundle
 from tests.helpers_io_workflow import write_fixture, write_config
 from tests.reduced_ebr_promo_helpers import (
     attach_real_certificate,
+    cprime_summary_for_export,
+    cprime_validation_context_for_export,
 )
+
+
+def _fixture_cprime_context(export):
+    context = cprime_validation_context_for_export(export)
+    return dict(context["_by_identity"])
+
+
+def build_reduced_ebr_mapping(**kwargs):
+    export = kwargs.get("ebr_export_bundle")
+    if isinstance(export, dict):
+        kwargs.setdefault(
+            "cprime_validation_context",
+            _fixture_cprime_context(export),
+        )
+    return _build_reduced_ebr_mapping(**kwargs)
+
+
+def build_auto_reduced_ebr_mapping(**kwargs):
+    export = kwargs.get("ebr_export_bundle")
+    if isinstance(export, dict):
+        kwargs.setdefault(
+            "cprime_validation_context",
+            _fixture_cprime_context(export),
+        )
+    return _build_auto_reduced_ebr_mapping(**kwargs)
 
 # ---------------------------------------------------------------------------
 # Shared compact factories
@@ -169,11 +196,11 @@ def test_auto_canonical_mapping_is_authoritative_for_ingestion():
         spinor=True,
     )
     record = build_database_ingestion_record(
-        valley_summary={
-            "target_kpoints": ["GammaM"],
-            "iband": [1],
-            "input": {},
-        },
+        valley_summary=cprime_summary_for_export(
+            export,
+            target_kpoints=["GammaM"],
+            iband=[1],
+        ),
         valley_ebr_export_bundle=export,
         valley_reduced_ebr_mapping=mapping,
     )

@@ -72,8 +72,6 @@ def _ready_character_rows(kpoint: str, *, operation_2_state_1_ready: bool = True
                     "basis": "valley_adapted",
                     "state_index": state_index,
                     "phase_2pi": 0.0,
-                    "nearest_root_of_unity": "1",
-                    "root_deviation": 0.0,
                     "rotation_ready": ready,
                     "D_valley_offdiag_norm": 0.0,
                     "eigenvalue_real": float(wrong_eigenvalue.real),
@@ -84,7 +82,7 @@ def _ready_character_rows(kpoint: str, *, operation_2_state_1_ready: bool = True
                     "valley_preserving": True,
                     "topology_input_ready": ready,
                     "diagnostic_only": not ready,
-                    "reason": "" if ready else "root deviation too large",
+                    "reason": "" if ready else "representation evidence blocked",
                 }
             )
     return rows

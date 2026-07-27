@@ -158,7 +158,6 @@ def build_time_reversal_sewing_report(
     projector_selection_blockers: Sequence[str],
     time_reversal_valley_mapping: Mapping[str, str],
     spinor: bool,
-    spinor_convention_verified: bool,
     tolerance: float = _TOL,
 ) -> dict[str, object]:
     """Build ``B_Theta(-k) B_Theta(k)^*`` and projector-covariance tests.
@@ -184,9 +183,6 @@ def build_time_reversal_sewing_report(
     )
     if any(set(mapping) != set(names) for mapping in required_maps):
         blockers.append("time_reversal_wavefunction_inventory_incomplete")
-    if spinor and not spinor_convention_verified:
-        blockers.append("spinor_convention_unverified_for_time_reversal")
-
     valley_names = set(time_reversal_valley_mapping)
     if (
         not valley_names
@@ -325,11 +321,16 @@ def build_time_reversal_sewing_report(
     blockers = _deduplicate(blockers)
     return {
         "status": "validated" if rows and not blockers else "blocked",
+        "evidence_role": "numerical_sewing_diagnostic",
+        "cprime_scope_status": "not_evaluated",
+        "trusted_for_tr_completed_representation": False,
         "theta_square": theta_square,
         "spin_convention": (
             "spinful_i_sigma_y_K" if spinor else "scalar_complex_conjugation"
         ),
-        "spinor_convention_verified": bool(spinor_convention_verified),
+        "time_reversal_valley_mapping": dict(
+            time_reversal_valley_mapping
+        ),
         "time_reversal_kpoint_mapping": kpoint_mapping,
         "sampled_kpoint_frac_by_name": {
             name: vector.tolist()
@@ -379,9 +380,20 @@ def validate_time_reversal_sewing_report(
         if theta_square == -1 else "scalar_complex_conjugation"
     ):
         return False
-    spinor_verified = evidence.get("spinor_convention_verified")
-    if not isinstance(spinor_verified, bool) or (
-        theta_square == -1 and not spinor_verified
+    valley_mapping = evidence.get("time_reversal_valley_mapping")
+    if (
+        not isinstance(valley_mapping, Mapping)
+        or any(
+            not isinstance(valley_mapping.get(valley), str)
+            or not valley_mapping.get(valley)
+            for valley in valley_members
+        )
+        or {valley_mapping[valley] for valley in valley_members}
+        != set(valley_members)
+        or any(
+            valley_mapping.get(valley_mapping[valley]) != valley
+            for valley in valley_members
+        )
     ):
         return False
     kpoint_mapping = evidence.get("time_reversal_kpoint_mapping")
@@ -546,11 +558,12 @@ def validate_time_reversal_sewing_report(
             return False
         for valley in valley_members:
             entry = covariance.get(valley)
+            partner_valley = valley_mapping[valley]
             if (
                 not isinstance(entry, Mapping)
                 or set(entry) != _PROJECTOR_COVARIANCE_KEYS
                 or entry.get("status") != "validated"
-                or entry.get("partner_valley") != valley
+                or entry.get("partner_valley") != partner_valley
                 or not _is_residual(entry.get("covariance_residual"))
             ):
                 return False
@@ -558,7 +571,7 @@ def validate_time_reversal_sewing_report(
                 required_projector_workflows, source, valley
             )
             expected_target_workflow = _expected_projector_workflow(
-                required_projector_workflows, target, valley
+                required_projector_workflows, target, partner_valley
             )
             if required_projector_workflows is not None and (
                 (source in required_projector_workflows
@@ -579,7 +592,7 @@ def validate_time_reversal_sewing_report(
                 required_projector_provenance, source, valley
             )
             expected_target_provenance = _expected_projector_provenance(
-                required_projector_provenance, target, valley
+                required_projector_provenance, target, partner_valley
             )
             if required_projector_provenance is not None and (
                 (source in required_projector_provenance
@@ -604,7 +617,7 @@ def validate_time_reversal_sewing_report(
                 "projector_covariance"
             )
             reverse_entry = (
-                reverse_covariance.get(valley)
+                reverse_covariance.get(partner_valley)
                 if isinstance(reverse_covariance, Mapping) else None
             )
             if not isinstance(reverse_entry, Mapping) or (

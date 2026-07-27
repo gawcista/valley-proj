@@ -3,7 +3,10 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from tests.reduced_ebr_promo_helpers import attach_real_certificate
+from tests.reduced_ebr_promo_helpers import (
+    attach_cprime_fixture_to_candidates,
+    attach_real_certificate,
+)
 import yaml
 
 from valleyscope.io.config import load_config
@@ -11,9 +14,26 @@ from valleyscope.workflows.analyze_hsp import analyze_hsp
 
 from valleyscope.reports.analysis_outputs import write_analysis_outputs
 from valleyscope.reports.summary_report import build_summary_payload, render_summary_text
-from valleyscope.analysis.reduced_ebr_mapping import load_reduced_ebr_table, build_reduced_ebr_mapping
+from valleyscope.analysis.reduced_ebr_mapping import (
+    load_reduced_ebr_table,
+    build_reduced_ebr_mapping as _build_reduced_ebr_mapping,
+)
 from tests.helpers_io_workflow import write_fixture, write_config
 from tests.helpers_io_workflow import _E2E_SAMPLE_TABLE, e2e_write_table
+from tests.reduced_ebr_promo_helpers import (
+    cprime_validation_context_for_export,
+)
+
+
+def build_reduced_ebr_mapping(**kwargs):
+    export = kwargs.get("ebr_export_bundle")
+    if isinstance(export, dict):
+        context = cprime_validation_context_for_export(export)
+        kwargs.setdefault(
+            "cprime_validation_context",
+            dict(context["_by_identity"]),
+        )
+    return _build_reduced_ebr_mapping(**kwargs)
 
 _DEBUG_ONLY_FILES = frozenset({
     "valley_subspace.json", "symmetry_report.json", "symmetry_eigenvalues.csv",
@@ -29,9 +49,10 @@ _DEBUG_ONLY_FILES = frozenset({
 # Reduced EBR classification E2E smoke tests
 # -----------------------------------------------------------------------
 
-def test_reduced_ebr_e2e_config_path_writes_mapping_and_embeds_in_summary(tmp_path):
-    """E2E: analyze_hsp with analysis.reduced_ebr.enabled writes mapping JSON
-    and embeds it in valley_summary.json."""
+def test_reduced_ebr_e2e_config_path_keeps_not_evaluated_mapping_in_summary(
+    tmp_path,
+):
+    """A mapping with no ready bundle is summary-only."""
     h5_path = tmp_path / "wf.h5"
     table_path = tmp_path / "table.json"
     out_dir = tmp_path / "out"
@@ -46,13 +67,13 @@ def test_reduced_ebr_e2e_config_path_writes_mapping_and_embeds_in_summary(tmp_pa
     outputs = analyze_hsp(config_path)
 
     mapping_path = out_dir / "valley_reduced_ebr_mapping.json"
-    assert mapping_path.exists(), "valley_reduced_ebr_mapping.json must be written"
-    mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
-    assert mapping["table_status"] == "loaded"
+    assert not mapping_path.exists()
 
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
-    assert "valley_reduced_ebr_mapping" in summary
-    assert summary["valley_reduced_ebr_mapping"] == mapping
+    mapping = summary["valley_reduced_ebr_mapping"]
+    assert mapping["status"] == "not_evaluated"
+    assert mapping["table_status"] == "loaded"
+    assert "valley_reduced_ebr_mapping_json" not in outputs
     summary_text = outputs["valley_summary_txt"].read_text(encoding="utf-8")
     assert "Reduced EBR mapping" in summary_text
     assert "table: loaded" in summary_text
@@ -86,15 +107,14 @@ def test_reduced_ebr_enabled_without_input_marks_not_provided(tmp_path):
 
     outputs = analyze_hsp(config_path)
 
-    mapping = json.loads(
-        outputs["valley_reduced_ebr_mapping_json"].read_text(encoding="utf-8")
-    )
+    assert "valley_reduced_ebr_mapping_json" not in outputs
+    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
+    mapping = summary["valley_reduced_ebr_mapping"]
     assert mapping["status"] == "not_evaluated"
     assert mapping["table_status"] == "not_applicable"
     # Auto-canonical is attempted; falls back gracefully when no bundles.
     assert mapping["reduced_ebr_input"]["source"] == "auto_canonical"
 
-    summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     assert summary["valley_reduced_ebr_mapping"] == mapping
 
 def test_summary_text_surfaces_atomic_nonnegative_outside_classification():
@@ -210,10 +230,6 @@ def test_summary_text_truncated_search_surfaced():
 
 def test_reduced_ebr_classifier_payload_written_consistently_to_public_outputs(tmp_path):
     """Classifier output is written consistently to mapping JSON and summaries."""
-    from valleyscope.analysis.reduced_ebr_mapping import (
-        build_reduced_ebr_mapping,
-        load_reduced_ebr_table,
-    )
     from valleyscope.reports.analysis_outputs import write_analysis_outputs
 
     h5_path = tmp_path / "wf.h5"
@@ -225,6 +241,10 @@ def test_reduced_ebr_classifier_payload_written_consistently_to_public_outputs(t
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     raw["output"]["profile"] = "standard"
     raw["output"].pop("write_detailed_files", None)
+    raw["analysis"]["reduced_ebr"] = {
+        "enabled": True,
+        "table_file": str(table_path),
+    }
     config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
 
     table = {
@@ -412,6 +432,7 @@ def test_provenance_survives_through_output_writer_to_export_bundle(tmp_path):
             ),
             "source_table_spinor": True,
         })
+    attach_cprime_fixture_to_candidates(candidates)
 
     instances = build_ebr_problem_instances(
         ebr_input_candidates=candidates,

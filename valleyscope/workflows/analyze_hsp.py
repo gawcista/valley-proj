@@ -16,6 +16,9 @@ from valleyscope.analysis.hsp_star_conjugation import (
 from valleyscope.analysis.subspace_representation_quality import (
     build_subspace_representation_quality_report,
 )
+from valleyscope.analysis.scoped_representation_evidence import (
+    build_scoped_representation_evidence,
+)
 from valleyscope.analysis.irrep_workflow_decision import (
     build_irrep_workflow_decisions,
 )
@@ -44,7 +47,10 @@ from valleyscope.analysis.time_reversal_sewing import (
     build_time_reversal_sewing_report,
     select_trusted_valley_projectors,
 )
-from valleyscope.irreps.tables import load_standard_irrep_table
+from valleyscope.irreps.tables import (
+    build_spinful_source_table_evidence,
+    load_standard_irrep_table,
+)
 from valleyscope.irreps.ebr_data_adapter import load_ebr_source_data
 from valleyscope.irreps.time_reversal_ebr import (
     validate_grey_group_time_reversal_source,
@@ -98,6 +104,9 @@ from valleyscope.geometry.lattice import (
 )
 from valleyscope.io.config import AppConfig, load_config
 from valleyscope.io.h5_reader import read_wavefunction_h5
+from valleyscope.io.spinor_source_basis import (
+    build_spinor_source_basis_certificate,
+)
 from valleyscope.projection.qcut_scan import (
     qcut_from_min_sector_distance,
     qcut_from_moire_shell,
@@ -124,7 +133,9 @@ from valleyscope.subspace.valley_basis import (
     summarize_valley_projector_quality,
 )
 from valleyscope.symmetry.operation_classifier import classify_operation
-from valleyscope.symmetry.rotation_selection import mark_rotation_generators, resolve_rotation_order
+from valleyscope.symmetry.double_space_group_lift import (
+    build_double_space_group_lift_certificate,
+)
 from valleyscope.symmetry.spglib_finder import find_symmetry_operations
 from valleyscope.symmetry.valley_preservation import map_valley_sectors
 
@@ -251,6 +262,9 @@ def _resolve_generic_irrep_hsp_label_with_provenance(
 def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     config = load_config(config_path)
     wavefunctions = read_wavefunction_h5(config.input.wavefunction_h5)
+    source_basis_record = build_spinor_source_basis_certificate(
+        wavefunctions
+    ).to_record()
     output_dir = config.output.directory
     prepare_analysis_output_directory(config)
     monolayer_recip = config.default_monolayer_reciprocal()
@@ -439,7 +453,6 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                         q_cart=q_cart,
                         coefficients=coefficients,
                         symmetry_payload=symmetry_payload,
-                        spinor_convention_verified=config.spinor.convention_verified,
                     )
                 )
             symmetry_rows.extend(
@@ -451,11 +464,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     symmetry_payload=symmetry_payload,
                     basis_payload=basis_transforms.get(kpoint_name),
                     representation_payload=symmetry_representation_payload,
-                    spinor_convention_verified=config.spinor.convention_verified,
-                    spinor_convention=config.spinor.convention,
-                    spinor_benchmark=config.spinor.benchmark,
                     unitarity_tol=config.rotation.unitarity_tol,
-                    root_deviation_tol=config.rotation.root_deviation_tol,
                     d_valley_offdiag_tol=config.rotation.D_valley_offdiag_tol,
                     valley_names=valley_names,
                 )
@@ -573,8 +582,6 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             symmetry_adapted_valley_report=symmetry_adapted_valley_report,
             symmetry_rows=symmetry_rows,
             valley_names=valley_names,
-            spinor_convention_verified=config.spinor.convention_verified,
-            spinor_wavefunction=bool(symmetry_payload.get("spinor_wavefunction", False)),
         )
     # --- Canonical per-valley irrep matching preflight ---
     # Builds one source-payload context per (kpoint, valley) from the
@@ -590,6 +597,13 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     source_table_by_valley: dict[str, object] = {}
     source_ebr_data_by_valley: dict[str, dict[str, object]] = {}
     source_certificate_by_valley: dict[str, dict[str, object]] = {}
+    double_space_group_lift_certificates: dict[
+        str, dict[str, dict[str, object]]
+    ] = {}
+    scoped_representation_evidence: dict[
+        str, dict[str, dict[str, object]]
+    ] = {}
+    cprime_validation_context: dict[str, object] = {}
     ebr_source_basis_cache: dict[tuple[int, bool], dict[str, Any]] = {}
 
     # --- Canonical subgroup identity from per-valley standard matches ---
@@ -599,8 +613,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     per_valley_matches = subgroup_report.get(
         "per_valley_standard_matches", {},
     ) if isinstance(subgroup_report, dict) else {}
-    # Table spinfulness follows the wavefunction, not convention_verified.
-    # convention_verified is a readiness gate, not a table selection criterion.
+    # Table spinfulness follows the extracted wavefunction component layout.
     spinor_wf = bool(symmetry_payload.get("spinor_wavefunction", False))
     kpoint_frac = symmetry_payload.get("kpoint_frac_by_name", {})
 
@@ -926,6 +939,123 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     and classification.get("representation_transport_status")
                     == "validated"
                 ):
+                    (
+                        lift_record,
+                        scoped_record,
+                        scoped_validation_inputs,
+                    ) = _build_local_cprime_records(
+                        source_basis_record=source_basis_record,
+                        table=table,
+                        standard_setting_certificate=certificate,
+                        source_operation_map=dict(
+                            payload["source_operation_map"]
+                        ),
+                        required_operation_ids=list(vp_ids),
+                        symmetry_payload=symmetry_payload,
+                        raw_operation_payloads=(
+                            raw_representations_by_kpoint.get(kp_name, {})
+                        ),
+                        target_coefficients=coefficients_by_kpoint[kp_name],
+                        seed_projectors=(
+                            valley_matrices_by_kpoint.get(kp_name, {})
+                        ),
+                        symmetry_adapted_projectors=(
+                            symmetry_adapted_projectors_by_kpoint.get(
+                                kp_name, {}
+                            )
+                        ),
+                        workflow_decision=(
+                            irrep_workflow_decisions.get("by_kpoint", {})
+                            .get(kp_name, {})
+                            .get(v_name, {})
+                            if isinstance(irrep_workflow_decisions, dict)
+                            else {}
+                        ),
+                        kpoint_label=kp_name,
+                        kpoint_frac=np.asarray(k_frac_raw, dtype=float),
+                        valley=v_name,
+                        config=config,
+                    )
+                    double_space_group_lift_certificates.setdefault(
+                        kp_name, {}
+                    )[v_name] = lift_record
+                    if scoped_record is not None:
+                        scoped_representation_evidence.setdefault(
+                            kp_name, {}
+                        )[v_name] = scoped_record
+                        evidence_identity = scoped_record.get(
+                            "evidence_identity"
+                        )
+                        if (
+                            isinstance(evidence_identity, str)
+                            and isinstance(scoped_validation_inputs, dict)
+                        ):
+                            cprime_validation_context[evidence_identity] = {
+                                "record": scoped_record,
+                                "raw_inputs": scoped_validation_inputs,
+                            }
+                    cprime_passed = bool(
+                        lift_record.get("status") == "passed"
+                        and isinstance(scoped_record, dict)
+                        and scoped_record.get("status") == "passed"
+                    )
+                    if cprime_passed:
+                        _promote_local_cprime_readiness(
+                            irrep_workflow_decisions=(
+                                irrep_workflow_decisions
+                            ),
+                            symmetry_rows=symmetry_rows,
+                            symmetry_adapted_valley_report=(
+                                symmetry_adapted_valley_report
+                            ),
+                            kpoint=kp_name,
+                            valley=v_name,
+                            required_operation_ids=list(vp_ids),
+                            scoped_record=scoped_record,
+                            lift_record=lift_record,
+                            source_basis_record=source_basis_record,
+                        )
+                        payload_provenance["cprime"] = {
+                            "spinor_source_basis_certificate_identity": (
+                                source_basis_record.get(
+                                    "certificate_identity"
+                                )
+                            ),
+                            "double_space_group_lift_certificate_identity": (
+                                lift_record.get("certificate_identity")
+                            ),
+                            "scoped_representation_evidence_identity": (
+                                scoped_record.get("evidence_identity")
+                            ),
+                        }
+                    else:
+                        generic_source_blocked_rows.append(
+                            {
+                                "kpoint": kp_name,
+                                "valley": v_name,
+                                "reason": (
+                                    "C-prime representation evidence blocked"
+                                ),
+                                "double_space_group_lift_status": (
+                                    lift_record.get("status")
+                                ),
+                                "double_space_group_lift_blockers": (
+                                    lift_record.get("reason_codes", [])
+                                ),
+                                "scoped_representation_status": (
+                                    scoped_record.get("status")
+                                    if isinstance(scoped_record, dict)
+                                    else "not_evaluated"
+                                ),
+                                "scoped_representation_blockers": (
+                                    scoped_record.get("reason_codes", [])
+                                    if isinstance(scoped_record, dict)
+                                    else [
+                                        "scoped_representation_inputs_missing"
+                                    ]
+                                ),
+                            }
+                        )
                     src_chars.setdefault(kp_name, {})[v_name] = (
                         payload["source_irrep_characters"]
                     )
@@ -1073,7 +1203,6 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 "time_reversal_valley_mapping", {}
             ),
             spinor=spinor_wf,
-            spinor_convention_verified=config.spinor.convention_verified,
         )
         source_orbits_by_valley: dict[str, dict[str, object]] = {}
         grey_source_by_valley: dict[str, dict[str, object]] = {}
@@ -1137,11 +1266,23 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         projected_hsp_coverage["time_reversal"] = (
             time_reversal_orbit_report
         )
-    ebr_problem_instances = build_ebr_problem_instances(
+    local_ebr_problem_instances = build_ebr_problem_instances(
         ebr_input_candidates=ebr_input_candidates,
         projected_hsp_coverage=projected_hsp_coverage,
-        time_reversal_orbit_report=time_reversal_orbit_report,
+        time_reversal_orbit_report=None,
     )
+    if time_reversal_orbit_report is not None:
+        tr_ebr_problem_instances = build_ebr_problem_instances(
+            ebr_input_candidates=ebr_input_candidates,
+            projected_hsp_coverage=projected_hsp_coverage,
+            time_reversal_orbit_report=time_reversal_orbit_report,
+        )
+        ebr_problem_instances = _merge_ebr_problem_instance_reports(
+            local_ebr_problem_instances,
+            tr_ebr_problem_instances,
+        )
+    else:
+        ebr_problem_instances = local_ebr_problem_instances
     ebr_export_bundle = build_ebr_export_bundle(
         ebr_problem_instances=ebr_problem_instances,
     )
@@ -1175,6 +1316,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 ebr_export_bundle=ebr_export_bundle,
                 spinor=spinor_wf,
                 max_coefficient=config.reduced_ebr.max_coefficient,
+                cprime_validation_context=cprime_validation_context,
             )
         if reduced_ebr_mapping is None:
             reduced_ebr_mapping = build_reduced_ebr_mapping(
@@ -1182,6 +1324,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 table=table,
                 max_coefficient=config.reduced_ebr.max_coefficient,
                 reduced_ebr_input=reduced_ebr_input,
+                cprime_validation_context=cprime_validation_context,
             )
 
 
@@ -1253,8 +1396,413 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         valley_projected_representation=valley_projected_representation,
         folded_center_payload=folded_center_payload,
         sampled_k_coverage=sampled_k_coverage,
+        spinor_source_basis_certificate=source_basis_record,
+        double_space_group_lift_certificates=(
+            double_space_group_lift_certificates
+        ),
+        scoped_representation_evidence=scoped_representation_evidence,
     )
     return outputs
+
+
+def _merge_ebr_problem_instance_reports(
+    local_report: dict[str, object],
+    time_reversal_report: dict[str, object],
+) -> dict[str, object]:
+    """Keep local unitary problems independent of TR-completed problems."""
+    instances: list[dict[str, object]] = []
+    for prefix, report in (
+        ("local", local_report),
+        ("tr", time_reversal_report),
+    ):
+        raw_instances = report.get("instances", [])
+        if not isinstance(raw_instances, list):
+            continue
+        for index, raw_instance in enumerate(raw_instances, start=1):
+            if not isinstance(raw_instance, dict):
+                continue
+            instance = dict(raw_instance)
+            instance["instance_id"] = (
+                f"{prefix}_{raw_instance.get('instance_id', index)}"
+            )
+            instances.append(instance)
+    ready = sum(
+        instance.get("canonical_hsp_vector_ready") is True
+        for instance in instances
+    )
+    complete = sum(
+        instance.get("canonical_hsp_vector_complete") is True
+        for instance in instances
+    )
+    if not instances:
+        status = "no_canonical_hsp_vectors"
+    elif ready == len(instances):
+        status = "canonical_hsp_vectors_ready"
+    elif ready:
+        status = "partial_canonical_hsp_vectors_ready"
+    elif complete == len(instances):
+        status = "canonical_hsp_vectors_complete_but_untrusted"
+    elif complete:
+        status = "canonical_hsp_vectors_blocked"
+    else:
+        status = "incomplete_canonical_hsp_vectors"
+    return {
+        "status": status,
+        "instance_count": len(instances),
+        "ready_instance_count": ready,
+        "structurally_complete_instance_count": complete,
+        "structurally_complete_blocked_count": complete - ready,
+        "incomplete_instance_count": len(instances) - complete,
+        "interpretation": (
+            "Local unitary valley problems remain independent of optional "
+            "TR-completed and joint valley-orbit problems."
+        ),
+        "instances": instances,
+    }
+
+
+def _build_local_cprime_records(
+    *,
+    source_basis_record: dict[str, object],
+    table,
+    standard_setting_certificate: dict[str, object],
+    source_operation_map: dict[object, int],
+    required_operation_ids: list[object],
+    symmetry_payload: dict[str, object],
+    raw_operation_payloads: dict[object, dict[str, object]],
+    target_coefficients: np.ndarray,
+    seed_projectors: dict[str, np.ndarray],
+    symmetry_adapted_projectors: dict[str, np.ndarray],
+    workflow_decision: dict[str, object],
+    kpoint_label: str,
+    kpoint_frac: np.ndarray,
+    valley: str,
+    config: AppConfig,
+) -> tuple[
+    dict[str, object],
+    dict[str, object] | None,
+    dict[str, object] | None,
+]:
+    """Build the lift and local ``G_k^(a)`` evidence from raw producer data."""
+    operation_ids = [
+        int(operation_id)
+        for operation_id in required_operation_ids
+        if isinstance(operation_id, int)
+        and not isinstance(operation_id, bool)
+    ]
+    detected_by_id = {
+        operation.get("operation_id"): operation
+        for operation in symmetry_payload.get("detected_operations", [])
+        if isinstance(operation, dict)
+    }
+    lift_operation_map = _group_wide_standard_operation_map(
+        standard_setting_certificate,
+        table,
+    )
+    if not lift_operation_map:
+        lift_operation_map = {
+            int(operation_id): int(table_index)
+            for operation_id, table_index in source_operation_map.items()
+            if isinstance(operation_id, int)
+            and not isinstance(operation_id, bool)
+            and isinstance(table_index, int)
+            and not isinstance(table_index, bool)
+        }
+    lift_operation_ids = sorted(lift_operation_map)
+    operations = [
+        detected_by_id[operation_id]
+        for operation_id in lift_operation_ids
+        if operation_id in detected_by_id
+    ]
+    mapped_indices = [
+        lift_operation_map[operation_id]
+        for operation_id in lift_operation_ids
+        if operation_id in lift_operation_map
+    ]
+    try:
+        source_table_evidence = build_spinful_source_table_evidence(
+            table,
+            required_operation_indices=mapped_indices,
+        )
+    except (KeyError, TypeError, ValueError):
+        source_table_evidence = {
+            "schema_version": "1.0.0",
+            "provider": "irreptables",
+            "data_source": "irreptables.StandardIrrepTable",
+            "space_group_number": getattr(table, "number", None),
+            "spinor": bool(getattr(table, "spinor", False)),
+            "operations": [],
+        }
+    transform = standard_setting_certificate.get(
+        "parent_to_standard_direct_transform"
+    )
+    origin = standard_setting_certificate.get(
+        "origin_shift_fractional", [0.0, 0.0, 0.0]
+    )
+    standard_setting_evidence = {
+        "schema_version": "1.0.0",
+        "parent_to_standard_direct_transform": transform,
+        "origin_shift_fractional": origin,
+        "parent_to_standard_operation_map": {
+            str(operation_id): lift_operation_map[operation_id]
+            for operation_id in lift_operation_ids
+            if operation_id in lift_operation_map
+        },
+    }
+    direct_lattice = np.asarray(
+        symmetry_payload.get("lattice_direct_cart", np.eye(3)), dtype=float
+    )
+    lift = build_double_space_group_lift_certificate(
+        source_basis_record,
+        operations,
+        source_table_identity=source_table_evidence,
+        standard_setting_identity=standard_setting_evidence,
+        direct_lattice_cart=direct_lattice,
+    )
+    lift_record = lift.to_record()
+    if lift_record.get("status") != "passed":
+        return lift_record, None, None
+
+    workflow_path = str(workflow_decision.get("workflow_path", ""))
+    if workflow_path == "direct_qcut":
+        projector = seed_projectors.get(valley)
+    elif workflow_path == "symmetry_adapted":
+        projector = symmetry_adapted_projectors.get(valley)
+    else:
+        projector = None
+    basis = _projector_range_basis(projector)
+    if projector is None or basis is None:
+        return lift_record, None, None
+
+    representations: dict[int, np.ndarray] = {}
+    plane_wave_evidence: dict[int, dict[str, object]] = {}
+    valley_mappings: dict[int, dict[str, str]] = {}
+    for operation_id in operation_ids:
+        raw = raw_operation_payloads.get(operation_id)
+        if not isinstance(raw, dict) or raw.get("D_raw") is None:
+            continue
+        representations[operation_id] = np.asarray(
+            raw["D_raw"], dtype=np.complex128
+        )
+        plane_wave_evidence[operation_id] = {
+            "mapping_miss_count": int(raw.get("mapping_miss_count", 0)),
+            "norm_preservation_residual": abs(
+                float(raw.get("norm_preservation_residual", 0.0))
+            ),
+        }
+        mapping = raw.get("sector_mapping", {})
+        if isinstance(mapping, dict):
+            valley_mappings[operation_id] = {
+                str(key): str(value)
+                for key, value in mapping.items()
+                if value is not None
+            }
+
+    representation_tol = float(
+        config.symmetry_adapted_valley.representation_unitarity_fail_tol
+    )
+    projector_tol = (
+        float(config.symmetry_adapted_valley.projector_symmetry_warn_tol)
+        if workflow_path == "direct_qcut"
+        else float(
+            config.symmetry_adapted_valley.projector_symmetry_fail_tol
+        )
+    )
+    lift_inputs = {
+        "expected_operations": operations,
+        "source_table_identity": source_table_evidence,
+        "standard_setting_identity": standard_setting_evidence,
+        "direct_lattice_cart": direct_lattice,
+    }
+    scoped_inputs: dict[str, object] = {
+        "source_basis_record": source_basis_record,
+        "lift_record": lift_record,
+        "lift_validation_inputs": lift_inputs,
+        "extracted_wavefunction_payload_identity": str(
+            source_basis_record.get(
+                "extracted_wavefunction_payload_identity", ""
+            )
+        ),
+        "kpoint_label": kpoint_label,
+        "kpoint_frac": kpoint_frac,
+        "scope_kind": "local_irrep",
+        "source_valleys": (valley,),
+        "valley_orbit": (valley,),
+        "required_operation_ids": operation_ids,
+        "representations": representations,
+        "plane_wave_evidence": plane_wave_evidence,
+        "target_coefficients": target_coefficients,
+        "projectors": {
+            valley: np.asarray(projector, dtype=np.complex128)
+        },
+        "valley_bases": {valley: basis},
+        "valley_mappings": valley_mappings,
+        "numerical_tolerance": representation_tol,
+        "gram_tolerance": 1.0e-6,
+        "target_subspace_tolerance": representation_tol,
+        "projector_covariance_tolerance": projector_tol,
+        "valley_block_tolerance": float(
+            config.rotation.D_valley_offdiag_tol
+        ),
+    }
+    scoped = build_scoped_representation_evidence(**scoped_inputs)
+    return lift_record, scoped.to_record(), scoped_inputs
+
+
+def _group_wide_standard_operation_map(
+    certificate: dict[str, object],
+    table,
+) -> dict[int, int]:
+    """Map the full parent group to opaque source-table operation indices."""
+    primitive = certificate.get("affine_operation_map")
+    standard_indices: dict[int, int]
+    if isinstance(primitive, dict):
+        standard_indices = {}
+        for raw_parent, raw_standard in primitive.items():
+            try:
+                parent = int(raw_parent)
+            except (TypeError, ValueError):
+                return {}
+            if (
+                isinstance(raw_standard, bool)
+                or not isinstance(raw_standard, int)
+            ):
+                return {}
+            standard_indices[parent] = int(raw_standard)
+    else:
+        centered = certificate.get("centered_affine_operation_map")
+        if not isinstance(centered, list):
+            return {}
+        selected: dict[int, tuple[int, int]] = {}
+        for row in centered:
+            if not isinstance(row, dict):
+                return {}
+            parent = row.get("parent_operation_id")
+            coset = row.get("centering_coset_index")
+            standard = row.get("standard_operation_index")
+            if not all(
+                isinstance(value, int) and not isinstance(value, bool)
+                for value in (parent, coset, standard)
+            ):
+                return {}
+            current = selected.get(parent)
+            candidate = (coset, standard)
+            if current is None or candidate < current:
+                selected[parent] = candidate
+        standard_indices = {
+            parent: candidate[1]
+            for parent, candidate in selected.items()
+        }
+
+    operations = getattr(table, "operations", None)
+    if not isinstance(operations, tuple) or not operations:
+        return {}
+    result: dict[int, int] = {}
+    for parent, standard_index in standard_indices.items():
+        if standard_index < 0 or standard_index >= len(operations):
+            return {}
+        table_index = getattr(
+            operations[standard_index], "table_index", None
+        )
+        if not isinstance(table_index, int) or isinstance(table_index, bool):
+            return {}
+        result[parent] = table_index
+    if len(set(result.values())) != len(result):
+        return {}
+    return result
+
+
+def _projector_range_basis(
+    projector: np.ndarray | None,
+) -> np.ndarray | None:
+    if projector is None:
+        return None
+    matrix = np.asarray(projector, dtype=np.complex128)
+    if (
+        matrix.ndim != 2
+        or matrix.shape[0] != matrix.shape[1]
+        or matrix.shape[0] < 1
+    ):
+        return None
+    hermitian = 0.5 * (matrix + matrix.conj().T)
+    eigenvalues, eigenvectors = np.linalg.eigh(hermitian)
+    selected = eigenvalues > 0.5
+    if not np.any(selected):
+        return None
+    return eigenvectors[:, selected]
+
+
+def _promote_local_cprime_readiness(
+    *,
+    irrep_workflow_decisions: dict[str, object] | None,
+    symmetry_rows: list[dict[str, object]],
+    symmetry_adapted_valley_report: dict[str, object] | None,
+    kpoint: str,
+    valley: str,
+    required_operation_ids: list[object],
+    scoped_record: dict[str, object],
+    lift_record: dict[str, object],
+    source_basis_record: dict[str, object],
+) -> None:
+    """Attach producer-owned identity links and promote only the exact scope."""
+    identity_links = {
+        "spinor_source_basis_certificate_identity": (
+            source_basis_record.get("certificate_identity")
+        ),
+        "double_space_group_lift_certificate_identity": (
+            lift_record.get("certificate_identity")
+        ),
+        "scoped_representation_evidence_identity": (
+            scoped_record.get("evidence_identity")
+        ),
+    }
+    if isinstance(irrep_workflow_decisions, dict):
+        decision = (
+            irrep_workflow_decisions.get("by_kpoint", {})
+            .get(kpoint, {})
+            .get(valley)
+        )
+        if isinstance(decision, dict):
+            decision["readiness_level"] = "trusted"
+            decision["reason"] = (
+                "exact local HSP little-group and valley-preserving subgroup "
+                "scope passed C-prime representation evidence"
+            )
+            decision["cprime"] = dict(identity_links)
+
+    required = set(required_operation_ids)
+    for row in symmetry_rows:
+        if (
+            str(row.get("kpoint")) == str(kpoint)
+            and str(row.get("target_valley")) == str(valley)
+            and row.get("operation_id") in required
+        ):
+            row["topology_input_ready"] = True
+            row["topology_ready"] = True
+            row["local_irrep_ready"] = True
+            row["diagnostic_only"] = False
+            row["reason"] = ""
+            row.update(identity_links)
+
+    if not isinstance(symmetry_adapted_valley_report, dict):
+        return
+    kp_data = symmetry_adapted_valley_report.get("by_kpoint", {}).get(
+        kpoint, {}
+    )
+    if not isinstance(kp_data, dict):
+        return
+    for subspace in kp_data.get("valley_preserving_subspaces", []):
+        if not isinstance(subspace, dict):
+            continue
+        orbit = subspace.get("orbit", [])
+        if not orbit or str(orbit[0]) != str(valley):
+            continue
+        subspace["irrep_matching_input_ready"] = True
+        subspace["irrep_matching_input_status"] = "ready"
+        subspace["irrep_matching_input_reason"] = (
+            "passed scoped_representation_evidence for exact local scope"
+        )
+        subspace["cprime"] = dict(identity_links)
 
 
 def _add_valley_subspace_diagnostic(
@@ -1423,15 +1971,7 @@ def _prepare_symmetry_payload(config: AppConfig, monolayer_recip: np.ndarray) ->
         "angle_tolerance": symmetry.tolerance.angle_tolerance,
         "symprec_scan_summary": [],
         "detected_operations": [],
-        "candidate_rotations": [],
-        "filters": {
-            "proper_rotations_only": symmetry.filters.proper_rotations_only,
-            "allowed_orders": symmetry.filters.allowed_orders,
-            "rotation_order": symmetry.filters.rotation_order,
-        },
         "symmetry_eigenvalue_enabled": False,
-        "requested_rotation_order": symmetry.filters.rotation_order,
-        "resolved_rotation_order": None,
         "little_group_check": {"required": True, "status": "not_run"},
         "valley_preservation_check": {"required": True, "status": "not_run"},
     }
@@ -1458,17 +1998,10 @@ def _prepare_symmetry_payload(config: AppConfig, monolayer_recip: np.ndarray) ->
         }
     dataset = find_symmetry_operations(cell, symmetry.tolerance.symprec, symmetry.tolerance.angle_tolerance)
     lattice = np.asarray(cell[0], dtype=float)
-    candidate_orders = _candidate_rotation_orders(dataset.rotations)
-    resolved_rotation_order = resolve_rotation_order(
-        symmetry.filters.rotation_order,
-        international=dataset.international,
-        candidate_orders=candidate_orders,
-    )
-    effective_allowed_orders = [] if resolved_rotation_order is None else [resolved_rotation_order]
     inv_direct_T = np.linalg.inv(lattice.T)
     operations = []
     for op_id, (rotation, translation) in enumerate(zip(dataset.rotations, dataset.translations)):
-        info = classify_operation(rotation, translation, allowed_orders=effective_allowed_orders)
+        info = classify_operation(rotation, translation)
         rotation_cart = cart_rotation_from_fractional(rotation, lattice, inv_direct_T=inv_direct_T)
         translation_cart = cart_translation_from_fractional(translation, lattice)
         valley_mapping = map_valley_sectors(
@@ -1489,32 +2022,22 @@ def _prepare_symmetry_payload(config: AppConfig, monolayer_recip: np.ndarray) ->
                 "det": info.det,
                 "order": info.order,
                 "kind": info.kind,
-                "candidate_rotation": info.allowed_for_rotation_workflow,
                 "sector_mapping": valley_mapping.sector_mapping,
                 "preserved": valley_mapping.preserved,
                 "center_mapping": valley_mapping.center_mapping,
             }
         )
-    mark_rotation_generators(operations)
     symprec_scan_summary = _symprec_scan_summary(config, cell)
-    candidate_rotations = [
-        operation["operation_id"]
-        for operation in operations
-        if operation["candidate_rotation"]
-    ]
     return {
         **base_payload,
         "status": "ok",
         "structure_file": str(structure_file),
         "spacegroup_number": dataset.spacegroup_number,
         "international": dataset.international,
-        "symmetry_eigenvalue_enabled": resolved_rotation_order is not None,
-        "requested_rotation_order": symmetry.filters.rotation_order,
-        "resolved_rotation_order": resolved_rotation_order,
+        "symmetry_eigenvalue_enabled": True,
         "symprec_scan_summary": symprec_scan_summary,
         "lattice_direct_cart": lattice,
         "detected_operation_count": len(operations),
-        "candidate_rotations": candidate_rotations,
         "detected_operations": operations,
         "little_group_check": {"required": True, "status": "evaluated_per_kpoint"},
         "valley_preservation_check": {"required": True, "status": "completed"},
@@ -1530,38 +2053,20 @@ def _symprec_scan_summary(config: AppConfig, cell: tuple) -> list[dict[str, obje
                 symprec,
                 config.symmetry.tolerance.angle_tolerance,
             )
-            candidate_count = 0
             order_counts: dict[str, int] = {}
-            detected_orders = _candidate_rotation_orders(dataset.rotations)
-            resolved_rotation_order = resolve_rotation_order(
-                config.symmetry.filters.rotation_order,
-                international=dataset.international,
-                candidate_orders=detected_orders,
-            )
-            effective_allowed_orders = [] if resolved_rotation_order is None else [resolved_rotation_order]
             for rotation, translation in zip(dataset.rotations, dataset.translations):
-                info = classify_operation(
-                    rotation,
-                    translation,
-                    allowed_orders=effective_allowed_orders,
-                )
+                info = classify_operation(rotation, translation)
                 order_key = "none" if info.order is None else str(info.order)
                 order_counts[order_key] = order_counts.get(order_key, 0) + 1
-                if info.allowed_for_rotation_workflow:
-                    candidate_count += 1
             summary.append(
                 {
                     "symprec": float(symprec),
                     "status": "ok",
                     "spacegroup_number": dataset.spacegroup_number,
                     "international": dataset.international,
-                    "requested_rotation_order": config.symmetry.filters.rotation_order,
-                    "resolved_rotation_order": resolved_rotation_order,
                     "n_operations": len(dataset.rotations),
-                    "n_candidate_rotations": candidate_count,
                     "order_counts": order_counts,
                     "detected_operation_count": len(dataset.rotations),
-                    "candidate_rotation_count": candidate_count,
                 }
             )
         except Exception as exc:
@@ -1573,16 +2078,6 @@ def _symprec_scan_summary(config: AppConfig, cell: tuple) -> list[dict[str, obje
                 }
             )
     return summary
-
-
-def _candidate_rotation_orders(rotations: list[np.ndarray]) -> list[int]:
-    orders: list[int] = []
-    for rotation in rotations:
-        info = classify_operation(rotation, np.zeros(3), allowed_orders=[2, 3, 4, 6])
-        if info.det == 1 and info.order in {2, 3, 4, 6}:
-            orders.append(int(info.order))
-    return orders
-
 
 def _build_weight_entry(
     *,
@@ -1882,9 +2377,10 @@ def _build_symmetry_adapted_valley_report(
                 rank=orbit_inferred_rank,
                 rank_method="gap",
                 unitarity_tol=float(config.symmetry_adapted_valley.representation_unitarity_fail_tol),
-                modulus_tol=float(config.rotation.root_deviation_tol),
+                modulus_tol=float(
+                    config.symmetry_adapted_valley.representation_unitarity_fail_tol
+                ),
                 spinor_wavefunction=bool(symmetry_payload.get("spinor_wavefunction", False)),
-                spinor_convention_verified=bool(config.spinor.convention_verified),
                 operation_orders=operation_orders_by_id,
                 seed_overlap_warn_tol=float(config.symmetry_adapted_valley.seed_overlap_warn_tol),
                 seed_overlap_fail_tol=float(config.symmetry_adapted_valley.seed_overlap_fail_tol),
@@ -1902,9 +2398,10 @@ def _build_symmetry_adapted_valley_report(
             valley_mappings_dict=valley_mappings_dict,
             valley_names=valley_names,
             unitarity_tol=float(config.symmetry_adapted_valley.representation_unitarity_fail_tol),
-            modulus_tol=float(config.rotation.root_deviation_tol),
+            modulus_tol=float(
+                config.symmetry_adapted_valley.representation_unitarity_fail_tol
+            ),
             spinor_wavefunction=bool(symmetry_payload.get("spinor_wavefunction", False)),
-            spinor_convention_verified=bool(config.spinor.convention_verified),
             operation_orders_by_id=operation_orders_by_id,
             seed_overlap_warn_tol=float(config.symmetry_adapted_valley.seed_overlap_warn_tol),
             seed_overlap_fail_tol=float(config.symmetry_adapted_valley.seed_overlap_fail_tol),
@@ -1944,7 +2441,6 @@ def _build_valley_preserving_subspace_reports(
     unitarity_tol: float,
     modulus_tol: float,
     spinor_wavefunction: bool,
-    spinor_convention_verified: bool,
     operation_orders_by_id: dict[object, int] | None = None,
     seed_overlap_warn_tol: float = 0.8,
     seed_overlap_fail_tol: float = 0.5,
@@ -2016,7 +2512,6 @@ def _build_valley_preserving_subspace_reports(
             unitarity_tol=unitarity_tol,
             modulus_tol=modulus_tol,
             spinor_wavefunction=spinor_wavefunction,
-            spinor_convention_verified=spinor_convention_verified,
             operation_orders=operation_orders_by_id,
             seed_overlap_warn_tol=seed_overlap_warn_tol,
             seed_overlap_fail_tol=seed_overlap_fail_tol,

@@ -52,9 +52,7 @@ def test_config_loader_parses_core_schema(tmp_path):
     assert config.symmetry.tolerance.symprec == pytest.approx(1.0e-3)
     assert config.symmetry.tolerance.angle_tolerance == pytest.approx(-1.0)
     assert config.symmetry.tolerance.symprec_scan == [1.0e-5, 1.0e-3]
-    assert config.symmetry.filters.proper_rotations_only is True
-    assert config.symmetry.filters.allowed_orders == [2, 3, 4, 6]
-    assert config.symmetry.filters.rotation_order == "auto"
+    assert not hasattr(config.symmetry, "filters")
     assert config.valley_subspaces[0].name == "K_valley"
     assert config.time_reversal.enabled is False
 
@@ -219,12 +217,6 @@ def test_config_loader_accepts_simplified_schema_defaults(tmp_path):
         },
         "symmetry": {
             "operations": {"structure_file": "CONTCAR"},
-            "filters": {"rotation_order": "auto"},
-        },
-        "spinor": {
-            "convention": "vasp_up_down_saxis_z",
-            "convention_verified": True,
-            "benchmark": "tMoTe2_VBM_C3_literature",
         },
         "rotation": {
             "irrep_weight_tol": 1.0e-4,
@@ -244,11 +236,8 @@ def test_config_loader_accepts_simplified_schema_defaults(tmp_path):
     assert config.projection.overlap_policy == "warn_exclude"
     assert config.symmetry.operations.structure_file == config_path.parent / "CONTCAR"
     assert config.symmetry.operations.backend == "spglib"
-    assert config.symmetry.filters.proper_rotations_only is True
-    assert config.symmetry.filters.allowed_orders == [2, 3, 4, 6]
-    assert config.spinor.convention == "vasp_up_down_saxis_z"
-    assert config.spinor.convention_verified is True
-    assert config.spinor.benchmark == "tMoTe2_VBM_C3_literature"
+    assert not hasattr(config.symmetry, "filters")
+    assert not hasattr(config, "spinor")
     assert config.rotation.irrep_weight_tol == pytest.approx(1.0e-4)
 
 
@@ -312,8 +301,6 @@ def test_config_loader_accepts_legacy_symmetry_schema_with_deprecation_warning(t
         "symprec": 3.0e-4,
         "symprec_scan": [1.0e-5, 3.0e-4],
         "angle_tolerance": 0.5,
-        "allowed_orders": [3],
-        "proper_rotations_only": True,
         "little_group_check": True,
         "valley_preservation_check": True,
     }
@@ -327,30 +314,27 @@ def test_config_loader_accepts_legacy_symmetry_schema_with_deprecation_warning(t
     assert config.symmetry.tolerance.symprec == pytest.approx(3.0e-4)
     assert config.symmetry.tolerance.angle_tolerance == pytest.approx(0.5)
     assert config.symmetry.tolerance.symprec_scan == [1.0e-5, 3.0e-4]
-    assert config.symmetry.filters.allowed_orders == [3]
-    assert config.symmetry.filters.rotation_order == "auto"
+    assert not hasattr(config.symmetry, "filters")
 
 
-def test_config_loader_accepts_rotation_order_integer_and_none(tmp_path):
+def test_config_loader_rejects_removed_rotation_order(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "rotation_order.yaml"
     out_dir = tmp_path / "out"
     write_fixture(h5_path)
     write_config(config_path, h5_path, out_dir)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    raw["symmetry"]["filters"]["rotation_order"] = 3
+    raw["symmetry"]["filters"] = {"rotation_order": 3}
     config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
 
-    config = load_config(config_path)
-
-    assert config.symmetry.filters.rotation_order == 3
+    with pytest.raises(ValueError, match="Removed symmetry"):
+        load_config(config_path)
 
     raw["symmetry"]["filters"]["rotation_order"] = "None"
     config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
 
-    config = load_config(config_path)
-
-    assert config.symmetry.filters.rotation_order is None
+    with pytest.raises(ValueError, match="Removed symmetry"):
+        load_config(config_path)
 
 
 def test_rotation_readiness_preset_applies_and_allows_explicit_overrides(tmp_path):
@@ -367,7 +351,6 @@ def test_rotation_readiness_preset_applies_and_allows_explicit_overrides(tmp_pat
 
     assert config.rotation.readiness_preset == "loose"
     assert config.rotation.unitarity_tol == pytest.approx(1.0e-4)
-    assert config.rotation.root_deviation_tol == pytest.approx(1.0e-4)
     assert config.rotation.D_valley_offdiag_tol == pytest.approx(1.0e-2)
 
     raw["rotation"]["D_valley_offdiag_tol"] = 5.0e-3
@@ -375,7 +358,6 @@ def test_rotation_readiness_preset_applies_and_allows_explicit_overrides(tmp_pat
     config = load_config(config_path)
 
     assert config.rotation.readiness_preset == "loose"
-    assert config.rotation.root_deviation_tol == pytest.approx(1.0e-4)
     assert config.rotation.D_valley_offdiag_tol == pytest.approx(5.0e-3)
 
 
@@ -400,7 +382,7 @@ def test_config_template_uses_current_public_schema(tmp_path):
     assert "  iband:" in template
     assert "valley_subspaces:" in template
     assert "readiness_preset: strict" in template
-    assert "root_deviation_tol:" in template
+    assert "root_deviation_tol:" not in template
     assert "D_valley_offdiag_tol:" in template
     assert "target_bands_vasp" not in template
     assert "valley_sectors" not in template
@@ -427,7 +409,7 @@ def test_config_template_uses_current_public_schema(tmp_path):
     assert [sector.name for sector in config.valley_subspaces] == ["K_valley", "Kp_valley"]
 
 
-def test_config_loader_prefers_new_symmetry_schema_over_legacy_fields(tmp_path):
+def test_config_loader_rejects_removed_symmetry_selection_fields(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "mixed.yaml"
     out_dir = tmp_path / "out"
@@ -440,15 +422,10 @@ def test_config_loader_prefers_new_symmetry_schema_over_legacy_fields(tmp_path):
     raw["symmetry"]["allowed_orders"] = [2]
     raw["symmetry"]["operations"]["structure_file"] = "new-CONTCAR"
     raw["symmetry"]["tolerance"]["symprec"] = 2.0e-4
-    raw["symmetry"]["filters"]["allowed_orders"] = [3, 6]
     config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
 
-    with pytest.warns(DeprecationWarning, match="ignored"):
-        config = load_config(config_path)
-
-    assert config.symmetry.operations.structure_file == config_path.parent / "new-CONTCAR"
-    assert config.symmetry.tolerance.symprec == pytest.approx(2.0e-4)
-    assert config.symmetry.filters.allowed_orders == [3, 6]
+    with pytest.raises(ValueError, match="Removed symmetry"):
+        load_config(config_path)
 
 
 def test_input_poscar_fallback_for_legacy_symmetry_structure(tmp_path):

@@ -13,9 +13,6 @@ import h5py
 from valleyscope.geometry.lattice import read_poscar_lattice, reciprocal_from_direct
 from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector
 from valleyscope.io import resolve_config_path
-from valleyscope.symmetry.rotation_selection import parse_rotation_order
-
-
 @dataclass(frozen=True)
 class InputConfig:
     wavefunction_h5: Path
@@ -78,17 +75,9 @@ class SymmetryToleranceConfig:
 
 
 @dataclass(frozen=True)
-class SymmetryFilterConfig:
-    proper_rotations_only: bool = True
-    allowed_orders: list[int] = field(default_factory=lambda: [2, 3, 4, 6])
-    rotation_order: int | str | None = "auto"
-
-
-@dataclass(frozen=True)
 class SymmetryConfig:
     operations: SymmetryOperationsConfig = field(default_factory=SymmetryOperationsConfig)
     tolerance: SymmetryToleranceConfig = field(default_factory=SymmetryToleranceConfig)
-    filters: SymmetryFilterConfig = field(default_factory=SymmetryFilterConfig)
     little_group_check: bool = True
     valley_preservation_check: bool = True
 
@@ -110,17 +99,9 @@ class OutputConfig:
 
 
 @dataclass(frozen=True)
-class SpinorConfig:
-    convention: str = "vasp_up_down_saxis_z"
-    convention_verified: bool = False
-    benchmark: str | None = None
-
-
-@dataclass(frozen=True)
 class RotationConfig:
     readiness_preset: str = "strict"
     unitarity_tol: float = 1.0e-4
-    root_deviation_tol: float = 1.0e-6
     D_valley_offdiag_tol: float = 1.0e-6
     irrep_weight_tol: float = 1.0e-5
 
@@ -202,7 +183,6 @@ class AppConfig:
     projection: ProjectionConfig
     output: OutputConfig
     symmetry: SymmetryConfig = field(default_factory=SymmetryConfig)
-    spinor: SpinorConfig = field(default_factory=SpinorConfig)
     rotation: RotationConfig = field(default_factory=RotationConfig)
     symmetry_adapted_valley: SymmetryAdaptedValleyConfig = field(default_factory=SymmetryAdaptedValleyConfig)
     reduced_ebr: ReducedEbrConfig = field(default_factory=ReducedEbrConfig)
@@ -238,7 +218,28 @@ def _parse_symmetry_config(
         if symmetry_raw.get(hard_check) is False:
             raise ValueError(f"{hard_check} is a V1 hard check and cannot be disabled")
 
-    new_sections = {name for name in ("operations", "tolerance", "filters") if name in symmetry_raw}
+    removed_keys = {
+        key
+        for key in (
+            "filters",
+            "allowed_orders",
+            "proper_rotations_only",
+            "rotation_order",
+        )
+        if key in symmetry_raw
+    }
+    filters_raw = symmetry_raw.get("filters")
+    if isinstance(filters_raw, dict):
+        removed_keys.update(f"filters.{key}" for key in filters_raw)
+    if removed_keys:
+        removed = ", ".join(sorted(removed_keys))
+        raise ValueError(
+            "Removed symmetry operation-selection keys are not supported: "
+            f"{removed}. The generic representation path evaluates the exact "
+            "active operation inventory."
+        )
+
+    new_sections = {name for name in ("operations", "tolerance") if name in symmetry_raw}
     legacy_keys = {
         key
         for key in (
@@ -246,9 +247,6 @@ def _parse_symmetry_config(
             "symprec",
             "symprec_scan",
             "angle_tolerance",
-            "allowed_orders",
-            "proper_rotations_only",
-            "rotation_order",
             "little_group_check",
             "valley_preservation_check",
         )
@@ -278,11 +276,6 @@ def _parse_symmetry_config(
             symprec=float(tolerance_raw.get("symprec", 1e-3)),
             angle_tolerance=float(tolerance_raw.get("angle_tolerance", -1.0)),
             symprec_scan=[float(v) for v in tolerance_raw.get("symprec_scan", [])],
-            proper_rotations_only=bool(filters_raw.get("proper_rotations_only", True)),
-            allowed_orders=[int(v) for v in filters_raw.get("allowed_orders", [2, 3, 4, 6])],
-            rotation_order=parse_rotation_order(
-                filters_raw.get("rotation_order", symmetry_raw.get("rotation_order", "auto"))
-            ),
         )
     else:
         fields = dict(
@@ -292,9 +285,6 @@ def _parse_symmetry_config(
             symprec=float(symmetry_raw.get("symprec", 1e-3)),
             angle_tolerance=float(symmetry_raw.get("angle_tolerance", -1.0)),
             symprec_scan=[float(v) for v in symmetry_raw.get("symprec_scan", [])],
-            proper_rotations_only=bool(symmetry_raw.get("proper_rotations_only", True)),
-            allowed_orders=[int(v) for v in symmetry_raw.get("allowed_orders", [2, 3, 4, 6])],
-            rotation_order=parse_rotation_order(symmetry_raw.get("rotation_order", "auto")),
         )
 
     if fields["mode"] != "auto":
@@ -312,11 +302,6 @@ def _parse_symmetry_config(
             symprec=fields["symprec"],
             angle_tolerance=fields["angle_tolerance"],
             symprec_scan=fields["symprec_scan"],
-        ),
-        filters=SymmetryFilterConfig(
-            proper_rotations_only=fields["proper_rotations_only"],
-            allowed_orders=fields["allowed_orders"],
-            rotation_order=fields["rotation_order"],
         ),
         little_group_check=True,
         valley_preservation_check=True,
@@ -575,38 +560,19 @@ def _projection_qcut_mode(raw: dict[str, Any]) -> str:
     return "moire_shell"
 
 
-def _parse_spinor_config(raw: dict[str, Any]) -> SpinorConfig:
-    convention = str(raw.get("convention", "vasp_up_down_saxis_z"))
-    if convention != "vasp_up_down_saxis_z":
-        raise ValueError("spinor.convention currently supports only 'vasp_up_down_saxis_z'")
-    convention_verified = bool(raw.get("convention_verified", raw.get("verified", False)))
-    benchmark = raw.get("benchmark")
-    benchmark = None if benchmark is None else str(benchmark)
-    if convention_verified and not benchmark:
-        raise ValueError("spinor.convention_verified=true requires spinor.benchmark")
-    return SpinorConfig(
-        convention=convention,
-        convention_verified=convention_verified,
-        benchmark=benchmark,
-    )
-
-
 ROTATION_READINESS_PRESETS: dict[str, dict[str, float]] = {
     "strict": {
         "unitarity_tol": 1.0e-4,
-        "root_deviation_tol": 1.0e-6,
         "D_valley_offdiag_tol": 1.0e-6,
         "irrep_weight_tol": 1.0e-5,
     },
     "normal": {
         "unitarity_tol": 1.0e-4,
-        "root_deviation_tol": 1.0e-5,
         "D_valley_offdiag_tol": 1.0e-3,
         "irrep_weight_tol": 5.0e-5,
     },
     "loose": {
         "unitarity_tol": 1.0e-4,
-        "root_deviation_tol": 1.0e-4,
         "D_valley_offdiag_tol": 1.0e-2,
         "irrep_weight_tol": 1.0e-4,
     },
@@ -614,6 +580,14 @@ ROTATION_READINESS_PRESETS: dict[str, dict[str, float]] = {
 
 
 def _parse_rotation_config(raw: dict[str, Any]) -> RotationConfig:
+    removed_keys = {
+        key for key in ("root_deviation_tol", "root_order") if key in raw
+    }
+    if removed_keys:
+        raise ValueError(
+            "Removed rotation trust keys are not supported: "
+            + ", ".join(sorted(removed_keys))
+        )
     preset = str(raw.get("readiness_preset", "strict")).lower()
     if preset not in ROTATION_READINESS_PRESETS:
         allowed = ", ".join(sorted(ROTATION_READINESS_PRESETS))
@@ -622,7 +596,6 @@ def _parse_rotation_config(raw: dict[str, Any]) -> RotationConfig:
     return RotationConfig(
         readiness_preset=preset,
         unitarity_tol=float(raw.get("unitarity_tol", values["unitarity_tol"])),
-        root_deviation_tol=float(raw.get("root_deviation_tol", values["root_deviation_tol"])),
         D_valley_offdiag_tol=float(raw.get("D_valley_offdiag_tol", values["D_valley_offdiag_tol"])),
         irrep_weight_tol=float(raw.get("irrep_weight_tol", values["irrep_weight_tol"])),
     )
@@ -844,6 +817,12 @@ def load_config(path: str | Path) -> AppConfig:
     config_path = Path(path)
     base = config_path.parent
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    if "spinor" in raw:
+        raise ValueError(
+            "The spinor config block has been removed. Spinful V1 uses the "
+            "program-owned vasp_nonmagnetic_soc_default_saxis_v1 source-basis "
+            "certificate and accepts no per-run validation Boolean."
+        )
     input_raw = raw.get("input", {})
     monolayer_poscars = {
         str(name): resolve_config_path(base, str(value))
@@ -904,7 +883,6 @@ def load_config(path: str | Path) -> AppConfig:
             thresholds=dict(projection_raw.get("thresholds", {})),
         ),
         symmetry=_parse_symmetry_config(base, input_raw, symmetry_raw),
-        spinor=_parse_spinor_config(raw.get("spinor", {})),
         rotation=_parse_rotation_config(raw.get("rotation", {})),
         symmetry_adapted_valley=_parse_symmetry_adapted_valley_config(
             analysis_raw.get("symmetry_adapted_valley", {})

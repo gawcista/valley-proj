@@ -381,6 +381,57 @@ def test_fractional_and_cartesian_operations_are_bound_by_direct_lattice():
     assert "cartesian_affine_operation_mismatch" in record["reason_codes"]
 
 
+def test_one_common_spin_basis_transform_is_derived_for_all_operations():
+    direct = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [-0.5, np.sqrt(3.0) / 2.0, 0.0],
+            [0.0, 0.0, 2.0],
+        ]
+    )
+    c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]], dtype=int)
+    operations = [
+        _op(1, np.eye(3, dtype=int), direct_lattice=direct),
+        _op(7, c3, direct_lattice=direct),
+        _op(12, c3 @ c3, direct_lattice=direct),
+    ]
+    source_table, setting = _identities(
+        operations, direct_lattice=direct
+    )
+    common_basis = 1.0j * np.array(
+        [[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128
+    )
+    for source_operation in source_table["operations"]:
+        spin = np.asarray(
+            [
+                [complex(*value) for value in row]
+                for row in source_operation["spin_rotation"]
+            ],
+            dtype=np.complex128,
+        )
+        source_operation["spin_rotation"] = _complex_matrix_record(
+            common_basis @ spin @ common_basis.conj().T
+        )
+
+    record = build_double_space_group_lift_certificate(
+        _source_record(),
+        operations,
+        source_table_identity=source_table,
+        standard_setting_identity=setting,
+        direct_lattice_cart=direct,
+    ).to_record()
+
+    assert record["status"] == "passed"
+    assert record["source_table_identity"]["status"] == "passed"
+    assert max(
+        row["residual"]
+        for row in record["source_table_identity"]["spin_mapping_rows"]
+    ) < 1e-12
+    assert record["source_table_identity"][
+        "common_spin_basis_transform"
+    ] != _complex_matrix_record(np.eye(2))
+
+
 def test_failed_source_table_or_standard_setting_evidence_blocks_lift():
     operations = [_op(0, np.eye(3, dtype=int))]
     source_table, setting = _identities(operations)

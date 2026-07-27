@@ -350,7 +350,7 @@ def test_optional_public_outputs_removed_when_payload_becomes_absent(tmp_path):
 
     _write_minimal_outputs(
         load_config(config_path),
-        ebr_export_bundle={"status": "has_bundles"},
+        ebr_export_bundle={"status": "has_bundles", "bundle_count": 1},
         reduced_ebr_mapping={"status": "solved_exact"},
     )
     assert (out_dir / "valley_ebr_export_bundle.json").exists()

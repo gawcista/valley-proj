@@ -42,11 +42,11 @@ def test_analyze_hsp_writes_symmetry_operation_detection_report(tmp_path):
     assert report["symprec"] == pytest.approx(1.0e-3)
     assert report["angle_tolerance"] == pytest.approx(-1.0)
     assert "symprec_scan_summary" in report
-    assert {"symprec", "spacegroup_number", "international", "n_operations", "n_candidate_rotations", "order_counts"} <= set(
+    assert {"symprec", "spacegroup_number", "international", "n_operations", "order_counts"} <= set(
         report["symprec_scan_summary"][0]
     )
     assert "detected_operations" in report
-    assert "candidate_rotations" in report
+    assert "candidate_rotations" not in report
     assert "operations" not in report
     assert report["little_group_check"]["required"] is True
     assert report["valley_preservation_check"]["required"] is True
@@ -122,7 +122,6 @@ def test_symmetry_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp
         "symmetry": {
             "operations": {"mode": "auto", "structure_file": str(structure), "backend": "spglib"},
             "tolerance": {"symprec": 1.0e-5, "angle_tolerance": -1.0},
-            "filters": {"proper_rotations_only": True, "allowed_orders": [2, 4], "rotation_order": 2},
         },
         "output": {"directory": str(out_dir), "profile": "debug", "write_json": True, "write_csv": True, "write_hdf5_basis_transform": True},
     }
@@ -141,15 +140,10 @@ def test_symmetry_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp
     assert rows
     assert {
         "basis",
-        "nearest_root_of_unity",
-        "root_deviation",
         "rotation_ready",
         "topology_input_ready",
         "topology_ready",
         "spinor_rotation_applied",
-        "spinor_convention_verified",
-        "spinor_convention",
-        "spinor_benchmark",
         "diagnostic_only",
         "D_valley_offdiag_norm",
         "reason",
@@ -170,14 +164,11 @@ def test_symmetry_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp
         assert all("translation_cart" in group for group in operation_groups)
         assert all("basis" in group.attrs for group in operation_groups)
         assert all("spinor_rotation_applied" in group for group in operation_groups)
-        assert all("spinor_convention_verified" in group for group in operation_groups)
-        assert all("spinor_convention" in group.attrs for group in operation_groups)
-        assert all("spinor_benchmark" in group.attrs for group in operation_groups)
         assert all("rotation_ready" in group for group in operation_groups)
         assert all("topology_input_ready" in group for group in operation_groups)
         assert all("diagnostic_only" in group for group in operation_groups)
         assert all("D_valley_offdiag_norm" in group for group in operation_groups)
-        assert all("root_deviation" in group for group in operation_groups)
+        assert all("norm_preservation_residual" in group for group in operation_groups)
     summary_text = outputs["valley_summary_txt"].read_text(encoding="utf-8")
     assert "rejected" in summary_text
     assert (
@@ -190,8 +181,9 @@ def test_symmetry_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp
     assert "Rotation eigenvalues" not in summary_text
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     assert any("topology_input_ready" in row for row in summary["symmetry_eigenvalues"])
-    assert "spinor_convention" in summary["input"]
-    assert "spinor_benchmark" in summary["symmetry_eigenvalues"][0]
+    assert summary["input"]["spinor_input_profile"] == (
+        "vasp_nonmagnetic_soc_default_saxis_v1"
+    )
     assert outputs["symmetry_eigenvalues_csv"].exists()
     assert "symmetry_eigenvalues_csv" in summary["output_files"]
 
@@ -212,8 +204,6 @@ def test_symmetry_eigenvalues_csv_is_header_only_when_no_rows(tmp_path, monkeypa
             "spacegroup_number": 150,
             "international": "P321",
             "symmetry_eigenvalue_enabled": True,
-            "requested_rotation_order": "auto",
-            "resolved_rotation_order": 3,
             "detected_operation_count": 0,
             "detected_operations": [],
             "candidate_rotations": [],
@@ -233,7 +223,7 @@ def test_symmetry_eigenvalues_csv_is_header_only_when_no_rows(tmp_path, monkeypa
     assert outputs["symmetry_eigenvalues_csv"].exists()
     with outputs["symmetry_eigenvalues_csv"].open(encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
-        assert {"kpoint", "operation_id", "root_deviation", "D_valley_offdiag_norm"} <= set(reader.fieldnames or [])
+        assert {"kpoint", "operation_id", "modulus_deviation", "D_valley_offdiag_norm"} <= set(reader.fieldnames or [])
         assert list(reader) == []
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     assert "symmetry_eigenvalues_csv" in summary["output_files"]
@@ -390,8 +380,6 @@ def test_workflow_requests_all_valley_preserving_little_group_operations(tmp_pat
             "spacegroup_number": 150,
             "international": "P321",
             "symmetry_eigenvalue_enabled": True,
-            "requested_rotation_order": "auto",
-            "resolved_rotation_order": 3,
             "detected_operation_count": 0,
             "detected_operations": [],
             "candidate_rotations": [],

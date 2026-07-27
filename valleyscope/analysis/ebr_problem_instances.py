@@ -12,7 +12,11 @@ compatibility relations, or new physics.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
+
+from valleyscope.io.wavefunction_convention import valid_sha256_identity
 
 
 def build_ebr_problem_instances(
@@ -88,6 +92,9 @@ def build_ebr_problem_instances(
 
         direct_provenance_blockers: list[str] = []
         spin_values = set()
+        cprime_identities_by_kpoint: dict[
+            str, set[tuple[str, str, str]]
+        ] = {}
         for candidate in cands:
             candidate_source = candidate.get("source")
             candidate_workflow = candidate.get("workflow_path")
@@ -119,10 +126,56 @@ def build_ebr_problem_instances(
                 )
             else:
                 spin_values.add(source_spinor)
+            cprime = source_provenance.get("cprime")
+            if not isinstance(cprime, dict):
+                direct_provenance_blockers.append(
+                    "direct_candidate_cprime_provenance_missing"
+                )
+                continue
+            identity_values = (
+                cprime.get("spinor_source_basis_certificate_identity"),
+                cprime.get(
+                    "double_space_group_lift_certificate_identity"
+                ),
+                cprime.get(
+                    "scoped_representation_evidence_identity"
+                ),
+            )
+            if not all(valid_sha256_identity(value) for value in identity_values):
+                direct_provenance_blockers.append(
+                    "direct_candidate_cprime_identity_malformed"
+                )
+            else:
+                cprime_identities_by_kpoint.setdefault(
+                    str(candidate.get("kpoint", "")), set()
+                ).add(
+                    tuple(str(value) for value in identity_values)
+                )
         if len(spin_values) != 1:
             direct_provenance_blockers.append(
                 "direct_candidate_spin_provenance_mismatch"
             )
+        if any(
+            len(values) != 1
+            for values in cprime_identities_by_kpoint.values()
+        ):
+            direct_provenance_blockers.append(
+                "direct_candidate_cprime_identity_mismatch"
+            )
+        cprime_identity_by_kpoint: dict[str, dict[str, object]] = {}
+        for kpoint, identities in cprime_identities_by_kpoint.items():
+            if len(identities) != 1:
+                continue
+            values = next(iter(identities))
+            cprime_identity_by_kpoint[kpoint] = {
+                "spinor_source_basis_certificate_identity": (
+                    values[0]
+                ),
+                "double_space_group_lift_certificate_identity": (
+                    values[1]
+                ),
+                "scoped_representation_evidence_identity": values[2],
+            }
 
         # --- Aggregate provenance ---
         workflow_paths = sorted({
@@ -332,6 +385,7 @@ def build_ebr_problem_instances(
             "subspace_space_group": subspace_space_group,
             "spinor": next(iter(spin_values), None),
             "certificate_identity": cert_identity,
+            "cprime_identity_by_kpoint": cprime_identity_by_kpoint,
             "workflow_path": workflow_path,
             "workflow_paths": workflow_paths,
             "unitary_vector_construction": {
@@ -455,6 +509,17 @@ def _build_time_reversal_problem_instances(
         ):
             blockers.append("time_reversal_independent_hsp_basis_mismatch")
             expected_hsps = []
+        tr_cprime_identity_by_hsp = raw_orbit.get(
+            "joint_cprime_identity_by_hsp", {}
+        )
+        if not _valid_cprime_identity_inventory(
+            tr_cprime_identity_by_hsp,
+            required_hsps=expected_hsps,
+        ):
+            blockers.append(
+                "tr_completed_scoped_representation_evidence_missing"
+            )
+            tr_cprime_identity_by_hsp = {}
         canonical_hsp_vector_complete = (
             bool(irreps_by_kpoint)
             and bool(expected_hsps)
@@ -478,6 +543,9 @@ def _build_time_reversal_problem_instances(
             "spinor": next(iter(spin_values), None),
             "certificate_identity": _certificate_identity(
                 component_candidates
+            ),
+            "cprime_identity_by_kpoint": dict(
+                tr_cprime_identity_by_hsp
             ),
             "workflow_path": "time_reversal_valley_orbit",
             "workflow_paths": sorted({
@@ -683,6 +751,18 @@ def _build_tr_unitary_component_instances(
             blockers.append(
                 f"unitary_component_spin_evidence_mismatch:{valley}"
             )
+        tr_cprime_identity_by_hsp = raw_orbit.get(
+            "tr_completed_cprime_identity_by_hsp", {}
+        )
+        if not _valid_cprime_identity_inventory(
+            tr_cprime_identity_by_hsp,
+            required_hsps=full_hsps,
+        ):
+            blockers.append(
+                "tr_completed_scoped_representation_evidence_missing:"
+                f"{valley}"
+            )
+            tr_cprime_identity_by_hsp = {}
 
         complete_counts = (
             bool(full_hsps)
@@ -784,6 +864,9 @@ def _build_tr_unitary_component_instances(
             "subspace_space_group": dict(ssg),
             "spinor": next(iter(spin_values), None),
             "certificate_identity": _certificate_identity(candidates),
+            "cprime_identity_by_kpoint": dict(
+                tr_cprime_identity_by_hsp
+            ),
             "workflow_path": "time_reversal_completed_unitary_valley",
             "workflow_paths": workflow_paths,
             "unitary_vector_construction": {
@@ -924,6 +1007,33 @@ def _deduplicate_strings(values: list[str]) -> list[str]:
         if value not in out:
             out.append(value)
     return out
+
+
+def _valid_cprime_identity_inventory(
+    value: object,
+    *,
+    required_hsps: Sequence[str],
+) -> bool:
+    required_keys = {
+        "spinor_source_basis_certificate_identity",
+        "double_space_group_lift_certificate_identity",
+        "scoped_representation_evidence_identity",
+    }
+    if (
+        not required_hsps
+        or not isinstance(value, dict)
+        or set(value) != set(required_hsps)
+    ):
+        return False
+    return all(
+        isinstance(identity, dict)
+        and set(identity) == required_keys
+        and all(
+            valid_sha256_identity(identity.get(key))
+            for key in required_keys
+        )
+        for identity in value.values()
+    )
 
 
 def _problem_report_status(instances: list[dict[str, object]]) -> str:

@@ -13,18 +13,20 @@ import numpy as np
 import pytest
 
 from valleyscope.analysis.reduced_ebr_mapping import (
-    promote_bundle_for_solve,
-    build_reduced_ebr_mapping,
+    promote_bundle_for_solve as _promote_bundle_for_solve,
+    build_reduced_ebr_mapping as _build_reduced_ebr_mapping,
     _validate_primitive_affine_setting,
 )
 from valleyscope.analysis.standard_setting_kmap import (
     resolve_standard_setting_hsp_label,
 )
 from valleyscope.analysis.ebr_problem_instances import (
-    build_ebr_problem_instances,
+    build_ebr_problem_instances as _build_ebr_problem_instances,
     _certificate_identity,
 )
-from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
+from valleyscope.analysis.ebr_export_bundle import (
+    build_ebr_export_bundle as _build_ebr_export_bundle,
+)
 from valleyscope.analysis.irreptables_runtime_table_builder import (
     build_auto_canonical_reduced_ebr_table,
 )
@@ -34,9 +36,51 @@ from tests.reduced_ebr_promo_helpers import (
     real_primitive_certificate_identity,
     real_primitive_certificate_dict,
     add_real_certificate_to_candidates,
+    attach_cprime_fixture_to_candidates,
+    attach_cprime_fixture_contract,
     attach_real_certificate,
+    cprime_validation_context_for_export,
     _detected_standard_operations,
 )
+
+
+def build_ebr_problem_instances(**kwargs):
+    candidates = kwargs.get("ebr_input_candidates")
+    if isinstance(candidates, dict):
+        attach_cprime_fixture_to_candidates(candidates)
+    return _build_ebr_problem_instances(**kwargs)
+
+
+def build_ebr_export_bundle(**kwargs):
+    export = _build_ebr_export_bundle(**kwargs)
+    attach_cprime_fixture_contract(export)
+    return export
+
+
+def _fixture_cprime_context(export):
+    context = cprime_validation_context_for_export(export)
+    return dict(context["_by_identity"])
+
+
+def build_reduced_ebr_mapping(**kwargs):
+    export = kwargs.get("ebr_export_bundle")
+    if isinstance(export, dict):
+        kwargs.setdefault(
+            "cprime_validation_context",
+            _fixture_cprime_context(export),
+        )
+    return _build_reduced_ebr_mapping(**kwargs)
+
+
+def promote_bundle_for_solve(*, bundle, table):
+    return _promote_bundle_for_solve(
+        bundle=bundle,
+        table=table,
+        cprime_validation_context=_fixture_cprime_context(
+            {"bundles": [bundle]}
+        ),
+    )
+
 
 # Real affine primitive identity for SG 143 P3 (Hall 430), no post-mutation.
 _PRIMITIVE_IDENTITY = real_primitive_certificate_identity(143, "P3")
@@ -247,6 +291,7 @@ def _bundle(*, sg_number=143, symbol="P3", spinful=False, cert=None, **over):
         "certificate_identity": certificate,
     }
     bundle.update(over)
+    attach_cprime_fixture_contract({"bundles": [bundle]})
     return bundle
 
 
@@ -1064,10 +1109,6 @@ def test_injected_certificate_to_solve_is_plumbing_not_production():
     reaches solved_exact.  This is a lower-level plumbing integration test,
     not a full production workflow test (the real workflow currently
     produces an unresolved certificate; Phase E)."""
-    from valleyscope.analysis.ebr_problem_instances import (
-        build_ebr_problem_instances,
-    )
-    from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
     cert = real_primitive_certificate_dict(143, "P3")
     assert cert is not None
 

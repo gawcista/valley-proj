@@ -42,19 +42,12 @@ def decide_irrep_workflow(
     sym_adapted_min_seed_overlap: float | None = None,
     sym_adapted_local_irrep_ready: bool = False,
     sym_adapted_diagnostic_only: bool = True,
-    # --- common ---
-    spinor_convention_verified: bool = False,
-    spinor_wavefunction: bool = True,
 ) -> dict[str, object]:
     """Determine workflow path and readiness level for a single valley subspace.
 
     Returns a compact decision record.  All three diagnostic streams are
     inspected independently; the most favourable feasible path is chosen.
     """
-    # Scalar wavefunction: spinor convention gate does not apply.
-    spinor_gate_passed = (
-        spinor_convention_verified or not spinor_wavefunction
-    )
     reasons: list[str] = []
 
     # --- Direct q-cut path ---
@@ -80,14 +73,6 @@ def decide_irrep_workflow(
     )
 
     if seed_usable and closure_ok and qcut_ok:
-        if seed_clean and closure_clean and spinor_gate_passed:
-            return _decision(
-                workflow_path=PATH_DIRECT_QCUT,
-                readiness=READINESS_TRUSTED,
-                reason="q-cut seed basis is symmetry-consistent; target-subspace closure ok; all readiness gates passed",
-                uses_symmetry_adapted_projector=False,
-                direct_qcut_allowed=True,
-            )
         followups: list[str] = []
         caution_reasons: list[str] = []
         if not seed_clean:
@@ -97,9 +82,10 @@ def decide_irrep_workflow(
             )
         if not closure_clean:
             caution_reasons.append(f"target-subspace closure quality={closure_quality}")
-        if not spinor_gate_passed:
-            caution_reasons.append("spinor convention unverified")
-            followups.append("verify spinor convention against benchmark")
+        if seed_clean and closure_clean:
+            caution_reasons.append(
+                "awaiting passed scoped_representation_evidence"
+            )
         return _decision(
             workflow_path=PATH_DIRECT_QCUT,
             readiness=READINESS_USABLE_WITH_CAUTION,
@@ -138,20 +124,14 @@ def decide_irrep_workflow(
         )
 
     if sa_proj_usable and closure_usable:
-        if sa_ready and spinor_gate_passed:
-            return _decision(
-                workflow_path=PATH_SYMMETRY_ADAPTED,
-                readiness=READINESS_TRUSTED,
-                reason="symmetry-adapted projector path: local irrep ready, closure usable",
-                uses_symmetry_adapted_projector=True,
-                direct_qcut_allowed=False,
-            )
-        elif sa_ready:
+        if sa_ready:
             return _decision(
                 workflow_path=PATH_SYMMETRY_ADAPTED,
                 readiness=READINESS_USABLE_WITH_CAUTION,
-                reason="symmetry-adapted projector path: local irrep ready but spinor convention unverified",
-                required_followup="verify spinor convention against benchmark",
+                reason=(
+                    "symmetry-adapted projector path is numerically usable; "
+                    "awaiting passed scoped_representation_evidence"
+                ),
                 uses_symmetry_adapted_projector=True,
                 direct_qcut_allowed=False,
             )
@@ -213,8 +193,6 @@ def build_irrep_workflow_decisions(
     symmetry_adapted_valley_report: dict[str, object] | None,
     symmetry_rows: list[dict[str, object]],
     valley_names: list[str],
-    spinor_convention_verified: bool = False,
-    spinor_wavefunction: bool = True,
 ) -> dict[str, object]:
     """Build per-(kpoint, valley) workflow decision records.
 
@@ -289,7 +267,7 @@ def build_irrep_workflow_decisions(
             continue
         entry = qcut_ready.setdefault(kp, {}).setdefault(v, {"ready": 0, "total": 0})
         entry["total"] += 1
-        if bool(row.get("topology_input_ready", False)):
+        if bool(row.get("numerical_input_ready", False)):
             entry["ready"] += 1
 
     # Extract symmetry-adapted diagnostics per valley
@@ -331,7 +309,7 @@ def build_irrep_workflow_decisions(
             )
             # Identity-only is a little-group property, not a workflow path.
             # It removes only the non-identity eigenphase requirement.  Seed
-            # symmetry, closure, spinor, and actual projector-use evidence
+            # symmetry, closure, and actual projector-use evidence
             # still choose direct_qcut / symmetry_adapted / blocked below.
             has_identity_character = False
             if is_identity_only_vp:
@@ -430,8 +408,6 @@ def build_irrep_workflow_decisions(
                 sym_adapted_min_seed_overlap=sa.get("min_seed_overlap"),
                 sym_adapted_local_irrep_ready=sa.get("local_irrep_ready", False),
                 sym_adapted_diagnostic_only=sa.get("diagnostic_only", True),
-                spinor_convention_verified=spinor_convention_verified,
-                spinor_wavefunction=spinor_wavefunction,
             )
             if is_identity_only_vp:
                 decision["identity_only_valley_preserving_subgroup"] = True

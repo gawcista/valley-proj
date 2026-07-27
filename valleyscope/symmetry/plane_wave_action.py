@@ -10,6 +10,7 @@ class PlaneWaveRepresentationResult:
     matrix: np.ndarray
     mapping: np.ndarray
     mapping_miss_count: int
+    norm_preservation_residual: float
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,9 @@ def build_plane_wave_representation(
         matrix=matrix,
         mapping=action.mapping,
         mapping_miss_count=action.mapping_miss_count,
+        norm_preservation_residual=float(
+            np.linalg.norm(flat_transformed) - np.linalg.norm(flat_original)
+        ),
     )
 
 

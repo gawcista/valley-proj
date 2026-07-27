@@ -25,6 +25,363 @@ from valleyscope.analysis.ebr_problem_instances import _certificate_identity
 from valleyscope.analysis.reduced_ebr_mapping import (
     _derive_table_standard_setting,
 )
+from valleyscope.io.wavefunction_convention import canonical_identity
+from valleyscope.io.spinor_source_basis import SpinorSourceBasisCertificate
+from valleyscope.analysis.scoped_representation_evidence import (
+    build_scoped_representation_evidence,
+)
+from valleyscope.symmetry.double_space_group_lift import (
+    build_double_space_group_lift_certificate,
+    spin_lift_from_orthogonal,
+)
+
+
+def attach_cprime_fixture_contract(export_bundle: dict) -> dict:
+    """Attach identities derived from recomputable producer fixtures."""
+    context = cprime_validation_context_for_export(export_bundle)
+    source_identity = _cprime_fixture_source_record()[
+        "certificate_identity"
+    ]
+    for bundle in export_bundle.get("bundles", []):
+        if not isinstance(bundle, dict):
+            continue
+        links_by_kpoint: dict[str, dict[str, str]] = {}
+        irreps = bundle.get("irreps_by_kpoint", {})
+        if not isinstance(irreps, dict):
+            continue
+        records = bundle.get("irrep_records_by_kpoint", {})
+        if not isinstance(records, dict):
+            records = {}
+        bundle["irrep_records_by_kpoint"] = records
+        construction = bundle.get("unitary_vector_construction")
+        tr_completed = (
+            isinstance(construction, dict)
+            and construction.get("kind")
+            == "time_reversal_completed_unitary_rows"
+        )
+        joint_problem = (
+            bundle.get("problem_kind") == "valley_orbit_reduced_ebr"
+        )
+        completion_records = bundle.get(
+            "unitary_irrep_completion_records_by_hsp", {}
+        )
+        if not isinstance(completion_records, dict):
+            completion_records = {}
+        for kpoint in irreps:
+            links = {
+                "spinor_source_basis_certificate_identity": source_identity,
+                "double_space_group_lift_certificate_identity": "",
+                "scoped_representation_evidence_identity": "",
+            }
+            context_entry = context[(id(bundle), str(kpoint))]
+            scoped_record = context_entry["record"]
+            links["double_space_group_lift_certificate_identity"] = (
+                scoped_record[
+                    "double_space_group_lift_certificate_identity"
+                ]
+            )
+            links["scoped_representation_evidence_identity"] = (
+                scoped_record["evidence_identity"]
+            )
+            links_by_kpoint[str(kpoint)] = links
+            if (
+                not tr_completed
+                and not joint_problem
+                and (
+                    not isinstance(records.get(kpoint), list)
+                    or not records.get(kpoint)
+                )
+            ):
+                records[kpoint] = [
+                    {
+                        "matched_irrep": str(label),
+                        "irrep_source_provenance": {},
+                    }
+                    for label in irreps.get(kpoint, [])
+                ]
+            for row in records.get(kpoint, []):
+                if not isinstance(row, dict):
+                    continue
+                provenance = row.get("irrep_source_provenance")
+                if not isinstance(provenance, dict):
+                    provenance = {}
+                    row["irrep_source_provenance"] = provenance
+                provenance["cprime"] = dict(links)
+            if tr_completed:
+                for completion in completion_records.get(kpoint, []):
+                    if not isinstance(completion, dict):
+                        continue
+                    candidate_provenance = completion.get(
+                        "source_candidate_provenance"
+                    )
+                    if not isinstance(candidate_provenance, dict):
+                        continue
+                    candidate_provenance = deepcopy(candidate_provenance)
+                    completion["source_candidate_provenance"] = (
+                        candidate_provenance
+                    )
+                    irrep_provenance = candidate_provenance.get(
+                        "irrep_source_provenance"
+                    )
+                    if not isinstance(irrep_provenance, dict):
+                        irrep_provenance = {}
+                        candidate_provenance[
+                            "irrep_source_provenance"
+                        ] = irrep_provenance
+                    irrep_provenance["cprime"] = dict(links)
+        bundle["cprime_identity_by_kpoint"] = links_by_kpoint
+    return export_bundle
+
+
+def cprime_validation_context_for_export(
+    export_bundle: dict,
+) -> dict[str, object]:
+    """Build genuine, fully recomputable C-prime contexts for test bundles."""
+    entries: dict[object, object] = {}
+    by_identity: dict[str, object] = {}
+    for bundle in export_bundle.get("bundles", []):
+        if not isinstance(bundle, dict):
+            continue
+        irreps = bundle.get("irreps_by_kpoint", {})
+        if not isinstance(irreps, dict):
+            continue
+        for kpoint in irreps:
+            record, raw_inputs = _cprime_fixture_scope(
+                bundle=bundle,
+                kpoint=str(kpoint),
+            )
+            entry = {"record": record, "raw_inputs": raw_inputs}
+            entries[(id(bundle), str(kpoint))] = entry
+            by_identity[str(record["evidence_identity"])] = entry
+    entries["_by_identity"] = by_identity
+    return entries
+
+
+def mapping_cprime_context(export_bundle: dict) -> dict[str, object]:
+    """Attach fixture links and return the explicit solver context."""
+    context = cprime_validation_context_for_export(export_bundle)
+    attach_cprime_fixture_contract(export_bundle)
+    rebuilt = cprime_validation_context_for_export(export_bundle)
+    return dict(rebuilt["_by_identity"])
+
+
+def _cprime_fixture_source_record() -> dict[str, object]:
+    return SpinorSourceBasisCertificate(
+        extracted_wavefunction_payload_identity="sha256:" + "a" * 64,
+        nspinor=2,
+        parser_identity="valleyscope_h5_reader_v1",
+        extractor_identity="valleyscope_wavecar_h5_layout_v1",
+    ).to_record()
+
+
+def _cprime_fixture_operation(
+    operation_id: int,
+    rotation: np.ndarray,
+) -> dict[str, object]:
+    matrix = np.asarray(rotation, dtype=int)
+    return {
+        "operation_id": operation_id,
+        "rotation_frac": matrix,
+        "translation_frac": np.zeros(3),
+        "rotation_cart": matrix.astype(float),
+        "translation_cart": np.zeros(3),
+    }
+
+
+def _complex_matrix_record(matrix: np.ndarray) -> list:
+    return [
+        [[float(value.real), float(value.imag)] for value in row]
+        for row in np.asarray(matrix, dtype=np.complex128)
+    ]
+
+
+def _cprime_fixture_lift_inputs() -> dict[str, object]:
+    operations = [
+        _cprime_fixture_operation(2, np.eye(3, dtype=int)),
+        _cprime_fixture_operation(5, np.diag([1, -1, -1])),
+    ]
+    source_table = {
+        "schema_version": "1.0.0",
+        "provider": "irreptables",
+        "data_source": "irreptables.StandardIrrepTable",
+        "space_group_number": 1,
+        "spinor": True,
+        "operations": [
+            {
+                "table_index": index,
+                "rotation_frac": operation["rotation_frac"].tolist(),
+                "translation_frac": [0.0, 0.0, 0.0],
+                "spin_rotation": _complex_matrix_record(
+                    spin_lift_from_orthogonal(
+                        operation["rotation_cart"]
+                    )
+                ),
+            }
+            for index, operation in enumerate(operations)
+        ],
+    }
+    return {
+        "expected_operations": operations,
+        "source_table_identity": source_table,
+        "standard_setting_identity": {
+            "schema_version": "1.0.0",
+            "parent_to_standard_direct_transform": np.eye(3).tolist(),
+            "origin_shift_fractional": [0.0, 0.0, 0.0],
+            "parent_to_standard_operation_map": {"2": 0, "5": 1},
+        },
+        "direct_lattice_cart": np.eye(3),
+    }
+
+
+def _cprime_fixture_scope(
+    *,
+    bundle: dict,
+    kpoint: str,
+) -> tuple[dict[str, object], dict[str, object]]:
+    source = _cprime_fixture_source_record()
+    lift_inputs = _cprime_fixture_lift_inputs()
+    lift = build_double_space_group_lift_certificate(
+        source,
+        lift_inputs["expected_operations"],
+        source_table_identity=lift_inputs["source_table_identity"],
+        standard_setting_identity=lift_inputs[
+            "standard_setting_identity"
+        ],
+        direct_lattice_cart=lift_inputs["direct_lattice_cart"],
+    ).to_record()
+    construction = bundle.get("unitary_vector_construction")
+    tr_completed = (
+        bundle.get("problem_kind") == "valley_orbit_reduced_ebr"
+        or (
+            isinstance(construction, dict)
+            and construction.get("kind")
+            == "time_reversal_completed_unitary_rows"
+        )
+    )
+    declared_orbit = [
+        value
+        for value in bundle.get("valley_orbit", [])
+        if isinstance(value, str) and value
+    ]
+    source_valley = str(bundle.get("valley") or "fixture_v0")
+    orbit = declared_orbit or [source_valley]
+    if source_valley not in orbit:
+        source_valley = orbit[0]
+    exchanged = len(orbit) > 1
+    required_ids = (2, 5) if exchanged else (2,)
+    representations = {2: np.eye(2, dtype=np.complex128)}
+    mappings = {2: {valley: valley for valley in orbit}}
+    if exchanged:
+        representations[5] = np.array(
+            [[0.0, 1.0], [-1.0, 0.0]], dtype=np.complex128
+        )
+        mappings[5] = {
+            orbit[0]: orbit[1],
+            orbit[1]: orbit[0],
+        }
+    projectors = {
+        valley: np.diag(
+            [1.0, 0.0] if index == 0 else [0.0, 1.0]
+        )
+        for index, valley in enumerate(orbit[:2])
+    }
+    bases = {
+        valley: np.array(
+            [[1.0], [0.0]]
+            if index == 0
+            else [[0.0], [1.0]],
+            dtype=np.complex128,
+        )
+        for index, valley in enumerate(orbit[:2])
+    }
+    antiunitary = None
+    if tr_completed:
+        target = orbit[1] if exchanged else source_valley
+        antiunitary = {
+            "source_valley": source_valley,
+            "target_valley": target,
+            "forward_sewing_matrix": np.array([[1.0]]),
+            "reverse_sewing_matrix": np.array([[-1.0]]),
+            "expected_square_sign": -1,
+        }
+    raw_inputs: dict[str, object] = {
+        "source_basis_record": source,
+        "lift_record": lift,
+        "lift_validation_inputs": lift_inputs,
+        "extracted_wavefunction_payload_identity": (
+            source["extracted_wavefunction_payload_identity"]
+        ),
+        "kpoint_label": kpoint,
+        "kpoint_frac": np.zeros(3),
+        "scope_kind": "tr_completed" if tr_completed else "local_irrep",
+        "source_valleys": (source_valley,),
+        "valley_orbit": tuple(orbit),
+        "required_operation_ids": required_ids,
+        "representations": representations,
+        "plane_wave_evidence": {
+            operation_id: {
+                "mapping_miss_count": 0,
+                "norm_preservation_residual": 0.0,
+            }
+            for operation_id in required_ids
+        },
+        "target_coefficients": np.eye(2, dtype=np.complex128),
+        "projectors": projectors,
+        "valley_bases": bases,
+        "valley_mappings": mappings,
+        "antiunitary_evidence": antiunitary,
+    }
+    return (
+        build_scoped_representation_evidence(**raw_inputs).to_record(),
+        raw_inputs,
+    )
+
+
+def cprime_summary_for_export(
+    export_bundle: dict,
+    *,
+    target_kpoints: list[str] | None = None,
+    iband: list[int] | None = None,
+) -> dict:
+    """Build the compact public C-prime view consumed by ingestion tests."""
+    attach_cprime_fixture_contract(export_bundle)
+    source_identity = _cprime_fixture_source_record()[
+        "certificate_identity"
+    ]
+    matrix: list[dict[str, object]] = []
+    for bundle in export_bundle.get("bundles", []):
+        if not isinstance(bundle, dict):
+            continue
+        valley = str(bundle.get("valley", ""))
+        for kpoint, links in bundle.get(
+            "cprime_identity_by_kpoint", {}
+        ).items():
+            matrix.append({
+                "kpoint": str(kpoint),
+                "valley": valley,
+                "double_space_group_lift_status": "passed",
+                "double_space_group_lift_identity": links[
+                    "double_space_group_lift_certificate_identity"
+                ],
+                "scoped_representation_status": "passed",
+                "scoped_representation_evidence_identity": links[
+                    "scoped_representation_evidence_identity"
+                ],
+            })
+    return {
+        "schema_version": "2.0.0",
+        "target_kpoints": list(target_kpoints or []),
+        "iband": list(iband or []),
+        "input": {},
+        "cprime": {
+            "spinor_source_basis": {
+                "status": "passed",
+                "identity": source_identity,
+                "blockers": [],
+            },
+            "acceptance_matrix": matrix,
+        },
+    }
 
 
 def _detected_standard_operations(hall_number: int):
@@ -135,6 +492,58 @@ def add_real_certificate_to_candidates(ebr_input_candidates: dict,
             prov["standard_setting_hsp_mapping"] = kmap
         kmap["standard_setting_certificate"] = dict(cert)
         prov["source_table_spinor"] = bool(spinor)
+        prov["cprime"] = {
+            "spinor_source_basis_certificate_identity": canonical_identity({
+                "fixture": "spinor_source_basis",
+                "profile": "vasp_nonmagnetic_soc_default_saxis_v1",
+            }),
+            "double_space_group_lift_certificate_identity": (
+                canonical_identity({
+                    "fixture": "double_space_group_lift",
+                    "kpoint": str(c.get("kpoint", "")),
+                })
+            ),
+            "scoped_representation_evidence_identity": (
+                canonical_identity({
+                    "fixture": "scoped_representation_evidence",
+                    "kpoint": str(c.get("kpoint", "")),
+                    "valley": str(c.get("valley", "")),
+                })
+            ),
+        }
+    return ebr_input_candidates
+
+
+def attach_cprime_fixture_to_candidates(
+    ebr_input_candidates: dict,
+) -> dict:
+    """Attach producer-like C-prime identity links without changing setting."""
+    for candidate in ebr_input_candidates.get("candidates", []):
+        if not isinstance(candidate, dict):
+            continue
+        provenance = candidate.get("irrep_source_provenance")
+        if not isinstance(provenance, dict):
+            provenance = {}
+            candidate["irrep_source_provenance"] = provenance
+        provenance["cprime"] = {
+            "spinor_source_basis_certificate_identity": canonical_identity({
+                "fixture": "spinor_source_basis",
+                "profile": "vasp_nonmagnetic_soc_default_saxis_v1",
+            }),
+            "double_space_group_lift_certificate_identity": (
+                canonical_identity({
+                    "fixture": "double_space_group_lift",
+                    "kpoint": str(candidate.get("kpoint", "")),
+                })
+            ),
+            "scoped_representation_evidence_identity": (
+                canonical_identity({
+                    "fixture": "scoped_representation_evidence",
+                    "kpoint": str(candidate.get("kpoint", "")),
+                    "valley": str(candidate.get("valley", "")),
+                })
+            ),
+        }
     return ebr_input_candidates
 
 
@@ -187,6 +596,7 @@ def attach_real_certificate(export_bundle: dict, table: dict) -> dict | None:
                     "physical_object_kind",
                     "joint_time_reversal_valley_orbit",
                 )
+    attach_cprime_fixture_contract(export_bundle)
     return export_bundle
 
 

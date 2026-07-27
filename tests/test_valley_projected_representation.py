@@ -222,7 +222,6 @@ def test_representation_records_aggregate_rank_two_operation_data():
                 "phase_2pi": 0.25,
                 "character_raw": "0.000000+0.000000j",
                 "character_valley": "0.000000+0.000000j",
-                "root_deviation": 2.0e-8,
                 "basis": "valley_adapted",
                 "diagnostic_only": False,
                 "topology_input_ready": True,
@@ -239,7 +238,6 @@ def test_representation_records_aggregate_rank_two_operation_data():
                 "phase_2pi": -0.25,
                 "character_raw": "0.000000+0.000000j",
                 "character_valley": "0.000000+0.000000j",
-                "root_deviation": 1.0e-8,
                 "basis": "valley_adapted",
                 "diagnostic_only": False,
                 "topology_input_ready": True,
@@ -291,7 +289,6 @@ def test_representation_records_aggregate_rank_two_operation_data():
         {"real": 0.0, "imag": -1.0},
         {"real": 0.0, "imag": 1.0},
     ]
-    assert op["max_root_deviation"] == 2.0e-8
     assert op["basis"] == "valley_adapted"
 
 
