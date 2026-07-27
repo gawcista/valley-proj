@@ -1,343 +1,189 @@
 # ValleyScope 中文说明
 
-**语言:** 中文 | [English](README.md)
+[English](README.md)
 
-ValleyScope 是一套面向 VASP moire 超胞波函数的动量空间谷投影（momentum-space valley projection）与谷分辨对称性分析（valley-resolved symmetry analysis）后处理流程。它从选定的 moire 波函数出发，诊断其单层谷特征，在近简并目标子空间中固定谷规范，并计算谷保持对称操作的小群表示。
+ValleyScope 是面向**二维莫尔材料高通量后处理**的 valley projection、
+valley-projected irreps 与 reduced EBR workflow。它从选定的 VASP 波函数
+提取 parent-layer 动量 valley 信息，识别各 valley-projected subspace 的
+对称性，并依据经过审查的 Bilbao/irreptables 约定构造或求解降维 EBR 问题。
 
-这些对称本征值和表示矩阵是后续拓扑分析的输入，而不是自动拓扑标签。严格的谷分辨拓扑判断仍需要高对称点之外的额外验证。
+ValleyScope 输出物理证据和明确 blocker，不会把高 valley 权重或少量对称
+本征值自动解释为拓扑标签。
 
-## 物理动机
+## 支持范围
 
-在 moire 计算中，布洛赫动量属于 moire 布里渊区。但谷标记通常继承自单层布里渊区。因此，某个态位于 moire 高对称点并不意味着它就是某个单层谷态。ValleyScope 把谷定义为通过 moire 波函数中的平面波动量解析出的单层谷。
+目前主要支持并经过验证的计算范围为：
 
-对转角双层体系，同一个单层谷中的上下层动量可以杂化。这种层间杂化本身不破坏谷量子数。真正需要诊断的是目标态是否仍然局限在选定的谷子空间中，还是出现了谷间混合或谷外剩余权重。
+- VASP 平面波波函数，输入为 `WAVECAR` 或 ValleyScope HDF5 中间文件；
+- 非磁、含自旋轨道耦合、具有 parent time-reversal symmetry（TRS）且使用
+  默认 VASP Cartesian spin frame `SAXIS=[0,0,1]` 的二维莫尔体系；
+- 选定的莫尔高对称点（HSP）、目标能带、parent-layer valley center，以及
+  用于对称性识别的莫尔或双层结构。
 
-工作流在选定高对称点上回答这个问题。它还会检查候选对称操作是否属于该高对称点的小群（little group），以及是否保持所选谷，然后才报告对称本征值。
+工作流对晶格、空间群、HSP 集合、valley orbit 和 valley-projected subspace
+space group 保持通用。真实材料只用于验证，不会选择生产算法。
 
-## 物理定义
+上述计算条件无法仅从 `WAVECAR` 或紧凑 HDF5 中完整恢复，用户必须确认源
+计算属于该范围。磁性体系、spin-space-group 处理、无 SOC 非共线计算和任意
+自旋轴目前不作为已验证的生产输入。
 
-### 动量空间谷投影
+## 物理工作流
 
-对 moire 超胞中动量为 $\mathbf k_M$ 的 VASP 布洛赫态，每个平面波分量的物理动量为
-
-```math
-\mathbf q=\mathbf k_M+\mathbf G_M ,
+```text
+VASP WAVECAR / ValleyScope HDF5
+-> q-cut momentum-valley projection
+-> valley mapping 与 valley-projected subspace symmetry
+-> HSP little group 与 valley-preserving subgroup
+-> 限制在 valley-preserving subgroup 上的对称表示
+-> valley-preserving irreps
+-> Bilbao/irreptables 约定下的 reduced-dimensional EBR data
+-> exact-integer reduced EBR decomposition
 ```
-其中 $\mathbf G_M$ 是 moire 超胞倒格矢。ValleyScope 只使用面内分量 $\mathbf q_\parallel$ 进行谷归属。
 
-单层谷中心 $a$ 在单层倒空间坐标中给出，通过层变换映射到 moire 坐标系。其投影窗口由到单层倒格矢星的最小距离定义：
+### 动量 Valley 投影
+
+对莫尔动量为 \(\mathbf k_M\) 的布洛赫态，每个平面波分量的动量为
 
 ```math
-d_a(\mathbf q)=
-\min_{\mathbf G_{\rm mono}}
-\lvert
-\mathbf q_\parallel-
-(\mathbf Q_a+\mathbf G_{\rm mono})
-\rvert ,
+\mathbf q = \mathbf k_M + \mathbf G_M .
 ```
-```math
-\Omega_a(q_{\rm cut})=
-\{\,\mathbf q\mid d_a(\mathbf q)<q_{\rm cut}\,\}.
-```
-谷投影算符由一组窗口的并集构造。以含两个谷的转角双层为例，
+
+ValleyScope 将 \(\mathbf q\) 的面内分量与配置的 parent-layer valley center
+比较，并对相应单层倒格矢取模。q-cut 窗口为 valley \(a\) 定义 seed
+projector \(P_a^0\)。对归一化态，
 
 ```math
-\Omega_K=
-\Omega_{{\rm top},K}\cup\Omega_{{\rm bottom},K},
+W_a = \langle\psi|P_a^0|\psi\rangle,
 \qquad
-\Omega_{K'}=
-\Omega_{{\rm top},K'}\cup\Omega_{{\rm bottom},K'} .
+W_{\rm val} = \sum_a W_a .
 ```
-YAML 中的 `K_valley` 等名称只是用户定义的谷子空间标签。
 
-### 投影模式
+这是动量空间 parent-valley projection，不是完整的单层 Bloch-state
+unfolding。`W_val` 依赖真实的 valley center 和 q-cut，不是拓扑不变量。
 
-通过 `projection.projector_mode` 可选择两种投影中心模式。这是动量空间
-parent-valley 投影，不是完整的单层 Bloch-state unfolding。
+近简并目标能带中的单条 VASP 本征矢依赖规范选择，因此 ValleyScope 分析整个
+目标子空间，包括投影 valley 矩阵和 valley-adapted basis。稳定摘要字段包括：
 
-**`fixed_center`**（默认）：局部固定谷点诊断。将平面波动量
-`q = k_M + G_M` 与固定的单层谷中心 `Q_a` 比较（模单层倒格矢）。当采样
-moire k 点远离所有固定中心时，所有 center mask 可能为空，导致
-`W_val = 0`。摘要中以 `fixed_center_not_captured`（而非裸 `not_derived`）
-报告 — 这表示 k/center 不匹配，不一定是 parent-valley 起源的缺失。
+```text
+S_min:              目标谷子空间权重下界
+min_concentration:  valley-adapted basis 中的最低 valley 集中度
+assigned_valleys:   每个适配态的 valley 归属
+valley_weights_adapted: 适配基中的 valley 权重
+```
 
-**`k_resolved_parent_valley`**：动量空间 parent-valley 诊断。将每个单层
-谷中心 `Q_a` 折叠到 moire BZ 中得到 `k_a^fold`。对每个采样的 moire k_M，
-使用动态中心 `Q_a(k_M) = Q_a + (k_M - k_a^fold)`，询问在 k_M 处的 moire
-迷你带是否来自以 `Q_a` 为中心的 parent valley（包络动量为
-`k_M - k_a^fold`）。moire 倒格矢仅用于计算 `k_a^fold` / `G_a^M`，不重新定义
-单层谷本身。弃用别名：`folded_family`。
+可选的 projector mode 为：
 
-弃用别名 `fixed_point` 和 `folded_family` 可被接受并内部规范化。
+- `fixed_center`（默认）：使用固定 parent-layer valley center；这些 seed
+  projector 参与对称性与 irrep readiness。
+- `k_resolved_parent_valley`：使用动态 center 报告整个莫尔布里渊区中的
+  parent-valley 权重；它不会替代 irrep 或 EBR readiness 中的 fixed-center
+  projector。
 
-**Readiness 边界**: `k_resolved_parent_valley` 仅改变 reporting weights
-和 center diagnostics。种子投影矩阵、投影仪对称性、以及所有 irrep/EBR
-readiness gates 始终使用 fixed-center projectors。
+### Valley-Preserving Symmetry
 
-### 权重与谷间混合诊断
-
-设 $P_i$ 是第 $i$ 个谷的投影算符。默认策略下，落入多个谷投影窗口的平面波分量会从所有谷投影算符中移除，放入重叠投影算符 $P_\times$：
+对 HSP \(k\)，HSP little group 为
 
 ```math
-\Omega_\times=
-\{\,\mathbf q\mid
-\mathbf q\in\Omega_i\cap\Omega_j
-\ \text{for some}\ i\ne j\,\},
+G_k = \{g \mid gk = k + G_M\}.
 ```
-```math
-P_i=
-\sum_{\mathbf q\in\Omega_i\setminus\Omega_\times,\ s}
-|\mathbf q,s\rangle\langle\mathbf q,s|,
-\qquad
-P_\times=
-\sum_{\mathbf q\in\Omega_\times,\ s}
-|\mathbf q,s\rangle\langle\mathbf q,s| .
-```
-对归一化态 $|\psi\rangle$，第 $i$ 个谷的权重为
+
+若 \(\pi_g(a)\) 是操作 \(g\) 诱导的 valley mapping，则 valley \(a\) 的
+valley-preserving subgroup（谷保持子群）为
 
 ```math
-W_i=\langle\psi|P_i|\psi\rangle .
+G_k^{(a)} = \{g \in G_k \mid \pi_g(a)=a\}.
 ```
-目标谷子空间权重为
+
+seed-projector covariance 条件为
 
 ```math
-W_{\rm val}=\sum_i W_i .
-```
-谷纯度为
-
-```math
-P_v=\frac{\max_i W_i}{W_{\rm val}},\qquad W_{\rm val}>0 .
-```
-对于双谷情形，`P_v` 与 `|eta|` 存在冗余关系：`P_v = (1 + |eta|) / 2`。三谷及以上 `|eta|` 无定义，直接使用 `P_v` 作为谷集中度分数。
-
-谷集中度分数分为三档：
-- **clean**：高于 `valley_concentration_clean`（默认 0.95；在双谷分析中等价于 `|eta|=0.90`）。旧名称：`P_v_clean`。
-- **approx**：介于 `valley_concentration_approx`（默认 0.85）和 clean 阈值之间。旧名称：`P_v_approx`。
-- **mixed**：低于 approximate 阈值；单谷对称性数据只应作为诊断参考。
-
-公开摘要中的 `status` 还包括：
-
-- **not_derived**：目标态或目标子空间在用户定义谷子空间中的权重不足。
-- **unreliable**：投影窗口或剩余权重没有通过当前可靠性检查。
-- **n/a**：该子空间诊断不适用，例如单条非简并能带。
-
-对两谷子空间，有符号谷极化为
-
-```math
-\eta=
-\frac{W_K-W_{K'}}{W_K+W_{K'}}
-=
-\frac{W_K-W_{K'}}{W_{\rm val}} .
-```
-投影窗口重叠权重为
-
-```math
-W_{\rm overlap}=\langle\psi|P_\times|\psi\rangle .
-```
-谷外剩余权重为
-
-```math
-W_{\rm res}=1-W_{\rm val}-W_{\rm overlap}.
-```
-ValleyScope 报告分解 $W_{\rm val}+W_{\rm overlap}+W_{\rm res}=1$。在 CSV/JSON 输出中，`W_overlap` 保存 $W_{\rm overlap}$，`W_res` 保存谷外剩余权重。
-
-### 近简并子空间中的规范固定
-
-对孤立非简并能带，可以直接读取上述单态诊断。对近简并目标子空间，VASP 原始本征矢是规范依赖的：子空间内部任意酉变换都合法。
-
-ValleyScope 投影整个目标子空间并构造投影谷矩阵。给定 $N_v$ 个谷投影算符 $P_a$ 和目标态 $\{|\psi_i\rangle\}$，
-
-```math
-\left(P_a^{\rm sub}\right)_{ij}=
-\langle\psi_i|P_a|\psi_j\rangle,
-\qquad
-S=\sum_a P_a^{\rm sub},
-\qquad
-L = \sum_a \lambda_a P_a^{\rm sub}.
+D_g P_a^0 D_g^\dagger \approx P_{\pi_g(a)}^0 .
 ```
 
-矩阵 $S$ 检查目标子空间是否落在选定谷子空间中（$W_{\rm val}$ 的子空间推广）。谷标签算符 $L$ 在任意谷数下固定谷适配基。对角化 $L$ 得到适配基 $|\phi_\alpha\rangle$：
+把 \(a\) 映射到另一 valley 的操作是 **valley-changing operation**。它提供
+valley orbit 和 **valley sewing matrix（谷缝合矩阵）** 数据，不能被强行
+纳入 \(G_k^{(a)}\) 的单 valley irrep。
 
-```math
-w_{\alpha a} = \langle\phi_\alpha|P_a|\phi_\alpha\rangle,
-\qquad
-{\rm assigned\_valley}_\alpha = \arg\max_a w_{\alpha a},
-\qquad
-{\rm concentration}_\alpha = \frac{\max_a w_{\alpha a}}{\sum_a w_{\alpha a}}.
+ValleyScope 把对称表示限制在真实的 valley-preserving operation set 上；
+SOC 波函数使用 double-valued irreps。匹配依赖经过验证的
+standard-setting certificate，它把计算得到的仿射空间群操作和倒空间坐标映射
+到 Bilbao/irreptables 约定。仅有旋转矩阵或用户标签不足以证明该约定。
+
+### 时间反演
+
+Parent TRS **不意味着** one-valley subspace 保持 TRS。一般情况下，时间反演
+联系一对 time-reversed valleys：
+
+- 单 valley irrep 是其 valley-preserving subgroup 的酉不可约表示；
+- time-reversal completion 是独立的 valley 间构造；
+- one-valley 结果不会默认匹配到 grey group；
+- 只有所需反酉与 valley 间证据存在并通过验证时，才使用联合 grey-group
+  数据。
+
+仅当输入确定来自 parent-TRS 计算时才启用
+`analysis.time_reversal.enabled`。缺失或不一致的 sewing evidence 会保留为
+明确 blocker。
+
+### Reduced EBR 分析
+
+原始三维 EBR 数据不是 ValleyScope 的答案。ValleyScope 使用经过审查的
+Bilbao/irreptables 源约定，并把数据约化到与 valley 计算相同的物理基：
+
+```text
+source EBR data
+-> 已认证的 valley-projected subspace space group
+-> sampled source-HSP basis
+-> 限制到 valley-preserving subgroup
+-> matched valley-preserving irrep basis 中的重数
+-> reduced EBR matrix
 ```
 
-旧两谷 $V = P_K - P_{K'}$ 只是 $N_v=2$ 时的特例。对三谷及以上（如六角晶格 M-valley star），不应使用 $\eta$；应使用 `valley_weights_adapted`、`assigned_valleys`、`valley_concentration`。实际应主要看 `valley_subspace.json` 和 `valley_basis_transform.h5`。
+得到的整数向量由纯 Python/SymPy exact integer solver 求解。输出区分：精确
+非负 EBR 组合、属于整数张成但无非负 witness、不属于整数张成、有界搜索尚不
+确定，以及被物理证据阻塞。任何一种分类本身都不是陈数结论。
 
-### 对称性诊断
+### 信任条件
 
-ValleyScope 用 spglib 从 moire/bilayer 结构文件中自动识别对称操作，支持 `symprec` 和 `symprec_scan`。对称本征值仅在两项检查通过后才报告：
+高 valley purity 有参考价值，但不足以得到可信 irrep 或 EBR。进入可信结果还
+要求相关证据通过，包括：
 
-1. 该操作属于目标高对称点的 HSP little group $G_k$。
-2. 该操作保持**当前分析的特定 valley**，而非所有选定 valley。
+- 目标子空间闭合性和表示酉性；
+- seed projector 在完整 valley mapping 下的 covariance；
+- 定义明确的 valley-projected subspace 与 \(G_k^{(a)}\)；
+- 完整且无歧义的 operation mapping 和 source-HSP mapping；
+- 经过验证的 standard setting 与受审查的 irrep/EBR provenance；
+- 保守的 spinful 证据，以及启用时间反演时的 antiunitary sewing evidence。
 
-得到的矩阵是谷适配子空间中限定到当前 valley block 的小群表示。其本征值是对称性分析数据，可用于基于对称性的拓扑公式约束，但 ValleyScope 不从少数高对称点自动推断完整整数陈数。
+干净的 fixed-center seed basis 可以直接使用；否则 ValleyScope 可构造
+symmetry-adapted valley basis。失败或不完整的证据保持 diagnostic-only 或
+blocked，不应仅为获得标签而放宽 tolerance。
 
-每个 valley 的 valley-preserving subgroup 单独报告。Valley orbit 和 valley mapping 包含在 subgroup report 中。当前 V1.1 报告 valley orbit 和 operation mapping；严格 minimal coset representatives 和 induced representation relation 尚未自动完成。all-valley intersection（保持所有选定 valley 的操作集合）作为 debug 字段保留，但不用于 valley-preserving irrep matching。
+## 安装
 
-### 单谷不可约表示的解释
-
-valley-preserving irrep 应当与 HSP little group 内的谷保持子群（valley-preserving subgroup）的不可约表示比较：
-
-```math
-G_k^{(a)}=\{\,g\in G_k\mid \pi_g(a)=a\,\},
-```
-
-其中 $G_k$ 是 HSP little group，$\pi_g(a)$ 是操作 $g$ 诱导的 valley mapping。除非某个操作保持该谷子空间，否则单谷表示不应解释为完整 moire space group 的不可约表示。
-
-含 SOC 时必须使用 double-valued irreps。spinor 波函数在 $2\pi$ 旋转下变号，因此 spinful $C_3$ 满足 $C_3^3=-1$，允许 $\exp(+i\pi/3)$、$-1$、$\exp(-i\pi/3)$ 等本征值。
-
-经过 valley-preservation 过滤后，ValleyScope 报告每个选定 valley 各自的 $G_k^{(a)}$，而不是 all-valley intersection。把 valley $a$ 映射到另一个选定 valley 的操作会作为 valley-changing orbit 数据报告，但不会作为 $a$ 的 valley-preserving eigenvalue row。Canonical Bilbao/irreptables restricted-character matching over $G_k^{(a)}$ 产生 representation-level `irrep_multiplicities`。唯一的紧凑公开 irrep 对象是 `valley_resolved_irreps`；完整 `valley_irrep_matching` 和分组后的 `valley_projected_representations` 证据只在 debug profile 中出现。这些是 valley-preserving character matching 结果，不是 reduced EBR decomposition 或拓扑结论。
-
-### M-Star Valley Orbit 与 Valley-Preserving Subgroup 结构
-
-对六角 moire 超胞（如 $P321$/ $P312$）中的三谷 M-star，三个 M 点构成一个 valley orbit：
-
-```math
-O_M = \{M_1, M_2, M_3\}
-```
-
-典型 valley mapping 为：
-
-```math
-C_3: M_1 \to M_2 \to M_3 \to M_1,
-\qquad
-C_2^{(M_1)}: M_1 \to M_1,\; M_2 \leftrightarrow M_3 .
-```
-
-HSP little group 定义为：
-
-```math
-G_k = \{ g \in G \mid g k = k + \mathbf G_M \}.
-```
-
-$M_1$ 在 HSP little group 内的 valley-preserving subgroup 为：
-
-```math
-G_k^{(M_1)} = \{ g \in G_k \mid \pi_g(M_1)=M_1 \}.
-```
-
-类似地，$G_k^{(M_2)}=\{g\in G_k\mid\pi_g(M_2)=M_2\}$，$G_k^{(M_3)}=\{g\in G_k\mid\pi_g(M_3)=M_3\}$。当对应 valley orbit 由 $C_3$ 联系时，这些子群由共轭关系联系：
-
-```math
-G_k^{(M_2)} = C_3 G_k^{(M_1)} C_3^{-1}, \qquad
-G_k^{(M_3)} = C_3^2 G_k^{(M_1)} C_3^{-2}.
-```
-
-Single-valley irrep 应当匹配到对应的 valley-preserving subgroup $G_k^{(M_i)}$；完整 M-star representation 还需要 valley-changing operations 和 valley sewing matrices。
-
-**当前范围：** ValleyScope 输出 valley orbits、operation mappings 和
-valley-preserving subgroups。工作流包含三条 irrep 路径：
-`direct_qcut`（干净系统，q-cut seed basis 已通过所有 readiness gates，
-例如 tMoTe2 GammaM/KM）、`symmetry_adapted`（P_a^sym 回退，seed basis
-需要对称化纯化，例如 tZrSe2 M-star）、`blocked`（数据缺失或 O(1) 级失败）。
-单谷 irreps 匹配到对应的 valley-preserving subgroup；多谷 M-star 表示需要
-valley-changing operations 和 valley sewing matrices。仓库包含一个默认关闭的
-exact-integer external-table reduced EBR mapping 接口，但必须使用用户提供并
-验证过的表——不内置任何未审核的 EBR 表。Full-group irrep 描述整个 M-star
-manifold；valley-preserving irrep 描述 $G_k^{(M_i)}$。如果同时列出两者，
-还必须说明 orbit、mapping 和 induction-subduction 关系，否则信息仍不完整。
-
-## 运行流程
-
-### 安装
+ValleyScope 要求 Python 3.10 或更高版本。
 
 ```bash
 git clone https://github.com/gawcista/valley-proj.git
 cd valley-proj
-pip install -e .
+python -m pip install -e .
 ```
 
-源码目录中可以直接运行：
+检查已安装命令：
 
 ```bash
-python -m valleyscope.cli --help
+valleyscope --help
+valleyscope analyze-hsp --help
 ```
 
-### 快速开始
+在源码目录中，`python -m valleyscope.cli --help` 等价。
 
-推荐流程只有两步。
+## 快速开始
 
-第一步，从 `WAVECAR` 抽取 HDF5：
+标准流程只需抽取一次紧凑 HDF5，随后分析该文件。
 
-```bash
-valleyscope extract-wavecar extract.yaml
-```
+### 1. 抽取选定的 WAVECAR 数据
 
-第二步，分析高对称点波函数：
-
-```bash
-valleyscope analyze-hsp analyze.yaml
-```
-
-主分析流程读取 HDF5，不反复读完整 `WAVECAR`。
-
-分析后，从公共输出构建紧凑的数据库摄入记录（离线收集器，非默认 `analyze-hsp` 输出）：
-
-```bash
-valleyscope collect-database-record ./valley_analysis --output record.json
-```
-
-该记录中的 generic irrep 行会保留 `irrep_source_provenance`，包括可用时的
-`standard_setting_hsp_mapping.standard_setting_certificate`。
-最终 reduced-EBR 记录只有在 promotion provenance 与当前完整 export bundle、
-被提升的 irrep vector 及当前表输入来源严格一致时才会被采纳。重复 solution
-ID、过期或伪造的联合时间反演 grey-group 证据都会 fail closed。
-
-从显式指定的采集记录文件和 `analyze-hsp` 输出目录的任意混合输入，直接生成
-多运行数据库索引：
-
-```bash
-valleyscope collect-database-index run1/record.json run2/valley_analysis \
-  --output database_index.json
-```
-
-输入按命令行顺序消费；目录不会被递归扫描，也不会生成中间采集记录文件。
-数据库索引 schema `1.2.0` 将每个输入记录为带类型的 `source_input`；
-兼容字段 `source_files` 和 `source_record` 仍仅表示采集记录文件，绝不会写入
-分析输出目录。
-
-### 最小可运行配置
-
-一个只含必要字段的 `analyze.yaml`：
-
-```yaml
-input:
-  wavefunction_h5: ./wave.h5
-
-analysis:
-  kpoints: [GammaM, KM, MM]
-  iband: [2195, 2196]
-
-valley_centers:
-  coordinate_mode: cart
-  centers:
-    - name: K
-      cart: [0.5, 0.0, 0.0]
-    - name: Kp
-      cart: [-0.5, 0.0, 0.0]
-
-valley_subspaces:
-  - name: K_valley
-    centers: [K]
-  - name: Kp_valley
-    centers: [Kp]
-
-output:
-  directory: ./valley_analysis
-```
-
-其余字段使用默认值（`qcut_mode: moire_shell`, `qcut_shell: 3`, symmetry detection 跳过等）。
-当前分析配置使用 `analysis.iband` 表示 VASP 能带编号，使用
-`valley_subspaces` 表示用户定义的单层谷子空间。
-
-### 从 WAVECAR 抽取
-
-`extract.yaml`：
+创建 `extract.yaml`：
 
 ```yaml
 input:
@@ -349,469 +195,177 @@ extract:
       vasp_index: 1
     - name: KM
       vasp_index: 2
-    - name: MM
-      vasp_index: 3
-
-  # VASP 1-based band indices。也支持 {start: 2195, end: 2210}、
-  # "2195-2210" 或混合列表。
-  bands_vasp: [2195, 2196]
-
-  # 共线 ISPIN=2 时每次抽取一个自旋通道
-  # SOC/非共线 WAVECAR 由抽取器自动检测 spinor
-  spin_index: 1
-
-  # 可选：自动 G-list 重建 cutoff 微调的最大 |delta_Ecut|，单位 eV
-  # （默认 0.0 = 严格精确匹配模式）。
-  # 建议从 0.005 eV 或 0.01 eV 开始。接近 0.05 eV 或更大时应视为
-  # suspicious —— 检查 WAVECAR 变体、晶格约定、G-list 排序和 k-point 约定。
-  # ecut_adjust_tol 不修改 DFT 的 ENCUT，只是后处理 G-list 重建的
-  # effective cutoff tolerance。
-  # ecut_adjust_tol: 0.0
+  bands_vasp: [101, 102]
 
 output:
-  wavefunction_h5: ./wave.h5
+  wavefunction_h5: ./wavefunctions.h5
 ```
+
+`vasp_index` 和 `bands_vasp` 均使用从 1 开始的 VASP 编号。
 
 ```bash
 valleyscope extract-wavecar extract.yaml
 ```
 
-检查 HDF5 内容：
+### 2. 分析 HSP 波函数
 
-```text
-/metadata/g_vector_order
-/metadata/g_list_reconstruction_mode   (exact 或 ecut_adjusted)
-/metadata/original_encut_eV
-/metadata/reconstruction_encut_eV
-/metadata/ecut_adjust_tol_eV
-/metadata/ecut_adjust_delta_eV
-/kpoints/N/name
-/kpoints/N/frac
-/kpoints/N/g_vectors_frac
-/kpoints/N/coefficients       [nb, nspinor, nG]
-/kpoints/N/energies_eV
-/kpoints/N/band_indices_vasp
-/kpoints/N/nplane_record
-/kpoints/N/target_g_count
-/kpoints/N/generated_g_count_at_header_encut
-/kpoints/N/generated_g_count_final
-/kpoints/N/ecut_adjust_delta_eV
-```
-
-如果抽取器报 G-vector 数量不匹配，先尝试添加一个小 `ecut_adjust_tol`（建议从 0.005 eV 或 0.01 eV 开始）。大型 SOC/非共线 moire 超胞的 WAVECAR 可能因 cutoff 边界约定出现小差异。接近 0.05 eV 或更大时应视为 suspicious —— 检查 WAVECAR 变体、晶格约定、G-list 排序和 k-point 约定。`ecut_adjust_tol` 是后处理 G-list 重建 tolerance，不修改 DFT 的 ENCUT。严格模式（`ecut_adjust_tol: 0.0`）仍为默认。
-
-### 分析高对称点波函数
-
-对转角双层，层变换是最容易出错的地方。结构来自整数公度矩阵时，优先用 `supercell_matrix`。
-
-完整配置示例（`analyze.yaml`）：
+创建 `analyze.yaml`：
 
 ```yaml
 input:
-  wavefunction_h5: ./wave.h5
-
-  # 单层 POSCAR 用于构造层倒格矢和解释 layer_frac 谷中心
+  wavefunction_h5: ./wavefunctions.h5
   monolayer_poscars:
-    top: ./2dm-5370.vasp
-    bottom: ./2dm-5370.vasp
-
-layer_transforms:
-  top:
-    # Row-vector convention: M_moire = P^T A_layer
-    supercell_matrix:
-      - [9, -5, 0]
-      - [5, 4, 0]
-      - [0, 0, 1]
-  bottom:
-    supercell_matrix:
-      - [9, -4, 0]
-      - [4, 5, 0]
-      - [0, 0, 1]
+    parent: ./monolayer.vasp
 
 analysis:
-  kpoints: [GammaM, KM, MM]
-  iband: [2195, 2196]
-  subspace_energy_tol_meV: 1.0
-  # 可选：显式 crystallographic convention certificate，用于非平凡
-  # parent-to-standard HSP 坐标映射。只有已知 parent-to-standard
-  # direct-lattice transform 时才应填写。
-  # standard_setting:
-  #   parent_to_standard_direct_transform:
-  #     - [1.0, 0.0, 0.0]
-  #     - [0.0, 1.0, 0.0]
-  #     - [0.0, 0.0, 1.0]
-  #   origin_shift_fractional: [0.0, 0.0, 0.0]
-  #   transform_provenance: "explicit standard-cell convention"
+  kpoints: [GammaM, KM]
+  iband: [101, 102]
+  time_reversal:
+    enabled: true
 
 valley_centers:
   coordinate_mode: layer_frac
   centers:
-    - name: top_K
-      layer: top
+    - name: valley_a
+      layer: parent
       frac: [0.333333333333, 0.333333333333, 0.0]
-    - name: bottom_K
-      layer: bottom
-      frac: [0.333333333333, 0.333333333333, 0.0]
-    - name: top_Kp
-      layer: top
-      frac: [-0.333333333333, -0.333333333333, 0.0]
-    - name: bottom_Kp
-      layer: bottom
+    - name: valley_b
+      layer: parent
       frac: [-0.333333333333, -0.333333333333, 0.0]
 
 valley_subspaces:
-  - name: K_valley
-    centers: [top_K, bottom_K]
-  - name: Kp_valley
-    centers: [top_Kp, bottom_Kp]
+  - name: valley_a
+    centers: [valley_a]
+  - name: valley_b
+    centers: [valley_b]
 
 projection:
-  projector_mode: fixed_center   # 默认；或 k_resolved_parent_valley 用于 parent-valley 诊断
+  projector_mode: fixed_center
   qcut_fraction: 0.20
-  qcut_scan: [0.15, 0.20, 0.25, 0.30]
-  thresholds:
-    W_val_min: 0.8
-    valley_concentration_clean: 0.95
-    valley_concentration_approx: 0.85
 
 symmetry:
   operations:
-    structure_file: ./2dm-5370-7.34.vasp
-  tolerance:
-    symprec: 1.0e-3
-    angle_tolerance: -1.0
-    symprec_scan: [1.0e-5, 3.0e-5, 1.0e-4, 3.0e-4, 1.0e-3]
-  filters:
-    rotation_order: auto
-
-spinor:
-  convention_verified: true
-  benchmark: spinor_C3_reference_check
-
-rotation:
-  readiness_preset: strict
-  unitarity_tol: 1.0e-4
-  root_deviation_tol: 1.0e-6
-  D_valley_offdiag_tol: 1.0e-6
+    structure_file: ./moire.vasp
 
 output:
   directory: ./valley_analysis
+  profile: standard
 ```
+
+必须用实际体系的 HSP、能带、valley center、结构和 q-cut 替换示例值。对多层
+体系，应一致定义各层倒空间坐标和变换；对公度结构，整数 supercell transform
+通常比只给转角更可靠。
 
 ```bash
 valleyscope analyze-hsp analyze.yaml
 ```
 
-### 如何阅读屏幕输出
+### 终端摘要示例
 
-`analyze-hsp` 的终端摘要按以下部分组织：
-
-```text
-Input
-Valley subspaces
-Valley projection summary
-Valley subspace analysis
-Symmetry analysis
-Symmetry eigenvalues
-Warnings
-Output files
-```
-
-先看 `Valley projection summary`，它只给出逐条原始 VASP 能带的投影量：
+standard profile 在终端打印与 `valley_summary.txt` 完全相同的结果优先摘要。
+主要部分为：
 
 ```text
-W_val:      谷子空间权重
-P_v:        谷纯度
-W_overlap: 投影窗口重叠权重
-W_res:      剩余权重
+Run and projection context
+Valley projection by sampled state
+Valley-projected subspace space group and trusted HSP irreps
+Authoritative reduced EBR results
+Readiness blockers and warnings
+Public output files
 ```
 
-屏幕上的 `status` 保持紧凑，但会区分前置失败：`clean`、`approx`、`mixed`、`not_derived`、`unreliable` 或 `n/a`。
+运行上下文包含 `qcut mode:` 和实际 q-cut。`valley_summary.json` 中稳定的
+`Valley projection summary` 与 `Valley subspace analysis` payload 分别为
+`valley_projection_summary` 和 `valley_subspace_analysis`。常见可用性状态
+包括 `fixed_center_not_captured`、`not_derived` 和 `unreliable`。
 
-再看 `Valley subspace analysis`。近简并子空间中的原始 VASP 本征矢依赖规范选择，逐条能带投影不是最终诊断。ValleyScope 在目标子空间中构造通用投影谷矩阵 $P_a^{\rm sub}$ 和标签算符 $L = \sum_a \lambda_a P_a^{\rm sub}$：
+## 输入与配置
 
-```math
-S=\sum_a P_a^{\rm sub}, \qquad
-L=\sum_a \lambda_a P_a^{\rm sub}.
-```
+一次分析需要：
 
-```text
-S = sum_a P_a^sub:  目标能带中的目标谷子空间投影算符
-S_min:              目标谷子空间权重下界
-S_max:              目标谷子空间权重上界
-min_concentration:  谷适配基中的最低谷集中度
-assigned_valleys:   每个适配态的谷归属
-eta_adapted:        有符号谷极化（仅双谷兼容字段）
-```
+- ValleyScope HDF5，包含选定的平面波系数、倒格矢、k 点、能量和 VASP
+  能带编号；
+- 单层倒格信息和物理定义的 valley center，必要时包含 layer transform；
+- HDF5 中实际存在的 HSP label 与 `analysis.iband`；
+- 在 `symmetry.operations.structure_file` 指定供 spglib 识别操作的莫尔或
+  双层 POSCAR/CONTCAR。
 
-`S` 判断所选目标能带是否能被选定的谷子空间良好描述；标签算符 `L` 在任意谷数下固定谷适配基。对双谷，`eta_adapted` 作为兼容字段继续输出；对三谷及以上，应使用 `valley_weights_adapted`、`assigned_valleys` 和 `valley_concentration`。双谷 $V=P_K-P_{K'}$ 是这个通用框架的特例。这里输出的是对子空间整体的诊断，不是逐条原始能带投影表的重复。
+单层结构定义 parent-layer 倒空间坐标；莫尔或双层结构定义对称操作，二者不能
+互换。
 
-屏幕摘要的 `status` 取值为 `clean`、`approx`、`mixed`、`not_derived`、`unreliable` 和 `n/a`。前三者描述谷集中度；`not_derived` 表示目标谷子空间权重不足，`unreliable` 表示投影窗口或剩余权重检查失败，`n/a` 表示该子空间诊断不适用。
+日常计算使用 `output.profile: standard`；需要详细 projector、表示、闭合性、
+HSP-star 或 sewing 证据时使用 `output.profile: debug`。这里有意省略高级
+source-table 与 standard-setting override；准备受审查输入时，应以当前 CLI
+help 和 `valleyscope/io/config.py` parser 为准。
 
-`Symmetry analysis` 先列出空间群和检测到的对称操作，再按高对称点和 valley 列出 HSP-little-group 操作以及保持当前 valley 的操作。把一个选定 valley 映射到另一个 valley 的操作会标记为 `valley-changing`。`HSP-star coverage` 会报告当前配置的 HSP representatives 是否覆盖完整 symmetry star。`symmetry_derivable` 表示某些 star representatives 没有显式出现在输入 HDF5 中，但可以由已报告的空间群对称性生成；这不是要求额外 DFT。JSON 摘要在 `symmetry_analysis.hsp_star_report` 中用 `requires_additional_dft=false` 和 `symmetry_derivable_representatives` 记录这一点。JSON 摘要还包含 `symmetry_analysis.valley_preserving_subgroup_report`：它报告 valley orbits、valley-preserving subgroups、closure、`per_valley_standard_matches`，并把 all-valley intersection 作为 debug-only 字段保留。唯一的紧凑公开 canonical irrep 对象是 `valley_resolved_irreps`；分组后的 representation evidence 仅供 debug。`Symmetry eigenvalues` 只列出实际构造了表示矩阵并求得本征值的操作。`symmetry_characters` 聚合通过 HSP-little-group 和 valley-preserving 检查的 $\chi^{a}_k(g)=\mathrm{Tr}\,D^{a}_k(g)$；它是 irrep matching 的 character 输入层。`topology_input_ready` 只表示该高对称点对称本征值可作为后续基于对称性的拓扑分析输入，不验证整个 mBZ 的谷分辨拓扑。
+## 输出
 
-对于 SOC spinor 波函数，ValleyScope 在平面波表示中施加 SU(2) 自旋旋转。默认 VASP 自旋约定未验证时标记为 `diagnostic_only=True`。完成基准测试后可设置 `spinor.convention_verified: true`。`spinor.convention` 在 YAML 中可省略，因为当前只支持默认 VASP up/down convention。
+standard profile 突出以下公开入口：
 
-屏幕摘要示例：
+| 文件 | 用途 |
+| --- | --- |
+| `valley_summary.txt` | 结果优先的人类可读摘要，应首先查看 |
+| `valley_summary.json` | 机器可读公开记录，包含 canonical `valley_resolved_irreps` |
+| `valley_weights.csv` | 快速扫描每个 (kpoint, VASP band) 的原始 valley 权重 |
+| `valley_ebr_export_bundle.json` | 仅当至少存在一个 ready bundle 时写出 |
+| `valley_reduced_ebr_mapping.json` | 仅当 reduced EBR mapping 已启用且实际完成评估时写出 |
 
-```text
-Input
------
-wavefunction_h5: ./wave.h5
-operation structure: ./2dm-5370-7.34.vasp
-operation-detection backend: spglib
-spinor convention: vasp_up_down_saxis_z (verified=True, benchmark=spinor_C3_reference_check)
-target k-points: GammaM, KM, MM
-iband (VASP): 2195, 2196
-qcut mode: relative_min_valley_distance
-qcut value: 0.034 A^-1
-qcut fraction: 0.2
+`valley_resolved_irreps` 对每个采样 `(kpoint, valley)` 只保留一个 canonical
+记录，包括 valley-projected subspace space group、HSP little group、
+valley-preserving operation IDs、readiness、blocker 和
+`irrep_multiplicities`。
 
-Valley subspaces
-----------------
-label     centers
---------  ----------------
-K_valley  top_K, bottom_K
-Kp_valley top_Kp, bottom_Kp
+`valley_weights.csv` 的 raw row 适合快速筛查，但近简并能带子空间内的单条
+结果依赖规范选择，应结合摘要中的子空间与 readiness 信息解释。
 
-Valley projection summary
--------------------------
-W_val:      谷子空间权重
-P_v:        谷纯度
-W_overlap: 投影窗口重叠权重
-W_res:      剩余权重
-kpoint  band  W_val  P_v   W_overlap  W_res  status
-------  ----  -----  ----  ---------  -----  ------
-GammaM  2195  0.98   0.99  0          0.02   clean
-```
+debug profile 保留 `Valley subspaces`、`Valley subspace analysis`、
+`diagnostics.h5`、对称性报告、限制后的表示数据及 irrep/EBR provenance
+等详细证据。这些是调试入口，不是每位用户都必须逐个检查的主输出。若没有行
+满足相应物理作用域，某些 debug 表可能只有 header-only；这本身不表示运行
+失败。
 
-### 结构文件
+## 执行 Reduced EBR Mapping
 
-这些输入的用途不同：
+`analysis.reduced_ebr.enabled` 默认关闭。对 ready canonical bundle，分析器可从
+已安装的 `irreptables` 数据构造受审查的 reduced table，也可读取用户提供并
+验证过的 reduced table 或 reviewed mapping specification。所有路径都必须先
+通过 group、setting、spin、HSP、irrep 和 provenance 检查，才能进入 exact
+solver。
 
-```yaml
-input:
-  wavefunction_h5: ./wave.h5
-  monolayer_poscars:
-    top: ./2dm-5370.vasp
-    bottom: ./2dm-5370.vasp
-
-symmetry:
-  operations:
-    structure_file: ./2dm-5370-7.34.vasp
-```
-
-- `input.wavefunction_h5`：抽取后的 moire 波函数 HDF5，含高对称点平面波系数和 moire 倒格矢。
-- `input.monolayer_poscars`：单层结构，用于构造各层倒格矢和解释 `layer_frac` 谷中心。
-- `symmetry.operations.structure_file`：用于识别对称操作的 moire/bilayer POSCAR/CONTCAR。缺失时 symmetry detection 被跳过。
-
-单层 POSCAR 不能替代 moire POSCAR 做对称操作识别。
-
-`symmetry.filters.rotation_order` 是遗留的 summary/highlight 字段。V1.1 中它不控制哪些操作进入对称性分析。所有检测到的 proper HSP-little-group 操作（阶数 `2`、`3`、`4`、`6`）都会被枚举并按 valley-preserving subgroup 过滤。`rotation_order` 记录用户请求或自动解析出的旋转阶数，仅用于 summary 兼容：
-
-- `auto`：从空间群推断（如 `P321`/`P312` → `C3`，`P422` → `C4`）
-- 整数 `n`：以 `C_n` 作为突出显示的循环旋转阶数
-- `None`/`none`：跳过对称本征值提取
-
-Valley-preserving gate 为：
-
-```math
-\text{little\_group\_passed}(g, k) \land \text{mapped\_valley}[v_a] = v_a
-```
-
-而非旧的 all-valley intersection。一个保持某个 valley 但交换其他 valley 的操作，对被保持的 valley 是合法的 valley-preserving 操作。valley-changing operations 作为 valley-orbit 数据报告，不进入源 valley 的 valley-preserving eigenvalue 行。
-
-`root_deviation_tol`、`D_valley_offdiag_tol` 和 `irrep_weight_tol` 是 numerical readiness thresholds，不是普适物理常数。`root_deviation_tol` 检查计算得到的对称本征值是否足够接近允许的 root of unity。`D_valley_offdiag_tol` 检查当前双谷 benchmark 中 `D_valley` 的非对角范数。`irrep_weight_tol` 检查 character decomposition 权重是否足够接近整数，只有通过时才输出 irrep label。`readiness_preset` 支持 `strict`、`normal`、`loose`：`strict` 分别使用 `1.0e-6`、`1.0e-6`、`1.0e-5`；`normal` 使用 `1.0e-5`、`1.0e-3`、`5.0e-5`；`loose` 使用 `1.0e-4`、`1.0e-2`、`1.0e-4`。显式设置阈值会覆盖 preset。解释它们时必须同时看 qcut 稳定性、`W_val`、`P_v`、`S_min`、spinor benchmark、plane-wave mapping 质量和 symmetry tolerance。不要为了得到 `topology_input_ready=True` 或 irrep label 而随意放宽。
-
-## 读取输出
-
-分析结果写到 `output.directory`。输出由 `output.profile` 控制：
-
-- `standard`（默认）：仅公共用户输出。
-- `debug`：完整诊断文件集。
-
-设置 `output.profile: debug` 以启用所有详细诊断文件。公共输出 schema 在下文概述；
-内部开发 schema 说明不放入公开仓库。
-
-### 主入口
-
-```text
-valley_summary.txt           ← 最先看（人类可读）
-valley_summary.json          ← 机器可读
-```
-
-### 快速扫描
-
-```text
-valley_weights.csv           ← 每 (kpoint, band) 原始谷权重
-```
-
-### 下游 EBR 入口
-
-```text
-valley_ebr_export_bundle.json           ← 供下游工具使用的完整就绪 bundle
-```
-
-### 可选 External-Table Reduced EBR Mapping
-
-```text
-valley_reduced_ebr_mapping.json         ← 仅在 analysis.reduced_ebr.enabled 时生成
-```
-
-当 `analysis.reduced_ebr.enabled` 为 true 时，ValleyScope 使用 irreptables
-源数据执行精确整数 reduced EBR 分解。按优先级顺序支持三种输入模式：
-
-1. **`table_file`** — 用户提供并验证的外部 reduced EBR 表（JSON，包含
-   `schema_version`、`subspace_group_candidate`、`expected_hsps`、`irreps`
-   和 `ebrs`）。
-
-2. **`spec_file`** — JSON 映射规范，定义 `source_hsp_by_irrep`、
-   `valleyscope_irrep_multiplicity_by_source_irrep` 和 canonical irreptables
-   空间群编号。ValleyScope 通过独立的 `irreptables.ebrs.load_ebr_data` 边界
-   加载公开 irreptables EBR 数据，并执行自己的 sampled-HSP valley-preserving
-   降维。
-
-3. **Auto-canonical**（当 `table_file` 和 `spec_file` 均未提供时）—
-   ValleyScope 直接从 EBR export bundle 中已有的 canonical irreptables irrep
-   标签自动推导 reduced EBR 表。自动路径：
-   - 独立处理每个 ready bundle；
-   - 使用计算得到的 valley-projected 子空间群（如 P3/SG143），而非母体 moire
-     空间群（如 P321/SG150）；
-   - 从经过 `StandardIrrepTable` 校验的 canonical irrep 标签推导精确的
-     Bilbao→ValleyScope HSP 映射；
-   - 提取每个 irreptables EBR 基标签的 canonical k-vector token，仅保留
-     token 与已采样的 canonical Bilbao HSP 完全匹配的行；丢弃的行记录在
-     provenance 中；
-   - 报告精确非负整数分解及其分解唯一性（`unique` / `non_unique` /
-     `unknown_truncated`）；
-   - 区分源/约定失效（`blocked`）与完整的物理无解结果
-     （`no_exact_solution`）。
-
-三种路径均生成 `valley_reduced_ebr_mapping.json`，包含 solutions、excluded
-bundles、solver provenance 和 per-bundle 状态条目。
-
-独立的离线 CLI 也可用于已有的 export bundle 加用户提供的表：
+权威评估在 `analyze-hsp` 内完成，因为此时仍可用生产者拥有的表示证据重新计算。
+导出的 JSON bundle 保留 identity link，便于审计和下游传递，但这些 link 本身
+不能重新建立数值可信性。因此，仅向 standalone 命令提供序列化 JSON 时，它
+执行的是 fail-closed 兼容性审计，不会把 identity-only bundle 提升为权威解：
 
 ```bash
 valleyscope map-reduced-ebr \
   valley_ebr_export_bundle.json \
-  external_reduced_ebr_table.json \
+  validated_reduced_ebr_table.json \
   --output valley_reduced_ebr_mapping.json
 ```
 
-### Debug / 详细输出（仅 debug profile）
+ValleyScope 不提供临时拼接或未经审查的生产 EBR 表。
 
-以下文件仅在 `output.profile: debug` 时写出：
+## 限制与非目标
 
-```text
-valley_subspace.json        ← 多谷子空间数据
-symmetry_eigenvalues.csv    ← 对称本征值
-symmetry_report.json        ← 对称性分析
-valley_basis_transform.h5   ← 谷适配基变换
-diagnostics.h5              ← projector mask 和 q-cut scan 数据
-hsp_star_conjugation.json   ← HSP-star 共轭图
-hsp_star_derived_characters.json ← 衍生 HSP-star character
-subspace_representation_quality.json ← 可选/默认关闭的表示质量分解
-symmetry_adapted_valley_analysis.json   ← 对称适配 valley 分析
-valley_irrep_matching.json              ← valley-preserving irrep 匹配
-irrep_workflow_decisions.json           ← 工作流路径决策
-projector_symmetry_report.json          ← seed projector 对称性
-target_subspace_closure.json            ← D_raw 闭包诊断
-valley_ebr_input_candidates.json        ← 受信任的 irrep 候选
-valley_ebr_problem_instances.json       ← 按 valley 归类的 EBR 问题实例
-folded_center_report.json               ← valley-center 折叠
-sampled_k_coverage.json                 ← 采样 k 点覆盖
+ValleyScope 当前不提供：
+
+- 把原始三维 EBR decomposition 作为 valley-resolved 结果；
+- 内置未经审查的 EBR 表或启发式浮点 EBR fitting；
+- compatibility relations；
+- Berry curvature、Wilson loop 或 Chern number；
+- 自动的 full-moire-Brillouin-zone valley-goodness 验证；
+- 仅依据 HSP 数据给出的拓扑结论。
+
+## 开发
+
+安装测试依赖并运行测试：
+
+```bash
+python -m pip install -e ".[test]"
+python -m pytest -q
 ```
 
-### valley_weights.csv
-
-每行对应一个原始 VASP 能带：
-
-```text
-kpoint, band_vasp, energy_eV, K_valley, Kp_valley, W_val, P_v, eta, W_overlap, W_res
-```
-
-谷列名来自 YAML 标签。`W_val`、`P_v`、`eta` 分别为目标谷子空间权重、谷纯度、有符号谷极化。近简并目标态的逐条结果是规范依赖的。
-
-同一个原始逐能带权重向量也写入 `valley_summary.json` 的
-`valley_projection_summary[]` 行，字段名为 `valley_weights`，键为配置中的
-`valley_subspaces` 标签。这是 raw-band q-cut 权重；若要看谷适配目标子空间中的权重，
-应使用 `valley_subspace.json` 或 `valley_basis_transform.h5`。
-
-### valley_subspace.json
-
-近简并态的主要摘要文件。记录投影谷算符、谷适配基诊断，以及目标子空间落在所选谷子空间中的程度。
-
-关键字段包括 `s_eigenvalues`、`assigned_valleys`、`valley_concentration`
-以及 `projector_quality`。其中 `projector_quality` 报告
-$P_a^{\rm sub}$ 的 rank estimate、本征值 gap、pair overlap、
-commutator norm 和 $||\sum_a P_a^{\rm sub}-I||_F$。这些量只说明
-q-cut windows 是否形成合理的 valley seed；可信的 valley-preserving irrep
-还需要 projector symmetry-consistency 和后续 symmetry-adapted analysis。
-
-注意：`valley_weights` 和 `sector_weights` 在 `valley_subspace.json` 中保存相同数据。`sector_weights` 作为 legacy alias 保留；新代码应优先使用 `valley_weights`。类似地，`diagnostics.h5` 在 `valley_masks`（推荐）和 `sector_masks`（legacy）下各存一份 mask。内部类名如 `SectorProjectors` 可能仍使用 "sector" 出于历史原因。
-
-### symmetry_eigenvalues.csv
-
-只有操作通过表示矩阵检查后才写入：真旋转且阶数在 `[2,3,4,6]`、属于 HSP 小群、保持所选谷。
-
-只有 header-only 的空文件不一定是错误；它通常表示当前 HSP 与谷设置下没有操作通过这些检查。
-
-主要列：
-
-- `kpoint`：moiré 高对称点
-- `operation_id`：`symmetry_report.json` 中的对称操作编号
-- `order`：旋转阶数
-- `phase_2pi`：本征值相位 / 2π
-- `nearest_root_of_unity` / `root_deviation`：最近单位根及偏差
-- `rotation_ready`：表示矩阵通过数值检查
-- `topology_input_ready`：适合作为后续拓扑分析输入（保守标志）
-- `diagnostic_only`：仅供诊断
-- `D_valley_offdiag_norm`：双谷基中表示矩阵非对角块范数
-- `valley_eta`：谷适配态的有符号谷极化
-
-### valley_summary.json 中的 symmetry_characters
-
-summary JSON 包含一等字段 `symmetry_characters`。每一行按 `(kpoint, target_valley, operation_id)` 聚合，记录 `character_raw`、`character_valley`、readiness flags，以及该操作是否可作为该 valley 的 valley-preserving representation。只有通过 HSP-little-group 和 valley-preserving 检查的操作会进入这里。这是下游 valley irrep matching 的 character 输入层；valley-preserving irrep matching 由 `valley_irrep_matching.json` 执行，reduced EBR decomposition 以默认关闭的 exact-integer external-table 接口形式存在（`valley_reduced_ebr_mapping.json`，仅在 `analysis.reduced_ebr.enabled` 时生成）。
-
-### valley_basis_transform.h5
-
-```text
-/GammaM/transform
-/GammaM/eta                 （仅双谷）
-/GammaM/s_matrix
-/GammaM/label_operator
-/GammaM/s_eigenvalues
-/GammaM/valley_weights_adapted
-/GammaM/assigned_valleys
-/GammaM/valley_concentration
-/GammaM/band_indices_vasp
-/GammaM/valid_valley_subspace
-```
-
-对正好两个谷，`eta` 和 `v_matrix` 会作为兼容字段继续写出。对三谷及以上，应使用 `valley_weights_adapted` 和 `assigned_valleys`。后续在谷适配子空间中构造表示矩阵时使用这里的 `transform`。
-
-### symmetry_report.json
-
-记录检测到的对称操作（类型、旋转矩阵、平移、候选旋转状态、后端、小群/谷保持检查结果）。
-
-summary JSON 额外暴露 `symmetry_analysis.valley_preserving_subgroup_report`。该结果列出 valley orbits、valley-preserving operation ids、闭合状态、`per_valley_standard_matches`，以及从检测到的 preserving operations 得到的标准子群匹配。all-valley intersection 只作为 debug 字段保留，不用于 irrep matching。
-
-`"status": "skipped"` 通常表示 `symmetry.operations.structure_file` 未设置或路径错误。
-
-### diagnostics.h5
-
-投影掩码与 q-cut 扫描数据，用于调参和调试：
-
-```text
-/projectors/<kpoint>/center_masks
-/projectors/<kpoint>/overlap_mask
-/qcut_scan/<kpoint>/qcuts
-/qcut_scan/<kpoint>/w_val
-...
-/symmetry_representations/<kpoint>/<operation_id>/D_raw
-/symmetry_representations/<kpoint>/<operation_id>/D_valley
-...
-```
-
-`D_valley` 仅在存在有效谷适配基时写入。
+公开命令定义在 `valleyscope/cli.py`，配置解析定义在
+`valleyscope/io/config.py`，公开输出选择定义在
+`valleyscope/reports/analysis_outputs.py`。
