@@ -126,7 +126,7 @@ def derive_symmetry_status(
     symmetry_skipped: bool,
     little_group_passed: bool | None = None,
     valley_preserving: bool | None = None,
-    topology_input_ready: bool | None = None,
+    local_irrep_ready: bool | None = None,
 ) -> str:
     if symmetry_skipped:
         return "not_requested"
@@ -134,8 +134,8 @@ def derive_symmetry_status(
         return "rejected_not_little_group"
     if valley_preserving is False:
         return "rejected_not_valley_preserving"
-    if topology_input_ready is True:
-        return "topology_input_ready"
+    if local_irrep_ready is True:
+        return "local_irrep_ready"
     return "diagnostic_only"
 
 

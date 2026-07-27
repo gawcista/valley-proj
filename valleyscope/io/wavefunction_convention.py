@@ -16,7 +16,8 @@ V1_PROFILE_ASSUMPTIONS: dict[str, object] = {
     "saxis_cart": [0.0, 0.0, 1.0],
 }
 H5_PARSER_IDENTITY = "valleyscope_h5_reader_v1"
-WAVECAR_H5_EXTRACTOR_IDENTITY = "valleyscope_wavecar_h5_layout_v1"
+H5_LAYOUT_IDENTITY = "valleyscope_wavefunction_h5_layout_v1"
+WAVECAR_H5_EXTRACTOR_IDENTITY = "valleyscope_extract_wavecar_v1"
 COEFFICIENT_SHAPE_ORDER = (
     "band",
     "spinor_component",

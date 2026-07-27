@@ -534,7 +534,7 @@ def test_debug_summary_payload_renders_valley_projected_representations(tmp_path
                         "operation_id": 4,
                         "operation_order": 2,
                         "diagnostic_only": False,
-                        "topology_input_ready": True,
+                        "local_irrep_ready": True,
                     }
                 ],
                 "readiness_level": "trusted",
@@ -810,12 +810,12 @@ def test_summary_marks_unpromoted_representation_as_diagnostic_only(tmp_path):
                 "basis": "valley_adapted",
                 "state_index": 0,
                 "phase_2pi": 0.5,
-                "rotation_ready": True,
-                "topology_input_ready": False,
+                "plane_wave_mapping_complete": True,
+                "local_irrep_ready": False,
                 "topology_ready": False,
                 "spinor_rotation_applied": True,
                 "diagnostic_only": True,
-                "D_valley_offdiag_norm": 0.0,
+                "D_block_leakage_norm": 0.0,
             }
         ],
         output_paths={},
@@ -826,7 +826,7 @@ def test_summary_marks_unpromoted_representation_as_diagnostic_only(tmp_path):
         for warning in summary["warnings"]
     )
     text = render_summary_text(summary)
-    assert "topology_input_ready" in text
+    assert "local_irrep_ready" in text
     assert "diagnostic-only" in text
 
 
@@ -1028,10 +1028,10 @@ def test_symmetry_analysis_distinguishes_computed_from_diagnostic_only(tmp_path)
                 "basis": "valley_adapted",
                 "state_index": 0,
                 "phase_2pi": 1.0 / 6.0,
-                "rotation_ready": True,
-                "topology_input_ready": False,
+                "plane_wave_mapping_complete": True,
+                "local_irrep_ready": False,
                 "diagnostic_only": True,
-                "D_valley_offdiag_norm": 0.01,
+                "D_block_leakage_norm": 0.01,
                 "reason": "two-valley D_valley offdiag diagnostic too large",
             }
         ],
@@ -1288,7 +1288,7 @@ def test_summary_exposes_symmetry_characters_as_first_class_rows(tmp_path):
             "valley_preserving": True,
             "character_raw": "1.000000+0.000000j",
             "character_valley": "0.500000+0.866025j",
-            "topology_input_ready": True,
+            "local_irrep_ready": True,
             "diagnostic_only": False,
         },
         {
@@ -1301,7 +1301,7 @@ def test_summary_exposes_symmetry_characters_as_first_class_rows(tmp_path):
             "valley_preserving": True,
             "character_raw": "",
             "character_valley": "",
-            "topology_input_ready": True,
+            "local_irrep_ready": True,
             "diagnostic_only": False,
         },
         {
@@ -1314,7 +1314,7 @@ def test_summary_exposes_symmetry_characters_as_first_class_rows(tmp_path):
             "valley_preserving": False,
             "character_raw": "0.000000+0.000000j",
             "character_valley": "0.000000+0.000000j",
-            "topology_input_ready": False,
+            "local_irrep_ready": False,
             "diagnostic_only": True,
         },
     ]
@@ -1343,22 +1343,19 @@ def test_summary_exposes_symmetry_characters_as_first_class_rows(tmp_path):
             "basis": "valley_adapted",
             "character_raw": "1.000000+0.000000j",
             "character_valley": "0.500000+0.866025j",
-            "topology_input_ready": True,
+            "local_irrep_ready": True,
             "diagnostic_only": False,
             "accepted_for_valley_preserving_representation": True,
         }
     ]
 
 
-def test_summary_exposes_representation_readiness_thresholds(tmp_path):
+def test_summary_omits_removed_representation_readiness_presets(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "config.yaml"
     out_dir = tmp_path / "out"
     write_fixture(h5_path)
     write_config(config_path, h5_path, out_dir)
-    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    raw["rotation"] = {"readiness_preset": "normal"}
-    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     config = load_config(config_path)
     from valleyscope.reports.summary_report import build_summary_payload
 
@@ -1377,14 +1374,8 @@ def test_summary_exposes_representation_readiness_thresholds(tmp_path):
         output_paths={},
     )
 
-    thresholds = summary["representation_readiness_thresholds"]
-    assert thresholds["readiness_preset"] == "normal"
-    assert "root_deviation_tol" not in thresholds
-    assert thresholds["unitarity_tol"] == pytest.approx(1.0e-4)
-    assert thresholds["D_valley_offdiag_tol"] == pytest.approx(1.0e-3)
-    assert thresholds["irrep_weight_tol"] == pytest.approx(5.0e-5)
-    assert "not universal physical constants" in thresholds["interpretation"]
-    assert "do not loosen" in thresholds["recommended_action"]
+    assert "representation_readiness_thresholds" not in summary
+    assert "local_irrep_ready" in summary["legend"]
 
 
 # ---------------------------------------------------------------------------
@@ -1809,6 +1800,11 @@ def test_tmote2_projected_source_hsp_coverage_and_tr_orbit_are_explicit():
     assert orbit["full_unitary_source_hsp_labels"] == ["GM", "K", "KA", "M"]
     assert orbit["independent_time_reversal_hsp_labels"] == ["GM", "K", "M"]
     assert orbit["grey_bns_number"] == "143.2"
+    assert orbit["cprime_scope_status"] == "passed"
+    assert set(orbit["tr_completed_cprime_identity_by_hsp"]) == {
+        "GM", "K", "KA", "M",
+    }
+    assert set(orbit["joint_cprime_identity_by_hsp"]) == {"GM", "K", "M"}
     sewing = time_reversal["antiunitary_sewing_evidence"]
     assert sewing["status"] == "blocked"
     assert sewing["time_reversal_kpoint_mapping"] == {
@@ -1849,27 +1845,12 @@ def test_tmote2_projected_source_hsp_coverage_and_tr_orbit_are_explicit():
 
     export = s["valley_ebr_export_bundle"]
     assert export["schema_version"] == "2.0.0"
-    assert export["bundle_count"] == 0
-    assert export["excluded_count"] == 5
-    excluded = export["excluded_instances"]
-    assert {
-        row["source_instance_id"] for row in excluded
-    } == {
-        "local_ebr_instance_001",
-        "local_ebr_instance_002",
-        "tr_ebr_instance_001",
-        "tr_ebr_instance_001_unitary_001",
-        "tr_ebr_instance_001_unitary_002",
-    }
-    blockers = {
-        blocker
-        for row in excluded
-        for blocker in row["exclusion_reasons"]
-    }
-    assert "source_hsp_coverage_incomplete" in blockers
-    assert (
-        "tr_completed_scoped_representation_evidence_missing"
-        in blockers
+    assert export["bundle_count"] == 3
+    assert export["excluded_count"] == 0
+    assert export["excluded_instances"] == []
+    assert all(
+        bundle["ready_for_reduced_table_validation"] is True
+        for bundle in export["bundles"]
     )
 
 
@@ -2051,17 +2032,18 @@ def test_centered_fixture_cprime_blocks_source_rows_but_not_generic_rows():
 
 
 # ---------------------------------------------------------------------------
-# C-prime reduced EBR fail-closed regression (tMoTe2)
+# C-prime reduced EBR production regression (tMoTe2)
 # ---------------------------------------------------------------------------
 
-def test_tmote2_reduced_ebr_stays_embedded_and_not_evaluated():
+def test_tmote2_reduced_ebr_is_authoritative_after_tr_completion():
     s = _read_fixture_summary()
     mapping = s["valley_reduced_ebr_mapping"]
 
     assert mapping["schema_version"] == "2.0.0"
-    assert mapping["status"] == "not_evaluated"
-    assert mapping["table_status"] == "not_applicable"
-    assert mapping["solutions"] == []
+    assert mapping["status"] == "no_exact_solution"
+    assert mapping["table_status"] == "loaded"
+    assert len(mapping["solutions"]) == 3
+    assert mapping["excluded_bundles"] == []
     output_dir = (
         Path(__file__).parent.parent
         / "real_tests"
@@ -2069,5 +2051,5 @@ def test_tmote2_reduced_ebr_stays_embedded_and_not_evaluated():
         / "output"
         / "valley_analysis_wave"
     )
-    assert not (output_dir / "valley_ebr_export_bundle.json").exists()
-    assert not (output_dir / "valley_reduced_ebr_mapping.json").exists()
+    assert (output_dir / "valley_ebr_export_bundle.json").exists()
+    assert (output_dir / "valley_reduced_ebr_mapping.json").exists()

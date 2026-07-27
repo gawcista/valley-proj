@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from tests.reduced_ebr_promo_helpers import (
+    attach_cprime_fixture_contract,
     attach_cprime_fixture_to_candidates,
     attach_real_certificate,
 )
@@ -290,6 +291,7 @@ def test_reduced_ebr_classifier_payload_written_consistently_to_public_outputs(t
         ],
     }
     attach_real_certificate(export_bundle, loaded_table)
+    attach_cprime_fixture_contract(export_bundle)
     mapping = build_reduced_ebr_mapping(
         ebr_export_bundle=export_bundle,
         table=loaded_table

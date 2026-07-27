@@ -44,14 +44,14 @@ from tests.reduced_ebr_promo_helpers import (
 )
 
 
-def build_ebr_problem_instances(**kwargs):
+def _build_problem_instances_with_explicit_low_level_cprime_fixture(**kwargs):
     candidates = kwargs.get("ebr_input_candidates")
     if isinstance(candidates, dict):
         attach_cprime_fixture_to_candidates(candidates)
     return _build_ebr_problem_instances(**kwargs)
 
 
-def build_ebr_export_bundle(**kwargs):
+def _build_export_with_explicit_low_level_cprime_fixture(**kwargs):
     export = _build_ebr_export_bundle(**kwargs)
     attach_cprime_fixture_contract(export)
     return export
@@ -62,7 +62,7 @@ def _fixture_cprime_context(export):
     return dict(context["_by_identity"])
 
 
-def build_reduced_ebr_mapping(**kwargs):
+def _map_with_explicit_low_level_cprime_fixture(**kwargs):
     export = kwargs.get("ebr_export_bundle")
     if isinstance(export, dict):
         kwargs.setdefault(
@@ -72,7 +72,7 @@ def build_reduced_ebr_mapping(**kwargs):
     return _build_reduced_ebr_mapping(**kwargs)
 
 
-def promote_bundle_for_solve(*, bundle, table):
+def _promote_with_explicit_low_level_cprime_fixture(*, bundle, table):
     return _promote_bundle_for_solve(
         bundle=bundle,
         table=table,
@@ -296,7 +296,7 @@ def _bundle(*, sg_number=143, symbol="P3", spinful=False, cert=None, **over):
 
 
 def _promote(bundle, table):
-    return promote_bundle_for_solve(bundle=bundle, table=table)
+    return _promote_with_explicit_low_level_cprime_fixture(bundle=bundle, table=table)
 
 
 def _codes(result):
@@ -419,7 +419,7 @@ def test_legacy_export_without_required_operation_ids_remains_fail_closed():
         "schema_version": "1.0.0",
         "bundles": [_bundle(cert=cert_id)],
     }
-    result = build_reduced_ebr_mapping(
+    result = _map_with_explicit_low_level_cprime_fixture(
         ebr_export_bundle=legacy_export,
         table=_table(),
     )
@@ -608,11 +608,11 @@ def test_sg79_centered_resolver_to_exact_solve_uses_default_irreptables_table():
         "irrep_source_provenance": _provenance(),
     } for operation_id, (kpoint, irrep, multiplicity) in enumerate(target_rows)]
 
-    instances = build_ebr_problem_instances(
+    instances = _build_problem_instances_with_explicit_low_level_cprime_fixture(
         ebr_input_candidates={"candidates": candidates},
         projected_hsp_coverage=_complete_coverage({"GM": "GammaM"}),
     )
-    export = build_ebr_export_bundle(ebr_problem_instances=instances)
+    export = _build_export_with_explicit_low_level_cprime_fixture(ebr_problem_instances=instances)
     exported_identity = export["bundles"][0]["certificate_identity"]
     expected_identity = _real_centered_identity()
     assert exported_identity["centered_affine_operation_map"] == (
@@ -620,7 +620,7 @@ def test_sg79_centered_resolver_to_exact_solve_uses_default_irreptables_table():
     )
     assert exported_identity["affine_required_operation_ids"] == [-7, 0, 4, 11]
 
-    result = build_reduced_ebr_mapping(
+    result = _map_with_explicit_low_level_cprime_fixture(
         ebr_export_bundle=export,
         table=generated_table,
     )
@@ -736,14 +736,14 @@ def test_injected_primitive_certificate_with_synthetic_table_solves_plumbing():
         "irrep_source_provenance": _prov("GM" if kp == "GammaM" else "K"),
     } for i, (kp, irr, mult) in enumerate(rows)]
 
-    instances = build_ebr_problem_instances(
+    instances = _build_problem_instances_with_explicit_low_level_cprime_fixture(
         ebr_input_candidates={"candidates": candidates},
         projected_hsp_coverage=_complete_coverage(
             {"GM": "GammaM", "K": "KM"}
         ),
     )
-    export = build_ebr_export_bundle(ebr_problem_instances=instances)
-    r = build_reduced_ebr_mapping(ebr_export_bundle=export, table=_table())
+    export = _build_export_with_explicit_low_level_cprime_fixture(ebr_problem_instances=instances)
+    r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle=export, table=_table())
     assert r["status"] == "solved_exact"
     sol = r["solutions"][0]
     assert sol["certificate_identity"]["operation_mapping_status"] == \
@@ -939,7 +939,7 @@ def test_arbitrary_minimal_table_rejected():
         "ebrs": [{"label": "EBR_A", "vector": [1, 0, 1]},
                  {"label": "EBR_B", "vector": [1, 1, 0]}],
     }
-    r = build_reduced_ebr_mapping(ebr_export_bundle={"bundles": [_bundle()]},
+    r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle={"bundles": [_bundle()]},
                                   table=minimal)
     assert r["status"] != "solved_exact"
 
@@ -948,8 +948,9 @@ def test_attach_resolver_certificate_to_synthetic_validator_fixture_solves():
     table = _table()
     export = attach_real_certificate({"bundles": [_bundle()]}, table)
     assert export is not None
+    attach_cprime_fixture_contract(export)
     assert "setting_identity" not in table["provenance"]
-    r = build_reduced_ebr_mapping(ebr_export_bundle=export, table=table)
+    r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle=export, table=table)
     assert r["status"] == "solved_exact"
 
 
@@ -1131,12 +1132,12 @@ def test_injected_certificate_to_solve_is_plumbing_not_production():
         "irrep_source_provenance": _prov("GM" if kp == "GammaM" else "K"),
     } for i, (kp, irr, mult) in enumerate(rows)]
 
-    instances = build_ebr_problem_instances(
+    instances = _build_problem_instances_with_explicit_low_level_cprime_fixture(
         ebr_input_candidates={"candidates": candidates},
         projected_hsp_coverage=_complete_coverage(
             {"GM": "GammaM", "K": "KM"}
         ),
     )
-    export = build_ebr_export_bundle(ebr_problem_instances=instances)
-    r = build_reduced_ebr_mapping(ebr_export_bundle=export, table=_table())
+    export = _build_export_with_explicit_low_level_cprime_fixture(ebr_problem_instances=instances)
+    r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle=export, table=_table())
     assert r["status"] == "solved_exact"

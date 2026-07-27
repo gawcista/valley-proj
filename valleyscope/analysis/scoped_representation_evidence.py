@@ -18,14 +18,25 @@ from valleyscope.io.wavefunction_convention import (
 from valleyscope.symmetry.double_space_group_lift import (
     validate_double_space_group_lift_record,
 )
+from valleyscope.symmetry.plane_wave_action import (
+    RECIPROCAL_GRID_ACTION_CONVENTION,
+    build_reciprocal_grid_map,
+    reciprocal_grid_identity,
+    validate_reciprocal_grid_permutation,
+)
 
 
-SCOPED_REPRESENTATION_EVIDENCE_SCHEMA_VERSION = "1.0.0"
+SCOPED_REPRESENTATION_EVIDENCE_SCHEMA_VERSION = "1.2.0"
 SUPPORTED_SCOPE_KINDS = frozenset(
     {"local_irrep", "valley_sewing", "tr_completed"}
 )
-DEFAULT_NUMERICAL_TOLERANCE = 1.0e-8
-DEFAULT_GRAM_TOLERANCE = 1.0e-6
+DEFAULT_GROUP_LAW_TOLERANCE = 1.0e-8
+DEFAULT_PLANE_WAVE_NORM_TOLERANCE = 1.0e-8
+DEFAULT_COEFFICIENT_GRAM_TOLERANCE = 1.0e-6
+DEFAULT_TARGET_SUBSPACE_TOLERANCE = 1.0e-8
+DEFAULT_PROJECTOR_COVARIANCE_TOLERANCE = 1.0e-8
+DEFAULT_VALLEY_BLOCK_TOLERANCE = 1.0e-8
+DEFAULT_ANTIUNITARY_TOLERANCE = 1.0e-8
 
 
 @dataclass(frozen=True)
@@ -70,11 +81,13 @@ def build_scoped_representation_evidence(
     valley_bases: Mapping[str, np.ndarray],
     valley_mappings: Mapping[int, Mapping[str, str]],
     antiunitary_evidence: Mapping[str, object] | None = None,
-    numerical_tolerance: float = DEFAULT_NUMERICAL_TOLERANCE,
-    gram_tolerance: float = DEFAULT_GRAM_TOLERANCE,
-    target_subspace_tolerance: float | None = None,
-    projector_covariance_tolerance: float | None = None,
-    valley_block_tolerance: float | None = None,
+    group_law_tolerance: float = DEFAULT_GROUP_LAW_TOLERANCE,
+    plane_wave_norm_tolerance: float = DEFAULT_PLANE_WAVE_NORM_TOLERANCE,
+    coefficient_gram_tolerance: float = DEFAULT_COEFFICIENT_GRAM_TOLERANCE,
+    target_subspace_tolerance: float = DEFAULT_TARGET_SUBSPACE_TOLERANCE,
+    projector_covariance_tolerance: float = DEFAULT_PROJECTOR_COVARIANCE_TOLERANCE,
+    valley_block_tolerance: float = DEFAULT_VALLEY_BLOCK_TOLERANCE,
+    antiunitary_tolerance: float = DEFAULT_ANTIUNITARY_TOLERANCE,
 ) -> ScopedRepresentationEvidence:
     """Derive one immutable scope record from raw numerical inputs.
 
@@ -83,16 +96,33 @@ def build_scoped_representation_evidence(
     representation result can pass.
     """
     reasons: list[str] = []
-    tolerance = _positive_tolerance(numerical_tolerance, reasons)
-    gram_tol = _positive_tolerance(gram_tolerance, reasons)
-    target_tol = _optional_tolerance(
-        target_subspace_tolerance, tolerance, reasons
+    group_law_tol = _positive_tolerance(
+        group_law_tolerance, DEFAULT_GROUP_LAW_TOLERANCE,
+        "group_law_tolerance_malformed", reasons
     )
-    projector_tol = _optional_tolerance(
-        projector_covariance_tolerance, tolerance, reasons
+    plane_wave_norm_tol = _positive_tolerance(
+        plane_wave_norm_tolerance, DEFAULT_PLANE_WAVE_NORM_TOLERANCE,
+        "plane_wave_norm_tolerance_malformed", reasons
     )
-    block_tol = _optional_tolerance(
-        valley_block_tolerance, tolerance, reasons
+    gram_tol = _positive_tolerance(
+        coefficient_gram_tolerance, DEFAULT_COEFFICIENT_GRAM_TOLERANCE,
+        "coefficient_gram_tolerance_malformed", reasons
+    )
+    target_tol = _positive_tolerance(
+        target_subspace_tolerance, DEFAULT_TARGET_SUBSPACE_TOLERANCE,
+        "target_subspace_tolerance_malformed", reasons
+    )
+    projector_tol = _positive_tolerance(
+        projector_covariance_tolerance, DEFAULT_PROJECTOR_COVARIANCE_TOLERANCE,
+        "projector_covariance_tolerance_malformed", reasons
+    )
+    block_tol = _positive_tolerance(
+        valley_block_tolerance, DEFAULT_VALLEY_BLOCK_TOLERANCE,
+        "valley_block_tolerance_malformed", reasons
+    )
+    antiunitary_tol = _positive_tolerance(
+        antiunitary_tolerance, DEFAULT_ANTIUNITARY_TOLERANCE,
+        "antiunitary_tolerance_malformed", reasons
     )
 
     source_validation = validate_spinor_source_basis_record(source_basis_record)
@@ -155,8 +185,14 @@ def build_scoped_representation_evidence(
     closure_rows = _target_subspace_rows(
         operation_ids, matrices, target_tol, reasons
     )
-    plane_wave_rows = _plane_wave_rows(
-        operation_ids, plane_wave_evidence, tolerance, reasons
+    plane_wave_rows, plane_wave_maps = _plane_wave_rows(
+        operation_ids, plane_wave_evidence, plane_wave_norm_tol, reasons
+    )
+    plane_wave_composition_rows = _plane_wave_composition_rows(
+        operation_ids=operation_ids,
+        maps=plane_wave_maps,
+        lift_record=lift_record,
+        reasons=reasons,
     )
 
     preserving_ids, changing_ids = _classify_operation_scope(
@@ -178,7 +214,7 @@ def build_scoped_representation_evidence(
         representations=matrices,
         lift_record=lift_record,
         kpoint_frac=np.asarray(normalized_kpoint, dtype=float),
-        tolerance=tolerance,
+        tolerance=group_law_tol,
         reasons=reasons,
     )
     covariance_rows = _projector_covariance_rows(
@@ -203,7 +239,7 @@ def build_scoped_representation_evidence(
         required=normalized_scope_kind == "tr_completed",
         evidence=antiunitary_evidence,
         valley_orbit=normalized_orbit,
-        tolerance=tolerance,
+        tolerance=antiunitary_tol,
         reasons=reasons,
     )
 
@@ -225,13 +261,13 @@ def build_scoped_representation_evidence(
             "valley_changing_operation_ids": changing_ids,
         },
         "tolerances": {
-            "group_law": tolerance,
-            "plane_wave_mapping": tolerance,
+            "group_law": group_law_tol,
+            "plane_wave_norm": plane_wave_norm_tol,
             "coefficient_gram": gram_tol,
             "target_subspace": target_tol,
             "projector_covariance": projector_tol,
             "valley_block": block_tol,
-            "antiunitary": tolerance,
+            "antiunitary": antiunitary_tol,
         },
         "target_subspace": {
             "dimension": target_dimension,
@@ -242,7 +278,10 @@ def build_scoped_representation_evidence(
             ),
             "operation_rows": closure_rows,
         },
-        "plane_wave_mapping": {"operation_rows": plane_wave_rows},
+        "plane_wave_mapping": {
+            "operation_rows": plane_wave_rows,
+            "composition_rows": plane_wave_composition_rows,
+        },
         "projected_representation_group_law": {
             "pair_rows": group_law_rows
         },
@@ -385,26 +424,21 @@ def _validate_lift(
     )
 
 
-def _positive_tolerance(value: float, reasons: list[str]) -> float:
+def _positive_tolerance(
+    value: float,
+    default: float,
+    reason: str,
+    reasons: list[str],
+) -> float:
     try:
         tolerance = float(value)
     except (TypeError, ValueError):
-        reasons.append("numerical_tolerance_malformed")
-        return DEFAULT_NUMERICAL_TOLERANCE
+        reasons.append(reason)
+        return default
     if not np.isfinite(tolerance) or tolerance <= 0.0:
-        reasons.append("numerical_tolerance_malformed")
-        return DEFAULT_NUMERICAL_TOLERANCE
+        reasons.append(reason)
+        return default
     return tolerance
-
-
-def _optional_tolerance(
-    value: float | None,
-    fallback: float,
-    reasons: list[str],
-) -> float:
-    if value is None:
-        return fallback
-    return _positive_tolerance(value, reasons)
 
 
 def _kpoint_record(value: np.ndarray, reasons: list[str]) -> list[float]:
@@ -552,42 +586,182 @@ def _plane_wave_rows(
     evidence: Mapping[int, Mapping[str, object]],
     tolerance: float,
     reasons: list[str],
-) -> list[dict[str, object]]:
+) -> tuple[list[dict[str, object]], dict[int, list[int]]]:
     rows: list[dict[str, object]] = []
+    maps: dict[int, list[int]] = {}
     for operation_id in operation_ids:
         raw = evidence.get(operation_id)
         if not isinstance(raw, Mapping):
             reasons.append("plane_wave_mapping_evidence_missing")
             continue
+        convention = raw.get("action_convention")
+        grid_identity = raw.get("reciprocal_grid_identity")
+        dimension = raw.get("reciprocal_grid_dimension")
+        q_cart = raw.get("q_cart")
+        rotation_cart = raw.get("rotation_cart")
+        map_tolerance = raw.get("mapping_tolerance")
+        serialized_map = raw.get("source_to_target_map")
         miss_count = raw.get("mapping_miss_count")
-        residual = raw.get("norm_preservation_residual")
+        residual = raw.get("relative_norm_residual")
         if (
-            not isinstance(miss_count, int)
+            convention != RECIPROCAL_GRID_ACTION_CONVENTION
+            or not valid_sha256_identity(grid_identity)
+            or not isinstance(dimension, int)
+            or isinstance(dimension, bool)
+            or dimension < 1
+            or not isinstance(miss_count, int)
             or isinstance(miss_count, bool)
             or miss_count < 0
         ):
             reasons.append("plane_wave_mapping_evidence_malformed")
             continue
         try:
+            q = np.asarray(q_cart, dtype=float)
+            rotation = np.asarray(rotation_cart, dtype=float)
+            effective_map_tolerance = float(map_tolerance)
             norm_residual = float(residual)
         except (TypeError, ValueError):
             reasons.append("plane_wave_mapping_evidence_malformed")
             continue
+        if (
+            q.shape != (dimension, 3)
+            or rotation.shape != (3, 3)
+            or not np.all(np.isfinite(q))
+            or not np.all(np.isfinite(rotation))
+            or not np.isfinite(effective_map_tolerance)
+            or effective_map_tolerance <= 0.0
+            or not np.isfinite(norm_residual)
+            or norm_residual < 0.0
+        ):
+            reasons.append("plane_wave_mapping_evidence_malformed")
+            continue
+
+        permutation_validation = validate_reciprocal_grid_permutation(
+            serialized_map,
+            dimension=dimension,
+        )
+        if permutation_validation.status != "passed":
+            if any(
+                reason in permutation_validation.reason_codes
+                for reason in (
+                    "mapping_collection_malformed",
+                    "mapping_index_malformed",
+                )
+            ):
+                reasons.append("plane_wave_mapping_evidence_malformed")
+            else:
+                reasons.append("plane_wave_mapping_not_bijective")
+        try:
+            recomputed = build_reciprocal_grid_map(
+                q,
+                rotation,
+                tolerance=effective_map_tolerance,
+            )
+            recomputed_map = recomputed.mapping.tolist()
+            expected_grid_identity = reciprocal_grid_identity(q)
+        except ValueError:
+            reasons.append("plane_wave_mapping_evidence_malformed")
+            continue
+        if grid_identity != expected_grid_identity:
+            reasons.append("plane_wave_grid_identity_mismatch")
+        if not isinstance(serialized_map, (list, tuple)):
+            normalized_map: list[object] = []
+        else:
+            normalized_map = list(serialized_map)
+        if normalized_map != recomputed_map:
+            reasons.append("plane_wave_mapping_recomputation_mismatch")
+        recomputed_validation = validate_reciprocal_grid_permutation(
+            recomputed.mapping,
+            dimension=dimension,
+        )
+        if recomputed_validation.status != "passed":
+            reasons.append("plane_wave_mapping_not_bijective")
+        if miss_count != recomputed.mapping_miss_count:
+            reasons.append("plane_wave_mapping_miss_count_mismatch")
         passed = (
             miss_count == 0
-            and np.isfinite(norm_residual)
+            and permutation_validation.status == "passed"
+            and recomputed_validation.status == "passed"
+            and normalized_map == recomputed_map
+            and grid_identity == expected_grid_identity
             and norm_residual <= tolerance
         )
         if not passed:
             reasons.append("plane_wave_mapping_failed")
+        if (
+            permutation_validation.status == "passed"
+            and normalized_map == recomputed_map
+        ):
+            maps[operation_id] = [int(value) for value in normalized_map]
         rows.append(
             {
                 "operation_id": operation_id,
+                "action_convention": convention,
+                "reciprocal_grid_identity": grid_identity,
+                "reciprocal_grid_dimension": dimension,
+                "source_to_target_map": normalized_map,
                 "mapping_miss_count": miss_count,
-                "norm_preservation_residual": norm_residual,
+                "mapping_tolerance": effective_map_tolerance,
+                "relative_norm_residual": norm_residual,
+                "reciprocal_grid_permutation_passed": (
+                    permutation_validation.status == "passed"
+                    and recomputed_validation.status == "passed"
+                ),
                 "passed": bool(passed),
             }
         )
+    return rows, maps
+
+
+def _plane_wave_composition_rows(
+    *,
+    operation_ids: Sequence[int],
+    maps: Mapping[int, Sequence[int]],
+    lift_record: Mapping[str, object],
+    reasons: list[str],
+) -> list[dict[str, object]]:
+    pairwise = lift_record.get("pairwise_products")
+    if not isinstance(pairwise, Mapping):
+        reasons.append("plane_wave_map_composition_evidence_missing")
+        return []
+    required = set(operation_ids)
+    rows: list[dict[str, object]] = []
+    for left_id in operation_ids:
+        for right_id in operation_ids:
+            pair = pairwise.get(f"{left_id},{right_id}")
+            if not isinstance(pair, Mapping):
+                reasons.append("plane_wave_map_composition_evidence_missing")
+                continue
+            product_id = pair.get("product_operation_id")
+            if product_id not in required:
+                reasons.append("required_operation_scope_not_closed")
+                continue
+            left = maps.get(left_id)
+            right = maps.get(right_id)
+            product = maps.get(product_id)
+            if left is None or right is None or product is None:
+                reasons.append("plane_wave_map_composition_evidence_missing")
+                continue
+            if not (len(left) == len(right) == len(product)):
+                reasons.append("plane_wave_map_composition_failed")
+                continue
+            try:
+                composed = [int(left[int(right[index])]) for index in range(len(right))]
+            except (IndexError, TypeError, ValueError):
+                reasons.append("plane_wave_map_composition_failed")
+                continue
+            passed = composed == list(product)
+            if not passed:
+                reasons.append("plane_wave_map_composition_failed")
+            rows.append(
+                {
+                    "left_operation_id": left_id,
+                    "right_operation_id": right_id,
+                    "product_operation_id": product_id,
+                    "composed_source_to_target_map": composed,
+                    "passed": passed,
+                }
+            )
     return rows
 
 
@@ -892,6 +1066,34 @@ def _antiunitary_record(
     target = evidence.get("target_valley")
     if source not in valley_orbit or target not in valley_orbit:
         reasons.append("antiunitary_valley_mapping_invalid")
+    source_hsp = evidence.get("source_hsp_label")
+    target_hsp = evidence.get("target_hsp_label")
+    hsp_mapping = evidence.get("time_reversal_hsp_mapping")
+    if (
+        not isinstance(source_hsp, str)
+        or not source_hsp
+        or not isinstance(target_hsp, str)
+        or not target_hsp
+        or not isinstance(hsp_mapping, Mapping)
+        or hsp_mapping.get(source_hsp) != target_hsp
+        or hsp_mapping.get(target_hsp) != source_hsp
+        or any(
+            not isinstance(key, str)
+            or not key
+            or not isinstance(value, str)
+            or not value
+            for key, value in hsp_mapping.items()
+        )
+        or set(hsp_mapping) != set(hsp_mapping.values())
+        or any(
+            hsp_mapping.get(hsp_mapping.get(key)) != key
+            for key in hsp_mapping
+        )
+    ):
+        reasons.append("antiunitary_hsp_mapping_invalid")
+    construction_kind = evidence.get("construction_kind")
+    if construction_kind != "observed_to_inferred":
+        reasons.append("antiunitary_construction_kind_invalid")
     try:
         forward = np.asarray(
             evidence["forward_sewing_matrix"], dtype=np.complex128
@@ -932,9 +1134,30 @@ def _antiunitary_record(
             ord="fro",
         )
     )
+    grid_bijective, grid_residual = _antiunitary_grid_mapping(
+        evidence=evidence,
+        tolerance=tolerance,
+        reasons=reasons,
+    )
+    compatibility_rows = _antiunitary_unitary_compatibility_rows(
+        evidence=evidence,
+        forward=forward,
+        tolerance=tolerance,
+        reasons=reasons,
+    )
+    compatibility_residuals = [
+        float(row["residual"]) for row in compatibility_rows
+    ]
+    max_compatibility_residual = max(
+        compatibility_residuals, default=2.0 * tolerance
+    )
     passed = max(
-        forward_unitarity, reverse_unitarity, square_residual
-    ) <= tolerance
+        forward_unitarity,
+        reverse_unitarity,
+        square_residual,
+        grid_residual,
+        max_compatibility_residual,
+    ) <= tolerance and grid_bijective
     if not passed:
         reasons.append("antiunitary_evidence_failed")
     return {
@@ -942,12 +1165,141 @@ def _antiunitary_record(
         "evaluated": True,
         "source_valley": source,
         "target_valley": target,
+        "source_hsp_label": source_hsp,
+        "target_hsp_label": target_hsp,
+        "time_reversal_hsp_mapping": (
+            dict(hsp_mapping) if isinstance(hsp_mapping, Mapping) else {}
+        ),
+        "construction_kind": construction_kind,
         "expected_square_sign": expected_sign,
         "forward_unitarity_residual": forward_unitarity,
         "reverse_unitarity_residual": reverse_unitarity,
         "square_residual": square_residual,
+        "grid_map_bijective": grid_bijective,
+        "grid_mapping_residual": grid_residual,
+        "unitary_compatibility_rows": compatibility_rows,
+        "max_unitary_compatibility_residual": (
+            max_compatibility_residual
+        ),
         "passed": bool(passed),
     }
+
+
+def _antiunitary_grid_mapping(
+    *,
+    evidence: Mapping[str, object],
+    tolerance: float,
+    reasons: list[str],
+) -> tuple[bool, float]:
+    try:
+        source = np.asarray(
+            evidence["source_reciprocal_grid_vectors_cart"], dtype=float
+        )
+        target = np.asarray(
+            evidence["target_reciprocal_grid_vectors_cart"], dtype=float
+        )
+    except (KeyError, TypeError, ValueError):
+        reasons.append("antiunitary_grid_mapping_invalid")
+        return False, 2.0 * tolerance
+    if (
+        source.ndim != 2
+        or source.shape[1:] != (3,)
+        or target.shape != source.shape
+        or not np.all(np.isfinite(source))
+        or not np.all(np.isfinite(target))
+    ):
+        reasons.append("antiunitary_grid_mapping_invalid")
+        return False, 2.0 * tolerance
+    try:
+        source_identity = reciprocal_grid_identity(source)
+        target_identity = reciprocal_grid_identity(target)
+    except ValueError:
+        reasons.append("antiunitary_grid_mapping_invalid")
+        return False, 2.0 * tolerance
+    if (
+        evidence.get("source_reciprocal_grid_identity") != source_identity
+        or evidence.get("target_reciprocal_grid_identity") != target_identity
+    ):
+        reasons.append("antiunitary_grid_identity_mismatch")
+    serialized_map = evidence.get("source_to_target_grid_map")
+    validation = validate_reciprocal_grid_permutation(
+        serialized_map, dimension=int(len(source))
+    )
+    if validation.status != "passed":
+        reasons.append("antiunitary_grid_mapping_invalid")
+        return False, 2.0 * tolerance
+    mapping = [int(value) for value in serialized_map]
+    residual = float(
+        np.max(
+            np.linalg.norm(target[np.asarray(mapping)] + source, axis=1),
+            initial=0.0,
+        )
+    )
+    if residual > tolerance:
+        reasons.append("antiunitary_grid_mapping_invalid")
+    return True, residual
+
+
+def _antiunitary_unitary_compatibility_rows(
+    *,
+    evidence: Mapping[str, object],
+    forward: np.ndarray,
+    tolerance: float,
+    reasons: list[str],
+) -> list[dict[str, object]]:
+    source_raw = evidence.get("source_unitary_representations")
+    target_raw = evidence.get("target_unitary_representations")
+    if (
+        not isinstance(source_raw, Mapping)
+        or not isinstance(target_raw, Mapping)
+        or not source_raw
+        or set(source_raw) != set(target_raw)
+    ):
+        reasons.append("antiunitary_unitary_compatibility_missing")
+        return []
+    rows: list[dict[str, object]] = []
+    for operation_id in source_raw:
+        if not isinstance(operation_id, int) or isinstance(operation_id, bool):
+            reasons.append("antiunitary_unitary_compatibility_malformed")
+            continue
+        try:
+            source = np.asarray(
+                source_raw[operation_id], dtype=np.complex128
+            )
+            target = np.asarray(
+                target_raw[operation_id], dtype=np.complex128
+            )
+        except (TypeError, ValueError):
+            reasons.append("antiunitary_unitary_compatibility_malformed")
+            continue
+        if (
+            source.shape != forward.shape
+            or target.shape != forward.shape
+            or not np.all(np.isfinite(source))
+            or not np.all(np.isfinite(target))
+        ):
+            reasons.append("antiunitary_unitary_compatibility_malformed")
+            continue
+        residual = float(
+            np.linalg.norm(
+                target
+                - forward @ source.conj() @ forward.conj().T,
+                ord="fro",
+            )
+        )
+        passed = residual <= tolerance
+        if not passed:
+            reasons.append("antiunitary_unitary_compatibility_failed")
+        rows.append(
+            {
+                "operation_id": operation_id,
+                "residual": residual,
+                "passed": passed,
+            }
+        )
+    if len(rows) != len(source_raw):
+        reasons.append("antiunitary_unitary_compatibility_malformed")
+    return rows
 
 
 def _unique(values: list[str]) -> list[str]:

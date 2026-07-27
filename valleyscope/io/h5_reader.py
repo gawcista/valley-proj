@@ -9,8 +9,8 @@ import numpy as np
 from valleyscope.geometry.lattice import Lattice
 from valleyscope.io.wavefunction_convention import (
     COEFFICIENT_SHAPE_ORDER,
+    H5_LAYOUT_IDENTITY,
     H5_PARSER_IDENTITY,
-    WAVECAR_H5_EXTRACTOR_IDENTITY,
     file_payload_identity,
     spinor_component_order,
 )
@@ -26,7 +26,8 @@ class WavefunctionMetadata:
     coefficient_shape_order: tuple[str, ...]
     spinor_component_order: tuple[str, ...]
     parser_identity: str
-    extractor_identity: str
+    hdf5_layout_identity: str
+    extractor_provenance: str | None
     hdf5_payload_identity: str
 
 
@@ -118,10 +119,10 @@ def read_wavefunction_h5(path: str | Path) -> WavefunctionData:
             raise ValueError(f"HDF5 coefficient layout has unsupported nspinor={nspinor}")
         if spinor_metadata != (nspinor == 2):
             raise ValueError("metadata/spinor conflicts with coefficient nspinor")
-        extractor_identity = (
+        extractor_provenance = (
             _read_string(h5["metadata/extractor_identity"])
             if "metadata/extractor_identity" in h5
-            else WAVECAR_H5_EXTRACTOR_IDENTITY
+            else None
         )
         metadata = WavefunctionMetadata(
             lattice=Lattice(
@@ -135,7 +136,8 @@ def read_wavefunction_h5(path: str | Path) -> WavefunctionData:
             coefficient_shape_order=COEFFICIENT_SHAPE_ORDER,
             spinor_component_order=spinor_component_order(nspinor),
             parser_identity=H5_PARSER_IDENTITY,
-            extractor_identity=extractor_identity,
+            hdf5_layout_identity=H5_LAYOUT_IDENTITY,
+            extractor_provenance=extractor_provenance,
             hdf5_payload_identity=payload_identity,
         )
     seen_names: set[str] = set()

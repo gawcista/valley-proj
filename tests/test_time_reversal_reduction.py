@@ -439,7 +439,7 @@ def test_grey_source_rejects_nonbijective_unitary_irrep_involution():
     )
 
 
-def _reviewed_joint_bundle_and_table():
+def _reviewed_joint_bundle_and_table_with_explicit_cprime_fixture():
     table = build_auto_time_reversal_reduced_ebr_table(
         unitary_space_group_number=143,
         grey_bns_number="143.2",
@@ -538,6 +538,7 @@ def _reviewed_joint_bundle_and_table():
     }
     export = {"bundles": [bundle]}
     assert attach_real_certificate(export, table) is not None
+    attach_cprime_fixture_contract(export)
     return export["bundles"][0], table
 
 
@@ -579,7 +580,9 @@ def _projector_provenance_from_sewing(report):
 
 
 def test_joint_problem_promotion_requires_matching_type_ii_grey_provenance():
-    bundle, table = _reviewed_joint_bundle_and_table()
+    bundle, table = (
+        _reviewed_joint_bundle_and_table_with_explicit_cprime_fixture()
+    )
 
     promotion = promote_bundle_for_solve(bundle=bundle, table=table)
     assert promotion["promoted"]
@@ -633,7 +636,9 @@ def test_joint_grey_mapping_is_authoritative_for_ingestion():
         build_database_ingestion_record,
     )
 
-    bundle, table = _reviewed_joint_bundle_and_table()
+    bundle, table = (
+        _reviewed_joint_bundle_and_table_with_explicit_cprime_fixture()
+    )
     export = {"bundles": [bundle]}
     mapping = build_reduced_ebr_mapping(
         ebr_export_bundle=export,
@@ -664,7 +669,9 @@ def test_ingestion_revalidates_coordinated_joint_grey_mutation(mutation):
         build_database_ingestion_record,
     )
 
-    bundle, table = _reviewed_joint_bundle_and_table()
+    bundle, table = (
+        _reviewed_joint_bundle_and_table_with_explicit_cprime_fixture()
+    )
     export = {"bundles": [bundle]}
     mapping = build_reduced_ebr_mapping(
         ebr_export_bundle=export,
@@ -727,7 +734,9 @@ def test_ingestion_revalidates_coordinated_joint_grey_mutation(mutation):
 
 
 def test_problem_kind_compatibility_rejects_grey_table_for_unitary_bundle():
-    bundle, table = _reviewed_joint_bundle_and_table()
+    bundle, table = (
+        _reviewed_joint_bundle_and_table_with_explicit_cprime_fixture()
+    )
     unitary = dict(bundle)
     unitary.update({
         "problem_kind": "unitary_valley_reduced_ebr",
@@ -745,7 +754,9 @@ def test_problem_kind_compatibility_rejects_grey_table_for_unitary_bundle():
 
 
 def test_joint_problem_requires_complete_bundle_time_reversal_evidence():
-    bundle, table = _reviewed_joint_bundle_and_table()
+    bundle, table = (
+        _reviewed_joint_bundle_and_table_with_explicit_cprime_fixture()
+    )
     incomplete = dict(bundle)
     incomplete["time_reversal"] = dict(bundle["time_reversal"])
     incomplete["time_reversal"].pop("grey_bns_number")
@@ -759,7 +770,9 @@ def test_joint_problem_requires_complete_bundle_time_reversal_evidence():
 
 
 def test_joint_problem_rejects_incomplete_hsp_and_irrep_involutions():
-    bundle, table = _reviewed_joint_bundle_and_table()
+    bundle, table = (
+        _reviewed_joint_bundle_and_table_with_explicit_cprime_fixture()
+    )
     malformed_hsp = dict(bundle)
     malformed_hsp["time_reversal"] = dict(bundle["time_reversal"])
     malformed_hsp["time_reversal"]["time_reversal_hsp_orbits"] = [{
@@ -782,7 +795,9 @@ def test_joint_problem_rejects_incomplete_hsp_and_irrep_involutions():
 
 
 def test_joint_problem_rejects_component_hsp_outside_declared_inventory():
-    bundle, table = _reviewed_joint_bundle_and_table()
+    bundle, table = (
+        _reviewed_joint_bundle_and_table_with_explicit_cprime_fixture()
+    )
     malformed = deepcopy(bundle)
     malformed["unitary_valley_irreps"]["left"] = {
         "X": {"-GM4": 1},
@@ -794,7 +809,9 @@ def test_joint_problem_rejects_component_hsp_outside_declared_inventory():
 
 
 def test_self_mapped_joint_problem_requires_serialized_sewing_evidence():
-    bundle, table = _reviewed_joint_bundle_and_table()
+    bundle, table = (
+        _reviewed_joint_bundle_and_table_with_explicit_cprime_fixture()
+    )
     self_mapped = dict(bundle)
     self_mapped["valley_orbit"] = ["v"]
     self_mapped["unitary_valley_irreps"] = {
@@ -2109,7 +2126,9 @@ def test_generated_tr_unitary_adversarial_mutations_block_promotion():
 def test_problem_kind_and_physical_object_kind_must_match(
     problem_kind, physical_object_kind,
 ):
-    bundle, table = _reviewed_joint_bundle_and_table()
+    bundle, table = (
+        _reviewed_joint_bundle_and_table_with_explicit_cprime_fixture()
+    )
     forged = deepcopy(bundle)
     forged["problem_kind"] = problem_kind
     forged["physical_object_kind"] = physical_object_kind

@@ -7,18 +7,18 @@ from typing import Any
 from valleyscope.io.h5_reader import WavefunctionData
 from valleyscope.io.wavefunction_convention import (
     COEFFICIENT_SHAPE_ORDER,
+    H5_LAYOUT_IDENTITY,
     H5_PARSER_IDENTITY,
     V1_EVIDENCE_ORIGIN,
     V1_PROFILE_ASSUMPTIONS,
     V1_PROFILE_IDENTITY,
-    WAVECAR_H5_EXTRACTOR_IDENTITY,
     canonical_identity,
     spinor_component_order,
     valid_sha256_identity,
 )
 
 
-SOURCE_BASIS_SCHEMA_VERSION = "1.0.0"
+SOURCE_BASIS_SCHEMA_VERSION = "1.1.0"
 
 
 @dataclass(frozen=True)
@@ -32,7 +32,8 @@ class SpinorSourceBasisCertificate:
     extracted_wavefunction_payload_identity: str
     nspinor: int
     parser_identity: str
-    extractor_identity: str
+    hdf5_layout_identity: str
+    extractor_provenance: str | None = None
 
     @property
     def applicability(self) -> str:
@@ -62,7 +63,8 @@ class SpinorSourceBasisCertificate:
                 "nspinor": self.nspinor,
             },
             "parser_identity": self.parser_identity,
-            "extractor_identity": self.extractor_identity,
+            "hdf5_layout_identity": self.hdf5_layout_identity,
+            "extractor_provenance": self.extractor_provenance,
             "extracted_wavefunction_payload_identity": (
                 self.extracted_wavefunction_payload_identity
             ),
@@ -92,7 +94,8 @@ def build_spinor_source_basis_certificate(
         extracted_wavefunction_payload_identity=metadata.hdf5_payload_identity,
         nspinor=metadata.nspinor,
         parser_identity=metadata.parser_identity,
-        extractor_identity=metadata.extractor_identity,
+        hdf5_layout_identity=metadata.hdf5_layout_identity,
+        extractor_provenance=metadata.extractor_provenance,
     )
 
 
@@ -128,8 +131,14 @@ def validate_spinor_source_basis_record(
         reasons.append("coefficient_layout_mismatch")
     if record.get("parser_identity") != H5_PARSER_IDENTITY:
         reasons.append("parser_identity_mismatch")
-    if record.get("extractor_identity") != WAVECAR_H5_EXTRACTOR_IDENTITY:
-        reasons.append("extractor_identity_mismatch")
+    if record.get("hdf5_layout_identity") != H5_LAYOUT_IDENTITY:
+        reasons.append("hdf5_layout_identity_mismatch")
+    extractor_provenance = record.get("extractor_provenance")
+    if extractor_provenance is not None and (
+        not isinstance(extractor_provenance, str)
+        or not extractor_provenance
+    ):
+        reasons.append("extractor_provenance_malformed")
 
     payload_identity = record.get("extracted_wavefunction_payload_identity")
     if not valid_sha256_identity(payload_identity):
@@ -160,7 +169,8 @@ def validate_spinor_source_basis_record(
             "source_claims_parsed",
             "coefficient_layout",
             "parser_identity",
-            "extractor_identity",
+            "hdf5_layout_identity",
+            "extractor_provenance",
             "extracted_wavefunction_payload_identity",
         )
     }

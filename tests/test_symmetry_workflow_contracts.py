@@ -140,12 +140,11 @@ def test_symmetry_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp
     assert rows
     assert {
         "basis",
-        "rotation_ready",
-        "topology_input_ready",
-        "topology_ready",
+        "plane_wave_mapping_complete",
+        "local_irrep_ready",
         "spinor_rotation_applied",
         "diagnostic_only",
-        "D_valley_offdiag_norm",
+        "D_block_leakage_norm",
         "reason",
         "valley_eta",
     } <= set(rows[0])
@@ -164,10 +163,10 @@ def test_symmetry_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp
         assert all("translation_cart" in group for group in operation_groups)
         assert all("basis" in group.attrs for group in operation_groups)
         assert all("spinor_rotation_applied" in group for group in operation_groups)
-        assert all("rotation_ready" in group for group in operation_groups)
-        assert all("topology_input_ready" in group for group in operation_groups)
+        assert all("plane_wave_mapping_complete" in group for group in operation_groups)
+        assert all("local_irrep_ready" in group for group in operation_groups)
         assert all("diagnostic_only" in group for group in operation_groups)
-        assert all("D_valley_offdiag_norm" in group for group in operation_groups)
+        assert all("D_block_leakage_norm" in group for group in operation_groups)
         assert all("norm_preservation_residual" in group for group in operation_groups)
     summary_text = outputs["valley_summary_txt"].read_text(encoding="utf-8")
     assert "rejected" in summary_text
@@ -176,11 +175,11 @@ def test_symmetry_eigenvalues_use_valley_adapted_basis_and_write_diagnostics(tmp
         or "valley-changing" in summary_text
         or "not valley preserving" in summary_text
     )
-    assert "topology_input_ready" in summary_text
+    assert "local_irrep_ready" in summary_text
     assert "Symmetry eigenvalues" in summary_text
     assert "Rotation eigenvalues" not in summary_text
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
-    assert any("topology_input_ready" in row for row in summary["symmetry_eigenvalues"])
+    assert any("local_irrep_ready" in row for row in summary["symmetry_eigenvalues"])
     assert summary["input"]["spinor_input_profile"] == (
         "vasp_nonmagnetic_soc_default_saxis_v1"
     )
@@ -223,7 +222,7 @@ def test_symmetry_eigenvalues_csv_is_header_only_when_no_rows(tmp_path, monkeypa
     assert outputs["symmetry_eigenvalues_csv"].exists()
     with outputs["symmetry_eigenvalues_csv"].open(encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
-        assert {"kpoint", "operation_id", "modulus_deviation", "D_valley_offdiag_norm"} <= set(reader.fieldnames or [])
+        assert {"kpoint", "operation_id", "modulus_deviation", "D_block_leakage_norm"} <= set(reader.fieldnames or [])
         assert list(reader) == []
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     assert "symmetry_eigenvalues_csv" in summary["output_files"]

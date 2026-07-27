@@ -210,8 +210,6 @@ def apply_projector_symmetry_gate(
         if status != "failed":
             continue
 
-        row["topology_input_ready"] = False
-        row["topology_ready"] = False
         row["local_irrep_ready"] = False
         row["diagnostic_only"] = True
         row["reason"] = _append_reason(

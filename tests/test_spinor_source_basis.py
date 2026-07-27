@@ -12,6 +12,10 @@ from valleyscope.io.spinor_source_basis import (
     build_spinor_source_basis_certificate,
     validate_spinor_source_basis_record,
 )
+from valleyscope.io.wavefunction_convention import (
+    H5_LAYOUT_IDENTITY,
+    WAVECAR_H5_EXTRACTOR_IDENTITY,
+)
 
 
 def _write_wavefunction_h5(path: Path, *, nspinor: int) -> None:
@@ -43,7 +47,7 @@ def test_spinor_source_basis_uses_fixed_v1_scope_without_user_input(tmp_path):
     wavefunction = read_wavefunction_h5(path)
     record = build_spinor_source_basis_certificate(wavefunction).to_record()
 
-    assert record["schema_version"] == "1.0.0"
+    assert record["schema_version"] == "1.1.0"
     assert record["applicability"] == "applicable"
     assert record["status"] == "passed"
     assert record["reason_codes"] == []
@@ -67,9 +71,32 @@ def test_spinor_source_basis_uses_fixed_v1_scope_without_user_input(tmp_path):
     ]
     assert record["coefficient_layout"]["nspinor"] == 2
     assert record["parser_identity"] == "valleyscope_h5_reader_v1"
-    assert record["extractor_identity"] == "valleyscope_wavecar_h5_layout_v1"
+    assert record["hdf5_layout_identity"] == H5_LAYOUT_IDENTITY
+    assert record["extractor_provenance"] is None
+    assert "extractor_identity" not in record
     assert record["extracted_wavefunction_payload_identity"].startswith("sha256:")
     assert record["certificate_identity"].startswith("sha256:")
+    assert validate_spinor_source_basis_record(record).status == "passed"
+
+
+def test_spinor_source_basis_preserves_actual_optional_extractor_provenance(
+    tmp_path,
+):
+    path = tmp_path / "wave.h5"
+    _write_wavefunction_h5(path, nspinor=2)
+    with h5py.File(path, "r+") as h5:
+        h5["metadata/extractor_identity"] = WAVECAR_H5_EXTRACTOR_IDENTITY
+
+    wavefunction = read_wavefunction_h5(path)
+    record = build_spinor_source_basis_certificate(wavefunction).to_record()
+
+    assert wavefunction.metadata.hdf5_layout_identity == H5_LAYOUT_IDENTITY
+    assert (
+        wavefunction.metadata.extractor_provenance
+        == WAVECAR_H5_EXTRACTOR_IDENTITY
+    )
+    assert record["hdf5_layout_identity"] == H5_LAYOUT_IDENTITY
+    assert record["extractor_provenance"] == WAVECAR_H5_EXTRACTOR_IDENTITY
     assert validate_spinor_source_basis_record(record).status == "passed"
 
 
@@ -109,6 +136,11 @@ def test_spinor_source_basis_marks_scalar_input_not_applicable(tmp_path):
             ("extracted_wavefunction_payload_identity",),
             "sha256:" + "0" * 64,
             "certificate_identity_mismatch",
+        ),
+        (
+            ("hdf5_layout_identity",),
+            "unreviewed_layout",
+            "hdf5_layout_identity_mismatch",
         ),
         (
             ("parser_identity",),

@@ -13,6 +13,7 @@ from valleyscope.analysis.reduced_ebr_mapping import (
 )
 from valleyscope.io.config import load_config
 from tests.reduced_ebr_promo_helpers import (
+    attach_cprime_fixture_contract,
     attach_real_certificate,
     cprime_summary_for_export,
     cprime_validation_context_for_export,
@@ -20,7 +21,7 @@ from tests.reduced_ebr_promo_helpers import (
 from valleyscope.analysis.reduced_ebr_solver import classify_bundle
 
 
-def build_reduced_ebr_mapping(**kwargs):
+def _map_with_explicit_low_level_cprime_fixture(**kwargs):
     export = kwargs.get("ebr_export_bundle")
     if isinstance(export, dict):
         context = cprime_validation_context_for_export(export)
@@ -61,7 +62,7 @@ def _current_direct_mapping_inputs(*, source="table_file"):
         "source": source,
         f"{source}_stem": "reviewed_input",
     }
-    mapping = build_reduced_ebr_mapping(
+    mapping = _map_with_explicit_low_level_cprime_fixture(
         ebr_export_bundle=export,
         table=table,
         reduced_ebr_input=reduced_input,
@@ -73,8 +74,9 @@ def _write_table(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data), encoding="utf-8")
 
 def _ready(export: dict, table: dict) -> dict:
-    """Make an export bundle + table pass the fail-closed promotion validator."""
+    """Prepare an explicitly labelled low-level validator fixture."""
     attach_real_certificate(export, table)
+    attach_cprime_fixture_contract(export)
     return export
 
 _SAMPLE_TABLE = {
@@ -176,7 +178,7 @@ def test_exact_solution_found():
             "irreps_by_kpoint": bundle_vec,
         }],
     }
-    r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(b, _SAMPLE_TABLE), table=_SAMPLE_TABLE)
+    r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle=_ready(b, _SAMPLE_TABLE), table=_SAMPLE_TABLE)
     assert r["status"] == "solved_exact"
     s = r["solutions"][0]
     assert s["status"] == "solved_exact"
@@ -199,7 +201,7 @@ def test_no_exact_solution():
             "irreps_by_kpoint": bundle_vec,
         }],
     }
-    r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(b, _SAMPLE_TABLE), table=_SAMPLE_TABLE)
+    r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle=_ready(b, _SAMPLE_TABLE), table=_SAMPLE_TABLE)
     assert r["status"] == "no_exact_solution"
 
 # -----------------------------------------------------------------------
@@ -207,7 +209,7 @@ def test_no_exact_solution():
 # -----------------------------------------------------------------------
 
 def test_missing_table():
-    r = build_reduced_ebr_mapping(ebr_export_bundle=_bundle(), table=None)
+    r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle=_bundle(), table=None)
     assert r["status"] == "missing_table"
     assert r["table_status"] == "not_provided"
 
@@ -216,7 +218,7 @@ def test_missing_table():
 # -----------------------------------------------------------------------
 
 def test_null_bundle():
-    r = build_reduced_ebr_mapping(ebr_export_bundle=None)
+    r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle=None)
     assert r["status"] == "not_evaluated"
     assert r["schema_version"] == "2.0.0"
     assert "mapping_status" not in r
@@ -237,7 +239,7 @@ def test_group_mismatch_excluded():
             "irreps_by_kpoint": {"GammaM": ["C2_spinor_phase_+1/4"]},
         }],
     }
-    r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(b, _SAMPLE_TABLE), table=_SAMPLE_TABLE)
+    r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle=_ready(b, _SAMPLE_TABLE), table=_SAMPLE_TABLE)
     ex = r["excluded_bundles"]
     assert len(ex) == 1
     assert ex[0]["subspace_group_candidate"] == "P2"
@@ -250,7 +252,7 @@ def test_group_mismatch_excluded():
 # -----------------------------------------------------------------------
 
 def test_schema_fields():
-    r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(_bundle(), _SAMPLE_TABLE), table=_SAMPLE_TABLE)
+    r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle=_ready(_bundle(), _SAMPLE_TABLE), table=_SAMPLE_TABLE)
     for k in ["status", "schema_version", "table_status",
               "solutions", "excluded_bundles", "solver"]:
         assert k in r, f"missing: {k}"
@@ -259,12 +261,12 @@ def test_schema_fields():
     assert "reduced_ebr_decomposition_status" not in r
 
 def test_json_serializable():
-    r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(_bundle(), _SAMPLE_TABLE), table=_SAMPLE_TABLE)
+    r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle=_ready(_bundle(), _SAMPLE_TABLE), table=_SAMPLE_TABLE)
     encoded = json.dumps(r)
     assert len(encoded) > 0
 
 def test_no_forbidden_terms():
-    r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(_bundle(), _SAMPLE_TABLE), table=_SAMPLE_TABLE)
+    r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle=_ready(_bundle(), _SAMPLE_TABLE), table=_SAMPLE_TABLE)
     encoded = json.dumps(r)
     for forbidden in ["covariance", "equivariance", "stabilizer",
                       "valley_little_group"]:
@@ -284,7 +286,7 @@ def test_not_ready_excluded():
             "irreps_by_kpoint": {},
         }],
     }
-    r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(b, _SAMPLE_TABLE), table=_SAMPLE_TABLE)
+    r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle=_ready(b, _SAMPLE_TABLE), table=_SAMPLE_TABLE)
     ex = r["excluded_bundles"]
     assert len(ex) == 1
     assert ex[0]["subspace_group_candidate"] == "P3"
@@ -306,7 +308,7 @@ def test_unknown_irrep_label_is_not_matched_by_hsp_only():
             "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
         }],
     }
-    r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(b, table), table=table)
+    r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle=_ready(b, table), table=table)
     assert r["status"] == "blocked"
     assert "could not resolve" in r["excluded_bundles"][0]["reason"]
 
@@ -328,7 +330,7 @@ def test_unique_operation_suffix_fallback_does_not_double_count():
             "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
         }],
     }
-    r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(b, table), table=table)
+    r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle=_ready(b, table), table=table)
     assert r["status"] == "solved_exact"
     assert r["solutions"][0]["irrep_vector"] == [1]
 
@@ -352,13 +354,13 @@ def test_ambiguous_operation_suffix_fallback_is_excluded():
             "irreps_by_kpoint": {"GammaM": ["C3_spinor_phase_+1/2"]},
         }],
     }
-    r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(b, table), table=table)
+    r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle=_ready(b, table), table=table)
     assert r["status"] == "blocked"
     assert "could not resolve" in r["excluded_bundles"][0]["reason"]
 
 def test_negative_max_coefficient_raises():
     with pytest.raises(ValueError, match="max_coefficient"):
-        build_reduced_ebr_mapping(
+        _map_with_explicit_low_level_cprime_fixture(
             ebr_export_bundle=_bundle(),
             table=_SAMPLE_TABLE,
             max_coefficient=-1
@@ -889,7 +891,7 @@ def test_matching_basis_solves_exact():
             "KM": ["C3_spinor_phase_+1/6", "C3_spinor_phase_-1/6"],
         },
     )
-    r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(b, _SAMPLE_TABLE), table=_SAMPLE_TABLE)
+    r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle=_ready(b, _SAMPLE_TABLE), table=_SAMPLE_TABLE)
     assert r["status"] == "solved_exact"
     assert r["solutions"][0]["status"] == "solved_exact"
 
@@ -899,7 +901,7 @@ def test_table_extra_hsp_excludes_bundle():
         expected=["GammaM"],
         irreps_by_kp={"GammaM": ["C3_spinor_phase_+1/2"]},
     )
-    r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(b, _SAMPLE_TABLE), table=_SAMPLE_TABLE)
+    r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle=_ready(b, _SAMPLE_TABLE), table=_SAMPLE_TABLE)
     assert len(r["excluded_bundles"]) == 1
     assert "expected_hsps mismatch" in r["excluded_bundles"][0]["reason"]
 
@@ -913,7 +915,7 @@ def test_bundle_extra_hsp_excludes_bundle():
             "MM": ["C3_spinor_phase_-1/6"],
         },
     )
-    r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(b, _SAMPLE_TABLE), table=_SAMPLE_TABLE)
+    r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle=_ready(b, _SAMPLE_TABLE), table=_SAMPLE_TABLE)
     assert len(r["excluded_bundles"]) == 1
     assert "expected_hsps mismatch" in r["excluded_bundles"][0]["reason"]
 
@@ -926,7 +928,7 @@ def test_irrep_keys_mismatch_excludes():
             # KM missing — irreps_by_kpoint keys ≠ table expected_hsps
         },
     )
-    r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(b, _SAMPLE_TABLE), table=_SAMPLE_TABLE)
+    r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle=_ready(b, _SAMPLE_TABLE), table=_SAMPLE_TABLE)
     assert len(r["excluded_bundles"]) >= 1
     reasons = " ".join(e["reason"] for e in r["excluded_bundles"])
     assert "hsp_basis_mismatch" in reasons or "expected_hsps mismatch" in reasons
@@ -940,7 +942,7 @@ def test_malformed_declared_expected_hsps_excludes():
             "KM": ["C3_spinor_phase_+1/6", "C3_spinor_phase_-1/6"],
         },
     )
-    r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(b, _SAMPLE_TABLE), table=_SAMPLE_TABLE)
+    r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle=_ready(b, _SAMPLE_TABLE), table=_SAMPLE_TABLE)
     assert len(r["excluded_bundles"]) == 1
     assert "hsp_basis_malformed" in r["excluded_bundles"][0]["reason"]
 
@@ -953,7 +955,7 @@ def test_basis_gate_before_group_check():
         irreps_by_kp={"GammaM": ["C3_spinor_phase_+1/2"]},
         g="P3",  # group matches table
     )
-    r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(b, _SAMPLE_TABLE), table=_SAMPLE_TABLE)
+    r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle=_ready(b, _SAMPLE_TABLE), table=_SAMPLE_TABLE)
     assert len(r["excluded_bundles"]) == 1
     assert "expected_hsps mismatch" in r["excluded_bundles"][0]["reason"]
 
@@ -977,7 +979,7 @@ def test_atomic_compatible_classification():
             "KM": ["C3_spinor_phase_+1/6", "C3_spinor_phase_-1/6"],
         },
     )
-    r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(b, _SAMPLE_TABLE), table=_SAMPLE_TABLE)
+    r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle=_ready(b, _SAMPLE_TABLE), table=_SAMPLE_TABLE)
     assert r["status"] == "solved_exact"
     s = r["solutions"][0]
     assert s["classification"] == "atomic-compatible-candidate"
@@ -1099,7 +1101,7 @@ def test_top_level_status_is_partial_when_one_bundle_is_blocked():
     blocked["certificate_identity"] = {}
     export["bundles"].append(blocked)
 
-    result = build_reduced_ebr_mapping(
+    result = _map_with_explicit_low_level_cprime_fixture(
         ebr_export_bundle=export,
         table=_SAMPLE_TABLE,
     )
@@ -1126,7 +1128,7 @@ def test_top_level_status_preserves_indeterminate_truncation():
         },
     )
 
-    result = build_reduced_ebr_mapping(
+    result = _map_with_explicit_low_level_cprime_fixture(
         ebr_export_bundle=_ready(export, table),
         table=table,
         max_coefficient=5,
@@ -1230,7 +1232,7 @@ def test_joint_bundle_cannot_bypass_missing_cprime_producer_context():
 def test_classification_fields_on_existing_tests():
     """All solutions must carry classification, integer_span_status,
     and nonnegative_solution_status."""
-    r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(_bundle(), _SAMPLE_TABLE), table=_SAMPLE_TABLE)
+    r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle=_ready(_bundle(), _SAMPLE_TABLE), table=_SAMPLE_TABLE)
     for s in r["solutions"]:
         assert s["classification"] in {
             "atomic-compatible-candidate",
@@ -1265,7 +1267,7 @@ def test_cli_shows_classification_counts(tmp_path, capsys):
 
 def test_schema_fields_include_classification():
     """Top-level schema must still include all required fields."""
-    r = build_reduced_ebr_mapping(ebr_export_bundle=_ready(_bundle(), _SAMPLE_TABLE), table=_SAMPLE_TABLE)
+    r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle=_ready(_bundle(), _SAMPLE_TABLE), table=_SAMPLE_TABLE)
     for k in ["status", "schema_version", "table_status", "solutions",
               "excluded_bundles", "solver"]:
         assert k in r, f"missing top-level key: {k}"
@@ -1588,14 +1590,15 @@ def test_table_file_and_spec_file_equivalent_outputs():
     table = dict(_SAMPLE_TABLE)
 
     attach_real_certificate(bundle, _SAMPLE_TABLE)
-    result_table = build_reduced_ebr_mapping(
+    attach_cprime_fixture_contract(bundle)
+    result_table = _map_with_explicit_low_level_cprime_fixture(
         ebr_export_bundle=bundle,
         table=table,
         reduced_ebr_input={"source": "table_file", "table_file_stem": "p3_table"}
     )
     assert result_table["status"] == "solved_exact"
 
-    result_spec = build_reduced_ebr_mapping(
+    result_spec = _map_with_explicit_low_level_cprime_fixture(
         ebr_export_bundle=bundle,
         table=table,
         reduced_ebr_input={
@@ -1645,7 +1648,8 @@ def test_reduced_ebr_input_provenance_in_output():
         }],
     }
     attach_real_certificate(bundle, _SAMPLE_TABLE)
-    result = build_reduced_ebr_mapping(
+    attach_cprime_fixture_contract(bundle)
+    result = _map_with_explicit_low_level_cprime_fixture(
         ebr_export_bundle=bundle,
         table=dict(_SAMPLE_TABLE),
         reduced_ebr_input={"source": "table_file", "table_file_stem": "p3_table"}
@@ -1658,7 +1662,7 @@ def test_reduced_ebr_input_provenance_in_output():
 
 def test_reduced_ebr_input_preserved_in_missing_table_status():
     """reduced_ebr_input is preserved even when table is missing."""
-    result = build_reduced_ebr_mapping(
+    result = _map_with_explicit_low_level_cprime_fixture(
         ebr_export_bundle=_bundle(),
         table=None,
         reduced_ebr_input={"source": "spec_file", "spec_file_stem": "bad_spec"},
@@ -1687,7 +1691,8 @@ def test_reduced_ebr_input_provenance_in_ingestion_record():
         }],
     }
     attach_real_certificate(bundle, _SAMPLE_TABLE)
-    mapping = build_reduced_ebr_mapping(
+    attach_cprime_fixture_contract(bundle)
+    mapping = _map_with_explicit_low_level_cprime_fixture(
         ebr_export_bundle=bundle,
         table=dict(_SAMPLE_TABLE),
         reduced_ebr_input={"source": "table_file", "table_file_stem": "p3_table"}
@@ -1724,7 +1729,8 @@ def test_reduced_ebr_input_not_present_when_not_provided():
         }],
     }
     attach_real_certificate(bundle, _SAMPLE_TABLE)
-    result = build_reduced_ebr_mapping(
+    attach_cprime_fixture_contract(bundle)
+    result = _map_with_explicit_low_level_cprime_fixture(
         ebr_export_bundle=bundle,
         table=dict(_SAMPLE_TABLE)
     )
@@ -1733,7 +1739,7 @@ def test_reduced_ebr_input_not_present_when_not_provided():
 
 def test_reduced_ebr_input_not_provided_marker():
     """Explicit not_provided provenance is preserved in missing-table output."""
-    result = build_reduced_ebr_mapping(
+    result = _map_with_explicit_low_level_cprime_fixture(
         ebr_export_bundle=_bundle(),
         table=None,
         reduced_ebr_input={"source": "not_provided"},

@@ -284,8 +284,7 @@ def test_symmetry_consistency_failure_demotes_symmetry_rows():
             "target_valley": "K_valley",
             "little_group_passed": True,
             "valley_preserving": True,
-            "topology_input_ready": True,
-            "topology_ready": True,
+            "local_irrep_ready": True,
             "diagnostic_only": False,
             "reason": "",
         }
@@ -296,8 +295,7 @@ def test_symmetry_consistency_failure_demotes_symmetry_rows():
     row = rows[0]
     assert row["projector_symmetry_status"] == "failed"
     assert row["epsilon_seed"] == 0.5
-    assert row["topology_input_ready"] is False
-    assert row["topology_ready"] is False
+    assert row["local_irrep_ready"] is False
     assert row["diagnostic_only"] is True
     assert row["reason"] == "seed projector symmetry-consistency failed"
 

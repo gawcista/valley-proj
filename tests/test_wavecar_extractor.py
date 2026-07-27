@@ -9,6 +9,9 @@ import numpy as np
 import yaml
 
 from valleyscope.io.wavecar import _choose_target, _target_candidates
+from valleyscope.io.wavefunction_convention import (
+    WAVECAR_H5_EXTRACTOR_IDENTITY,
+)
 from valleyscope.workflows.extract_wavecar import (
     _parse_bands_vasp,
     extract_wavecar_to_h5,
@@ -181,8 +184,9 @@ def test_extract_wavecar_accepts_spinor_count_in_nplane_record(tmp_path):
 
     with h5py.File(output_h5, "r") as h5:
         assert h5["metadata/spinor"][()] == np.bool_(True)
-        assert h5["metadata/extractor_identity"][()].decode() == (
-            "valleyscope_wavecar_h5_layout_v1"
+        assert (
+            h5["metadata/extractor_identity"][()].decode()
+            == WAVECAR_H5_EXTRACTOR_IDENTITY
         )
         assert h5["metadata/coefficient_shape_order"][()].decode() == (
             "band,spinor_component,reciprocal_grid"

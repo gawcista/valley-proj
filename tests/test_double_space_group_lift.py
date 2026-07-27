@@ -26,7 +26,8 @@ def _source_record() -> dict[str, object]:
         extracted_wavefunction_payload_identity="sha256:" + "1" * 64,
         nspinor=2,
         parser_identity="valleyscope_h5_reader_v1",
-        extractor_identity="valleyscope_wavecar_h5_layout_v1",
+        hdf5_layout_identity="valleyscope_wavefunction_h5_layout_v1",
+        extractor_provenance=None,
     ).to_record()
 
 

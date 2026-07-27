@@ -76,9 +76,6 @@ def build_summary_payload(
         "symmetry_analysis": _symmetry_analysis(symmetry_payload, config.analysis.kpoints),
         "symmetry_eigenvalues": eigen_rows,
         "symmetry_characters": _symmetry_character_rows(eigen_rows),
-        "representation_readiness_thresholds": (
-            _representation_readiness_thresholds(config)
-        ),
         "warnings": warnings,
         "output_profile": config.output.profile,
         "output_files": {name: str(path) for name, path in output_paths.items()},
@@ -91,11 +88,10 @@ def build_summary_payload(
             "valley_concentration": "max weight fraction in assigned valley (general multi-valley)",
             "W_overlap": "projector-window overlap weight",
             "W_res": "residual weight",
-            "topology_input_ready": (
-                "HSP symmetry eigenvalue is suitable as input to later symmetry-based topology analysis; "
-                "it does not validate full-mBZ valley-resolved topology"
+            "local_irrep_ready": (
+                "the exact local HSP little-group and valley-preserving subgroup "
+                "scope passed producer-owned C-prime evidence"
             ),
-            "topology_ready": "backward-compatible alias of topology_input_ready",
             "epsilon_seed": (
                 "||D_g P_a^0 D_g^dag - P_{pi_g(a)}^0||_F / max(||P_a^0||_F, small); "
                 "epsilon_seed is the seed projector symmetry error"
@@ -210,6 +206,10 @@ def _compact_cprime_records(
                 )
                 if isinstance(evidence.get("reason_codes", []), list)
                 else ["reason_codes_malformed"],
+                "reciprocal_grid_permutation_status": (
+                    _reciprocal_grid_permutation_status(evidence)
+                ),
+                "residual_maxima": _scoped_residual_maxima(evidence),
             }
         )
     return {
@@ -225,6 +225,96 @@ def _compact_cprime_records(
         "acceptance_matrix": acceptance_matrix,
         "full_records": "diagnostics.h5:/cprime",
     }
+
+
+def _reciprocal_grid_permutation_status(
+    evidence: dict[str, Any],
+) -> str:
+    mapping = evidence.get("plane_wave_mapping")
+    if not isinstance(mapping, dict):
+        return "not_evaluated"
+    operation_rows = mapping.get("operation_rows")
+    composition_rows = mapping.get("composition_rows")
+    if not isinstance(operation_rows, list) or not operation_rows:
+        return "not_evaluated"
+    rows = [
+        row for row in [*operation_rows, *(
+            composition_rows if isinstance(composition_rows, list) else []
+        )]
+        if isinstance(row, dict)
+    ]
+    return (
+        "passed"
+        if rows and all(row.get("passed") is True for row in rows)
+        else "blocked"
+    )
+
+
+def _scoped_residual_maxima(
+    evidence: dict[str, Any],
+) -> dict[str, float | None]:
+    target = evidence.get("target_subspace")
+    plane_wave = evidence.get("plane_wave_mapping")
+    group_law = evidence.get("projected_representation_group_law")
+    covariance = evidence.get("projector_covariance")
+    valley_block = evidence.get("valley_block_quality")
+    antiunitary = evidence.get("antiunitary_evidence")
+    return {
+        "coefficient_gram": _optional_number(
+            target.get("coefficient_gram_error")
+            if isinstance(target, dict) else None
+        ),
+        "target_subspace_unitarity": _max_row_number(
+            target, "operation_rows", "unitarity_residual"
+        ),
+        "plane_wave_relative_norm": _max_row_number(
+            plane_wave, "operation_rows", "relative_norm_residual"
+        ),
+        "projected_group_law": _max_row_number(
+            group_law, "pair_rows", "residual"
+        ),
+        "projector_covariance": _max_row_number(
+            covariance, "operation_rows", "residual"
+        ),
+        "valley_block_leakage": _max_row_number(
+            valley_block, "operation_rows", "block_leakage_residual"
+        ),
+        "antiunitary_square": _optional_number(
+            antiunitary.get("square_residual")
+            if isinstance(antiunitary, dict) else None
+        ),
+        "antiunitary_grid_mapping": _optional_number(
+            antiunitary.get("grid_mapping_residual")
+            if isinstance(antiunitary, dict) else None
+        ),
+        "antiunitary_unitary_compatibility": _optional_number(
+            antiunitary.get("max_unitary_compatibility_residual")
+            if isinstance(antiunitary, dict) else None
+        ),
+    }
+
+
+def _max_row_number(
+    section: object,
+    row_key: str,
+    value_key: str,
+) -> float | None:
+    rows = section.get(row_key) if isinstance(section, dict) else None
+    if not isinstance(rows, list):
+        return None
+    values = [
+        value for row in rows
+        if isinstance(row, dict)
+        and (value := _optional_number(row.get(value_key))) is not None
+    ]
+    return max(values) if values else None
+
+
+def _optional_number(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    return number if np.isfinite(number) else None
 
 
 def render_summary_text(summary: dict[str, Any]) -> str:
@@ -868,8 +958,8 @@ def _render_debug_summary_text(summary: dict[str, Any]) -> str:
 
     _section(lines, "Symmetry eigenvalues")
     lines.append(
-        "Note: topology_input_ready only means the HSP symmetry eigenvalue is suitable as input "
-        "to later symmetry-based topology analysis; it does not validate full-mBZ valley-resolved topology."
+        "Note: local_irrep_ready requires producer-owned C-prime evidence on "
+        "the exact HSP little-group and valley-preserving subgroup scope."
     )
     lines.extend(
         _table(
@@ -880,10 +970,9 @@ def _render_debug_summary_text(summary: dict[str, Any]) -> str:
                 "order",
                 "state",
                 "phase",
-                "ready",
-                "input_ready",
+                "pw_map",
+                "local_irrep",
                 "diagnostic",
-                "offdiag",
                 "block_leak",
                 "reason",
             ],
@@ -895,10 +984,9 @@ def _render_debug_summary_text(summary: dict[str, Any]) -> str:
                     row["order"],
                     row["state_index"],
                     _fmt(row["phase_2pi"]),
-                    row.get("rotation_ready", ""),
-                    row.get("topology_input_ready", row.get("topology_ready", "")),
+                    row.get("plane_wave_mapping_complete", ""),
+                    row.get("local_irrep_ready", ""),
                     row.get("diagnostic_only", ""),
-                    _fmt(row.get("D_valley_offdiag_norm")),
                     _fmt(row.get("D_block_leakage_norm")),
                     row.get("reason", ""),
                 ]
@@ -1266,7 +1354,7 @@ def _symmetry_character_rows(symmetry_rows: list[dict[str, Any]]) -> list[dict[s
                 "basis": row.get("basis", ""),
                 "character_raw": "",
                 "character_valley": "",
-                "topology_input_ready": True,
+                "local_irrep_ready": True,
                 "diagnostic_only": False,
                 "accepted_for_valley_preserving_representation": True,
             }
@@ -1275,26 +1363,11 @@ def _symmetry_character_rows(symmetry_rows: list[dict[str, Any]]) -> list[dict[s
             item["character_raw"] = row.get("character_raw")
         if row.get("character_valley"):
             item["character_valley"] = row.get("character_valley")
-        item["topology_input_ready"] = bool(item["topology_input_ready"]) and bool(row.get("topology_input_ready", False))
+        item["local_irrep_ready"] = bool(item["local_irrep_ready"]) and bool(
+            row.get("local_irrep_ready", False)
+        )
         item["diagnostic_only"] = bool(item["diagnostic_only"]) or bool(row.get("diagnostic_only", False))
     return list(grouped.values())
-
-
-def _representation_readiness_thresholds(config: AppConfig) -> dict[str, Any]:
-    return {
-        "readiness_preset": config.rotation.readiness_preset,
-        "unitarity_tol": config.rotation.unitarity_tol,
-        "D_valley_offdiag_tol": config.rotation.D_valley_offdiag_tol,
-        "irrep_weight_tol": config.rotation.irrep_weight_tol,
-        "interpretation": (
-            "These are numerical readiness thresholds, not universal physical constants."
-        ),
-        "recommended_action": (
-            "Check qcut stability, valley purity, C-prime identities, plane-wave mapping, "
-            "and representation quality; do not loosen thresholds only to obtain "
-            "topology_input_ready=True or an irrep label."
-        ),
-    }
 
 
 def _collect_warnings(
@@ -1329,7 +1402,7 @@ def _collect_warnings(
         warnings.append("Some symmetry eigenvalues are not valley-adapted and are diagnostic-only")
     if any(bool(row.get("diagnostic_only", False)) for row in symmetry_rows):
         warnings.append(
-            "Some symmetry eigenvalues are diagnostic-only and are not topology_input_ready"
+            "Some symmetry eigenvalues are diagnostic-only and are not local_irrep_ready"
         )
     # Collect fixed_center_not_captured per-kpoint warnings (deduplicated).
     fc_warned_kpoints: set[str] = set()

@@ -22,8 +22,8 @@ def test_direct_qcut_waits_for_cprime_evidence():
         seed_symmetry_status="passed",
         seed_symmetry_failed_count=0,
         closure_quality="ok",
-        qcut_eigenvalue_ready_count=3,
-        qcut_eigenvalue_total_count=3,
+        qcut_diagnostic_complete_count=3,
+        qcut_diagnostic_total_count=3,
     )
     assert d["workflow_path"] == PATH_DIRECT_QCUT
     assert d["readiness_level"] == READINESS_USABLE_WITH_CAUTION
@@ -37,8 +37,8 @@ def test_direct_qcut_is_cautious_before_cprime_promotion():
         seed_symmetry_status="passed",
         seed_symmetry_failed_count=0,
         closure_quality="ok",
-        qcut_eigenvalue_ready_count=2,
-        qcut_eigenvalue_total_count=2,
+        qcut_diagnostic_complete_count=2,
+        qcut_diagnostic_total_count=2,
     )
     assert d["workflow_path"] == PATH_DIRECT_QCUT
     assert d["readiness_level"] == READINESS_USABLE_WITH_CAUTION
@@ -54,8 +54,8 @@ def test_symmetry_adapted_waits_for_cprime_evidence():
         seed_symmetry_status="failed",
         seed_symmetry_failed_count=1,
         closure_quality="ok",
-        qcut_eigenvalue_ready_count=0,
-        qcut_eigenvalue_total_count=2,
+        qcut_diagnostic_complete_count=0,
+        qcut_diagnostic_total_count=2,
         sym_adapted_proj_status="ok",
         sym_adapted_local_irrep_ready=True,
         sym_adapted_diagnostic_only=False,
@@ -70,8 +70,8 @@ def test_symmetry_adapted_numerical_path_is_cautious():
         seed_symmetry_status="failed",
         seed_symmetry_failed_count=1,
         closure_quality="usable_with_caution",
-        qcut_eigenvalue_ready_count=0,
-        qcut_eigenvalue_total_count=2,
+        qcut_diagnostic_complete_count=0,
+        qcut_diagnostic_total_count=2,
         sym_adapted_proj_status="ok",
         sym_adapted_local_irrep_ready=True,
         sym_adapted_diagnostic_only=False,
@@ -85,8 +85,8 @@ def test_symmetry_adapted_not_ready():
         seed_symmetry_status="failed",
         seed_symmetry_failed_count=1,
         closure_quality="usable_with_caution",
-        qcut_eigenvalue_ready_count=0,
-        qcut_eigenvalue_total_count=2,
+        qcut_diagnostic_complete_count=0,
+        qcut_diagnostic_total_count=2,
         sym_adapted_proj_status="warn",
         sym_adapted_local_irrep_ready=False,
         sym_adapted_diagnostic_only=True,
@@ -104,8 +104,8 @@ def test_blocked_closure():
         seed_symmetry_status="passed",
         seed_symmetry_failed_count=0,
         closure_quality="blocked",
-        qcut_eigenvalue_ready_count=1,
-        qcut_eigenvalue_total_count=1,
+        qcut_diagnostic_complete_count=1,
+        qcut_diagnostic_total_count=1,
     )
     assert d["workflow_path"] == PATH_BLOCKED
     assert d["readiness_level"] == READINESS_BLOCKED
@@ -116,8 +116,8 @@ def test_blocked_projector_failed():
         seed_symmetry_status="failed",
         seed_symmetry_failed_count=1,
         closure_quality="usable_with_caution",
-        qcut_eigenvalue_ready_count=0,
-        qcut_eigenvalue_total_count=1,
+        qcut_diagnostic_complete_count=0,
+        qcut_diagnostic_total_count=1,
         sym_adapted_proj_status="failed",
     )
     assert d["workflow_path"] == PATH_BLOCKED
@@ -128,8 +128,8 @@ def test_blocked_all_closed():
     d = decide_irrep_workflow(
         seed_symmetry_status="not_evaluated",
         closure_quality="not_evaluated",
-        qcut_eigenvalue_ready_count=0,
-        qcut_eigenvalue_total_count=0,
+        qcut_diagnostic_complete_count=0,
+        qcut_diagnostic_total_count=0,
         sym_adapted_proj_status="not_evaluated",
     )
     assert d["workflow_path"] == PATH_BLOCKED
@@ -142,22 +142,22 @@ def test_blocked_all_closed():
 
 @pytest.mark.parametrize("kwargs,expected_readiness", [
     (dict(seed_symmetry_status="passed", seed_symmetry_failed_count=0,
-          closure_quality="ok", qcut_eigenvalue_ready_count=1,
-          qcut_eigenvalue_total_count=1),
+          closure_quality="ok", qcut_diagnostic_complete_count=1,
+          qcut_diagnostic_total_count=1),
      READINESS_USABLE_WITH_CAUTION),
     (dict(seed_symmetry_status="passed", seed_symmetry_failed_count=0,
-          closure_quality="ok", qcut_eigenvalue_ready_count=1,
-          qcut_eigenvalue_total_count=1),
+          closure_quality="ok", qcut_diagnostic_complete_count=1,
+          qcut_diagnostic_total_count=1),
      READINESS_USABLE_WITH_CAUTION),
     (dict(seed_symmetry_status="failed", seed_symmetry_failed_count=1,
           closure_quality="usable_with_caution",
-          qcut_eigenvalue_ready_count=0, qcut_eigenvalue_total_count=1,
+          qcut_diagnostic_complete_count=0, qcut_diagnostic_total_count=1,
           sym_adapted_proj_status="ok", sym_adapted_local_irrep_ready=True,
           sym_adapted_diagnostic_only=False),
      READINESS_USABLE_WITH_CAUTION),
     (dict(seed_symmetry_status="failed", seed_symmetry_failed_count=1,
           closure_quality="blocked",
-          qcut_eigenvalue_ready_count=0, qcut_eigenvalue_total_count=1),
+          qcut_diagnostic_complete_count=0, qcut_diagnostic_total_count=1),
      READINESS_BLOCKED),
 ])
 def test_readiness_level_only_three(kwargs, expected_readiness):
@@ -178,8 +178,8 @@ def test_usable_with_caution_never_trusted():
         seed_symmetry_max_epsilon=0.05,
         seed_symmetry_failed_count=0,
         closure_quality="usable_with_caution",
-        qcut_eigenvalue_ready_count=1,
-        qcut_eigenvalue_total_count=1,
+        qcut_diagnostic_complete_count=1,
+        qcut_diagnostic_total_count=1,
         sym_adapted_proj_status="warn",
         sym_adapted_local_irrep_ready=False,
         sym_adapted_diagnostic_only=True,
@@ -194,8 +194,8 @@ def test_seed_warning_stays_cautious():
         seed_symmetry_failed_count=0,
         seed_symmetry_warn_count=1,
         closure_quality="clean",
-        qcut_eigenvalue_ready_count=2,
-        qcut_eigenvalue_total_count=2,
+        qcut_diagnostic_complete_count=2,
+        qcut_diagnostic_total_count=2,
     )
     assert d["workflow_path"] == PATH_DIRECT_QCUT
     assert d["readiness_level"] == READINESS_USABLE_WITH_CAUTION
@@ -207,8 +207,8 @@ def test_partial_qcut_readiness_does_not_take_direct_path():
         seed_symmetry_status="passed",
         seed_symmetry_failed_count=0,
         closure_quality="clean",
-        qcut_eigenvalue_ready_count=1,
-        qcut_eigenvalue_total_count=2,
+        qcut_diagnostic_complete_count=1,
+        qcut_diagnostic_total_count=2,
     )
     assert d["workflow_path"] == PATH_BLOCKED
     assert d["readiness_level"] == READINESS_BLOCKED
@@ -277,7 +277,7 @@ def test_build_decisions_direct_qcut_toy():
         },
         symmetry_rows=[
             {"kpoint": "Gamma", "target_valley": "K",
-             "operation_id": 1, "numerical_input_ready": True},
+             "operation_id": 1, "plane_wave_mapping_complete": True},
         ],
         valley_names=["K"],
     )
@@ -460,8 +460,8 @@ def test_schema_json_serializable():
         seed_symmetry_status="passed",
         seed_symmetry_failed_count=0,
         closure_quality="ok",
-        qcut_eigenvalue_ready_count=2,
-        qcut_eigenvalue_total_count=2,
+        qcut_diagnostic_complete_count=2,
+        qcut_diagnostic_total_count=2,
     )
     encoded = json.dumps(d)
     assert len(encoded) > 0
@@ -506,7 +506,7 @@ def test_schema_no_forbidden_terms():
         },
         symmetry_rows=[
             {"kpoint": "Gamma", "target_valley": "K",
-             "operation_id": 1, "topology_input_ready": True},
+             "operation_id": 1, "local_irrep_ready": True},
         ],
         valley_names=["K"],
     )

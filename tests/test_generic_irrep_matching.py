@@ -663,8 +663,8 @@ def test_representation_record_reflects_generic_blocked():
             "operation_id": 2,
             "order": 2,
             "diagnostic_only": False,
-            "topology_input_ready": True,
-            "rotation_ready": True,
+            "local_irrep_ready": True,
+            "plane_wave_mapping_complete": True,
         }],
         symmetry_adapted_valley_report={
             "by_kpoint": {
@@ -931,8 +931,8 @@ def test_representation_record_no_legacy_fallback_in_generic_mode():
             "operation_id": 2,
             "order": 2,
             "diagnostic_only": False,
-            "topology_input_ready": True,
-            "rotation_ready": True,
+            "local_irrep_ready": True,
+            "plane_wave_mapping_complete": True,
         }],
         symmetry_adapted_valley_report={
             "by_kpoint": {
@@ -1018,11 +1018,10 @@ def test_summary_text_generic_first_legacy_explicit():
         },
         "symmetry_eigenvalues": [],
         "symmetry_characters": [],
-        "rotation_readiness_thresholds": {},
         "warnings": [],
         "output_profile": "debug",
         "output_files": {},
-        "legend": {"topology_input_ready": "explanation"},
+        "legend": {"local_irrep_ready": "explanation"},
         "valley_irrep_matching": {
             "status": "ok",
             "matching_mode": "generic",
@@ -1078,11 +1077,10 @@ def test_summary_text_legacy_by_kpoint_rendering_removed():
         },
         "symmetry_eigenvalues": [],
         "symmetry_characters": [],
-        "rotation_readiness_thresholds": {},
         "warnings": [],
         "output_profile": "standard",
         "output_files": {},
-        "legend": {"topology_input_ready": "explanation"},
+        "legend": {"local_irrep_ready": "explanation"},
         "valley_irrep_matching": {
             "status": "ok",
             "matching_mode": "legacy",

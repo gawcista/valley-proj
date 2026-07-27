@@ -144,17 +144,17 @@ class TestDeriveSymmetryStatus:
         )
         assert status == "rejected_not_valley_preserving"
 
-    def test_topology_input_ready(self):
+    def test_local_irrep_ready(self):
         status = derive_symmetry_status(
             symmetry_skipped=False, little_group_passed=True,
-            valley_preserving=True, topology_input_ready=True,
+            valley_preserving=True, local_irrep_ready=True,
         )
-        assert status == "topology_input_ready"
+        assert status == "local_irrep_ready"
 
     def test_diagnostic_only_when_passes_checks_but_not_ready(self):
         status = derive_symmetry_status(
             symmetry_skipped=False, little_group_passed=True,
-            valley_preserving=True, topology_input_ready=False,
+            valley_preserving=True, local_irrep_ready=False,
         )
         assert status == "diagnostic_only"
 
@@ -164,19 +164,19 @@ class TestDeriveSymmetryStatus:
             "rejected_not_little_group",
             "rejected_not_valley_preserving",
             "diagnostic_only",
-            "topology_input_ready",
+            "local_irrep_ready",
         }
         cases = [
             ("not_requested", True, None, None, None),
             ("rejected_not_little_group", False, False, None, None),
             ("rejected_not_valley_preserving", False, True, False, None),
             ("diagnostic_only", False, True, True, False),
-            ("topology_input_ready", False, True, True, True),
+            ("local_irrep_ready", False, True, True, True),
         ]
         for expected, skipped, lg, vp, ready in cases:
             result = derive_symmetry_status(
                 symmetry_skipped=skipped, little_group_passed=lg,
-                valley_preserving=vp, topology_input_ready=ready,
+                valley_preserving=vp, local_irrep_ready=ready,
             )
             assert result == expected, f"Expected {expected}"
             assert result in valid
@@ -255,9 +255,9 @@ class TestDecisionTreeIntegration:
         """A separable subspace with verified symmetry eigenvalue."""
         s_status = derive_symmetry_status(
             symmetry_skipped=False, little_group_passed=True,
-            valley_preserving=True, topology_input_ready=True,
+            valley_preserving=True, local_irrep_ready=True,
         )
-        assert s_status == "topology_input_ready"
+        assert s_status == "local_irrep_ready"
 
     def test_overlap_short_circuits_before_polarization_check(self):
         """Step 3 (projector reliability) gates before Step 2 (separation)."""

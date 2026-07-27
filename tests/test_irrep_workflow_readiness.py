@@ -72,15 +72,15 @@ def _ready_character_rows(kpoint: str, *, operation_2_state_1_ready: bool = True
                     "basis": "valley_adapted",
                     "state_index": state_index,
                     "phase_2pi": 0.0,
-                    "rotation_ready": ready,
-                    "D_valley_offdiag_norm": 0.0,
+                    "plane_wave_mapping_complete": ready,
+                    "D_block_leakage_norm": 0.0,
                     "eigenvalue_real": float(wrong_eigenvalue.real),
                     "eigenvalue_imag": float(wrong_eigenvalue.imag),
                     "character_valley": "1.000000+0.000000j" if state_index == 0 else "",
                     "character_raw": "",
                     "little_group_passed": True,
                     "valley_preserving": True,
-                    "topology_input_ready": ready,
+                    "local_irrep_ready": ready,
                     "diagnostic_only": not ready,
                     "reason": "" if ready else "representation evidence blocked",
                 }
@@ -130,12 +130,7 @@ def _fake_diagnostics_dvalley_mixed(kpoint_name, representation_payload, **kwarg
 
 
 
-# ---------------------------------------------------------------------------
-# rotation threshold plumbing (only remaining test after legacy irrep removal)
-# ---------------------------------------------------------------------------
-
-def test_rotation_thresholds_from_config_parsed_and_applied(tmp_path):
-    """Fix 3: rotation thresholds in YAML config are parsed and used."""
+def test_removed_rotation_thresholds_are_rejected(tmp_path):
     config_path = tmp_path / "config.yaml"
     raw = {
         "input": {"wavefunction_h5": "w.h5"},
@@ -147,6 +142,5 @@ def test_rotation_thresholds_from_config_parsed_and_applied(tmp_path):
         "output": {"directory": "out"},
     }
     config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
-    config = load_config(config_path)
-    assert config.rotation.readiness_preset == "strict"
-    assert config.rotation.irrep_weight_tol == pytest.approx(1.0e-5)
+    with pytest.raises(ValueError, match="rotation config block has been removed"):
+        load_config(config_path)

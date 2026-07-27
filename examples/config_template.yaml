@@ -23,6 +23,10 @@ analysis:
   # VASP band indices. Also accepts {start: 101, end: 120} or "101-120".
   iband: [101, 102]
   subspace_energy_tol_meV: 1.0
+  symmetry_adapted_valley:
+    # Distinct physical residuals have distinct gates; no shared readiness preset.
+    projected_group_law_fail_tol: 1.0e-2
+    valley_block_leakage_fail_tol: 1.0e-2
   # Explicit evidence that the parent calculation is time-reversal symmetric.
   # Default is false; never inferred from material names or spinor inputs.
   time_reversal:
@@ -75,13 +79,6 @@ symmetry:
     symprec: 1.0e-3
     angle_tolerance: -1.0
     symprec_scan: [1.0e-5, 3.0e-5, 1.0e-4, 3.0e-4, 1.0e-3]
-rotation:
-  # strict keeps the conservative defaults; normal/loose are numerical readiness presets.
-  readiness_preset: strict
-  unitarity_tol: 1.0e-4
-  D_valley_offdiag_tol: 1.0e-6
-  irrep_weight_tol: 1.0e-5
-
 output:
   directory: ./valley_analysis
   # profile: standard        # standard (default): public outputs; debug: full diagnostics

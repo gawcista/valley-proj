@@ -99,14 +99,6 @@ class OutputConfig:
 
 
 @dataclass(frozen=True)
-class RotationConfig:
-    readiness_preset: str = "strict"
-    unitarity_tol: float = 1.0e-4
-    D_valley_offdiag_tol: float = 1.0e-6
-    irrep_weight_tol: float = 1.0e-5
-
-
-@dataclass(frozen=True)
 class ReducedEbrConfig:
     enabled: bool = False
     table_file: Path | None = None
@@ -169,6 +161,8 @@ class SymmetryAdaptedValleyConfig:
     projector_symmetry_fail_tol: float = 1e-1
     representation_unitarity_warn_tol: float = 1e-3
     representation_unitarity_fail_tol: float = 1e-2
+    projected_group_law_fail_tol: float = 1e-2
+    valley_block_leakage_fail_tol: float = 1e-2
     ebr_seed_overlap_min: float = 0.8
     ebr_unitarity_max: float = 1e-3
     write_subspace_representation_quality: bool = False
@@ -183,7 +177,6 @@ class AppConfig:
     projection: ProjectionConfig
     output: OutputConfig
     symmetry: SymmetryConfig = field(default_factory=SymmetryConfig)
-    rotation: RotationConfig = field(default_factory=RotationConfig)
     symmetry_adapted_valley: SymmetryAdaptedValleyConfig = field(default_factory=SymmetryAdaptedValleyConfig)
     reduced_ebr: ReducedEbrConfig = field(default_factory=ReducedEbrConfig)
     time_reversal: TimeReversalConfig = field(default_factory=TimeReversalConfig)
@@ -560,47 +553,6 @@ def _projection_qcut_mode(raw: dict[str, Any]) -> str:
     return "moire_shell"
 
 
-ROTATION_READINESS_PRESETS: dict[str, dict[str, float]] = {
-    "strict": {
-        "unitarity_tol": 1.0e-4,
-        "D_valley_offdiag_tol": 1.0e-6,
-        "irrep_weight_tol": 1.0e-5,
-    },
-    "normal": {
-        "unitarity_tol": 1.0e-4,
-        "D_valley_offdiag_tol": 1.0e-3,
-        "irrep_weight_tol": 5.0e-5,
-    },
-    "loose": {
-        "unitarity_tol": 1.0e-4,
-        "D_valley_offdiag_tol": 1.0e-2,
-        "irrep_weight_tol": 1.0e-4,
-    },
-}
-
-
-def _parse_rotation_config(raw: dict[str, Any]) -> RotationConfig:
-    removed_keys = {
-        key for key in ("root_deviation_tol", "root_order") if key in raw
-    }
-    if removed_keys:
-        raise ValueError(
-            "Removed rotation trust keys are not supported: "
-            + ", ".join(sorted(removed_keys))
-        )
-    preset = str(raw.get("readiness_preset", "strict")).lower()
-    if preset not in ROTATION_READINESS_PRESETS:
-        allowed = ", ".join(sorted(ROTATION_READINESS_PRESETS))
-        raise ValueError(f"rotation.readiness_preset must be one of: {allowed}")
-    values = dict(ROTATION_READINESS_PRESETS[preset])
-    return RotationConfig(
-        readiness_preset=preset,
-        unitarity_tol=float(raw.get("unitarity_tol", values["unitarity_tol"])),
-        D_valley_offdiag_tol=float(raw.get("D_valley_offdiag_tol", values["D_valley_offdiag_tol"])),
-        irrep_weight_tol=float(raw.get("irrep_weight_tol", values["irrep_weight_tol"])),
-    )
-
-
 def _resolve_output_profile(raw: dict[str, Any]) -> str:
     """Resolve output.profile, mapping legacy write_detailed_files when needed.
 
@@ -807,6 +759,12 @@ def _parse_symmetry_adapted_valley_config(raw: dict[str, Any]) -> SymmetryAdapte
         projector_symmetry_fail_tol=float(raw.get("projector_symmetry_fail_tol", 1e-1)),
         representation_unitarity_warn_tol=float(raw.get("representation_unitarity_warn_tol", 1e-3)),
         representation_unitarity_fail_tol=float(raw.get("representation_unitarity_fail_tol", 1e-2)),
+        projected_group_law_fail_tol=float(
+            raw.get("projected_group_law_fail_tol", 1e-2)
+        ),
+        valley_block_leakage_fail_tol=float(
+            raw.get("valley_block_leakage_fail_tol", 1e-2)
+        ),
         ebr_seed_overlap_min=float(raw.get("ebr_seed_overlap_min", 0.8)),
         ebr_unitarity_max=float(raw.get("ebr_unitarity_max", 1e-3)),
         write_subspace_representation_quality=bool(raw.get("write_subspace_representation_quality", False)),
@@ -822,6 +780,11 @@ def load_config(path: str | Path) -> AppConfig:
             "The spinor config block has been removed. Spinful V1 uses the "
             "program-owned vasp_nonmagnetic_soc_default_saxis_v1 source-basis "
             "certificate and accepts no per-run validation Boolean."
+        )
+    if "rotation" in raw:
+        raise ValueError(
+            "rotation config block has been removed; representation trust uses "
+            "producer-owned, physically named residual gates"
         )
     input_raw = raw.get("input", {})
     monolayer_poscars = {
@@ -883,7 +846,6 @@ def load_config(path: str | Path) -> AppConfig:
             thresholds=dict(projection_raw.get("thresholds", {})),
         ),
         symmetry=_parse_symmetry_config(base, input_raw, symmetry_raw),
-        rotation=_parse_rotation_config(raw.get("rotation", {})),
         symmetry_adapted_valley=_parse_symmetry_adapted_valley_config(
             analysis_raw.get("symmetry_adapted_valley", {})
         ),

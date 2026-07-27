@@ -148,7 +148,7 @@ def build_valley_projected_representation_report(
 
             # Build representation record.
             diag_only = bool(row.get("diagnostic_only", False))
-            topology_ready = bool(row.get("topology_input_ready", False))
+            local_irrep_ready = bool(row.get("local_irrep_ready", False))
             # Public irrep group = subspace HSP little group G_k^(a).
             # Parent full HSP little group and valley-sewing ops are
             # provenance only — they must not feed irrep matching or EBR.
@@ -182,7 +182,7 @@ def build_valley_projected_representation_report(
                 "readiness_level": wf_data.get("readiness_level", "?"),
                 "workflow_path": wf_data.get("workflow_path", "?"),
                 "diagnostic_only": diag_only,
-                "topology_input_ready": topology_ready,
+                "local_irrep_ready": local_irrep_ready,
                 "state_index": row.get("state_index"),
                 "character_raw": row.get("character_raw", ""),
                 "character_valley": row.get("character_valley", ""),
@@ -364,10 +364,8 @@ def _blocking_reasons(
         else:
             reasons.append("diagnostic_only")
     else:
-        if not bool(row.get("rotation_ready", False)):
-            reasons.append("rotation_not_ready")
-        if not bool(row.get("topology_input_ready", False)):
-            reasons.append("topology_input_not_ready")
+        if not bool(row.get("local_irrep_ready", False)):
+            reasons.append("local_irrep_not_ready")
         wf_path = wf_data.get("workflow_path", "")
         if wf_path == "blocked":
             reasons.append("workflow_blocked")
@@ -454,8 +452,8 @@ def _build_representation_records(
                 "diagnostic_only": any(
                     bool(r.get("diagnostic_only", False)) for r in sorted_rows
                 ),
-                "topology_input_ready": all(
-                    bool(r.get("topology_input_ready", False)) for r in sorted_rows
+                "local_irrep_ready": all(
+                    bool(r.get("local_irrep_ready", False)) for r in sorted_rows
                 ),
                 "source_row_count": len(sorted_rows),
             }

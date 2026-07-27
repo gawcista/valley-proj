@@ -2245,13 +2245,14 @@ def test_tmote2_ingestion_compact_reduced_ebr_records():
     assert all(row["evidence_sampled_kpoint"] == "KM" for row in inferred)
 
 
-def test_summary_only_ingestion_does_not_import_optional_irrep_runtime():
-    fixture = (
-        Path(__file__).parent.parent
-        / "real_tests"
-        / "tMoTe2"
-        / "output"
-        / "valley_analysis_wave"
+def test_summary_only_ingestion_does_not_import_optional_irrep_runtime(
+    tmp_path,
+):
+    fixture = tmp_path / "summary_only"
+    fixture.mkdir()
+    (fixture / "valley_summary.json").write_text(
+        json.dumps({"target_kpoints": [], "iband": []}),
+        encoding="utf-8",
     )
     script = f"""
 import builtins
@@ -2273,9 +2274,9 @@ from valleyscope.analysis.database_ingestion_record import (
 record = load_database_ingestion_record_from_directory(Path({str(fixture)!r}))
 assert record["record_status"] == "no_reduced_ebr_input"
 assert record["final_reduced_ebr_result_count"] == 0
-assert record["ebr_export_status"] == "no_bundles"
-assert record["input_excluded_instance_count"] == 5
-assert record["reduced_ebr_mapping_status"] == "not_evaluated"
+assert record["ebr_export_status"] == "not_available"
+assert record["input_excluded_instance_count"] == 0
+assert record["reduced_ebr_mapping_status"] == "not_available"
 assert record["validation_errors"] == []
 """
     completed = subprocess.run(

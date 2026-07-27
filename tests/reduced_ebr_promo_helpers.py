@@ -34,6 +34,10 @@ from valleyscope.symmetry.double_space_group_lift import (
     build_double_space_group_lift_certificate,
     spin_lift_from_orthogonal,
 )
+from valleyscope.symmetry.plane_wave_action import (
+    RECIPROCAL_GRID_ACTION_CONVENTION,
+    reciprocal_grid_identity,
+)
 
 
 def attach_cprime_fixture_contract(export_bundle: dict) -> dict:
@@ -170,7 +174,8 @@ def _cprime_fixture_source_record() -> dict[str, object]:
         extracted_wavefunction_payload_identity="sha256:" + "a" * 64,
         nspinor=2,
         parser_identity="valleyscope_h5_reader_v1",
-        extractor_identity="valleyscope_wavecar_h5_layout_v1",
+        hdf5_layout_identity="valleyscope_wavefunction_h5_layout_v1",
+        extractor_provenance=None,
     ).to_record()
 
 
@@ -295,14 +300,40 @@ def _cprime_fixture_scope(
         for index, valley in enumerate(orbit[:2])
     }
     antiunitary = None
+    q_cart = np.array(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=float
+    )
+    rotations = {
+        2: np.eye(3, dtype=float),
+        5: np.diag([1.0, -1.0, -1.0]),
+    }
     if tr_completed:
         target = orbit[1] if exchanged else source_valley
+        target_q = -q_cart
         antiunitary = {
             "source_valley": source_valley,
             "target_valley": target,
-            "forward_sewing_matrix": np.array([[1.0]]),
-            "reverse_sewing_matrix": np.array([[-1.0]]),
+            "source_hsp_label": kpoint,
+            "target_hsp_label": kpoint,
+            "time_reversal_hsp_mapping": {kpoint: kpoint},
+            "construction_kind": "observed_to_inferred",
+            "source_reciprocal_grid_vectors_cart": q_cart,
+            "target_reciprocal_grid_vectors_cart": target_q,
+            "source_reciprocal_grid_identity": reciprocal_grid_identity(
+                q_cart
+            ),
+            "target_reciprocal_grid_identity": reciprocal_grid_identity(
+                target_q
+            ),
+            "source_to_target_grid_map": [0, 1],
+            "forward_sewing_matrix": np.eye(2, dtype=np.complex128),
+            "reverse_sewing_matrix": -np.eye(2, dtype=np.complex128),
             "expected_square_sign": -1,
+            "source_unitary_representations": representations,
+            "target_unitary_representations": {
+                operation_id: matrix.conj()
+                for operation_id, matrix in representations.items()
+            },
         }
     raw_inputs: dict[str, object] = {
         "source_basis_record": source,
@@ -320,7 +351,17 @@ def _cprime_fixture_scope(
         "representations": representations,
         "plane_wave_evidence": {
             operation_id: {
+                "action_convention": RECIPROCAL_GRID_ACTION_CONVENTION,
+                "reciprocal_grid_identity": reciprocal_grid_identity(
+                    q_cart
+                ),
+                "reciprocal_grid_dimension": 2,
+                "q_cart": q_cart,
+                "rotation_cart": rotations[operation_id],
+                "mapping_tolerance": 1.0e-6,
+                "source_to_target_map": [0, 1],
                 "mapping_miss_count": 0,
+                "relative_norm_residual": 0.0,
                 "norm_preservation_residual": 0.0,
             }
             for operation_id in required_ids
@@ -596,7 +637,6 @@ def attach_real_certificate(export_bundle: dict, table: dict) -> dict | None:
                     "physical_object_kind",
                     "joint_time_reversal_valley_orbit",
                 )
-    attach_cprime_fixture_contract(export_bundle)
     return export_bundle
 
 

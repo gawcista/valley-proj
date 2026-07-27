@@ -1155,8 +1155,8 @@ def test_standard_outputs_no_cn_like_guardrail(tmp_path):
     eigen_rows = [{
         "kpoint": "GammaM", "target_valley": "K_valley",
         "operation_id": 1, "order": 4,
-        "diagnostic_only": False, "topology_input_ready": True,
-        "rotation_ready": True,
+        "diagnostic_only": False, "local_irrep_ready": True,
+        "plane_wave_mapping_complete": True,
     }]
 
     matching = build_valley_irrep_matching_report(

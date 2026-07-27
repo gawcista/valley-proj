@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from tests.reduced_ebr_promo_helpers import (
+    attach_cprime_fixture_contract,
     attach_real_certificate,
     cprime_validation_context_for_export,
 )
@@ -257,6 +258,7 @@ def test_spec_file_table_feeds_reduced_ebr_mapping_e2e(tmp_path):
     validated["subspace_group_candidate"] = "P321"
     bundle["bundles"][0]["subspace_group_candidate"] = "P321"
     attach_real_certificate(bundle, validated)
+    attach_cprime_fixture_contract(bundle)
     result = build_reduced_ebr_mapping(
         ebr_export_bundle=bundle,
         table=validated
@@ -2380,6 +2382,7 @@ def test_c3_real_source_mapping_e2e_solved_exact(tmp_path):
     table["subspace_group_candidate"] = "P321"
     bundle["bundles"][0]["subspace_group_candidate"] = "P321"
     attach_real_certificate(bundle, table)
+    attach_cprime_fixture_contract(bundle)
     result = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
 
     # Production path may reject minimal table.
@@ -2516,6 +2519,7 @@ def test_c2_mm_m3_dry_run_mapping_e2e_solved_exact():
     table["subspace_group_candidate"] = "P312"
     bundle["bundles"][0]["subspace_group_candidate"] = "P312"
     attach_real_certificate(bundle, table)
+    attach_cprime_fixture_contract(bundle)
     result = build_reduced_ebr_mapping(ebr_export_bundle=bundle, table=table)
 
     # Production path may reject minimal table.

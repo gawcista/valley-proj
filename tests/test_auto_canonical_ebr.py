@@ -14,42 +14,24 @@ from valleyscope.analysis.irreptables_runtime_table_builder import (
 )
 from valleyscope.analysis.reduced_ebr_mapping import (
     _build_auto_table_for_bundle,
-    build_auto_reduced_ebr_mapping as _build_auto_reduced_ebr_mapping,
-    build_reduced_ebr_mapping as _build_reduced_ebr_mapping,
+    build_auto_reduced_ebr_mapping,
+    build_reduced_ebr_mapping,
     load_reduced_ebr_table,
 )
 from valleyscope.analysis.reduced_ebr_solver import classify_bundle
 from tests.helpers_io_workflow import write_fixture, write_config
 from tests.reduced_ebr_promo_helpers import (
+    attach_cprime_fixture_contract,
     attach_real_certificate,
     cprime_summary_for_export,
     cprime_validation_context_for_export,
 )
 
 
-def _fixture_cprime_context(export):
+def _explicit_low_level_cprime_context(export):
     context = cprime_validation_context_for_export(export)
     return dict(context["_by_identity"])
 
-
-def build_reduced_ebr_mapping(**kwargs):
-    export = kwargs.get("ebr_export_bundle")
-    if isinstance(export, dict):
-        kwargs.setdefault(
-            "cprime_validation_context",
-            _fixture_cprime_context(export),
-        )
-    return _build_reduced_ebr_mapping(**kwargs)
-
-
-def build_auto_reduced_ebr_mapping(**kwargs):
-    export = kwargs.get("ebr_export_bundle")
-    if isinstance(export, dict):
-        kwargs.setdefault(
-            "cprime_validation_context",
-            _fixture_cprime_context(export),
-        )
-    return _build_auto_reduced_ebr_mapping(**kwargs)
 
 # ---------------------------------------------------------------------------
 # Shared compact factories
@@ -99,10 +81,18 @@ def _mk_bundle(bid, sg_num, symbol, hsps, irreps, ready=True):
             },
         },
     )
+    attach_cprime_fixture_contract({"bundles": [bundle]})
     return bundle
 
-def _bm(*bundles): return build_auto_reduced_ebr_mapping(
-    ebr_export_bundle={"bundles": list(bundles)}, spinor=True)
+def _bm(*bundles):
+    export = {"bundles": list(bundles)}
+    return build_auto_reduced_ebr_mapping(
+        ebr_export_bundle=export,
+        spinor=True,
+        cprime_validation_context=(
+            _explicit_low_level_cprime_context(export)
+        ),
+    )
 
 def _auto_table(sg, hsps, irreps, loader=None):
     return build_auto_canonical_reduced_ebr_table(
@@ -121,6 +111,10 @@ def test_none_or_empty_is_not_evaluated():
         result = build_auto_reduced_ebr_mapping(
             ebr_export_bundle=bundle,
             spinor=True,
+            cprime_validation_context=(
+                _explicit_low_level_cprime_context(bundle)
+                if isinstance(bundle, dict) else {}
+            ),
         )
         assert result["status"] == "not_evaluated"
 
@@ -194,6 +188,9 @@ def test_auto_canonical_mapping_is_authoritative_for_ingestion():
     mapping = build_auto_reduced_ebr_mapping(
         ebr_export_bundle=export,
         spinor=True,
+        cprime_validation_context=(
+            _explicit_low_level_cprime_context(export)
+        ),
     )
     record = build_database_ingestion_record(
         valley_summary=cprime_summary_for_export(
@@ -283,7 +280,11 @@ def test_auto_table_e2e_solve(tmp_path):
     t = _auto_table(75, ["GammaM"], {"GammaM": ["-GM5", "-GM6"]})
     p = tmp_path / "t.json"; p.write_text(json.dumps(t))
     eb = {"bundles": [_mk_bundle("b", 75, "P4", ["GammaM"], {"GammaM": ["-GM5", "-GM6"]})]}
-    r = build_reduced_ebr_mapping(ebr_export_bundle=eb, table=load_reduced_ebr_table(p))
+    r = build_reduced_ebr_mapping(
+        ebr_export_bundle=eb,
+        table=load_reduced_ebr_table(p),
+        cprime_validation_context=_explicit_low_level_cprime_context(eb),
+    )
     assert r["status"] == "solved_exact"
     assert r["solutions"][0]["classification"] == "atomic-compatible-candidate"
     provenance = r["solutions"][0]["table_provenance"]
@@ -311,17 +312,21 @@ def test_auto_orchestration_preserves_filtered_zero_provenance(monkeypatch):
         "build_auto_canonical_reduced_ebr_table",
         _build_table,
     )
+    export = {
+        "bundles": [_mk_bundle(
+            "b",
+            75,
+            "P4",
+            ["GammaM"],
+            {"GammaM": ["-GM5", "-GM6"]},
+        )],
+    }
     result = build_auto_reduced_ebr_mapping(
-        ebr_export_bundle={
-            "bundles": [_mk_bundle(
-                "b",
-                75,
-                "P4",
-                ["GammaM"],
-                {"GammaM": ["-GM5", "-GM6"]},
-            )],
-        },
+        ebr_export_bundle=export,
         spinor=True,
+        cprime_validation_context=(
+            _explicit_low_level_cprime_context(export)
+        ),
     )
 
     assert result["status"] == "solved_exact"
@@ -334,7 +339,11 @@ def test_auto_table_hsp_mismatch(tmp_path):
     t = _auto_table(75, ["GammaM"], {"GammaM": ["-GM5"]})
     p = tmp_path / "t.json"; p.write_text(json.dumps(t))
     eb = {"bundles": [_mk_bundle("b", 75, "P4", ["GammaM", "XM"], {"GammaM": ["-GM5"], "XM": ["-X3"]})]}
-    r = build_reduced_ebr_mapping(ebr_export_bundle=eb, table=load_reduced_ebr_table(p))
+    r = build_reduced_ebr_mapping(
+        ebr_export_bundle=eb,
+        table=load_reduced_ebr_table(p),
+        cprime_validation_context=_explicit_low_level_cprime_context(eb),
+    )
     assert len(r["excluded_bundles"]) == 1 and "expected_hsps mismatch" in r["excluded_bundles"][0]["reason"]
 
 def test_subspace_sg_not_parent():
@@ -491,7 +500,13 @@ def test_explicit_table_and_spec_regression(tmp_path):
     tp = tmp_path / "t.json"; tp.write_text(json.dumps(td))
     eb = {"bundles": [_mk_bundle("b",75,"P4",["GammaM"],{"GammaM":["-GM5"]})]}
     tt = load_reduced_ebr_table(tp); attach_real_certificate(eb, tt)
-    r = build_reduced_ebr_mapping(ebr_export_bundle=eb, table=tt, reduced_ebr_input={"source":"table_file"})
+    attach_cprime_fixture_contract(eb)
+    r = build_reduced_ebr_mapping(
+        ebr_export_bundle=eb,
+        table=tt,
+        reduced_ebr_input={"source":"table_file"},
+        cprime_validation_context=_explicit_low_level_cprime_context(eb),
+    )
     assert r["status"] == "solved_exact"
     # spec_file — use a loader that returns exactly the labels declared in the spec
     from valleyscope.analysis.irreptables_runtime_table_builder import build_reduced_table_from_spec_file
@@ -499,7 +514,13 @@ def test_explicit_table_and_spec_regression(tmp_path):
     def _spec_ld(sg,spin): return {"basis":{"irrep_labels":["-GM5","-GM6"]},"ebrs":[{"ebr_name":"E","vector":[1,0]}]}
     t2 = build_reduced_table_from_spec_file(str(sp), source_loader=_spec_ld)
     eb2 = {"bundles": [_mk_bundle("b",75,"P4",["GammaM"],{"GammaM":["-GM5"]})]}; attach_real_certificate(eb2, t2)
-    r2 = build_reduced_ebr_mapping(ebr_export_bundle=eb2, table=t2, reduced_ebr_input={"source":"spec_file"})
+    attach_cprime_fixture_contract(eb2)
+    r2 = build_reduced_ebr_mapping(
+        ebr_export_bundle=eb2,
+        table=t2,
+        reduced_ebr_input={"source":"spec_file"},
+        cprime_validation_context=_explicit_low_level_cprime_context(eb2),
+    )
     assert r2["status"] == "solved_exact"
 
 def test_no_cn_like_labels():

@@ -33,9 +33,9 @@ def decide_irrep_workflow(
     closure_quality: str = "not_evaluated",
     closure_max_raw_unitarity: float | None = None,
     closure_max_residual: float | None = None,
-    # --- q-cut symmetry eigenvalue readiness ---
-    qcut_eigenvalue_ready_count: int = 0,
-    qcut_eigenvalue_total_count: int = 0,
+    # --- q-cut diagnostic producer coverage ---
+    qcut_diagnostic_complete_count: int = 0,
+    qcut_diagnostic_total_count: int = 0,
     # --- symmetry-adapted projector quality ---
     sym_adapted_proj_status: str = "not_evaluated",
     sym_adapted_max_seed_overlap: float | None = None,
@@ -66,10 +66,11 @@ def decide_irrep_workflow(
     closure_ok = closure_quality not in ("blocked", "not_evaluated")
     closure_usable = closure_quality in ("usable_with_caution", "ok", "clean")
     closure_clean = closure_quality in ("ok", "clean")
-    # Q-cut eigenvalue readiness: all relevant rows must be ready.
+    # All relevant diagnostic rows must have a complete plane-wave map.
+    # Positive irrep readiness is owned later by scoped C-prime evidence.
     qcut_ok = (
-        qcut_eigenvalue_total_count > 0
-        and qcut_eigenvalue_ready_count == qcut_eigenvalue_total_count
+        qcut_diagnostic_total_count > 0
+        and qcut_diagnostic_complete_count == qcut_diagnostic_total_count
     )
 
     if seed_usable and closure_ok and qcut_ok:
@@ -104,8 +105,9 @@ def decide_irrep_workflow(
         reasons.append(f"target-subspace closure quality={closure_quality}")
     if not qcut_ok:
         reasons.append(
-            f"q-cut eigenvalue readiness insufficient "
-            f"(ready={qcut_eigenvalue_ready_count}/{qcut_eigenvalue_total_count})"
+            f"q-cut diagnostic coverage insufficient "
+            f"(complete={qcut_diagnostic_complete_count}/"
+            f"{qcut_diagnostic_total_count})"
         )
 
     # --- Symmetry-adapted path ---
@@ -257,7 +259,7 @@ def build_irrep_workflow_decisions(
                         closure_by_kp.setdefault(kp_name, {}).setdefault(v, []).append(row)
 
     # Extract eigenvalue readiness by (kpoint, valley)
-    qcut_ready: dict[str, dict[str, dict[str, bool]]] = {}
+    qcut_diagnostics: dict[str, dict[str, dict[str, int]]] = {}
     for row in symmetry_rows:
         if not isinstance(row, dict):
             continue
@@ -265,10 +267,12 @@ def build_irrep_workflow_decisions(
         v = str(row.get("target_valley", ""))
         if not kp or not v:
             continue
-        entry = qcut_ready.setdefault(kp, {}).setdefault(v, {"ready": 0, "total": 0})
+        entry = qcut_diagnostics.setdefault(kp, {}).setdefault(
+            v, {"complete": 0, "total": 0}
+        )
         entry["total"] += 1
-        if bool(row.get("numerical_input_ready", False)):
-            entry["ready"] += 1
+        if bool(row.get("plane_wave_mapping_complete", False)):
+            entry["complete"] += 1
 
     # Extract symmetry-adapted diagnostics per valley
     sa_by_kp: dict[str, dict[str, dict[str, Any]]] = {}
@@ -295,7 +299,12 @@ def build_irrep_workflow_decisions(
                 }
 
     # Build decisions
-    for kp_name in sorted(set(list(seed_by_kp) + list(closure_by_kp) + list(qcut_ready) + list(sa_by_kp))):
+    for kp_name in sorted(set(
+        list(seed_by_kp)
+        + list(closure_by_kp)
+        + list(qcut_diagnostics)
+        + list(sa_by_kp)
+    )):
         kp_decisions: dict[str, object] = {}
         for v in valley_names:
             # --- Identity-only G_k^(a) detection ---
@@ -385,11 +394,13 @@ def build_irrep_workflow_decisions(
             closure_max_res = max(closure_residuals) if closure_residuals else None
 
             # Q-cut eigenvalue readiness
-            qcut = qcut_ready.get(kp_name, {}).get(v, {"ready": 0, "total": 0})
+            qcut = qcut_diagnostics.get(kp_name, {}).get(
+                v, {"complete": 0, "total": 0}
+            )
             if is_identity_only_vp and has_identity_character:
                 # The identity character supplies the local representation
                 # dimension.  There is deliberately no non-identity phase row.
-                qcut = {"ready": 1, "total": 1}
+                    qcut = {"complete": 1, "total": 1}
 
             # Symmetry-adapted diagnostics
             sa = sa_by_kp.get(kp_name, {}).get(v, {})
@@ -402,8 +413,8 @@ def build_irrep_workflow_decisions(
                 closure_quality=worst_closure,
                 closure_max_raw_unitarity=closure_max_unit,
                 closure_max_residual=closure_max_res,
-                qcut_eigenvalue_ready_count=qcut["ready"],
-                qcut_eigenvalue_total_count=qcut["total"],
+                qcut_diagnostic_complete_count=qcut["complete"],
+                qcut_diagnostic_total_count=qcut["total"],
                 sym_adapted_proj_status=sa.get("proj_status", "not_evaluated"),
                 sym_adapted_min_seed_overlap=sa.get("min_seed_overlap"),
                 sym_adapted_local_irrep_ready=sa.get("local_irrep_ready", False),

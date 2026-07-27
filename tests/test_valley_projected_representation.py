@@ -13,8 +13,8 @@ def test_resolved_matching_group_overlays_unresolved_subspace_report():
             "operation_id": 1,
             "order": 3,
             "diagnostic_only": False,
-            "topology_input_ready": True,
-            "rotation_ready": True,
+            "local_irrep_ready": True,
+            "plane_wave_mapping_complete": True,
         }],
         symmetry_adapted_valley_report={"by_kpoint": {"GammaM": {
             "valley_preserving_subspaces": [{
@@ -75,8 +75,8 @@ def test_representation_report_uses_subspace_space_group_as_primary():
                 "character_raw": "-1.000000+0.000000j",
                 "character_valley": "-1.000000+0.000000j",
                 "diagnostic_only": False,
-                "topology_input_ready": True,
-                "rotation_ready": True,
+                "local_irrep_ready": True,
+                "plane_wave_mapping_complete": True,
             }
         ],
         symmetry_adapted_valley_report={
@@ -137,7 +137,7 @@ def test_representation_report_uses_subspace_space_group_as_primary():
     assert op["eigenvalues"] == [{"real": -1.0, "imag": 0.0}]
     assert op["source_row_count"] == 1
     assert op["diagnostic_only"] is False
-    assert op["topology_input_ready"] is True
+    assert op["local_irrep_ready"] is True
 
 
 def test_representation_records_group_by_kpoint_valley():
@@ -152,8 +152,8 @@ def test_representation_records_group_by_kpoint_valley():
                 "operation_id": 1,
                 "order": 3,
                 "diagnostic_only": False,
-                "topology_input_ready": True,
-                "rotation_ready": True,
+                "local_irrep_ready": True,
+                "plane_wave_mapping_complete": True,
             },
             {
                 "kpoint": "GammaM",
@@ -161,8 +161,8 @@ def test_representation_records_group_by_kpoint_valley():
                 "operation_id": 2,
                 "order": 3,
                 "diagnostic_only": False,
-                "topology_input_ready": True,
-                "rotation_ready": True,
+                "local_irrep_ready": True,
+                "plane_wave_mapping_complete": True,
             },
         ],
         symmetry_adapted_valley_report={
@@ -224,8 +224,8 @@ def test_representation_records_aggregate_rank_two_operation_data():
                 "character_valley": "0.000000+0.000000j",
                 "basis": "valley_adapted",
                 "diagnostic_only": False,
-                "topology_input_ready": True,
-                "rotation_ready": True,
+                "local_irrep_ready": True,
+                "plane_wave_mapping_complete": True,
             },
             {
                 "kpoint": "GammaM",
@@ -240,8 +240,8 @@ def test_representation_records_aggregate_rank_two_operation_data():
                 "character_valley": "0.000000+0.000000j",
                 "basis": "valley_adapted",
                 "diagnostic_only": False,
-                "topology_input_ready": True,
-                "rotation_ready": True,
+                "local_irrep_ready": True,
+                "plane_wave_mapping_complete": True,
             },
         ],
         symmetry_adapted_valley_report={
@@ -304,8 +304,8 @@ def test_representation_records_with_generic_irrep_matching():
                 "operation_id": 1,
                 "order": 3,
                 "diagnostic_only": False,
-                "topology_input_ready": True,
-                "rotation_ready": True,
+                "local_irrep_ready": True,
+                "plane_wave_mapping_complete": True,
             },
         ],
         symmetry_adapted_valley_report={
@@ -373,8 +373,8 @@ def test_representation_records_p4_order4_group_agnostic():
                 "operation_id": 3,
                 "order": 4,
                 "diagnostic_only": False,
-                "topology_input_ready": True,
-                "rotation_ready": True,
+                "local_irrep_ready": True,
+                "plane_wave_mapping_complete": True,
             },
         ],
         symmetry_adapted_valley_report={
@@ -437,7 +437,7 @@ def test_representation_records_p4_order4_group_agnostic():
     op = rec["valley_preserving_operations"][0]
     assert op["operation_id"] == 3
     assert op["operation_order"] == 4
-    assert op["topology_input_ready"] is True
+    assert op["local_irrep_ready"] is True
     assert rec["irrep_matching"] is not None
     assert rec["irrep_matching"]["matching_strategy"] == "bilbao_restricted_character"
     assert rec["irrep_matching"]["irrep_multiplicities"] == {"-GM_plus_1over4": 1}
@@ -467,8 +467,8 @@ def test_blocked_identity_only_pair_produces_record_without_eigenvalue_rows():
             {
                 "kpoint": "GammaM", "target_valley": "K_valley",
                 "operation_id": 1, "order": 3,
-                "diagnostic_only": False, "topology_input_ready": True,
-                "rotation_ready": True,
+                "diagnostic_only": False, "local_irrep_ready": True,
+                "plane_wave_mapping_complete": True,
             },
         ],
         symmetry_adapted_valley_report={
@@ -615,14 +615,14 @@ def test_subspace_hsp_little_group_is_public_irrep_group():
             {
                 "kpoint": "GammaM", "target_valley": "K_valley",
                 "operation_id": 1, "order": 3,
-                "diagnostic_only": False, "topology_input_ready": True,
-                "rotation_ready": True,
+                "diagnostic_only": False, "local_irrep_ready": True,
+                "plane_wave_mapping_complete": True,
             },
             {
                 "kpoint": "KM", "target_valley": "K_valley",
                 "operation_id": 1, "order": 3,
-                "diagnostic_only": False, "topology_input_ready": True,
-                "rotation_ready": True,
+                "diagnostic_only": False, "local_irrep_ready": True,
+                "plane_wave_mapping_complete": True,
             },
         ],
         symmetry_adapted_valley_report={
@@ -802,14 +802,14 @@ def test_target_kpoints_not_silently_dropped_from_records():
             {
                 "kpoint": "GammaM", "target_valley": "K_valley",
                 "operation_id": 1, "order": 3,
-                "diagnostic_only": False, "topology_input_ready": True,
-                "rotation_ready": True,
+                "diagnostic_only": False, "local_irrep_ready": True,
+                "plane_wave_mapping_complete": True,
             },
             {
                 "kpoint": "KM", "target_valley": "K_valley",
                 "operation_id": 1, "order": 3,
-                "diagnostic_only": False, "topology_input_ready": True,
-                "rotation_ready": True,
+                "diagnostic_only": False, "local_irrep_ready": True,
+                "plane_wave_mapping_complete": True,
             },
         ],
         symmetry_adapted_valley_report={

@@ -5,7 +5,13 @@ from valleyscope.geometry.lattice import cart_rotation_from_fractional, cart_tra
 from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector
 from valleyscope.symmetry.little_group import is_little_group_operation
 from valleyscope.symmetry.operation_classifier import classify_operation, operation_order, rotation_axis_angle
-from valleyscope.symmetry.plane_wave_action import build_plane_wave_representation, spin_rotation_matrix
+from valleyscope.symmetry.plane_wave_action import (
+    build_plane_wave_representation,
+    build_reciprocal_grid_map,
+    reciprocal_grid_identity,
+    spin_rotation_matrix,
+    validate_reciprocal_grid_permutation,
+)
 from valleyscope.symmetry.spglib_finder import find_symmetry_operations
 from valleyscope.symmetry.valley_preservation import map_valley_sectors
 from valleyscope.analysis.symmetry_eigenvalue_diagnostic import symmetry_eigenvalue_diagnostics_for_kpoint
@@ -306,11 +312,10 @@ def test_spinor_symmetry_rows_require_scoped_evidence_for_readiness():
     assert rows[0]["spinor_rotation_applied"] is True
     assert "spinor_convention_verified" not in rows[0]
     assert rows[0]["diagnostic_only"] is True
-    assert rows[0]["topology_input_ready"] is False
-    assert rows[0]["topology_ready"] is False
+    assert rows[0]["local_irrep_ready"] is False
 
 
-def test_rotation_ready_tolerates_small_truncation_unitarity_error():
+def test_plane_wave_mapping_complete_tolerates_small_truncation_unitarity_error():
     coefficients = np.array([[[np.sqrt(0.99999) + 0.0j]]], dtype=np.complex128)
     symmetry_payload = {
         "detected_operations": [
@@ -337,7 +342,7 @@ def test_rotation_ready_tolerates_small_truncation_unitarity_error():
     )
 
     assert rows[0]["unitarity_deviation"] < 1.0e-4
-    assert rows[0]["rotation_ready"] is True
+    assert rows[0]["plane_wave_mapping_complete"] is True
 
 
 def test_plane_wave_mapping_uses_local_lookup_not_dense_all_pairs(monkeypatch):
@@ -391,6 +396,74 @@ def test_plane_wave_mapping_default_tolerance_handles_real_wavecar_roundoff():
 
     assert result.mapping_miss_count == 0
     assert result.mapping[0] == 1
+
+
+def test_reciprocal_grid_map_rejects_duplicate_grid_collision():
+    q_cart = np.zeros((2, 3), dtype=float)
+
+    result = build_reciprocal_grid_map(
+        q_cart,
+        np.eye(3),
+    )
+    validation = validate_reciprocal_grid_permutation(
+        result.mapping,
+        dimension=2,
+    )
+
+    assert result.mapping.tolist() == [0, 0]
+    assert validation.status == "blocked"
+    assert "target_index_collision" in validation.reason_codes
+    assert "target_coverage_incomplete" in validation.reason_codes
+
+
+@pytest.mark.parametrize(
+    ("mapping", "reason"),
+    [
+        ([0, 0], "target_index_collision"),
+        ([0, 2], "target_index_out_of_range"),
+        ([0, -1], "source_coverage_incomplete"),
+        ([0, 1.0], "mapping_index_malformed"),
+        ([0, True], "mapping_index_malformed"),
+    ],
+)
+def test_reciprocal_grid_permutation_validation_fails_closed(mapping, reason):
+    validation = validate_reciprocal_grid_permutation(
+        mapping,
+        dimension=2,
+    )
+
+    assert validation.status == "blocked"
+    assert reason in validation.reason_codes
+
+
+def test_reciprocal_grid_identity_binds_order_and_values():
+    q_cart = np.array(
+        [[0.0, 0.0, 0.0], [1.0, -2.0, 3.0]],
+        dtype=float,
+    )
+
+    identity = reciprocal_grid_identity(q_cart)
+
+    assert identity.startswith("sha256:")
+    assert identity != reciprocal_grid_identity(q_cart[::-1])
+
+
+def test_plane_wave_norm_residual_is_relative_finite_and_nonnegative():
+    coefficients = np.array([[[1.0, 1.0j]]], dtype=np.complex128)
+    q_cart = np.array(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+        dtype=float,
+    )
+
+    result = build_plane_wave_representation(
+        coefficients,
+        q_cart,
+        np.zeros((3, 3)),
+        np.zeros(3),
+    )
+
+    assert np.isfinite(result.relative_norm_preservation_residual)
+    assert result.relative_norm_preservation_residual >= 0.0
 
 
 def test_spglib_finds_c3_candidate_for_simple_hexagonal_cell():
@@ -603,7 +676,7 @@ class TestLittleGroupExtendedDiagnostics:
         assert sorted(row["phase_2pi"] for row in rows) == pytest.approx(
             [-1.0 / 6.0, 1.0 / 6.0]
         )
-        assert all(not row["topology_input_ready"] for row in rows)
+        assert all(not row["local_irrep_ready"] for row in rows)
         assert rows[0]["character_valley"] == "1.000000+0.000000j"
 
 
@@ -1340,7 +1413,7 @@ class TestV11PerValleySubgroup:
 
         assert rows
         assert all(row["basis"] == "valley_adapted" for row in rows)
-        assert all(row["topology_input_ready"] is False for row in rows)
+        assert all(row["local_irrep_ready"] is False for row in rows)
         assert all(row["reason"] == "valley subspace not clean" for row in rows)
         assert representation_payload["GM"]["operation_0__valley_K_valley"]["D_valley"].shape == (2, 2)
 

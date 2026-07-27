@@ -4,6 +4,24 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from valleyscope.io.wavefunction_convention import canonical_identity
+
+
+RECIPROCAL_GRID_ACTION_CONVENTION = "q_target = rotation_cart @ q_source"
+DEFAULT_RECIPROCAL_GRID_MAPPING_TOLERANCE = 1.0e-6
+
+
+@dataclass(frozen=True)
+class ReciprocalGridMapResult:
+    mapping: np.ndarray
+    mapping_miss_count: int
+
+
+@dataclass(frozen=True)
+class ReciprocalGridPermutationValidation:
+    status: str
+    reason_codes: tuple[str, ...]
+
 
 @dataclass(frozen=True)
 class PlaneWaveRepresentationResult:
@@ -11,6 +29,7 @@ class PlaneWaveRepresentationResult:
     mapping: np.ndarray
     mapping_miss_count: int
     norm_preservation_residual: float
+    relative_norm_preservation_residual: float
 
 
 @dataclass(frozen=True)
@@ -61,13 +80,20 @@ def build_plane_wave_representation(
         coeffs.shape[0], -1
     )
     matrix = flat_original.conj() @ flat_transformed.T
+    original_norm = float(np.linalg.norm(flat_original))
+    transformed_norm = float(np.linalg.norm(flat_transformed))
+    absolute_norm_residual = abs(transformed_norm - original_norm)
+    relative_norm_residual = (
+        absolute_norm_residual / original_norm
+        if original_norm > 0.0
+        else absolute_norm_residual
+    )
     return PlaneWaveRepresentationResult(
         matrix=matrix,
         mapping=action.mapping,
         mapping_miss_count=action.mapping_miss_count,
-        norm_preservation_residual=float(
-            np.linalg.norm(flat_transformed) - np.linalg.norm(flat_original)
-        ),
+        norm_preservation_residual=absolute_norm_residual,
+        relative_norm_preservation_residual=relative_norm_residual,
     )
 
 
@@ -96,12 +122,15 @@ def apply_plane_wave_action(
         if spin.shape != (n_spinor, n_spinor):
             raise ValueError("spin_rotation shape must match nspinor")
 
-    lookup = _q_vector_lookup(q, tolerance)
-    mapping = np.full(n_g, -1, dtype=int)
+    reciprocal_grid_map = build_reciprocal_grid_map(
+        q,
+        rot,
+        tolerance=tolerance,
+    )
+    mapping = reciprocal_grid_map.mapping
     q_rotated = np.empty_like(q)
     for source_idx, q_source in enumerate(q):
         q_rotated[source_idx] = rot @ q_source
-        mapping[source_idx] = _lookup_q_vector(q_rotated[source_idx], q, lookup, tolerance)
 
     transformed = np.zeros_like(coeffs)
     for source_idx, target_idx in enumerate(mapping):
@@ -114,7 +143,113 @@ def apply_plane_wave_action(
     return PlaneWaveActionResult(
         transformed_coefficients=transformed,
         mapping=mapping,
-        mapping_miss_count=int(np.sum(mapping < 0)),
+        mapping_miss_count=reciprocal_grid_map.mapping_miss_count,
+    )
+
+
+def build_reciprocal_grid_map(
+    q_cart: np.ndarray,
+    rotation_cart: np.ndarray,
+    *,
+    tolerance: float = DEFAULT_RECIPROCAL_GRID_MAPPING_TOLERANCE,
+) -> ReciprocalGridMapResult:
+    """Map every source reciprocal-grid vector under one spatial operation."""
+    q = np.asarray(q_cart, dtype=float)
+    rotation = np.asarray(rotation_cart, dtype=float)
+    if q.ndim != 2 or q.shape[1:] != (3,) or not np.all(np.isfinite(q)):
+        raise ValueError("q_cart must be a finite array with shape [nG,3]")
+    if (
+        rotation.shape != (3, 3)
+        or not np.all(np.isfinite(rotation))
+    ):
+        raise ValueError("rotation_cart must be a finite 3x3 matrix")
+    if not np.isfinite(tolerance) or tolerance <= 0.0:
+        raise ValueError("tolerance must be positive and finite")
+
+    lookup = _q_vector_lookup(q, tolerance)
+    mapping = np.full(len(q), -1, dtype=int)
+    for source_idx, q_source in enumerate(q):
+        mapping[source_idx] = _lookup_q_vector(
+            rotation @ q_source,
+            q,
+            lookup,
+            tolerance,
+        )
+    return ReciprocalGridMapResult(
+        mapping=mapping,
+        mapping_miss_count=int(np.count_nonzero(mapping < 0)),
+    )
+
+
+def validate_reciprocal_grid_permutation(
+    mapping: object,
+    *,
+    dimension: int,
+) -> ReciprocalGridPermutationValidation:
+    """Require an exact permutation of ``range(dimension)``."""
+    reasons: list[str] = []
+    if (
+        not isinstance(dimension, int)
+        or isinstance(dimension, bool)
+        or dimension < 0
+    ):
+        return ReciprocalGridPermutationValidation(
+            "blocked",
+            ("reciprocal_grid_dimension_malformed",),
+        )
+
+    if isinstance(mapping, np.ndarray):
+        if mapping.ndim != 1 or mapping.dtype.kind not in "iu":
+            candidates: object = None
+        else:
+            candidates = mapping.tolist()
+    elif isinstance(mapping, (list, tuple)):
+        candidates = list(mapping)
+    else:
+        candidates = None
+    if candidates is None:
+        return ReciprocalGridPermutationValidation(
+            "blocked",
+            ("mapping_collection_malformed",),
+        )
+
+    if len(candidates) != dimension:
+        reasons.append("source_coverage_incomplete")
+    valid_indices: list[int] = []
+    for value in candidates:
+        if not isinstance(value, int) or isinstance(value, bool):
+            reasons.append("mapping_index_malformed")
+            continue
+        if value < 0:
+            reasons.append("source_coverage_incomplete")
+            continue
+        if value >= dimension:
+            reasons.append("target_index_out_of_range")
+            continue
+        valid_indices.append(value)
+    if len(set(valid_indices)) != len(valid_indices):
+        reasons.append("target_index_collision")
+    if set(valid_indices) != set(range(dimension)):
+        reasons.append("target_coverage_incomplete")
+
+    unique_reasons = tuple(dict.fromkeys(reasons))
+    return ReciprocalGridPermutationValidation(
+        "passed" if not unique_reasons else "blocked",
+        unique_reasons,
+    )
+
+
+def reciprocal_grid_identity(q_cart: np.ndarray) -> str:
+    """Return an order-sensitive identity for one finite Cartesian q grid."""
+    q = np.asarray(q_cart, dtype=float)
+    if q.ndim != 2 or q.shape[1:] != (3,) or not np.all(np.isfinite(q)):
+        raise ValueError("q_cart must be a finite array with shape [nG,3]")
+    return canonical_identity(
+        {
+            "coordinate_system": "cartesian_inverse_angstrom",
+            "dimension": int(len(q)),
+            "q_cart": q.tolist(),
+        }
     )
 
 

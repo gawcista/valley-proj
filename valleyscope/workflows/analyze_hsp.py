@@ -47,6 +47,9 @@ from valleyscope.analysis.time_reversal_sewing import (
     build_time_reversal_sewing_report,
     select_trusted_valley_projectors,
 )
+from valleyscope.analysis.tr_completed_representation import (
+    attach_tr_completed_representation_evidence,
+)
 from valleyscope.irreps.tables import (
     build_spinful_source_table_evidence,
     load_standard_irrep_table,
@@ -464,8 +467,6 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     symmetry_payload=symmetry_payload,
                     basis_payload=basis_transforms.get(kpoint_name),
                     representation_payload=symmetry_representation_payload,
-                    unitarity_tol=config.rotation.unitarity_tol,
-                    d_valley_offdiag_tol=config.rotation.D_valley_offdiag_tol,
                     valley_names=valley_names,
                 )
             )
@@ -1263,6 +1264,12 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 ),
             )
         )
+        time_reversal_orbit_report = (
+            attach_tr_completed_representation_evidence(
+                time_reversal_orbit_report=time_reversal_orbit_report,
+                cprime_validation_context=cprime_validation_context,
+            )
+        )
         projected_hsp_coverage["time_reversal"] = (
             time_reversal_orbit_report
         )
@@ -1283,6 +1290,12 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         )
     else:
         ebr_problem_instances = local_ebr_problem_instances
+    _register_tr_cprime_summary_scopes(
+        ebr_problem_instances=ebr_problem_instances,
+        cprime_validation_context=cprime_validation_context,
+        lift_by_scope=double_space_group_lift_certificates,
+        representation_by_scope=scoped_representation_evidence,
+    )
     ebr_export_bundle = build_ebr_export_bundle(
         ebr_problem_instances=ebr_problem_instances,
     )
@@ -1409,8 +1422,20 @@ def _merge_ebr_problem_instance_reports(
     local_report: dict[str, object],
     time_reversal_report: dict[str, object],
 ) -> dict[str, object]:
-    """Keep local unitary problems independent of TR-completed problems."""
+    """Prefer trusted TR-completed unitary rows over incomplete local copies."""
     instances: list[dict[str, object]] = []
+    tr_instances = time_reversal_report.get("instances", [])
+    tr_completed_valleys = {
+        str(instance.get("valley"))
+        for instance in tr_instances
+        if isinstance(instance, dict)
+        and instance.get("problem_kind") == "unitary_valley_reduced_ebr"
+        and instance.get("canonical_hsp_vector_ready") is True
+        and instance.get("workflow_path")
+        == "time_reversal_completed_unitary_valley"
+        and isinstance(instance.get("valley"), str)
+        and instance.get("valley")
+    } if isinstance(tr_instances, list) else set()
     for prefix, report in (
         ("local", local_report),
         ("tr", time_reversal_report),
@@ -1420,6 +1445,13 @@ def _merge_ebr_problem_instance_reports(
             continue
         for index, raw_instance in enumerate(raw_instances, start=1):
             if not isinstance(raw_instance, dict):
+                continue
+            if (
+                prefix == "local"
+                and raw_instance.get("problem_kind")
+                == "unitary_valley_reduced_ebr"
+                and raw_instance.get("valley") in tr_completed_valleys
+            ):
                 continue
             instance = dict(raw_instance)
             instance["instance_id"] = (
@@ -1454,11 +1486,58 @@ def _merge_ebr_problem_instance_reports(
         "structurally_complete_blocked_count": complete - ready,
         "incomplete_instance_count": len(instances) - complete,
         "interpretation": (
-            "Local unitary valley problems remain independent of optional "
-            "TR-completed and joint valley-orbit problems."
+            "Trusted TR-completed unitary rows supersede incomplete local "
+            "copies for the same valley; joint valley-orbit rows remain "
+            "separate physical objects."
         ),
         "instances": instances,
     }
+
+
+def _register_tr_cprime_summary_scopes(
+    *,
+    ebr_problem_instances: dict[str, object],
+    cprime_validation_context: dict[str, object],
+    lift_by_scope: dict[str, dict[str, dict[str, object]]],
+    representation_by_scope: dict[
+        str, dict[str, dict[str, object]]
+    ],
+) -> None:
+    """Expose every exported TR C-prime scope to ingestion validation."""
+    instances = ebr_problem_instances.get("instances", [])
+    if not isinstance(instances, list):
+        return
+    for instance in instances:
+        if (
+            not isinstance(instance, dict)
+            or instance.get("canonical_hsp_vector_ready") is not True
+        ):
+            continue
+        valley = str(instance.get("valley", ""))
+        links_by_hsp = instance.get("cprime_identity_by_kpoint")
+        if not isinstance(links_by_hsp, dict):
+            continue
+        for hsp, links in links_by_hsp.items():
+            if not isinstance(links, dict):
+                continue
+            evidence_identity = links.get(
+                "scoped_representation_evidence_identity"
+            )
+            context = cprime_validation_context.get(str(evidence_identity))
+            if not isinstance(context, dict):
+                continue
+            record = context.get("record")
+            raw_inputs = context.get("raw_inputs")
+            lift = (
+                raw_inputs.get("lift_record")
+                if isinstance(raw_inputs, dict) else None
+            )
+            if not isinstance(record, dict) or not isinstance(lift, dict):
+                continue
+            lift_by_scope.setdefault(str(hsp), {})[valley] = lift
+            representation_by_scope.setdefault(
+                str(hsp), {}
+            )[valley] = record
 
 
 def _build_local_cprime_records(
@@ -1585,9 +1664,28 @@ def _build_local_cprime_records(
             raw["D_raw"], dtype=np.complex128
         )
         plane_wave_evidence[operation_id] = {
-            "mapping_miss_count": int(raw.get("mapping_miss_count", 0)),
-            "norm_preservation_residual": abs(
-                float(raw.get("norm_preservation_residual", 0.0))
+            "action_convention": raw.get(
+                "plane_wave_action_convention"
+            ),
+            "reciprocal_grid_identity": raw.get(
+                "reciprocal_grid_identity"
+            ),
+            "reciprocal_grid_dimension": raw.get(
+                "reciprocal_grid_dimension"
+            ),
+            "q_cart": raw.get("q_cart"),
+            "rotation_cart": raw.get("rotation_cart"),
+            "mapping_tolerance": raw.get(
+                "plane_wave_mapping_tolerance"
+            ),
+            "source_to_target_map": (
+                raw.get("plane_wave_mapping").tolist()
+                if isinstance(raw.get("plane_wave_mapping"), np.ndarray)
+                else raw.get("plane_wave_mapping")
+            ),
+            "mapping_miss_count": raw.get("mapping_miss_count"),
+            "relative_norm_residual": raw.get(
+                "relative_norm_preservation_residual"
             ),
         }
         mapping = raw.get("sector_mapping", {})
@@ -1637,12 +1735,13 @@ def _build_local_cprime_records(
         },
         "valley_bases": {valley: basis},
         "valley_mappings": valley_mappings,
-        "numerical_tolerance": representation_tol,
-        "gram_tolerance": 1.0e-6,
+        "group_law_tolerance": float(
+            config.symmetry_adapted_valley.projected_group_law_fail_tol
+        ),
         "target_subspace_tolerance": representation_tol,
         "projector_covariance_tolerance": projector_tol,
         "valley_block_tolerance": float(
-            config.rotation.D_valley_offdiag_tol
+            config.symmetry_adapted_valley.valley_block_leakage_fail_tol
         ),
     }
     scoped = build_scoped_representation_evidence(**scoped_inputs)
@@ -1777,8 +1876,6 @@ def _promote_local_cprime_readiness(
             and str(row.get("target_valley")) == str(valley)
             and row.get("operation_id") in required
         ):
-            row["topology_input_ready"] = True
-            row["topology_ready"] = True
             row["local_irrep_ready"] = True
             row["diagnostic_only"] = False
             row["reason"] = ""
@@ -2128,8 +2225,8 @@ def _resolve_symmetry_status(
     symmetry_skipped = symmetry_payload.get("status") == "skipped"
     if symmetry_payload.get("symmetry_eigenvalue_enabled") is False:
         return "not_requested"
-    has_topology_ready = any(
-        row.get("topology_input_ready") for row in symmetry_rows
+    has_local_irrep_ready = any(
+        row.get("local_irrep_ready") for row in symmetry_rows
         if row.get("kpoint") == kpoint_name
     )
     has_diagnostic = any(
@@ -2159,7 +2256,11 @@ def _resolve_symmetry_status(
         symmetry_skipped=symmetry_skipped,
         little_group_passed=little_group_passed,
         valley_preserving=valley_preserving,
-        topology_input_ready=has_topology_ready if has_topology_ready else (False if has_diagnostic and not has_topology_ready else None),
+        local_irrep_ready=(
+            has_local_irrep_ready
+            if has_local_irrep_ready
+            else (False if has_diagnostic else None)
+        ),
     )
 
 
@@ -2188,7 +2289,7 @@ def _build_symmetry_eigenvalue_summary(
                 "accepted": accepted,
                 "reason": "" if accepted else row.get("reason"),
                 "diagnostic_reasons": [],
-                "topology_input_ready": [],
+                "local_irrep_ready": [],
                 "character_valley": row.get("character_valley"),
                 "character_raw": row.get("character_raw"),
                 "eigenvalues": [],
@@ -2196,7 +2297,9 @@ def _build_symmetry_eigenvalue_summary(
             by_operation[key] = op_info
             by_kpoint[kp]["operations"].append(op_info)
         by_operation[key]["eigenvalues"].append(row.get("phase_2pi"))
-        by_operation[key]["topology_input_ready"].append(bool(row.get("topology_input_ready", False)))
+        by_operation[key]["local_irrep_ready"].append(
+            bool(row.get("local_irrep_ready", False))
+        )
         if row.get("reason") and row.get("little_group_passed", False) and row.get("valley_preserving", False):
             reasons = by_operation[key]["diagnostic_reasons"]
             if row.get("reason") not in reasons:

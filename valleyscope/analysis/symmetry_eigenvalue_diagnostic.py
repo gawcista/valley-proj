@@ -9,13 +9,12 @@ from valleyscope.symmetry.double_space_group_lift import (
     spin_lift_from_orthogonal,
 )
 from valleyscope.symmetry.plane_wave_action import (
+    DEFAULT_RECIPROCAL_GRID_MAPPING_TOLERANCE,
+    RECIPROCAL_GRID_ACTION_CONVENTION,
     build_plane_wave_representation,
+    reciprocal_grid_identity,
     unitarity_deviation,
 )
-
-
-UNITARITY_TOL = 1e-4
-D_VALLEY_OFFDIAG_TOL = 1e-6
 
 
 def symmetry_eigenvalue_diagnostics_for_kpoint(
@@ -27,8 +26,6 @@ def symmetry_eigenvalue_diagnostics_for_kpoint(
     symmetry_payload: dict[str, object],
     basis_payload: dict[str, np.ndarray] | None,
     representation_payload: dict[str, object],
-    unitarity_tol: float = UNITARITY_TOL,
-    d_valley_offdiag_tol: float = D_VALLEY_OFFDIAG_TOL,
     valley_names: list[str] | None = None,
 ) -> list[dict[str, object]]:
     """Compute diagnostic eigenvalues for valley-preserving little-group operations.
@@ -82,8 +79,6 @@ def symmetry_eigenvalue_diagnostics_for_kpoint(
                 coefficients=coefficients,
                 basis_payload=basis_payload,
                 representation_payload=representation_payload,
-                unitarity_tol=unitarity_tol,
-                d_valley_offdiag_tol=d_valley_offdiag_tol,
                 little_group_passed=little,
                 target_valley=target_valley,
                 valley_preserving=valley_preserves,
@@ -102,8 +97,6 @@ def _append_operation_rows(
     coefficients: np.ndarray,
     basis_payload: dict[str, np.ndarray] | None,
     representation_payload: dict[str, object],
-    unitarity_tol: float,
-    d_valley_offdiag_tol: float,
     little_group_passed: bool,
     target_valley: str,
     valley_preserving: bool,
@@ -165,23 +158,8 @@ def _append_operation_rows(
     phases = np.angle(eigenvalues) / (2.0 * np.pi)
     modulus_deviation = np.abs(np.abs(eigenvalues) - 1.0)
     matrix_unitarity = unitarity_deviation(matrix_for_eigen)
-    rotation_ready = bool(
-        representation.mapping_miss_count == 0
-        and matrix_unitarity <= unitarity_tol
-    )
-    d_valley_offdiag_norm = _two_sector_offdiag_norm(d_valley)
     order = int(operation.get("order") or 1)
-    leakage_ready = (
-        d_block_leakage_norm is not None
-        and d_block_leakage_norm <= d_valley_offdiag_tol
-    )
-    numerical_input_ready = bool(
-        rotation_ready
-        and basis == "valley_adapted"
-        and valid_valley_subspace
-        and leakage_ready
-    )
-    topology_input_ready_by_state = np.zeros(len(eigenvalues), dtype=bool)
+    plane_wave_mapping_complete = representation.mapping_miss_count == 0
 
     operation.setdefault("representation_quality", {})[kpoint_name] = {
         "mapping_miss_count": representation.mapping_miss_count,
@@ -190,11 +168,9 @@ def _append_operation_rows(
         "max_modulus_deviation": (
             float(np.max(modulus_deviation)) if len(modulus_deviation) else 0.0
         ),
-        "rotation_ready": rotation_ready,
-        "numerical_input_ready": numerical_input_ready,
+        "plane_wave_mapping_complete": plane_wave_mapping_complete,
         "spinor_rotation_applied": spinor_rotation_applied,
         "diagnostic_only": True,
-        "D_valley_offdiag_norm": np.nan if d_valley_offdiag_norm is None else d_valley_offdiag_norm,
         "D_block_leakage_norm": np.nan if d_block_leakage_norm is None else d_block_leakage_norm,
         "basis": basis,
     }
@@ -206,8 +182,18 @@ def _append_operation_rows(
         "D_raw": representation.matrix,
         "eigenvalues": eigenvalues,
         "plane_wave_mapping": representation.mapping,
+        "plane_wave_action_convention": RECIPROCAL_GRID_ACTION_CONVENTION,
+        "reciprocal_grid_identity": reciprocal_grid_identity(q_cart),
+        "reciprocal_grid_dimension": int(len(q_cart)),
+        "plane_wave_mapping_tolerance": (
+            DEFAULT_RECIPROCAL_GRID_MAPPING_TOLERANCE
+        ),
+        "q_cart": np.asarray(q_cart, dtype=float),
         "mapping_miss_count": representation.mapping_miss_count,
         "norm_preservation_residual": representation.norm_preservation_residual,
+        "relative_norm_preservation_residual": (
+            representation.relative_norm_preservation_residual
+        ),
         "unitarity_deviation": matrix_unitarity,
         "operation_order": int(operation["order"]),
         "rotation_frac": np.asarray(operation.get("rotation_frac", np.eye(3))),
@@ -215,12 +201,10 @@ def _append_operation_rows(
         "rotation_cart": np.asarray(operation["rotation_cart"]),
         "translation_cart": np.asarray(operation["translation_cart"]),
         "basis": basis,
-        "rotation_ready": rotation_ready,
-        "numerical_input_ready": numerical_input_ready,
+        "plane_wave_mapping_complete": plane_wave_mapping_complete,
         "spinor_rotation_applied": spinor_rotation_applied,
-        "topology_input_ready": topology_input_ready_by_state,
-        "diagnostic_only": ~topology_input_ready_by_state,
-        "D_valley_offdiag_norm": np.nan if d_valley_offdiag_norm is None else d_valley_offdiag_norm,
+        "local_irrep_ready": np.zeros(len(eigenvalues), dtype=bool),
+        "diagnostic_only": np.ones(len(eigenvalues), dtype=bool),
         "D_block_leakage_norm": np.nan if d_block_leakage_norm is None else d_block_leakage_norm,
     }
     if d_valley is not None:
@@ -230,13 +214,8 @@ def _append_operation_rows(
     char_raw = complex(np.trace(representation.matrix))
     char_valley = complex(np.trace(d_valley)) if d_valley is not None else None
 
-    for state_index, (value, phase, modulus_error, topology_input_ready) in enumerate(
-        zip(
-            eigenvalues,
-            phases,
-            modulus_deviation,
-            topology_input_ready_by_state,
-        )
+    for state_index, (value, phase, modulus_error) in enumerate(
+        zip(eigenvalues, phases, modulus_deviation)
     ):
         row_reason = reason or "awaiting scoped_representation_evidence"
         rows.append(
@@ -259,13 +238,10 @@ def _append_operation_rows(
                 "character_valley": "" if char_valley is None else f"{char_valley.real:.6f}{char_valley.imag:+.6f}j",
                 "little_group_passed": bool(little_group_passed),
                 "valley_preserving": bool(valley_preserving),
-                "rotation_ready": rotation_ready,
-                "numerical_input_ready": numerical_input_ready,
+                "plane_wave_mapping_complete": plane_wave_mapping_complete,
                 "spinor_rotation_applied": spinor_rotation_applied,
-                "topology_input_ready": bool(topology_input_ready),
-                "topology_ready": bool(topology_input_ready),
-                "diagnostic_only": bool(not topology_input_ready),
-                "D_valley_offdiag_norm": "" if d_valley_offdiag_norm is None else d_valley_offdiag_norm,
+                "local_irrep_ready": False,
+                "diagnostic_only": True,
                 "D_block_leakage_norm": "" if d_block_leakage_norm is None else d_block_leakage_norm,
                 "reason": row_reason,
                 "valley_eta": "" if valley_eta is None or state_index >= len(valley_eta) else float(valley_eta[state_index]),
@@ -282,8 +258,7 @@ def _select_valley_block(
 
     Returns (block_matrix, leakage_norm) where leakage_norm is the Frobenius
     norm of the off-diagonal elements connecting target_valley states to other
-    valley states.  This is the general multi-valley block-closure diagnostic,
-    replacing the two-valley-only D_valley_offdiag_norm.
+    valley states.
     """
     n = d_valley.shape[0]
     target_indices = [i for i, v in enumerate(assigned_valleys) if v == target_valley]
@@ -356,12 +331,6 @@ def _legacy_rejection_reason(
             if target is not None and str(target) != str(source):
                 return "valley-exchanging"
     return "not valley preserving"
-
-
-def _two_sector_offdiag_norm(matrix: np.ndarray | None) -> float | None:
-    if matrix is None or matrix.shape != (2, 2):
-        return None
-    return float(np.linalg.norm(np.array([matrix[0, 1], matrix[1, 0]], dtype=np.complex128)))
 
 
 def build_raw_representations_for_kpoint(
@@ -462,9 +431,24 @@ def build_raw_representations_for_kpoint(
             "sector_mapping": dict(sector_mapping),
             "little_group_passed": True,
             "plane_wave_mapping": representation.mapping,
+            "plane_wave_action_convention": (
+                RECIPROCAL_GRID_ACTION_CONVENTION
+            ),
+            "reciprocal_grid_identity": reciprocal_grid_identity(q_cart),
+            "reciprocal_grid_dimension": int(len(q_cart)),
+            "plane_wave_mapping_tolerance": (
+                DEFAULT_RECIPROCAL_GRID_MAPPING_TOLERANCE
+            ),
+            "q_cart": np.asarray(q_cart, dtype=float),
+            "rotation_cart": np.asarray(
+                operation["rotation_cart"], dtype=float
+            ),
             "mapping_miss_count": representation.mapping_miss_count,
             "norm_preservation_residual": (
                 representation.norm_preservation_residual
+            ),
+            "relative_norm_preservation_residual": (
+                representation.relative_norm_preservation_residual
             ),
         }
 
