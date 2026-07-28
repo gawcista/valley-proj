@@ -283,9 +283,17 @@ def validate_tr_irrep_completion_certificate(
     """Recompute a serialized exact completion certificate fail-closed."""
     if (
         not isinstance(certificate, Mapping)
+        or not isinstance(completion_record, Mapping)
+        or not isinstance(valley_mapping, Mapping)
+        or not isinstance(hsp_mapping, Mapping)
+        or not isinstance(irrep_pairing, Mapping)
         or not _valid_reviewed_source_identity(reviewed_source_identity)
         or not isinstance(reviewed_source_context, Mapping)
         or not reviewed_source_context
+        or (
+            cprime_validation_context is not None
+            and not isinstance(cprime_validation_context, Mapping)
+        )
     ):
         return False
     from valleyscope.irreps.time_reversal_source import (

@@ -899,6 +899,44 @@ def test_portable_problem_export_rederive_raw_source_pairing(
     )["bundle_count"] == 0
 
 
+def test_portable_completion_validator_rejects_malformed_inputs(
+    tmp_path,
+):
+    inputs = _portable_orbit_inputs(tmp_path)
+    completed = attach_tr_irrep_completion_certificates(
+        time_reversal_orbit_report=_build_portable_orbit_report(inputs),
+        cprime_validation_context=inputs["context"],
+    )
+    orbit = completed["valley_orbits"][0]
+    record = orbit[
+        "unitary_valley_irrep_completion_records"
+    ]["left"]["KA"][0]
+    kwargs = {
+        "certificate": record["tr_irrep_completion_certificate"],
+        "completion_record": record,
+        "valley_mapping": completed["time_reversal_valley_mapping"],
+        "hsp_mapping": {"K": "KA", "KA": "K"},
+        "irrep_pairing": orbit["time_reversal_irrep_pairing"],
+        "reviewed_source_identity": orbit[
+            "reviewed_time_reversal_source_identity"
+        ],
+        "reviewed_source_context": orbit[
+            "reviewed_time_reversal_source_context"
+        ],
+    }
+    assert validate_tr_irrep_completion_certificate(**kwargs)
+    for field in (
+        "completion_record",
+        "valley_mapping",
+        "hsp_mapping",
+        "irrep_pairing",
+        "cprime_validation_context",
+    ):
+        malformed = dict(kwargs)
+        malformed[field] = None if field != "cprime_validation_context" else []
+        assert not validate_tr_irrep_completion_certificate(**malformed)
+
+
 def test_portable_promotion_rederives_raw_source_against_coordinated_substitution(
     tmp_path,
 ):
