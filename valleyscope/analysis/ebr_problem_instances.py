@@ -1075,9 +1075,9 @@ def _completion_cprime_identity_inventory(
                 valley_mapping=valley_mapping,
                 hsp_mapping=hsp_mapping,
                 irrep_pairing=irrep_pairing,
-            reviewed_source_identity=reviewed_source_identity,
-            reviewed_source_context=reviewed_source_context,
-            require_exact_completion=require_exact_completion,
+                reviewed_source_identity=reviewed_source_identity,
+                reviewed_source_context=reviewed_source_context,
+                require_exact_completion=require_exact_completion,
             )
             if identity is None:
                 blockers.append(

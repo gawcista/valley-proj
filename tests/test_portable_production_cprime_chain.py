@@ -31,6 +31,7 @@ from valleyscope.analysis.time_reversal_orbits import (
 )
 from valleyscope.analysis.tr_irrep_completion import (
     attach_tr_irrep_completion_certificates,
+    validate_tr_irrep_completion_certificate,
 )
 from valleyscope.analysis.unitary_provenance import (
     validate_tr_completed_unitary_bundle,
@@ -52,6 +53,7 @@ from valleyscope.irreps.tables import (
 )
 from valleyscope.irreps.time_reversal_source import (
     derive_time_reversal_source_irrep_orbits,
+    validate_reviewed_time_reversal_source_context,
 )
 from valleyscope.symmetry.double_space_group_lift import (
     build_double_space_group_lift_certificate,
@@ -803,6 +805,98 @@ def test_portable_unitary_validator_rejects_coordinated_affine_substitution(
 
     assert forged["certificate_identity"][bundle_field] == forged_value
     assert not validate_tr_completed_unitary_bundle(forged)
+
+
+def test_portable_problem_export_rederive_raw_source_pairing(
+    tmp_path,
+):
+    inputs = _portable_orbit_inputs(tmp_path)
+    report = _build_portable_orbit_report(inputs)
+    completed, _, _ = _complete_and_export_portable_orbit(inputs, report)
+    forged = deepcopy(completed)
+    orbit = forged["valley_orbits"][0]
+    pairing = dict(orbit["time_reversal_irrep_pairing"])
+    pairing.update({
+        "-K4": "-KA5",
+        "-KA5": "-K4",
+        "-K5": "-KA4",
+        "-KA4": "-K5",
+    })
+    orbit["time_reversal_irrep_pairing"] = pairing
+    source_identity = dict(
+        orbit["reviewed_time_reversal_source_identity"]
+    )
+    source_identity["irrep_pairing"] = pairing
+    source_identity["identity"] = canonical_identity({
+        key: value
+        for key, value in source_identity.items()
+        if key != "identity"
+    })
+    orbit["reviewed_time_reversal_source_identity"] = source_identity
+
+    rederived_source = validate_reviewed_time_reversal_source_context(
+        orbit["reviewed_time_reversal_source_context"]
+    )
+    assert rederived_source["irrep_partner_by_label"]["-K4"] == "-KA4"
+    assert pairing["-K4"] == "-KA5"
+
+    inferred_records = []
+    for valley in orbit[
+        "time_reversal_completed_unitary_valley_irreps"
+    ]:
+        orbit["time_reversal_completed_unitary_valley_irreps"][valley][
+            "KA"
+        ] = {"-KA5": 1}
+        inferred = orbit[
+            "unitary_valley_irrep_completion_records"
+        ][valley]["KA"][0]
+        inferred["irrep"] = "-KA5"
+        inferred["reviewed_time_reversal_relation"][
+            "target_irrep"
+        ] = "-KA5"
+        certificate = inferred["tr_irrep_completion_certificate"]
+        certificate["inferred_target"]["irrep"] = "-KA5"
+        certificate["reviewed_time_reversal"]["irrep_pairing"] = pairing
+        certificate["reviewed_time_reversal"][
+            "source_model_identity"
+        ] = source_identity
+        certificate["certificate_identity"] = canonical_identity({
+            key: value
+            for key, value in certificate.items()
+            if key != "certificate_identity"
+        })
+        inferred_records.append(inferred)
+
+    assert all(
+        not validate_tr_irrep_completion_certificate(
+            record["tr_irrep_completion_certificate"],
+            completion_record=record,
+            valley_mapping=forged["time_reversal_valley_mapping"],
+            hsp_mapping={"K": "KA", "KA": "K"},
+            irrep_pairing=pairing,
+            reviewed_source_identity=source_identity,
+            reviewed_source_context=orbit[
+                "reviewed_time_reversal_source_context"
+            ],
+        )
+        for record in inferred_records
+    )
+    problems = build_ebr_problem_instances(
+        ebr_input_candidates={
+            "status": "has_candidates",
+            "candidate_count": 2,
+            "candidates": inputs["candidates"],
+        },
+        time_reversal_orbit_report=forged,
+    )
+    assert sum(
+        instance["canonical_hsp_vector_ready"]
+        for instance in problems["instances"]
+        if instance["problem_kind"] == "unitary_valley_reduced_ebr"
+    ) == 0
+    assert build_ebr_export_bundle(
+        ebr_problem_instances=problems
+    )["bundle_count"] == 0
 
 
 def test_portable_promotion_rederives_raw_source_against_coordinated_substitution(

@@ -75,19 +75,33 @@ from tests.reduced_ebr_promo_helpers import (
 )
 
 
+def _fixture_source_context_validator(context, **_kwargs):
+    return _validate_reviewed_time_reversal_source_context(
+        context,
+        require_reviewed_table=False,
+    )
+
+
+def _fixture_completion_certificate_validator(*args, **kwargs):
+    with patch.object(
+        _tr_source_module,
+        "validate_reviewed_time_reversal_source_context",
+        _fixture_source_context_validator,
+    ), patch.object(
+        _tr_completion_module,
+        "_source_context_matches_source_irrep",
+        lambda _context, _source_irrep: True,
+    ):
+        return _validate_tr_irrep_completion_certificate(*args, **kwargs)
+
+
 def build_time_reversal_valley_orbit_report(**kwargs):
     """Exercise structural synthetic rows without weakening production trust."""
-
-    def fixture_validator(context, **_kwargs):
-        return _validate_reviewed_time_reversal_source_context(
-            context,
-            require_reviewed_table=False,
-        )
 
     with patch.object(
         _tr_orbits_module,
         "validate_reviewed_time_reversal_source_context",
-        fixture_validator,
+        _fixture_source_context_validator,
     ):
         return _build_time_reversal_valley_orbit_report(**kwargs)
 
@@ -95,16 +109,10 @@ def build_time_reversal_valley_orbit_report(**kwargs):
 def attach_tr_irrep_completion_certificates(**kwargs):
     """Exercise structural synthetic rows without weakening production trust."""
 
-    def fixture_validator(context, **_kwargs):
-        return _validate_reviewed_time_reversal_source_context(
-            context,
-            require_reviewed_table=False,
-        )
-
     with patch.object(
         _tr_source_module,
         "validate_reviewed_time_reversal_source_context",
-        fixture_validator,
+        _fixture_source_context_validator,
     ), patch.object(
         _tr_completion_module,
         "_source_context_matches_source_irrep",
@@ -114,10 +122,19 @@ def attach_tr_irrep_completion_certificates(**kwargs):
 
 
 def _unitary_bundle_completion_evidence_valid(bundle):
-    return _validate_tr_completed_unitary_bundle(
-        bundle,
-        require_reviewed_table=False,
-    )
+    with patch.object(
+        _tr_source_module,
+        "validate_reviewed_time_reversal_source_context",
+        _fixture_source_context_validator,
+    ), patch.object(
+        _tr_completion_module,
+        "_source_context_matches_source_irrep",
+        lambda _context, _source_irrep: True,
+    ):
+        return _validate_tr_completed_unitary_bundle(
+            bundle,
+            require_reviewed_table=False,
+        )
 
 
 def build_ebr_problem_instances(**kwargs):
@@ -190,8 +207,7 @@ def build_ebr_problem_instances(**kwargs):
                 )
             )
     def fixture_certificate_validator(*args, **call_kwargs):
-        call_kwargs.pop("reviewed_source_context", None)
-        return _validate_tr_irrep_completion_certificate(
+        return _fixture_completion_certificate_validator(
             *args,
             **call_kwargs,
         )
@@ -225,10 +241,11 @@ def build_reduced_ebr_mapping(**kwargs):
     with patch.object(
         _mapping_module,
         "validate_tr_completed_unitary_bundle",
-        lambda bundle: _validate_tr_completed_unitary_bundle(
-            bundle,
-            require_reviewed_table=False,
-        ),
+        _unitary_bundle_completion_evidence_valid,
+    ), patch.object(
+        _mapping_module,
+        "validate_tr_irrep_completion_certificate",
+        _fixture_completion_certificate_validator,
     ):
         return _build_reduced_ebr_mapping(**kwargs)
 
@@ -237,10 +254,11 @@ def promote_bundle_for_solve(*, bundle, table):
     with patch.object(
         _mapping_module,
         "validate_tr_completed_unitary_bundle",
-        lambda candidate: _validate_tr_completed_unitary_bundle(
-            candidate,
-            require_reviewed_table=False,
-        ),
+        _unitary_bundle_completion_evidence_valid,
+    ), patch.object(
+        _mapping_module,
+        "validate_tr_irrep_completion_certificate",
+        _fixture_completion_certificate_validator,
     ):
         return _promote_bundle_for_solve(
             bundle=bundle,

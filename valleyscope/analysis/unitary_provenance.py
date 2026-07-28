@@ -353,9 +353,7 @@ def validate_tr_completed_unitary_bundle(
         reviewed_source_identity=time_reversal.get(
             "reviewed_time_reversal_source_identity", {}
         ),
-        reviewed_source_context=(
-            source_context if require_reviewed_table else None
-        ),
+        reviewed_source_context=source_context,
         independent_hsps=set(independent_hsps),
         expected_spinor=spinor,
     )

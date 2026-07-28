@@ -277,13 +277,32 @@ def validate_tr_irrep_completion_certificate(
     hsp_mapping: Mapping[str, str],
     irrep_pairing: Mapping[str, str],
     reviewed_source_identity: Mapping[str, object],
-    reviewed_source_context: Mapping[str, object] | None = None,
+    reviewed_source_context: Mapping[str, object],
     cprime_validation_context: Mapping[str, object] | None = None,
 ) -> bool:
     """Recompute a serialized exact completion certificate fail-closed."""
     if (
         not isinstance(certificate, Mapping)
         or not _valid_reviewed_source_identity(reviewed_source_identity)
+        or not isinstance(reviewed_source_context, Mapping)
+        or not reviewed_source_context
+    ):
+        return False
+    from valleyscope.irreps.time_reversal_source import (
+        validate_reviewed_time_reversal_source_context,
+    )
+    rederived_source = validate_reviewed_time_reversal_source_context(
+        reviewed_source_context,
+    )
+    rederived_source_identity = _rederived_source_identity(rederived_source)
+    if (
+        rederived_source.get("status") != "validated"
+        or rederived_source_identity is None
+        or dict(hsp_mapping)
+        != rederived_source.get("time_reversal_hsp_mapping")
+        or dict(irrep_pairing)
+        != rederived_source.get("irrep_partner_by_label")
+        or dict(reviewed_source_identity) != rederived_source_identity
     ):
         return False
     content = {
@@ -351,16 +370,11 @@ def validate_tr_irrep_completion_certificate(
     source_context_identity = reviewed.get("source_context_identity")
     if (
         not valid_sha256_identity(source_context_identity)
-        or (
-            reviewed_source_context is not None
-            and (
-                source_context_identity
-                != reviewed_source_context.get("context_identity")
-                or not _source_context_matches_source_irrep(
-                    reviewed_source_context,
-                    source_irrep,
-                )
-            )
+        or source_context_identity
+        != reviewed_source_context.get("context_identity")
+        or not _source_context_matches_source_irrep(
+            reviewed_source_context,
+            source_irrep,
         )
     ):
         return False

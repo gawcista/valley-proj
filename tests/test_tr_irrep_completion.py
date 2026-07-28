@@ -17,7 +17,7 @@ from valleyscope.analysis.ebr_problem_instances import (
 )
 from valleyscope.analysis.tr_irrep_completion import (
     attach_tr_irrep_completion_certificates as _attach_tr_irrep_completion_certificates,
-    validate_tr_irrep_completion_certificate,
+    validate_tr_irrep_completion_certificate as _validate_tr_irrep_completion_certificate,
 )
 from valleyscope.analysis.unitary_provenance import (
     validate_tr_completed_unitary_bundle,
@@ -32,19 +32,34 @@ from tests.test_scoped_representation_evidence import _raw_inputs
 from tests.test_database_ingestion import _tr_completed_unitary_bundle
 
 
+def _fixture_source_context_validator(context, **_kwargs):
+    return _validate_reviewed_time_reversal_source_context(
+        context,
+        require_reviewed_table=False,
+    )
+
+
+def validate_tr_irrep_completion_certificate(*args, **kwargs):
+    """Validate structural fixtures through an explicit test-only source path."""
+    with patch.object(
+        _tr_source_module,
+        "validate_reviewed_time_reversal_source_context",
+        _fixture_source_context_validator,
+    ), patch.object(
+        _tr_completion_module,
+        "_source_context_matches_source_irrep",
+        lambda _context, _source_irrep: True,
+    ):
+        return _validate_tr_irrep_completion_certificate(*args, **kwargs)
+
+
 def attach_tr_irrep_completion_certificates(**kwargs):
     """Exercise structural synthetic rows without weakening production trust."""
-
-    def fixture_validator(context, **_kwargs):
-        return _validate_reviewed_time_reversal_source_context(
-            context,
-            require_reviewed_table=False,
-        )
 
     with patch.object(
         _tr_source_module,
         "validate_reviewed_time_reversal_source_context",
-        fixture_validator,
+        _fixture_source_context_validator,
     ), patch.object(
         _tr_completion_module,
         "_source_context_matches_source_irrep",
@@ -57,7 +72,6 @@ def build_ebr_problem_instances(**kwargs):
     """Keep synthetic structural fixtures outside production trust claims."""
 
     def fixture_certificate_validator(*args, **call_kwargs):
-        call_kwargs.pop("reviewed_source_context", None)
         return validate_tr_irrep_completion_certificate(
             *args,
             **call_kwargs,
@@ -670,6 +684,9 @@ def test_completion_certificate_rejects_tampering_of_every_bound_field(
         reviewed_source_identity=(
             orbit["reviewed_time_reversal_source_identity"]
         ),
+        reviewed_source_context=orbit[
+            "reviewed_time_reversal_source_context"
+        ],
         cprime_validation_context=context,
     )
 
@@ -691,6 +708,9 @@ def test_completion_certificate_rejects_tampering_of_every_bound_field(
         reviewed_source_identity=(
             orbit["reviewed_time_reversal_source_identity"]
         ),
+        reviewed_source_context=orbit[
+            "reviewed_time_reversal_source_context"
+        ],
         cprime_validation_context=context,
     )
 
@@ -743,6 +763,9 @@ def test_completion_certificate_rejects_coordinated_tampering_against_producer_c
         reviewed_source_identity=(
             orbit["reviewed_time_reversal_source_identity"]
         ),
+        reviewed_source_context=orbit[
+            "reviewed_time_reversal_source_context"
+        ],
         cprime_validation_context=context,
     )
 

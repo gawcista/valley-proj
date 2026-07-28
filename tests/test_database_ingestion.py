@@ -42,6 +42,13 @@ from tests.reduced_ebr_promo_helpers import (
 )
 
 
+def _fixture_source_context_validator(context, **_kwargs):
+    return _validate_reviewed_time_reversal_source_context(
+        context,
+        require_reviewed_table=False,
+    )
+
+
 def build_database_ingestion_record(**kwargs):
     production_validator = (
         _ingestion_module.validate_unitary_bundle_provenance
@@ -59,6 +66,14 @@ def build_database_ingestion_record(**kwargs):
         _ingestion_module,
         "validate_unitary_bundle_provenance",
         fixture_validator,
+    ), patch.object(
+        _tr_source_module,
+        "validate_reviewed_time_reversal_source_context",
+        _fixture_source_context_validator,
+    ), patch.object(
+        _tr_completion_module,
+        "_source_context_matches_source_irrep",
+        lambda _context, _source_irrep: True,
     ):
         return _build_database_ingestion_record(**kwargs)
 
@@ -66,16 +81,10 @@ def build_database_ingestion_record(**kwargs):
 def attach_tr_irrep_completion_certificates(**kwargs):
     """Exercise structural synthetic rows without weakening production trust."""
 
-    def fixture_validator(context, **_kwargs):
-        return _validate_reviewed_time_reversal_source_context(
-            context,
-            require_reviewed_table=False,
-        )
-
     with patch.object(
         _tr_source_module,
         "validate_reviewed_time_reversal_source_context",
-        fixture_validator,
+        _fixture_source_context_validator,
     ), patch.object(
         _tr_completion_module,
         "_source_context_matches_source_irrep",

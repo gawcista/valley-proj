@@ -1774,6 +1774,7 @@ def _validate_cprime_bundle_identity(
                     hsp_mapping,
                     irrep_pairing,
                     reviewed_source_identity,
+                    reviewed_source_context,
                 ) = (
                     _tr_irrep_completion_maps(bundle)
                 )
@@ -1796,6 +1797,9 @@ def _validate_cprime_bundle_identity(
                         irrep_pairing=irrep_pairing,
                         reviewed_source_identity=(
                             reviewed_source_identity
+                        ),
+                        reviewed_source_context=(
+                            reviewed_source_context
                         ),
                         cprime_validation_context=(
                             cprime_validation_context
@@ -1851,10 +1855,11 @@ def _tr_irrep_completion_maps(
     dict[str, str],
     dict[str, str],
     dict[str, object],
+    dict[str, object],
 ]:
     evidence = bundle.get("time_reversal")
     if not isinstance(evidence, dict):
-        return {}, {}, {}, {}
+        return {}, {}, {}, {}, {}
     valley_mapping = evidence.get("time_reversal_valley_mapping")
     irrep_pairing = evidence.get("time_reversal_irrep_pairing")
     raw_hsp_orbits = evidence.get("time_reversal_hsp_orbits")
@@ -1874,7 +1879,7 @@ def _tr_irrep_completion_maps(
                     for member in members
                 )
             ):
-                return {}, {}, {}, {}
+                return {}, {}, {}, {}, {}
             if len(members) == 1:
                 hsp_mapping[members[0]] = members[0]
             else:
@@ -1887,6 +1892,11 @@ def _tr_irrep_completion_maps(
         dict(evidence.get("reviewed_time_reversal_source_identity", {}))
         if isinstance(
             evidence.get("reviewed_time_reversal_source_identity"), dict
+        )
+        else {},
+        dict(evidence.get("reviewed_time_reversal_source_context", {}))
+        if isinstance(
+            evidence.get("reviewed_time_reversal_source_context"), dict
         )
         else {},
     )
