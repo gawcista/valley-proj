@@ -151,7 +151,7 @@ def test_no_material_specific_strings_in_production_code():
     regression fixtures only.  They must not appear in program logic, output
     strings, config keys, or file paths inside valleyscope/.
 
-    This test does not guard docs/benchmarks/ or real_tests/.
+    This test does not guard benchmark documentation or manual fixtures.
     """
     valleyscope_dir = Path("valleyscope")
     forbidden = ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]

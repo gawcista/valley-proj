@@ -323,7 +323,7 @@ def build_time_reversal_sewing_report(
         "status": "validated" if rows and not blockers else "blocked",
         "evidence_role": "numerical_sewing_diagnostic",
         "cprime_scope_status": "not_evaluated",
-        "trusted_for_tr_completed_representation": False,
+        "trusted_for_numerical_antiunitary_evidence": False,
         "theta_square": theta_square,
         "spin_convention": (
             "spinful_i_sigma_y_K" if spinor else "scalar_complex_conjugation"

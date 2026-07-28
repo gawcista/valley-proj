@@ -47,8 +47,8 @@ from valleyscope.analysis.time_reversal_sewing import (
     build_time_reversal_sewing_report,
     select_trusted_valley_projectors,
 )
-from valleyscope.analysis.tr_completed_representation import (
-    attach_tr_completed_representation_evidence,
+from valleyscope.analysis.tr_irrep_completion import (
+    attach_tr_irrep_completion_certificates,
 )
 from valleyscope.irreps.tables import (
     build_spinful_source_table_evidence,
@@ -994,6 +994,9 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                             cprime_validation_context[evidence_identity] = {
                                 "record": scoped_record,
                                 "raw_inputs": scoped_validation_inputs,
+                                "standard_setting_certificate": dict(
+                                    certificate
+                                ),
                             }
                     cprime_passed = bool(
                         lift_record.get("status") == "passed"
@@ -1265,7 +1268,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             )
         )
         time_reversal_orbit_report = (
-            attach_tr_completed_representation_evidence(
+            attach_tr_irrep_completion_certificates(
                 time_reversal_orbit_report=time_reversal_orbit_report,
                 cprime_validation_context=cprime_validation_context,
             )
@@ -1290,12 +1293,6 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         )
     else:
         ebr_problem_instances = local_ebr_problem_instances
-    _register_tr_cprime_summary_scopes(
-        ebr_problem_instances=ebr_problem_instances,
-        cprime_validation_context=cprime_validation_context,
-        lift_by_scope=double_space_group_lift_certificates,
-        representation_by_scope=scoped_representation_evidence,
-    )
     ebr_export_bundle = build_ebr_export_bundle(
         ebr_problem_instances=ebr_problem_instances,
     )
@@ -1494,52 +1491,6 @@ def _merge_ebr_problem_instance_reports(
     }
 
 
-def _register_tr_cprime_summary_scopes(
-    *,
-    ebr_problem_instances: dict[str, object],
-    cprime_validation_context: dict[str, object],
-    lift_by_scope: dict[str, dict[str, dict[str, object]]],
-    representation_by_scope: dict[
-        str, dict[str, dict[str, object]]
-    ],
-) -> None:
-    """Expose every exported TR C-prime scope to ingestion validation."""
-    instances = ebr_problem_instances.get("instances", [])
-    if not isinstance(instances, list):
-        return
-    for instance in instances:
-        if (
-            not isinstance(instance, dict)
-            or instance.get("canonical_hsp_vector_ready") is not True
-        ):
-            continue
-        valley = str(instance.get("valley", ""))
-        links_by_hsp = instance.get("cprime_identity_by_kpoint")
-        if not isinstance(links_by_hsp, dict):
-            continue
-        for hsp, links in links_by_hsp.items():
-            if not isinstance(links, dict):
-                continue
-            evidence_identity = links.get(
-                "scoped_representation_evidence_identity"
-            )
-            context = cprime_validation_context.get(str(evidence_identity))
-            if not isinstance(context, dict):
-                continue
-            record = context.get("record")
-            raw_inputs = context.get("raw_inputs")
-            lift = (
-                raw_inputs.get("lift_record")
-                if isinstance(raw_inputs, dict) else None
-            )
-            if not isinstance(record, dict) or not isinstance(lift, dict):
-                continue
-            lift_by_scope.setdefault(str(hsp), {})[valley] = lift
-            representation_by_scope.setdefault(
-                str(hsp), {}
-            )[valley] = record
-
-
 def _build_local_cprime_records(
     *,
     source_basis_record: dict[str, object],
@@ -1696,16 +1647,6 @@ def _build_local_cprime_records(
                 if value is not None
             }
 
-    representation_tol = float(
-        config.symmetry_adapted_valley.representation_unitarity_fail_tol
-    )
-    projector_tol = (
-        float(config.symmetry_adapted_valley.projector_symmetry_warn_tol)
-        if workflow_path == "direct_qcut"
-        else float(
-            config.symmetry_adapted_valley.projector_symmetry_fail_tol
-        )
-    )
     lift_inputs = {
         "expected_operations": operations,
         "source_table_identity": source_table_evidence,
@@ -1735,14 +1676,6 @@ def _build_local_cprime_records(
         },
         "valley_bases": {valley: basis},
         "valley_mappings": valley_mappings,
-        "group_law_tolerance": float(
-            config.symmetry_adapted_valley.projected_group_law_fail_tol
-        ),
-        "target_subspace_tolerance": representation_tol,
-        "projector_covariance_tolerance": projector_tol,
-        "valley_block_tolerance": float(
-            config.symmetry_adapted_valley.valley_block_leakage_fail_tol
-        ),
     }
     scoped = build_scoped_representation_evidence(**scoped_inputs)
     return lift_record, scoped.to_record(), scoped_inputs

@@ -36,6 +36,9 @@ from valleyscope.analysis.time_reversal_orbits import (
 from valleyscope.analysis.time_reversal_sewing import (
     build_time_reversal_sewing_report,
 )
+from valleyscope.analysis.tr_irrep_completion import (
+    attach_tr_irrep_completion_certificates,
+)
 from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector
 from valleyscope.io.wavefunction_convention import canonical_identity
 from valleyscope.irreps.tables import (
@@ -57,6 +60,7 @@ from tests.reduced_ebr_promo_helpers import (
     attach_cprime_fixture_to_candidates,
     attach_cprime_fixture_contract,
     cprime_summary_for_export,
+    cprime_validation_context_for_candidates,
     cprime_validation_context_for_export,
     real_primitive_certificate_identity,
 )
@@ -67,51 +71,69 @@ def build_ebr_problem_instances(**kwargs):
     if isinstance(candidates, dict):
         attach_cprime_fixture_to_candidates(candidates)
     orbit_report = kwargs.get("time_reversal_orbit_report")
-    if isinstance(orbit_report, dict):
+    if isinstance(orbit_report, dict) and isinstance(candidates, dict):
+        candidate_by_evidence = {
+            (candidate.get("valley"), candidate.get("kpoint")): candidate
+            for candidate in candidates.get("candidates", [])
+            if isinstance(candidate, dict)
+        }
         for orbit in orbit_report.get("valley_orbits", []):
             if not isinstance(orbit, dict):
                 continue
-            full_hsps = {
-                str(value)
-                for value in orbit.get(
-                    "full_unitary_source_hsp_labels", []
-                )
-                if isinstance(value, str) and value
-            }
-            joint_hsps = {
-                str(value)
-                for value in orbit.get("expected_hsps", [])
-                if isinstance(value, str) and value
-            }
-
-            def identities(hsps):
-                return {
-                    hsp: {
-                        "spinor_source_basis_certificate_identity": (
-                            canonical_identity({
-                                "fixture": "tr_source_basis",
-                            })
-                        ),
-                        "double_space_group_lift_certificate_identity": (
-                            canonical_identity({
-                                "fixture": "tr_lift", "hsp": hsp,
-                            })
-                        ),
-                        "scoped_representation_evidence_identity": (
-                            canonical_identity({
-                                "fixture": "tr_completed_scope",
-                                "hsp": hsp,
-                            })
-                        ),
-                    }
-                    for hsp in hsps
-                }
-
-            orbit["tr_completed_cprime_identity_by_hsp"] = identities(
-                full_hsps
+            by_valley = orbit.get(
+                "unitary_valley_irrep_completion_records", {}
             )
-            orbit["joint_cprime_identity_by_hsp"] = identities(
-                joint_hsps
+            if not isinstance(by_valley, dict):
+                continue
+            for by_hsp in by_valley.values():
+                if not isinstance(by_hsp, dict):
+                    continue
+                for records in by_hsp.values():
+                    if not isinstance(records, list):
+                        continue
+                    for record in records:
+                        if not isinstance(record, dict):
+                            continue
+                        candidate = candidate_by_evidence.get((
+                            record.get("evidence_valley"),
+                            record.get("evidence_sampled_kpoint"),
+                        ))
+                        source = record.get(
+                            "source_candidate_provenance"
+                        )
+                        target = (
+                            source.get("irrep_source_provenance")
+                            if isinstance(source, dict)
+                            else None
+                        )
+                        candidate_source = (
+                            candidate.get("irrep_source_provenance")
+                            if isinstance(candidate, dict)
+                            else None
+                        )
+                        if (
+                            isinstance(target, dict)
+                            and isinstance(candidate_source, dict)
+                            and isinstance(
+                                candidate_source.get("cprime"), dict
+                            )
+                        ):
+                            target["cprime"] = deepcopy(
+                                candidate_source["cprime"]
+                            )
+        if any(
+            isinstance(orbit, dict)
+            and orbit.get("mapping_type") == "exchanged"
+            for orbit in orbit_report.get("valley_orbits", [])
+        ):
+            context = cprime_validation_context_for_candidates(candidates)
+            kwargs["time_reversal_orbit_report"] = (
+                attach_tr_irrep_completion_certificates(
+                    time_reversal_orbit_report=orbit_report,
+                    cprime_validation_context=dict(
+                        context["_by_identity"]
+                    ),
+                )
             )
     return _build_ebr_problem_instances(**kwargs)
 
@@ -148,24 +170,43 @@ def promote_bundle_for_solve(*, bundle, table):
     return export
 
 
-def test_tr_completed_problem_requires_scoped_cprime_identity_inventory():
+def test_tr_problem_requires_exact_completion_and_blocks_joint_corepresentation():
     candidates = _orbit_candidates()
     attach_cprime_fixture_to_candidates(candidates)
+    report = _exchanged_orbit_report(candidates)
+    for by_hsp in report["valley_orbits"][0][
+        "unitary_valley_irrep_completion_records"
+    ].values():
+        for records in by_hsp.values():
+            for record in records:
+                if record["completion_kind"] == "inferred_by_time_reversal":
+                    record.pop("tr_irrep_completion_certificate", None)
     problems = _build_ebr_problem_instances(
         ebr_input_candidates=candidates,
-        time_reversal_orbit_report=_exchanged_orbit_report(),
+        time_reversal_orbit_report=report,
     )
 
     assert problems["ready_instance_count"] == 0
+    unitary = [
+        instance for instance in problems["instances"]
+        if instance["problem_kind"] == "unitary_valley_reduced_ebr"
+    ]
+    joint = next(
+        instance for instance in problems["instances"]
+        if instance["problem_kind"] == "valley_orbit_reduced_ebr"
+    )
     assert all(
         any(
             str(blocker).startswith(
-                "tr_completed_scoped_representation_evidence_missing"
+                "tr_irrep_completion_cprime_invalid"
             )
             for blocker in instance["blocked_by"]
         )
-        for instance in problems["instances"]
+        for instance in unitary
     )
+    assert "joint_time_reversal_corepresentation_not_certified" in joint[
+        "blocked_by"
+    ]
 
 
 def _operation(index: int, rotation: list[list[int]]) -> StandardTableOperation:
@@ -1058,6 +1099,10 @@ def test_self_mapped_joint_problem_requires_serialized_sewing_evidence():
 def _synthetic_source_orbit_report():
     return {
         "status": "validated",
+        "operation_inventory_identity": canonical_identity({
+            "fixture": "synthetic_time_reversal_source",
+        }),
+        "spin_convention": "spinor_double_group",
         "time_reversal_hsp_mapping": {
             "G": "G", "Q": "QA", "QA": "Q", "M": "M",
         },
@@ -1100,6 +1145,10 @@ def _synthetic_grey_report():
 def _self_mapped_source_report():
     return {
         "status": "validated",
+        "operation_inventory_identity": canonical_identity({
+            "fixture": "self_mapped_source",
+        }),
+        "spin_convention": "spinor_double_group",
         "time_reversal_hsp_mapping": {"G": "G"},
         "time_reversal_hsp_orbits": [{
             "representative": "G",
@@ -1251,6 +1300,10 @@ def test_self_mapped_valley_rejects_malformed_or_blocked_sewing_evidence():
 def _self_mapped_nontrim_source_report():
     return {
         "status": "validated",
+        "operation_inventory_identity": canonical_identity({
+            "fixture": "self_mapped_nontrim_source",
+        }),
+        "spin_convention": "scalar_single_group",
         "time_reversal_hsp_mapping": {"Q": "QA", "QA": "Q"},
         "time_reversal_hsp_orbits": [{
             "representative": "Q",
@@ -1696,8 +1749,20 @@ def _orbit_candidates(*, mismatched_g: bool = False):
                 "matched_irrep": irrep,
                 "irrep_multiplicity": 1,
                 "irrep_source_provenance": {
+                    "matching_strategy": "bilbao_restricted_character",
+                    "subspace_space_group_number": 75,
+                    "subspace_space_group_symbol": "P4",
+                    "source_table_sg_number": 75,
+                    "source_table_name": "irreptables.StandardIrrepTable",
                     "source_hsp_label": hsp,
                     "source_table_spinor": True,
+                    "standard_setting_hsp_mapping": {
+                        "standard_setting_certificate": {
+                            "schema_version": "1.0.0",
+                            "validation_status": "validated",
+                            "fixture": "unit_time_reversal_completion",
+                        },
+                    },
                 },
                 "kpoint": f"{hsp}_{valley}",
                 "workflow_path": "direct_qcut",
@@ -1714,9 +1779,11 @@ def _orbit_candidates(*, mismatched_g: bool = False):
 
 
 def _exchanged_orbit_report(candidates=None):
+    candidates = candidates or _orbit_candidates()
+    attach_cprime_fixture_to_candidates(candidates)
     source = _synthetic_source_orbit_report()
     grey = _synthetic_grey_report()
-    return build_time_reversal_valley_orbit_report(
+    report = build_time_reversal_valley_orbit_report(
         valley_mapping_report={
             "status": "validated", "theta_square": -1,
             "time_reversal_valley_mapping": {"left": "right", "right": "left"},
@@ -1727,7 +1794,12 @@ def _exchanged_orbit_report(candidates=None):
         },
         source_irrep_orbits_by_valley={"left": source, "right": source},
         grey_source_by_valley={"left": grey, "right": grey},
-        ebr_input_candidates=candidates or _orbit_candidates(),
+        ebr_input_candidates=candidates,
+    )
+    context = cprime_validation_context_for_candidates(candidates)
+    return attach_tr_irrep_completion_certificates(
+        time_reversal_orbit_report=report,
+        cprime_validation_context=dict(context["_by_identity"]),
     )
 
 
@@ -1807,7 +1879,7 @@ def test_missing_source_hsp_blockers_preserve_reviewed_basis_order():
     ]
 
 
-def test_tr_enabled_problem_builder_emits_unitary_components_and_joint_grey():
+def test_tr_enabled_problem_builder_readies_unitary_components_but_not_joint():
     report = _exchanged_orbit_report()
 
     problems = build_ebr_problem_instances(
@@ -1865,7 +1937,10 @@ def test_tr_enabled_problem_builder_emits_unitary_components_and_joint_grey():
         "M": ["m_corep"],
     }
     orbit = report["valley_orbits"][0]
-    assert joint[0]["canonical_hsp_vector_ready"] is True
+    assert joint[0]["canonical_hsp_vector_ready"] is False
+    assert "joint_time_reversal_corepresentation_not_certified" in joint[0][
+        "blocked_by"
+    ]
     assert joint[0]["time_reversal"][
         "source_hsp_to_sampled_kpoint_by_valley"
     ] == orbit["source_hsp_to_sampled_kpoint_by_valley"]
@@ -1880,7 +1955,7 @@ def test_tr_unitary_completion_provenance_survives_export_without_fake_sample():
 
     export = build_ebr_export_bundle(ebr_problem_instances=problems)
 
-    assert export["bundle_count"] == 3
+    assert export["bundle_count"] == 2
     left = next(
         bundle for bundle in export["bundles"]
         if bundle["problem_kind"] == "unitary_valley_reduced_ebr"
@@ -1897,21 +1972,13 @@ def test_tr_unitary_completion_provenance_survives_export_without_fake_sample():
     assert inferred["completion_kind"] == "inferred_by_time_reversal"
     assert "sampled_kpoint" not in inferred
     assert inferred["evidence_sampled_kpoint"] == "Q_right"
-    joint = next(
-        bundle for bundle in export["bundles"]
-        if bundle["problem_kind"] == "valley_orbit_reduced_ebr"
+    assert all(
+        bundle["problem_kind"] == "unitary_valley_reduced_ebr"
+        for bundle in export["bundles"]
     )
-    assert joint["physical_object_kind"] == (
-        "joint_time_reversal_valley_orbit"
+    assert export["excluded_instances"][0]["source_instance_id"] == (
+        "ebr_instance_001"
     )
-    assert joint["time_reversal"][
-        "unitary_valley_irrep_completion_records"
-    ]["left"]["QA"][0]["evidence_sampled_kpoint"] == "Q_right"
-    assert joint["time_reversal"][
-        "source_hsp_to_sampled_kpoint_by_valley"
-    ] == report["valley_orbits"][0][
-        "source_hsp_to_sampled_kpoint_by_valley"
-    ]
 
 
 def test_tr_unitary_promotion_revalidates_row_level_completion_provenance():
@@ -2149,12 +2216,18 @@ def test_directly_observed_dependent_hsp_uses_observed_unitary_binding():
                 row for row in candidates["candidates"]
                 if row["valley"] == "left"
                 and row["irrep_source_provenance"]["source_hsp_label"] == "Q"
-            )),
-            "matched_irrep": "qa2",
-            "irrep_source_provenance": {
-                "source_hsp_label": "QA",
-                "source_table_spinor": True,
-            },
+                )),
+                "matched_irrep": "qa2",
+                "irrep_source_provenance": {
+                    **deepcopy(next(
+                        row for row in candidates["candidates"]
+                        if row["valley"] == "left"
+                        and row["irrep_source_provenance"][
+                            "source_hsp_label"
+                        ] == "Q"
+                    )["irrep_source_provenance"]),
+                    "source_hsp_label": "QA",
+                },
             "kpoint": "QA_left",
             "source": "fixture/left/QA",
         },
@@ -2163,12 +2236,18 @@ def test_directly_observed_dependent_hsp_uses_observed_unitary_binding():
                 row for row in candidates["candidates"]
                 if row["valley"] == "right"
                 and row["irrep_source_provenance"]["source_hsp_label"] == "Q"
-            )),
-            "matched_irrep": "qa1",
-            "irrep_source_provenance": {
-                "source_hsp_label": "QA",
-                "source_table_spinor": True,
-            },
+                )),
+                "matched_irrep": "qa1",
+                "irrep_source_provenance": {
+                    **deepcopy(next(
+                        row for row in candidates["candidates"]
+                        if row["valley"] == "right"
+                        and row["irrep_source_provenance"][
+                            "source_hsp_label"
+                        ] == "Q"
+                    )["irrep_source_provenance"]),
+                    "source_hsp_label": "QA",
+                },
             "kpoint": "QA_right",
             "source": "fixture/right/QA",
         },
@@ -2741,15 +2820,18 @@ def test_tr_producer_preserves_complete_untrusted_vector_but_export_blocks_it():
         ebr_input_candidates=candidates,
         time_reversal_orbit_report=validated_report,
     )
-    validated_instance = validated_problems["instances"][0]
+    validated_instance = next(
+        row for row in validated_problems["instances"]
+        if row["problem_kind"] == "unitary_valley_reduced_ebr"
+    )
     assert validated_instance["canonical_hsp_vector_complete"] is True
     assert validated_instance["canonical_hsp_vector_ready"] is True
     validated_export = build_ebr_export_bundle(
         ebr_problem_instances=validated_problems,
     )
-    assert validated_export["bundle_count"] == 2
+    assert validated_export["bundle_count"] == 1
     assert {row["problem_kind"] for row in validated_export["bundles"]} == {
-        "unitary_valley_reduced_ebr", "valley_orbit_reduced_ebr",
+        "unitary_valley_reduced_ebr",
     }
 
     untrusted_report = _self_mapped_pipeline_orbit_report(
@@ -2775,12 +2857,13 @@ def test_tr_producer_preserves_complete_untrusted_vector_but_export_blocks_it():
         ebr_input_candidates=candidates,
         time_reversal_orbit_report=untrusted_report,
     )
-    untrusted_instance = untrusted_problems["instances"][0]
-    assert untrusted_instance["status"] == (
-        "canonical_hsp_vector_complete_but_untrusted"
+    untrusted_instance = next(
+        row for row in untrusted_problems["instances"]
+        if row["problem_kind"] == "unitary_valley_reduced_ebr"
     )
+    assert untrusted_instance["status"] == "canonical_hsp_vector_ready"
     assert untrusted_instance["canonical_hsp_vector_complete"] is True
-    assert untrusted_instance["canonical_hsp_vector_ready"] is False
+    assert untrusted_instance["canonical_hsp_vector_ready"] is True
     untrusted_export = build_ebr_export_bundle(
         ebr_problem_instances=untrusted_problems,
     )

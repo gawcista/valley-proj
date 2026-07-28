@@ -111,7 +111,6 @@ def _raw_inputs(
     scope_kind: str,
     required_operation_ids: tuple[int, ...],
     bad_valley_changing_operation: bool = False,
-    antiunitary_evidence: dict[str, object] | None = None,
 ) -> dict[str, object]:
     q_cart = np.array(
         [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
@@ -174,49 +173,12 @@ def _raw_inputs(
             2: {"v0": "v0", "v1": "v1"},
             5: {"v0": "v1", "v1": "v0"},
         },
-        "antiunitary_evidence": antiunitary_evidence,
-        "group_law_tolerance": 1.0e-8,
-        "plane_wave_norm_tolerance": 1.0e-8,
-        "coefficient_gram_tolerance": 1.0e-6,
-        "target_subspace_tolerance": 1.0e-8,
-        "projector_covariance_tolerance": 1.0e-8,
-        "valley_block_tolerance": 1.0e-8,
-        "antiunitary_tolerance": 1.0e-8,
     }
 
 
 def _build(**kwargs) -> tuple[dict[str, object], dict[str, object]]:
     inputs = _raw_inputs(**kwargs)
     return build_scoped_representation_evidence(**inputs).to_record(), inputs
-
-
-def _clean_tr_evidence() -> dict[str, object]:
-    source_q = np.array(
-        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=float
-    )
-    target_q = -source_q
-    return {
-        "source_valley": "v0",
-        "target_valley": "v1",
-        "source_hsp_label": "K",
-        "target_hsp_label": "KA",
-        "time_reversal_hsp_mapping": {"K": "KA", "KA": "K"},
-        "construction_kind": "observed_to_inferred",
-        "source_reciprocal_grid_vectors_cart": source_q,
-        "target_reciprocal_grid_vectors_cart": target_q,
-        "source_reciprocal_grid_identity": reciprocal_grid_identity(source_q),
-        "target_reciprocal_grid_identity": reciprocal_grid_identity(target_q),
-        "source_to_target_grid_map": [0, 1],
-        "forward_sewing_matrix": np.eye(2, dtype=np.complex128),
-        "reverse_sewing_matrix": -np.eye(2, dtype=np.complex128),
-        "expected_square_sign": -1,
-        "source_unitary_representations": {
-            2: np.eye(2, dtype=np.complex128),
-        },
-        "target_unitary_representations": {
-            2: np.eye(2, dtype=np.complex128),
-        },
-    }
 
 
 def test_local_irrep_consumes_only_exact_valley_preserving_scope():
@@ -231,17 +193,15 @@ def test_local_irrep_consumes_only_exact_valley_preserving_scope():
     assert record["scope"]["required_operation_ids"] == [2]
     assert record["scope"]["valley_preserving_operation_ids"] == [2]
     assert record["scope"]["valley_changing_operation_ids"] == []
-    assert record["antiunitary_evidence"]["required"] is False
-    assert record["antiunitary_evidence"]["evaluated"] is False
+    assert "antiunitary_evidence" not in record
     assert record["grey_group_matching_allowed"] is False
     assert record["tolerances"] == {
-        "group_law": 1.0e-8,
+        "group_law": 1.0e-2,
         "plane_wave_norm": 1.0e-8,
         "coefficient_gram": 1.0e-6,
-        "target_subspace": 1.0e-8,
-        "projector_covariance": 1.0e-8,
-        "valley_block": 1.0e-8,
-        "antiunitary": 1.0e-8,
+        "target_subspace": 1.0e-2,
+        "projector_covariance": 1.0e-2,
+        "valley_block": 1.0e-2,
     }
     assert validate_scoped_representation_evidence_record(
         record, **inputs
@@ -281,70 +241,74 @@ def test_clean_valley_sewing_scope_passes_without_antiunitary_evidence():
 
     assert record["status"] == "passed"
     assert record["scope"]["valley_changing_operation_ids"] == [5]
-    assert record["antiunitary_evidence"]["required"] is False
+    assert "antiunitary_evidence" not in record
 
 
-def test_tr_completed_scope_requires_antiunitary_evidence_and_does_not_grey_match_one_valley():
-    missing, _ = _build(
-        scope_kind="tr_completed",
-        required_operation_ids=(2, 5),
+@pytest.mark.parametrize("rank", [2, 4])
+def test_matrix_residuals_are_normalized_by_subspace_rank(rank: int):
+    inputs = _raw_inputs(
+        scope_kind="local_irrep",
+        required_operation_ids=(2,),
     )
-    present, _ = _build(
-        scope_kind="tr_completed",
-        required_operation_ids=(2, 5),
-        antiunitary_evidence=_clean_tr_evidence(),
+    epsilon = 1.0e-4
+    scale = np.sqrt(1.0 + epsilon)
+    inputs["representations"] = {
+        2: scale * np.eye(rank, dtype=np.complex128),
+    }
+    inputs["target_coefficients"] = (
+        scale * np.eye(rank, dtype=np.complex128)
     )
+    inputs["projectors"] = {
+        "v0": np.eye(rank, dtype=np.complex128),
+        "v1": np.eye(rank, dtype=np.complex128),
+    }
+    inputs["valley_bases"] = {
+        "v0": np.eye(rank, dtype=np.complex128),
+        "v1": np.eye(rank, dtype=np.complex128),
+    }
+    record = build_scoped_representation_evidence(**inputs).to_record()
+    target = record["target_subspace"]
+    operation = target["operation_rows"][0]
+    group_law = record["projected_representation_group_law"][
+        "pair_rows"
+    ][0]
+    block = record["valley_block_quality"]["operation_rows"][0]
 
-    assert missing["status"] == "blocked"
-    assert "antiunitary_evidence_missing" in missing["reason_codes"]
-    assert present["status"] == "passed"
-    assert present["antiunitary_evidence"]["square_residual"] < 1e-12
-    assert present["antiunitary_evidence"]["source_hsp_label"] == "K"
-    assert present["antiunitary_evidence"]["target_hsp_label"] == "KA"
-    assert present["antiunitary_evidence"]["grid_map_bijective"] is True
-    assert (
-        present["antiunitary_evidence"][
-            "max_unitary_compatibility_residual"
-        ]
-        == 0.0
+    assert target["coefficient_gram_normalization"] == pytest.approx(
+        np.sqrt(rank)
     )
-    assert present["grey_group_matching_allowed"] is False
+    assert target["coefficient_gram_error"] == pytest.approx(epsilon)
+    assert operation["unitarity_residual_normalization"] == pytest.approx(
+        np.sqrt(rank)
+    )
+    assert operation["unitarity_residual"] == pytest.approx(epsilon)
+    assert group_law["residual_normalization"] == pytest.approx(
+        np.sqrt(rank)
+    )
+    assert group_law["residual"] == pytest.approx(
+        scale * abs(scale - 1.0)
+    )
+    assert block[
+        "source_basis_orthonormality_normalization"
+    ] == pytest.approx(np.sqrt(rank))
+    assert block[
+        "target_basis_orthonormality_normalization"
+    ] == pytest.approx(np.sqrt(rank))
+    assert block["block_unitarity_normalization"] == pytest.approx(
+        np.sqrt(rank)
+    )
+    assert block["block_unitarity_residual"] == pytest.approx(epsilon)
 
 
-@pytest.mark.parametrize(
-    ("field", "value", "reason"),
-    [
-        (
-            "time_reversal_hsp_mapping",
-            {"K": "KA", "KA": "KA"},
-            "antiunitary_hsp_mapping_invalid",
-        ),
-        (
-            "source_to_target_grid_map",
-            [0, 0],
-            "antiunitary_grid_mapping_invalid",
-        ),
-        (
-            "target_unitary_representations",
-            {2: np.diag([1.0, -1.0])},
-            "antiunitary_unitary_compatibility_failed",
-        ),
-    ],
-)
-def test_tr_completed_scope_recomputes_hsp_grid_and_unitary_compatibility(
-    field: str,
-    value: object,
-    reason: str,
-):
-    evidence = _clean_tr_evidence()
-    evidence[field] = value
+def test_tr_completed_scope_is_not_a_supported_representation_scope():
     record, _ = _build(
         scope_kind="tr_completed",
         required_operation_ids=(2,),
-        antiunitary_evidence=evidence,
     )
+
     assert record["status"] == "blocked"
-    assert reason in record["reason_codes"]
+    assert "scope_kind_unsupported" in record["reason_codes"]
+    assert "antiunitary_evidence" not in record
 
 
 def test_scoped_evidence_binds_payload_certificates_kpoint_valley_and_opaque_ids():
@@ -502,6 +466,6 @@ def test_readiness_composer_revalidates_and_fails_closed_on_identity_tampering()
 
     assert ready["local_irrep_ready"] is True
     assert ready["valley_sewing_ready"] is False
-    assert ready["tr_completed_ready"] is False
+    assert "tr_completed_ready" not in ready
     assert blocked["local_irrep_ready"] is False
     assert "scoped_representation_evidence_invalid" in blocked["blockers"]

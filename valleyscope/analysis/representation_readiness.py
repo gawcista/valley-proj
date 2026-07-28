@@ -33,7 +33,6 @@ def compose_representation_readiness(
         "scope_kind": scope_kind,
         "local_irrep_ready": evidence_valid and scope_kind == "local_irrep",
         "valley_sewing_ready": evidence_valid and scope_kind == "valley_sewing",
-        "tr_completed_ready": evidence_valid and scope_kind == "tr_completed",
         "diagnostic_only": not evidence_valid,
         "blockers": list(dict.fromkeys(blockers)),
     }

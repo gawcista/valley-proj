@@ -16,6 +16,9 @@ from collections.abc import Sequence
 
 import numpy as np
 
+from valleyscope.analysis.tr_irrep_completion import (
+    validate_tr_irrep_completion_certificate,
+)
 from valleyscope.io.wavefunction_convention import valid_sha256_identity
 
 
@@ -509,17 +512,13 @@ def _build_time_reversal_problem_instances(
         ):
             blockers.append("time_reversal_independent_hsp_basis_mismatch")
             expected_hsps = []
-        tr_cprime_identity_by_hsp = raw_orbit.get(
-            "joint_cprime_identity_by_hsp", {}
+        # Exact algebraic completion certifies unitary irrep rows only.  It is
+        # not a numerical antiunitary sewing/corepresentation certificate for
+        # the joint time-reversal orbit.
+        blockers.append(
+            "joint_time_reversal_corepresentation_not_certified"
         )
-        if not _valid_cprime_identity_inventory(
-            tr_cprime_identity_by_hsp,
-            required_hsps=expected_hsps,
-        ):
-            blockers.append(
-                "tr_completed_scoped_representation_evidence_missing"
-            )
-            tr_cprime_identity_by_hsp = {}
+        tr_cprime_identity_by_hsp: dict[str, dict[str, object]] = {}
         canonical_hsp_vector_complete = (
             bool(irreps_by_kpoint)
             and bool(expected_hsps)
@@ -618,6 +617,9 @@ def _build_time_reversal_problem_instances(
                 ),
                 "time_reversal_irrep_pairing": raw_orbit.get(
                     "time_reversal_irrep_pairing", {}
+                ),
+                "reviewed_time_reversal_source_identity": raw_orbit.get(
+                    "reviewed_time_reversal_source_identity", {}
                 ),
                 "projector_workflow_by_sampled_kpoint": raw_orbit.get(
                     "projector_workflow_by_sampled_kpoint", {}
@@ -751,18 +753,30 @@ def _build_tr_unitary_component_instances(
             blockers.append(
                 f"unitary_component_spin_evidence_mismatch:{valley}"
             )
-        tr_cprime_identity_by_hsp = raw_orbit.get(
-            "tr_completed_cprime_identity_by_hsp", {}
-        )
-        if not _valid_cprime_identity_inventory(
+        (
             tr_cprime_identity_by_hsp,
+            cprime_blockers,
+        ) = _completion_cprime_identity_inventory(
+            valley=valley,
+            records_by_hsp=records_by_hsp,
             required_hsps=full_hsps,
-        ):
-            blockers.append(
-                "tr_completed_scoped_representation_evidence_missing:"
-                f"{valley}"
-            )
-            tr_cprime_identity_by_hsp = {}
+            valley_mapping=time_reversal_orbit_report.get(
+                "time_reversal_valley_mapping", {}
+            ),
+            hsp_mapping=_time_reversal_hsp_mapping(
+                raw_orbit.get("time_reversal_hsp_orbits", [])
+            ),
+            irrep_pairing=raw_orbit.get(
+                "time_reversal_irrep_pairing", {}
+            ),
+            reviewed_source_identity=raw_orbit.get(
+                "reviewed_time_reversal_source_identity", {}
+            ),
+            require_exact_completion=(
+                raw_orbit.get("mapping_type") == "exchanged"
+            ),
+        )
+        blockers.extend(cprime_blockers)
 
         complete_counts = (
             bool(full_hsps)
@@ -951,6 +965,9 @@ def _build_tr_unitary_component_instances(
                 "time_reversal_irrep_pairing": raw_orbit.get(
                     "time_reversal_irrep_pairing", {}
                 ),
+                "reviewed_time_reversal_source_identity": raw_orbit.get(
+                    "reviewed_time_reversal_source_identity", {}
+                ),
                 "projector_workflow_by_sampled_kpoint": raw_orbit.get(
                     "projector_workflow_by_sampled_kpoint", {}
                 ),
@@ -1001,6 +1018,171 @@ def _completion_records_match_counts(
     return set(counts_by_hsp) == set(records_by_hsp)
 
 
+def _completion_cprime_identity_inventory(
+    *,
+    valley: str,
+    records_by_hsp: dict[str, object],
+    required_hsps: Sequence[str],
+    valley_mapping: object,
+    hsp_mapping: object,
+    irrep_pairing: object,
+    reviewed_source_identity: object,
+    require_exact_completion: bool,
+) -> tuple[dict[str, dict[str, object]], list[str]]:
+    inventory: dict[str, dict[str, object]] = {}
+    blockers: list[str] = []
+    if not all(
+        isinstance(value, dict)
+        for value in (valley_mapping, hsp_mapping, irrep_pairing)
+    ):
+        return {}, [
+            f"tr_irrep_completion_mapping_invalid:{valley}"
+        ]
+    for hsp in required_hsps:
+        records = records_by_hsp.get(hsp)
+        identities: list[dict[str, object]] = []
+        if not isinstance(records, list) or not records:
+            blockers.append(
+                f"tr_irrep_completion_record_missing:{valley}:{hsp}"
+            )
+            continue
+        for record in records:
+            identity = _completion_record_cprime_identity(
+                record=record,
+                valley_mapping=valley_mapping,
+                hsp_mapping=hsp_mapping,
+                irrep_pairing=irrep_pairing,
+                reviewed_source_identity=reviewed_source_identity,
+                require_exact_completion=require_exact_completion,
+            )
+            if identity is None:
+                blockers.append(
+                    f"tr_irrep_completion_cprime_invalid:{valley}:{hsp}"
+                )
+                continue
+            identities.append(identity)
+        if not identities:
+            continue
+        if any(identity != identities[0] for identity in identities[1:]):
+            blockers.append(
+                f"tr_irrep_completion_cprime_mismatch:{valley}:{hsp}"
+            )
+            continue
+        inventory[hsp] = identities[0]
+    if not _valid_cprime_identity_inventory(
+        inventory,
+        required_hsps=required_hsps,
+    ):
+        blockers.append(
+            f"tr_irrep_completion_cprime_inventory_incomplete:{valley}"
+        )
+    return inventory, _deduplicate_strings(blockers)
+
+
+def _completion_record_cprime_identity(
+    *,
+    record: object,
+    valley_mapping: dict[str, object],
+    hsp_mapping: dict[str, object],
+    irrep_pairing: dict[str, object],
+    reviewed_source_identity: object,
+    require_exact_completion: bool,
+) -> dict[str, object] | None:
+    if not isinstance(record, dict):
+        return None
+    kind = record.get("completion_kind")
+    if kind == "observed_at_sampled_kpoint":
+        provenance = record.get("source_candidate_provenance")
+        source_irrep = (
+            provenance.get("irrep_source_provenance")
+            if isinstance(provenance, dict)
+            else None
+        )
+        identity = (
+            source_irrep.get("cprime")
+            if isinstance(source_irrep, dict)
+            else None
+        )
+    elif kind == "inferred_by_time_reversal" and require_exact_completion:
+        certificate = record.get("tr_irrep_completion_certificate")
+        if not validate_tr_irrep_completion_certificate(
+            certificate,
+            completion_record=record,
+            valley_mapping=valley_mapping,
+            hsp_mapping=hsp_mapping,
+            irrep_pairing=irrep_pairing,
+            reviewed_source_identity=(
+                reviewed_source_identity
+                if isinstance(reviewed_source_identity, dict)
+                else {}
+            ),
+        ):
+            return None
+        observed = certificate.get("observed_source")
+        identity = (
+            observed.get("local_cprime_identity")
+            if isinstance(observed, dict)
+            else None
+        )
+    elif kind == "inferred_by_time_reversal":
+        provenance = record.get("source_candidate_provenance")
+        source_irrep = (
+            provenance.get("irrep_source_provenance")
+            if isinstance(provenance, dict)
+            else None
+        )
+        identity = (
+            source_irrep.get("cprime")
+            if isinstance(source_irrep, dict)
+            else None
+        )
+    else:
+        return None
+    if not _valid_cprime_identity(identity):
+        return None
+    return dict(identity)
+
+
+def _valid_cprime_identity(value: object) -> bool:
+    required_keys = {
+        "spinor_source_basis_certificate_identity",
+        "double_space_group_lift_certificate_identity",
+        "scoped_representation_evidence_identity",
+    }
+    return (
+        isinstance(value, dict)
+        and set(value) == required_keys
+        and all(
+            valid_sha256_identity(value.get(key))
+            for key in required_keys
+        )
+    )
+
+
+def _time_reversal_hsp_mapping(value: object) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    if not isinstance(value, list):
+        return mapping
+    for orbit in value:
+        if not isinstance(orbit, dict):
+            return {}
+        members = orbit.get("members")
+        if (
+            not isinstance(members, list)
+            or len(members) not in (1, 2)
+            or not all(
+                isinstance(member, str) and member for member in members
+            )
+        ):
+            return {}
+        if len(members) == 1:
+            mapping[members[0]] = members[0]
+        else:
+            mapping[members[0]] = members[1]
+            mapping[members[1]] = members[0]
+    return mapping
+
+
 def _deduplicate_strings(values: list[str]) -> list[str]:
     out: list[str] = []
     for value in values:
@@ -1014,11 +1196,6 @@ def _valid_cprime_identity_inventory(
     *,
     required_hsps: Sequence[str],
 ) -> bool:
-    required_keys = {
-        "spinor_source_basis_certificate_identity",
-        "double_space_group_lift_certificate_identity",
-        "scoped_representation_evidence_identity",
-    }
     if (
         not required_hsps
         or not isinstance(value, dict)
@@ -1026,12 +1203,7 @@ def _valid_cprime_identity_inventory(
     ):
         return False
     return all(
-        isinstance(identity, dict)
-        and set(identity) == required_keys
-        and all(
-            valid_sha256_identity(identity.get(key))
-            for key in required_keys
-        )
+        _valid_cprime_identity(identity)
         for identity in value.values()
     )
 

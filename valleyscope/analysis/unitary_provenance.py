@@ -8,6 +8,9 @@ from typing import Mapping
 from valleyscope.analysis.time_reversal_sewing import (
     validate_time_reversal_sewing_report,
 )
+from valleyscope.analysis.tr_irrep_completion import (
+    validate_tr_irrep_completion_certificate,
+)
 
 
 _PROJECTOR_WORKFLOWS = frozenset({"direct_qcut", "symmetry_adapted"})
@@ -293,6 +296,9 @@ def validate_tr_completed_unitary_bundle(
         valley_mapping=valley_mapping,
         hsp_mapping=hsp_mapping,
         irrep_mapping=irrep_mapping,
+        reviewed_source_identity=time_reversal.get(
+            "reviewed_time_reversal_source_identity", {}
+        ),
         independent_hsps=set(independent_hsps),
         expected_spinor=spinor,
     )
@@ -330,6 +336,7 @@ def _completion_records_valid(
     valley_mapping: Mapping[str, str],
     hsp_mapping: Mapping[str, str],
     irrep_mapping: Mapping[str, str],
+    reviewed_source_identity: Mapping[str, object],
     independent_hsps: set[str],
     expected_spinor: bool,
 ) -> tuple[bool, set[str]]:
@@ -442,6 +449,21 @@ def _completion_records_valid(
                         valley_mapping=valley_mapping,
                         hsp_mapping=hsp_mapping,
                         irrep_mapping=irrep_mapping,
+                    )
+                    or (
+                        valley_mapping.get(valley) != valley
+                        and not validate_tr_irrep_completion_certificate(
+                            record.get(
+                                "tr_irrep_completion_certificate"
+                            ),
+                            completion_record=record,
+                            valley_mapping=valley_mapping,
+                            hsp_mapping=hsp_mapping,
+                            irrep_pairing=irrep_mapping,
+                            reviewed_source_identity=(
+                                reviewed_source_identity
+                            ),
+                        )
                     )
                 ):
                     return False, set()

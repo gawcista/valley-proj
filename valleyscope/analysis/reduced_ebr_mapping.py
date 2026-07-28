@@ -21,6 +21,9 @@ from valleyscope.irreps.time_reversal_geometry import (
 from valleyscope.analysis.time_reversal_sewing import (
     validate_time_reversal_sewing_report,
 )
+from valleyscope.analysis.tr_irrep_completion import (
+    validate_tr_irrep_completion_certificate,
+)
 from valleyscope.analysis.promotion_identity import (
     build_promotion_input_identity,
     merge_table_input_provenance,
@@ -1716,11 +1719,7 @@ def _validate_cprime_bundle_identity(
             scoped_record,
             **raw_inputs,
         )
-        expected_scope_kind = (
-            "tr_completed"
-            if tr_completed or joint_problem
-            else "local_irrep"
-        )
+        expected_scope_kind = "local_irrep"
         scope = scoped_record.get("scope")
         source_basis = raw_inputs.get("source_basis_record")
         if (
@@ -1761,7 +1760,49 @@ def _validate_cprime_bundle_identity(
             ok = False
             continue
         for record in records:
-            if tr_completed and isinstance(record, dict):
+            if (
+                tr_completed
+                and isinstance(record, dict)
+                and record.get("completion_kind")
+                == "inferred_by_time_reversal"
+            ):
+                certificate = record.get(
+                    "tr_irrep_completion_certificate"
+                )
+                (
+                    valley_mapping,
+                    hsp_mapping,
+                    irrep_pairing,
+                    reviewed_source_identity,
+                ) = (
+                    _tr_irrep_completion_maps(bundle)
+                )
+                observed = (
+                    certificate.get("observed_source")
+                    if isinstance(certificate, dict)
+                    else None
+                )
+                cprime = (
+                    observed.get("local_cprime_identity")
+                    if isinstance(observed, dict)
+                    else None
+                )
+                certificate_valid = (
+                    validate_tr_irrep_completion_certificate(
+                        certificate,
+                        completion_record=record,
+                        valley_mapping=valley_mapping,
+                        hsp_mapping=hsp_mapping,
+                        irrep_pairing=irrep_pairing,
+                        reviewed_source_identity=(
+                            reviewed_source_identity
+                        ),
+                        cprime_validation_context=(
+                            cprime_validation_context
+                        ),
+                    )
+                )
+            elif tr_completed and isinstance(record, dict):
                 candidate_provenance = record.get(
                     "source_candidate_provenance"
                 )
@@ -1770,18 +1811,28 @@ def _validate_cprime_bundle_identity(
                     if isinstance(candidate_provenance, dict)
                     else None
                 )
+                cprime = (
+                    provenance.get("cprime")
+                    if isinstance(provenance, dict)
+                    else None
+                )
+                certificate_valid = (
+                    record.get("completion_kind")
+                    == "observed_at_sampled_kpoint"
+                )
             else:
                 provenance = (
                     record.get("irrep_source_provenance")
                     if isinstance(record, dict)
                     else None
                 )
-            cprime = (
-                provenance.get("cprime")
-                if isinstance(provenance, dict)
-                else None
-            )
-            if cprime != identity:
+                cprime = (
+                    provenance.get("cprime")
+                    if isinstance(provenance, dict)
+                    else None
+                )
+                certificate_valid = True
+            if not certificate_valid or cprime != identity:
                 blockers.append(
                     _blocker(
                         "cprime_record_link_mismatch",
@@ -1791,6 +1842,54 @@ def _validate_cprime_bundle_identity(
                 ok = False
                 break
     report["cprime_identity_check"] = "passed" if ok else "failed"
+
+
+def _tr_irrep_completion_maps(
+    bundle: dict[str, object],
+) -> tuple[
+    dict[str, str],
+    dict[str, str],
+    dict[str, str],
+    dict[str, object],
+]:
+    evidence = bundle.get("time_reversal")
+    if not isinstance(evidence, dict):
+        return {}, {}, {}, {}
+    valley_mapping = evidence.get("time_reversal_valley_mapping")
+    irrep_pairing = evidence.get("time_reversal_irrep_pairing")
+    raw_hsp_orbits = evidence.get("time_reversal_hsp_orbits")
+    hsp_mapping: dict[str, str] = {}
+    if isinstance(raw_hsp_orbits, list):
+        for raw_orbit in raw_hsp_orbits:
+            members = (
+                raw_orbit.get("members")
+                if isinstance(raw_orbit, dict)
+                else None
+            )
+            if (
+                not isinstance(members, list)
+                or len(members) not in (1, 2)
+                or not all(
+                    isinstance(member, str) and member
+                    for member in members
+                )
+            ):
+                return {}, {}, {}, {}
+            if len(members) == 1:
+                hsp_mapping[members[0]] = members[0]
+            else:
+                hsp_mapping[members[0]] = members[1]
+                hsp_mapping[members[1]] = members[0]
+    return (
+        dict(valley_mapping) if isinstance(valley_mapping, dict) else {},
+        hsp_mapping,
+        dict(irrep_pairing) if isinstance(irrep_pairing, dict) else {},
+        dict(evidence.get("reviewed_time_reversal_source_identity", {}))
+        if isinstance(
+            evidence.get("reviewed_time_reversal_source_identity"), dict
+        )
+        else {},
+    )
 
 
 def _validate_certificate_status(cert_id, blockers, report):

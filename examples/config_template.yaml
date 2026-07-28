@@ -24,9 +24,8 @@ analysis:
   iband: [101, 102]
   subspace_energy_tol_meV: 1.0
   symmetry_adapted_valley:
-    # Distinct physical residuals have distinct gates; no shared readiness preset.
-    projected_group_law_fail_tol: 1.0e-2
-    valley_block_leakage_fail_tol: 1.0e-2
+    # Controls only the symmetry-adapted projector workflow diagnostics.
+    enabled: true
   # Explicit evidence that the parent calculation is time-reversal symmetric.
   # Default is false; never inferred from material names or spinor inputs.
   time_reversal:

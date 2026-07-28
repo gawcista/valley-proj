@@ -69,7 +69,7 @@ def test_spinful_complete_kramers_pair_has_theta_square_minus_one():
     assert row["blockers"] == []
     assert report["evidence_role"] == "numerical_sewing_diagnostic"
     assert report["cprime_scope_status"] == "not_evaluated"
-    assert report["trusted_for_tr_completed_representation"] is False
+    assert report["trusted_for_numerical_antiunitary_evidence"] is False
 
 
 def test_spinful_exchanged_valley_sewing_validates_declared_mapping():
@@ -107,6 +107,46 @@ def test_spinful_exchanged_valley_sewing_validates_declared_mapping():
         "Kp": "K",
     }
     assert validate_time_reversal_sewing_report(
+        report,
+        valley_members=["K", "Kp"],
+        theta_square=-1,
+    )
+
+
+def test_spinful_exchanged_valley_sewing_rejects_o1_covariance_mismatch():
+    coefficients = np.asarray([
+        [[1.0 + 0.0j], [0.0 + 0.0j]],
+        [[0.0 + 0.0j], [1.0 + 0.0j]],
+    ])
+    mismatched_projectors = {
+        "K": np.diag([1.0, 0.0]),
+        "Kp": np.diag([1.0, 0.0]),
+    }
+    report = build_time_reversal_sewing_report(
+        kpoint_frac_by_name={"G": np.zeros(3)},
+        g_vectors_frac_by_kpoint={"G": np.zeros((1, 3), dtype=int)},
+        coefficients_by_kpoint={"G": coefficients},
+        band_indices_by_kpoint={"G": np.asarray([1, 2])},
+        valley_projectors_by_kpoint={"G": mismatched_projectors},
+        valley_projector_provenance_by_kpoint={
+            "G": {
+                valley: {
+                    "workflow_path": "direct_qcut",
+                    "projector_kind": "fixed_center_seed",
+                }
+                for valley in mismatched_projectors
+            },
+        },
+        projector_selection_blockers=[],
+        time_reversal_valley_mapping={"K": "Kp", "Kp": "K"},
+        spinor=True,
+    )
+
+    assert report["status"] == "blocked"
+    covariance = report["rows"][0]["projector_covariance"]["K"]
+    assert covariance["covariance_residual"] > 1.0
+    assert covariance["status"] == "blocked"
+    assert not validate_time_reversal_sewing_report(
         report,
         valley_members=["K", "Kp"],
         theta_square=-1,

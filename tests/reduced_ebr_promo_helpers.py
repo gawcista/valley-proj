@@ -149,12 +149,58 @@ def cprime_validation_context_for_export(
         irreps = bundle.get("irreps_by_kpoint", {})
         if not isinstance(irreps, dict):
             continue
+        construction = bundle.get("unitary_vector_construction")
+        tr_completed = (
+            isinstance(construction, dict)
+            and construction.get("kind")
+            == "time_reversal_completed_unitary_rows"
+        )
+        completion_records = bundle.get(
+            "unitary_irrep_completion_records_by_hsp", {}
+        )
         for kpoint in irreps:
+            scope_bundle = bundle
+            scope_kpoint = str(kpoint)
+            first = None
+            if tr_completed and isinstance(completion_records, dict):
+                records = completion_records.get(kpoint)
+                first = (
+                    records[0]
+                    if isinstance(records, list) and records
+                    and isinstance(records[0], dict)
+                    else None
+                )
+                if isinstance(first, dict):
+                    evidence_valley = first.get("evidence_valley")
+                    evidence_sample = first.get(
+                        "evidence_sampled_kpoint"
+                    )
+                    if (
+                        isinstance(evidence_valley, str)
+                        and evidence_valley
+                        and isinstance(evidence_sample, str)
+                        and evidence_sample
+                    ):
+                        scope_bundle = {
+                            "valley": evidence_valley,
+                            "valley_orbit": [evidence_valley],
+                        }
+                        scope_kpoint = evidence_sample
             record, raw_inputs = _cprime_fixture_scope(
-                bundle=bundle,
-                kpoint=str(kpoint),
+                bundle=scope_bundle,
+                kpoint=scope_kpoint,
+                source_table_sg_number=(
+                    _record_source_table_sg_number(first)
+                ),
             )
             entry = {"record": record, "raw_inputs": raw_inputs}
+            standard_certificate = _record_standard_setting_certificate(
+                first
+            )
+            if standard_certificate is not None:
+                entry["standard_setting_certificate"] = (
+                    standard_certificate
+                )
             entries[(id(bundle), str(kpoint))] = entry
             by_identity[str(record["evidence_identity"])] = entry
     entries["_by_identity"] = by_identity
@@ -200,7 +246,9 @@ def _complex_matrix_record(matrix: np.ndarray) -> list:
     ]
 
 
-def _cprime_fixture_lift_inputs() -> dict[str, object]:
+def _cprime_fixture_lift_inputs(
+    source_table_sg_number: int | None = None,
+) -> dict[str, object]:
     operations = [
         _cprime_fixture_operation(2, np.eye(3, dtype=int)),
         _cprime_fixture_operation(5, np.diag([1, -1, -1])),
@@ -209,7 +257,7 @@ def _cprime_fixture_lift_inputs() -> dict[str, object]:
         "schema_version": "1.0.0",
         "provider": "irreptables",
         "data_source": "irreptables.StandardIrrepTable",
-        "space_group_number": 1,
+        "space_group_number": source_table_sg_number or 1,
         "spinor": True,
         "operations": [
             {
@@ -242,9 +290,10 @@ def _cprime_fixture_scope(
     *,
     bundle: dict,
     kpoint: str,
+    source_table_sg_number: int | None = None,
 ) -> tuple[dict[str, object], dict[str, object]]:
     source = _cprime_fixture_source_record()
-    lift_inputs = _cprime_fixture_lift_inputs()
+    lift_inputs = _cprime_fixture_lift_inputs(source_table_sg_number)
     lift = build_double_space_group_lift_certificate(
         source,
         lift_inputs["expected_operations"],
@@ -254,15 +303,6 @@ def _cprime_fixture_scope(
         ],
         direct_lattice_cart=lift_inputs["direct_lattice_cart"],
     ).to_record()
-    construction = bundle.get("unitary_vector_construction")
-    tr_completed = (
-        bundle.get("problem_kind") == "valley_orbit_reduced_ebr"
-        or (
-            isinstance(construction, dict)
-            and construction.get("kind")
-            == "time_reversal_completed_unitary_rows"
-        )
-    )
     declared_orbit = [
         value
         for value in bundle.get("valley_orbit", [])
@@ -272,18 +312,9 @@ def _cprime_fixture_scope(
     orbit = declared_orbit or [source_valley]
     if source_valley not in orbit:
         source_valley = orbit[0]
-    exchanged = len(orbit) > 1
-    required_ids = (2, 5) if exchanged else (2,)
+    required_ids = (2,)
     representations = {2: np.eye(2, dtype=np.complex128)}
     mappings = {2: {valley: valley for valley in orbit}}
-    if exchanged:
-        representations[5] = np.array(
-            [[0.0, 1.0], [-1.0, 0.0]], dtype=np.complex128
-        )
-        mappings[5] = {
-            orbit[0]: orbit[1],
-            orbit[1]: orbit[0],
-        }
     projectors = {
         valley: np.diag(
             [1.0, 0.0] if index == 0 else [0.0, 1.0]
@@ -299,7 +330,6 @@ def _cprime_fixture_scope(
         )
         for index, valley in enumerate(orbit[:2])
     }
-    antiunitary = None
     q_cart = np.array(
         [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=float
     )
@@ -307,34 +337,6 @@ def _cprime_fixture_scope(
         2: np.eye(3, dtype=float),
         5: np.diag([1.0, -1.0, -1.0]),
     }
-    if tr_completed:
-        target = orbit[1] if exchanged else source_valley
-        target_q = -q_cart
-        antiunitary = {
-            "source_valley": source_valley,
-            "target_valley": target,
-            "source_hsp_label": kpoint,
-            "target_hsp_label": kpoint,
-            "time_reversal_hsp_mapping": {kpoint: kpoint},
-            "construction_kind": "observed_to_inferred",
-            "source_reciprocal_grid_vectors_cart": q_cart,
-            "target_reciprocal_grid_vectors_cart": target_q,
-            "source_reciprocal_grid_identity": reciprocal_grid_identity(
-                q_cart
-            ),
-            "target_reciprocal_grid_identity": reciprocal_grid_identity(
-                target_q
-            ),
-            "source_to_target_grid_map": [0, 1],
-            "forward_sewing_matrix": np.eye(2, dtype=np.complex128),
-            "reverse_sewing_matrix": -np.eye(2, dtype=np.complex128),
-            "expected_square_sign": -1,
-            "source_unitary_representations": representations,
-            "target_unitary_representations": {
-                operation_id: matrix.conj()
-                for operation_id, matrix in representations.items()
-            },
-        }
     raw_inputs: dict[str, object] = {
         "source_basis_record": source,
         "lift_record": lift,
@@ -344,7 +346,7 @@ def _cprime_fixture_scope(
         ),
         "kpoint_label": kpoint,
         "kpoint_frac": np.zeros(3),
-        "scope_kind": "tr_completed" if tr_completed else "local_irrep",
+        "scope_kind": "local_irrep",
         "source_valleys": (source_valley,),
         "valley_orbit": tuple(orbit),
         "required_operation_ids": required_ids,
@@ -370,7 +372,6 @@ def _cprime_fixture_scope(
         "projectors": projectors,
         "valley_bases": bases,
         "valley_mappings": mappings,
-        "antiunitary_evidence": antiunitary,
     }
     return (
         build_scoped_representation_evidence(**raw_inputs).to_record(),
@@ -558,7 +559,10 @@ def add_real_certificate_to_candidates(ebr_input_candidates: dict,
 def attach_cprime_fixture_to_candidates(
     ebr_input_candidates: dict,
 ) -> dict:
-    """Attach producer-like C-prime identity links without changing setting."""
+    """Attach identities from recomputable local C-prime producer fixtures."""
+    context = cprime_validation_context_for_candidates(
+        ebr_input_candidates
+    )
     for candidate in ebr_input_candidates.get("candidates", []):
         if not isinstance(candidate, dict):
             continue
@@ -566,26 +570,122 @@ def attach_cprime_fixture_to_candidates(
         if not isinstance(provenance, dict):
             provenance = {}
             candidate["irrep_source_provenance"] = provenance
+        entry = context.get(
+            (str(candidate.get("valley", "")), str(candidate.get("kpoint", "")))
+        )
+        if not isinstance(entry, dict):
+            continue
+        record = entry["record"]
         provenance["cprime"] = {
-            "spinor_source_basis_certificate_identity": canonical_identity({
-                "fixture": "spinor_source_basis",
-                "profile": "vasp_nonmagnetic_soc_default_saxis_v1",
-            }),
-            "double_space_group_lift_certificate_identity": (
-                canonical_identity({
-                    "fixture": "double_space_group_lift",
-                    "kpoint": str(candidate.get("kpoint", "")),
-                })
-            ),
-            "scoped_representation_evidence_identity": (
-                canonical_identity({
-                    "fixture": "scoped_representation_evidence",
-                    "kpoint": str(candidate.get("kpoint", "")),
-                    "valley": str(candidate.get("valley", "")),
-                })
-            ),
+            "spinor_source_basis_certificate_identity": record[
+                "source_basis_certificate_identity"
+            ],
+            "double_space_group_lift_certificate_identity": record[
+                "double_space_group_lift_certificate_identity"
+            ],
+            "scoped_representation_evidence_identity": record[
+                "evidence_identity"
+            ],
         }
     return ebr_input_candidates
+
+
+def cprime_validation_context_for_candidates(
+    ebr_input_candidates: dict,
+) -> dict[object, object]:
+    """Build deterministic local C-prime contexts for candidate fixtures."""
+    entries: dict[object, object] = {}
+    by_identity: dict[str, object] = {}
+    for candidate in ebr_input_candidates.get("candidates", []):
+        if not isinstance(candidate, dict):
+            continue
+        valley = str(candidate.get("valley", ""))
+        kpoint = str(candidate.get("kpoint", ""))
+        if not valley or not kpoint:
+            continue
+        provenance = candidate.get("irrep_source_provenance")
+        record, raw_inputs = _cprime_fixture_scope(
+            bundle={
+                "valley": valley,
+                "valley_orbit": [valley],
+            },
+            kpoint=kpoint,
+            source_table_sg_number=(
+                provenance.get("source_table_sg_number")
+                if isinstance(provenance, dict)
+                else None
+            ),
+        )
+        entry = {"record": record, "raw_inputs": raw_inputs}
+        setting_mapping = (
+            provenance.get("standard_setting_hsp_mapping")
+            if isinstance(provenance, dict)
+            else None
+        )
+        standard_certificate = (
+            setting_mapping.get("standard_setting_certificate")
+            if isinstance(setting_mapping, dict)
+            else None
+        )
+        if isinstance(standard_certificate, dict):
+            entry["standard_setting_certificate"] = deepcopy(
+                standard_certificate
+            )
+        entries[(valley, kpoint)] = entry
+        by_identity[str(record["evidence_identity"])] = entry
+    entries["_by_identity"] = by_identity
+    return entries
+
+
+def _record_standard_setting_certificate(
+    record: object,
+) -> dict[str, object] | None:
+    provenance = (
+        record.get("source_candidate_provenance")
+        if isinstance(record, dict)
+        else None
+    )
+    source_irrep = (
+        provenance.get("irrep_source_provenance")
+        if isinstance(provenance, dict)
+        else None
+    )
+    setting_mapping = (
+        source_irrep.get("standard_setting_hsp_mapping")
+        if isinstance(source_irrep, dict)
+        else None
+    )
+    certificate = (
+        setting_mapping.get("standard_setting_certificate")
+        if isinstance(setting_mapping, dict)
+        else None
+    )
+    return deepcopy(certificate) if isinstance(certificate, dict) else None
+
+
+def _record_source_table_sg_number(record: object) -> int | None:
+    provenance = (
+        record.get("source_candidate_provenance")
+        if isinstance(record, dict)
+        else None
+    )
+    source_irrep = (
+        provenance.get("irrep_source_provenance")
+        if isinstance(provenance, dict)
+        else None
+    )
+    value = (
+        source_irrep.get("source_table_sg_number")
+        if isinstance(source_irrep, dict)
+        else None
+    )
+    return (
+        value
+        if isinstance(value, int)
+        and not isinstance(value, bool)
+        and value > 0
+        else None
+    )
 
 
 def attach_real_certificate(export_bundle: dict, table: dict) -> dict | None:

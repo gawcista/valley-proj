@@ -161,8 +161,6 @@ class SymmetryAdaptedValleyConfig:
     projector_symmetry_fail_tol: float = 1e-1
     representation_unitarity_warn_tol: float = 1e-3
     representation_unitarity_fail_tol: float = 1e-2
-    projected_group_law_fail_tol: float = 1e-2
-    valley_block_leakage_fail_tol: float = 1e-2
     ebr_seed_overlap_min: float = 0.8
     ebr_unitarity_max: float = 1e-3
     write_subspace_representation_quality: bool = False
@@ -759,12 +757,6 @@ def _parse_symmetry_adapted_valley_config(raw: dict[str, Any]) -> SymmetryAdapte
         projector_symmetry_fail_tol=float(raw.get("projector_symmetry_fail_tol", 1e-1)),
         representation_unitarity_warn_tol=float(raw.get("representation_unitarity_warn_tol", 1e-3)),
         representation_unitarity_fail_tol=float(raw.get("representation_unitarity_fail_tol", 1e-2)),
-        projected_group_law_fail_tol=float(
-            raw.get("projected_group_law_fail_tol", 1e-2)
-        ),
-        valley_block_leakage_fail_tol=float(
-            raw.get("valley_block_leakage_fail_tol", 1e-2)
-        ),
         ebr_seed_overlap_min=float(raw.get("ebr_seed_overlap_min", 0.8)),
         ebr_unitarity_max=float(raw.get("ebr_unitarity_max", 1e-3)),
         write_subspace_representation_quality=bool(raw.get("write_subspace_representation_quality", False)),

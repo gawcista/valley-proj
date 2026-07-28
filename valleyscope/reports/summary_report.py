@@ -258,7 +258,6 @@ def _scoped_residual_maxima(
     group_law = evidence.get("projected_representation_group_law")
     covariance = evidence.get("projector_covariance")
     valley_block = evidence.get("valley_block_quality")
-    antiunitary = evidence.get("antiunitary_evidence")
     return {
         "coefficient_gram": _optional_number(
             target.get("coefficient_gram_error")
@@ -278,18 +277,6 @@ def _scoped_residual_maxima(
         ),
         "valley_block_leakage": _max_row_number(
             valley_block, "operation_rows", "block_leakage_residual"
-        ),
-        "antiunitary_square": _optional_number(
-            antiunitary.get("square_residual")
-            if isinstance(antiunitary, dict) else None
-        ),
-        "antiunitary_grid_mapping": _optional_number(
-            antiunitary.get("grid_mapping_residual")
-            if isinstance(antiunitary, dict) else None
-        ),
-        "antiunitary_unitary_compatibility": _optional_number(
-            antiunitary.get("max_unitary_compatibility_residual")
-            if isinstance(antiunitary, dict) else None
         ),
     }
 

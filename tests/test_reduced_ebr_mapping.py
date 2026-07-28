@@ -587,7 +587,12 @@ def test_public_docs_do_not_advertise_static_package_selector():
 def test_reduced_ebr_catalog_removed():
     """Package-data reduced EBR catalog was deleted. No static table selector remains."""
     import importlib
-    spec = importlib.util.find_spec("valleyscope.data.reduced_ebr.catalog")
+    try:
+        spec = importlib.util.find_spec(
+            "valleyscope.data.reduced_ebr.catalog"
+        )
+    except ModuleNotFoundError:
+        spec = None
     assert spec is None, "valleyscope.data.reduced_ebr.catalog was deleted"
 
 # -----------------------------------------------------------------------

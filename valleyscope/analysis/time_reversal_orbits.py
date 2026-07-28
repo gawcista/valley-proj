@@ -13,6 +13,10 @@ from valleyscope.analysis.time_reversal_sewing import (
     validate_time_reversal_sewing_report,
 )
 from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector
+from valleyscope.io.wavefunction_convention import (
+    canonical_identity,
+    valid_sha256_identity,
+)
 
 
 _TOL = 5e-6
@@ -242,12 +246,21 @@ def build_time_reversal_valley_orbit_report(
             structural_blockers.append(
                 "grey_group_time_reversal_source_not_validated"
             )
+        source_identities = [
+            _reviewed_time_reversal_source_identity(report)
+            for report in source_reports
+        ]
+        if any(identity is None for identity in source_identities):
+            structural_blockers.append(
+                "time_reversal_reviewed_source_identity_malformed"
+            )
         if source_reports and any(
             report.get("time_reversal_hsp_mapping")
             != source_reports[0].get("time_reversal_hsp_mapping")
             or report.get("irrep_partner_by_label")
             != source_reports[0].get("irrep_partner_by_label")
-            for report in source_reports[1:]
+            or source_identities[index] != source_identities[0]
+            for index, report in enumerate(source_reports[1:], start=1)
         ):
             structural_blockers.append(
                 "valley_source_time_reversal_models_disagree"
@@ -576,6 +589,11 @@ def build_time_reversal_valley_orbit_report(
                 "time_reversal_hsp_orbits", []
             ),
             "time_reversal_irrep_pairing": dict(irrep_mapping),
+            "reviewed_time_reversal_source_identity": (
+                source_identities[0]
+                if source_identities and source_identities[0] is not None
+                else {}
+            ),
             "full_unitary_source_hsp_labels": full_hsps,
             "independent_time_reversal_hsp_labels": independent_hsps,
             "source_hsp_to_sampled_kpoint": source_to_sampled,
@@ -621,6 +639,48 @@ def build_time_reversal_valley_orbit_report(
             blocker for row in orbit_rows for blocker in row["blockers"]
         ]),
     }
+
+
+def _reviewed_time_reversal_source_identity(
+    report: Mapping[str, object],
+) -> dict[str, object] | None:
+    operation_inventory_identity = report.get(
+        "operation_inventory_identity"
+    )
+    spin_convention = report.get("spin_convention")
+    hsp_involution = report.get("time_reversal_hsp_mapping")
+    irrep_pairing = report.get("irrep_partner_by_label")
+    if (
+        not _valid_operation_inventory_identity(
+            operation_inventory_identity
+        )
+        or not isinstance(spin_convention, str)
+        or not spin_convention
+        or not _is_nonempty_involutive_string_mapping(hsp_involution)
+        or not _is_nonempty_involutive_string_mapping(irrep_pairing)
+    ):
+        return None
+    content = {
+        "operation_inventory_identity": operation_inventory_identity,
+        "spin_convention": spin_convention,
+        "hsp_involution": dict(hsp_involution),
+        "irrep_pairing": dict(irrep_pairing),
+    }
+    return {
+        **content,
+        "identity": canonical_identity(content),
+    }
+
+
+def _valid_operation_inventory_identity(value: object) -> bool:
+    return bool(
+        valid_sha256_identity(value)
+        or (
+            isinstance(value, str)
+            and len(value) == 64
+            and all(character in "0123456789abcdef" for character in value)
+        )
+    )
 
 
 def _candidate_unitary_completion_records(
