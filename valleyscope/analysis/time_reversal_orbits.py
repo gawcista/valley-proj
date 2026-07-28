@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 import numpy as np
 
 from valleyscope.analysis.reduced_ebr_solver import (
@@ -16,6 +17,9 @@ from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector
 from valleyscope.io.wavefunction_convention import (
     canonical_identity,
     valid_sha256_identity,
+)
+from valleyscope.irreps.time_reversal_source import (
+    validate_reviewed_time_reversal_source_context,
 )
 
 
@@ -208,7 +212,7 @@ def build_time_reversal_valley_orbit_report(
                 "time_reversal_valley_orbit_members_malformed"
             )
         structural_blockers: list[str] = []
-        readiness_blockers: list[str] = []
+        joint_corepresentation_blockers: list[str] = []
         mapping_type = str(raw_orbit.get("mapping_type", ""))
         if mapping_type == "exchanged":
             if len(members) != 2:
@@ -231,19 +235,40 @@ def build_time_reversal_valley_orbit_report(
             )
             representative = members[0] if members else ""
 
-        source_reports = [
+        serialized_source_reports = [
             source_irrep_orbits_by_valley.get(member, {})
             for member in members
         ]
+        source_reports: list[dict[str, object]] = []
+        for serialized_report in serialized_source_reports:
+            context = serialized_report.get("reviewed_source_context")
+            rederived = validate_reviewed_time_reversal_source_context(
+                context,
+            )
+            if rederived.get("status") != "validated":
+                structural_blockers.append(
+                    "time_reversal_source_irrep_orbits_not_validated"
+                )
+            elif any(
+                serialized_report.get(key) != rederived.get(key)
+                for key in (
+                    "time_reversal_hsp_mapping",
+                    "time_reversal_hsp_orbits",
+                    "independent_hsp_labels",
+                    "irrep_partner_by_label",
+                    "operation_inventory_identity",
+                    "spin_convention",
+                )
+            ):
+                structural_blockers.append(
+                    "time_reversal_serialized_source_model_mismatch"
+                )
+            source_reports.append(rederived)
         grey_reports = [
             grey_source_by_valley.get(member, {}) for member in members
         ]
-        if any(report.get("status") != "validated" for report in source_reports):
-            structural_blockers.append(
-                "time_reversal_source_irrep_orbits_not_validated"
-            )
         if any(report.get("status") != "validated" for report in grey_reports):
-            structural_blockers.append(
+            joint_corepresentation_blockers.append(
                 "grey_group_time_reversal_source_not_validated"
             )
         source_identities = [
@@ -272,7 +297,7 @@ def build_time_reversal_valley_orbit_report(
             != grey_reports[0].get("grey_unitary_restriction_by_irrep")
             for report in grey_reports[1:]
         ):
-            structural_blockers.append(
+            joint_corepresentation_blockers.append(
                 "valley_grey_source_models_disagree"
             )
 
@@ -317,7 +342,7 @@ def build_time_reversal_valley_orbit_report(
                 unitary_hsp_by_irrep,
             )
         ):
-            structural_blockers.append(
+            joint_corepresentation_blockers.append(
                 "grey_group_time_reversal_source_mapping_malformed"
             )
 
@@ -375,7 +400,9 @@ def build_time_reversal_valley_orbit_report(
                 projector_workflows,
                 projector_workflow_blockers,
             ) = _candidate_projector_workflows(candidates, members)
-            readiness_blockers.extend(projector_workflow_blockers)
+            joint_corepresentation_blockers.extend(
+                projector_workflow_blockers
+            )
             (
                 projector_provenance,
                 projector_provenance_blockers,
@@ -383,12 +410,16 @@ def build_time_reversal_valley_orbit_report(
                 projector_workflows,
                 trusted_projector_provenance_by_kpoint,
             )
-            readiness_blockers.extend(projector_provenance_blockers)
+            joint_corepresentation_blockers.extend(
+                projector_provenance_blockers
+            )
             (
                 source_hsp_bindings,
                 source_hsp_binding_blockers,
             ) = _candidate_source_hsp_bindings(candidates, members)
-            structural_blockers.extend(source_hsp_binding_blockers)
+            joint_corepresentation_blockers.extend(
+                source_hsp_binding_blockers
+            )
             if not validate_time_reversal_sewing_report(
                 antiunitary_sewing_report,
                 valley_members=members,
@@ -397,7 +428,7 @@ def build_time_reversal_valley_orbit_report(
                 required_projector_workflows=projector_workflows,
                 required_projector_provenance=projector_provenance,
             ):
-                readiness_blockers.append(
+                joint_corepresentation_blockers.append(
                     "antiunitary_corepresentation_sewing_not_validated"
                 )
         for member in members:
@@ -511,17 +542,6 @@ def build_time_reversal_valley_orbit_report(
                         ).get(hsp, [])
                     ]
 
-        if mapping_type == "self_mapped" and readiness_blockers:
-            for by_hsp in completion_records.values():
-                for records in by_hsp.values():
-                    for record in records:
-                        if record.get("completion_kind") != (
-                            "inferred_by_time_reversal"
-                        ):
-                            continue
-                        for blocker in readiness_blockers:
-                            _block_completion_record_readiness(record, blocker)
-
         full_hsps = list(hsp_mapping)
         for member in members:
             for hsp in full_hsps:
@@ -542,22 +562,36 @@ def build_time_reversal_valley_orbit_report(
             )
 
         grey_counts: dict[str, dict[str, int]] = {}
-        if not structural_blockers:
+        grey_source_blocked = any(
+            blocker.startswith("grey_group_time_reversal_source")
+            or blocker == "valley_grey_source_models_disagree"
+            for blocker in joint_corepresentation_blockers
+        )
+        if not structural_blockers and not grey_source_blocked:
             grey_counts, decomposition_blockers = _decompose_grey_counts(
                 unitary_counts_by_hsp=combined,
                 grey_restrictions=grey_restrictions,
                 grey_hsp_by_irrep=grey_hsp_by_irrep,
                 unitary_hsp_by_irrep=unitary_hsp_by_irrep,
             )
-            structural_blockers.extend(decomposition_blockers)
+            joint_corepresentation_blockers.extend(decomposition_blockers)
             if not set(independent_hsps).issubset(grey_counts):
-                structural_blockers.append(
+                joint_corepresentation_blockers.append(
                     "time_reversal_grey_decomposition_basis_incomplete"
                 )
 
+        unitary_completion_blockers = _deduplicate(structural_blockers)
+        if unitary_completion_blockers:
+            for by_hsp in completion_records.values():
+                for records in by_hsp.values():
+                    for blocker in unitary_completion_blockers:
+                        _block_completion_records(records, blocker)
+        joint_corepresentation_blockers = _deduplicate(
+            joint_corepresentation_blockers
+        )
         all_blockers = _deduplicate([
-            *structural_blockers,
-            *readiness_blockers,
+            *unitary_completion_blockers,
+            *joint_corepresentation_blockers,
         ])
 
         irreps_by_kpoint = {
@@ -575,9 +609,20 @@ def build_time_reversal_valley_orbit_report(
             "members": members,
             "mapping_type": mapping_type,
             "status": "validated" if not all_blockers else "blocked",
+            "unitary_completion_status": (
+                "validated" if not unitary_completion_blockers else "blocked"
+            ),
+            "joint_corepresentation_status": (
+                "validated"
+                if not joint_corepresentation_blockers
+                and not unitary_completion_blockers
+                else "blocked"
+            ),
             "antiunitary_corepresentation_status": (
                 "validated"
-                if mapping_type == "self_mapped" and not all_blockers
+                if mapping_type == "self_mapped"
+                and not unitary_completion_blockers
+                and not joint_corepresentation_blockers
                 else "not_required_for_exchanged_orbit"
                 if mapping_type == "exchanged"
                 else "blocked"
@@ -592,6 +637,13 @@ def build_time_reversal_valley_orbit_report(
             "reviewed_time_reversal_source_identity": (
                 source_identities[0]
                 if source_identities and source_identities[0] is not None
+                else {}
+            ),
+            "reviewed_time_reversal_source_context": (
+                deepcopy(source_report.get("reviewed_source_context", {}))
+                if isinstance(
+                    source_report.get("reviewed_source_context"), Mapping
+                )
                 else {}
             ),
             "full_unitary_source_hsp_labels": full_hsps,
@@ -614,8 +666,12 @@ def build_time_reversal_valley_orbit_report(
             "grey_irrep_multiplicities_by_hsp": grey_counts,
             "irreps_by_kpoint": irreps_by_kpoint,
             "expected_hsps": list(independent_hsps),
-            "structural_blockers": _deduplicate(structural_blockers),
-            "readiness_blockers": _deduplicate(readiness_blockers),
+            "unitary_completion_blockers": unitary_completion_blockers,
+            "joint_corepresentation_blockers": (
+                joint_corepresentation_blockers
+            ),
+            "structural_blockers": unitary_completion_blockers,
+            "readiness_blockers": joint_corepresentation_blockers,
             "blockers": all_blockers,
         })
 

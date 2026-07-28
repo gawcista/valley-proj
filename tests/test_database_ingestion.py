@@ -4,6 +4,7 @@ from copy import deepcopy
 from pathlib import Path
 import subprocess
 import sys
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -13,12 +14,24 @@ from valleyscope.io.config import load_config
 from valleyscope.io.wavefunction_convention import canonical_identity
 from valleyscope.workflows.analyze_hsp import analyze_hsp
 
+import valleyscope.analysis.database_ingestion_record as _ingestion_module
+import valleyscope.analysis.tr_irrep_completion as _tr_completion_module
+import valleyscope.irreps.time_reversal_source as _tr_source_module
 from valleyscope.analysis.database_ingestion_record import (
-    build_database_ingestion_record,
+    build_database_ingestion_record as _build_database_ingestion_record,
     load_database_ingestion_record_from_directory,
 )
 from valleyscope.analysis.tr_irrep_completion import (
-    attach_tr_irrep_completion_certificates,
+    attach_tr_irrep_completion_certificates as _attach_tr_irrep_completion_certificates,
+)
+from valleyscope.analysis.unitary_provenance import (
+    unitary_bundle_claims_time_reversal_completion,
+    validate_tr_completed_unitary_bundle as _validate_tr_completed_unitary_bundle,
+)
+from valleyscope.irreps.tables import ReviewedSourceIrrep
+from valleyscope.irreps.time_reversal_source import (
+    derive_time_reversal_source_irrep_orbits,
+    validate_reviewed_time_reversal_source_context as _validate_reviewed_time_reversal_source_context,
 )
 
 from tests.helpers_io_workflow import write_fixture, write_config
@@ -29,14 +42,101 @@ from tests.reduced_ebr_promo_helpers import (
 )
 
 
+def build_database_ingestion_record(**kwargs):
+    production_validator = (
+        _ingestion_module.validate_unitary_bundle_provenance
+    )
+
+    def fixture_validator(bundle):
+        if unitary_bundle_claims_time_reversal_completion(bundle):
+            return _validate_tr_completed_unitary_bundle(
+                bundle,
+                require_reviewed_table=False,
+            )
+        return production_validator(bundle)
+
+    with patch.object(
+        _ingestion_module,
+        "validate_unitary_bundle_provenance",
+        fixture_validator,
+    ):
+        return _build_database_ingestion_record(**kwargs)
+
+
+def attach_tr_irrep_completion_certificates(**kwargs):
+    """Exercise structural synthetic rows without weakening production trust."""
+
+    def fixture_validator(context, **_kwargs):
+        return _validate_reviewed_time_reversal_source_context(
+            context,
+            require_reviewed_table=False,
+        )
+
+    with patch.object(
+        _tr_source_module,
+        "validate_reviewed_time_reversal_source_context",
+        fixture_validator,
+    ), patch.object(
+        _tr_completion_module,
+        "_source_context_matches_source_irrep",
+        lambda _context, _source_irrep: True,
+    ):
+        return _attach_tr_irrep_completion_certificates(**kwargs)
+
+
+def _reviewed_tr_source_report() -> dict[str, object]:
+    inventory = canonical_identity({
+        "fixture": "database_ingestion_reviewed_operations",
+    })
+    rows = [
+        ReviewedSourceIrrep(
+            label=label,
+            kpoint_label=hsp,
+            k_frac=np.asarray(k_frac, dtype=float),
+            dimension=1,
+            characters={1: character},
+            operation_indices=(1,),
+            operation_inventory_identity=inventory,
+            spinor=True,
+            spin_convention="double_group_spinor",
+            source_table="fixture_standard_irrep_table",
+            source_table_status="reviewed_fixture",
+            source_provenance="irreptables.StandardIrrepTable",
+        )
+        for label, hsp, k_frac, character in (
+            ("A", "GM", [0.0, 0.0, 0.0], 1.0 + 0.0j),
+            ("B", "K", [1.0 / 3.0, 1.0 / 3.0, 0.0], 0.0 + 1.0j),
+            ("Bp", "KA", [-1.0 / 3.0, -1.0 / 3.0, 0.0], 0.0 - 1.0j),
+        )
+    ]
+    return derive_time_reversal_source_irrep_orbits(
+        reviewed_rows=rows,
+        centering_vectors=[[0.0, 0.0, 0.0]],
+        source_table_identity={
+            "space_group_number": 143,
+            "space_group_symbol": "P3",
+            "source_table_name": "P3",
+            "source_table_provenance": "irreptables.StandardIrrepTable",
+            "spinor": True,
+        },
+        standard_setting_certificate={
+            "schema_version": "1.0.0",
+            "validation_status": "validated",
+            "fixture": "database_ingestion_unitary",
+            "centering_vectors": [[0.0, 0.0, 0.0]],
+        },
+    )
+
+
 def _reviewed_tr_source_identity() -> dict[str, object]:
+    report = _reviewed_tr_source_report()
     content = {
-        "operation_inventory_identity": canonical_identity({
-            "fixture": "database_ingestion_reviewed_operations",
-        }),
-        "spin_convention": "spinor_double_group",
-        "hsp_involution": {"GM": "GM", "K": "KA", "KA": "K"},
-        "irrep_pairing": {"A": "A", "B": "Bp", "Bp": "B"},
+        "operation_inventory_identity": report[
+            "operation_inventory_identity"
+        ],
+        "spin_convention": report["spin_convention"],
+        "hsp_involution": report["time_reversal_hsp_mapping"],
+        "irrep_pairing": report["irrep_partner_by_label"],
     }
     return {**content, "identity": canonical_identity(content)}
 
@@ -72,6 +172,8 @@ def _cprime_export(*bundles):
             ),
             "valley_orbits": [{
                 "status": "validated",
+                "unitary_completion_status": "validated",
+                "unitary_completion_blockers": [],
                 "blockers": [],
                 "mapping_type": evidence.get("mapping_type"),
                 "time_reversal_hsp_orbits": evidence.get(
@@ -82,6 +184,9 @@ def _cprime_export(*bundles):
                 ),
                 "reviewed_time_reversal_source_identity": evidence.get(
                     "reviewed_time_reversal_source_identity", {}
+                ),
+                "reviewed_time_reversal_source_context": evidence.get(
+                    "reviewed_time_reversal_source_context", {}
                 ),
                 "unitary_valley_irrep_completion_records": {
                     valley: records,
@@ -465,6 +570,7 @@ def test_tr_ingestion_fallback_requires_complete_valley_resolved_binding(
 
 
 def _tr_completed_unitary_bundle():
+    reviewed_source = _reviewed_tr_source_report()
     observed_identity = {
         "source": "fixture/K/GM",
         "workflow_path": "direct_qcut",
@@ -482,7 +588,7 @@ def _tr_completed_unitary_bundle():
             "subspace_space_group_number": 143,
             "subspace_space_group_symbol": "P3",
             "source_table_sg_number": 143,
-            "source_table_name": "irreptables.StandardIrrepTable",
+            "source_table_name": "P3",
             "source_hsp_label": "GM",
             "source_table_spinor": True,
             "standard_setting_hsp_mapping": {
@@ -490,6 +596,7 @@ def _tr_completed_unitary_bundle():
                     "schema_version": "1.0.0",
                     "validation_status": "validated",
                     "fixture": "database_ingestion_unitary",
+                    "centering_vectors": [[0.0, 0.0, 0.0]],
                 },
             },
         },
@@ -552,6 +659,9 @@ def _tr_completed_unitary_bundle():
             "reviewed_time_reversal_source_identity": (
                 _reviewed_tr_source_identity()
             ),
+            "reviewed_time_reversal_source_context": reviewed_source[
+                "reviewed_source_context"
+            ],
         },
         "irrep_records_by_kpoint": {},
         "unitary_irrep_completion_records_by_hsp": {
@@ -895,8 +1005,6 @@ def test_ingestion_record_excludes_non_ready_bundles():
 
 def test_ingestion_record_with_reduced_ebr_mapping():
     """Reduced EBR mapping adds status and classification counts."""
-    from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
-
     summary = {"target_kpoints": [], "iband": [], "input": {}}
     payloads = [
         _authoritative_unitary_ingestion_payload(

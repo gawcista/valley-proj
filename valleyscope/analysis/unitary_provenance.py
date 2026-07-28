@@ -11,6 +11,7 @@ from valleyscope.analysis.time_reversal_sewing import (
 from valleyscope.analysis.tr_irrep_completion import (
     validate_tr_irrep_completion_certificate,
 )
+from valleyscope.io.wavefunction_convention import canonical_identity
 
 
 _PROJECTOR_WORKFLOWS = frozenset({"direct_qcut", "symmetry_adapted"})
@@ -169,6 +170,8 @@ def validate_direct_unitary_bundle(
 
 def validate_tr_completed_unitary_bundle(
     bundle: Mapping[str, object],
+    *,
+    require_reviewed_table: bool = True,
 ) -> bool:
     """Validate serialized row-level TR completion and sewing dependencies."""
     valley = bundle.get("valley")
@@ -223,6 +226,57 @@ def validate_tr_completed_unitary_bundle(
         or set(expected_hsps) != set(irreps_by_hsp)
         or set(expected_hsps) != set(records_by_hsp)
         or bundle.get("irrep_records_by_kpoint") not in ({}, None)
+    ):
+        return False
+
+    source_context = time_reversal.get(
+        "reviewed_time_reversal_source_context"
+    )
+    from valleyscope.irreps.time_reversal_source import (
+        validate_reviewed_time_reversal_source_context,
+    )
+    rederived_source = validate_reviewed_time_reversal_source_context(
+        source_context,
+        require_reviewed_table=require_reviewed_table,
+    )
+    if rederived_source.get("status") != "validated":
+        return False
+    expected_source_content = {
+        "operation_inventory_identity": rederived_source.get(
+            "operation_inventory_identity"
+        ),
+        "spin_convention": rederived_source.get("spin_convention"),
+        "hsp_involution": rederived_source.get(
+            "time_reversal_hsp_mapping"
+        ),
+        "irrep_pairing": rederived_source.get("irrep_partner_by_label"),
+    }
+    expected_source_identity = {
+        **expected_source_content,
+        "identity": canonical_identity(expected_source_content),
+    }
+    if (
+        time_reversal.get("time_reversal_hsp_orbits")
+        != rederived_source.get("time_reversal_hsp_orbits")
+        or time_reversal.get("time_reversal_irrep_pairing")
+        != rederived_source.get("irrep_partner_by_label")
+        or time_reversal.get("reviewed_time_reversal_source_identity")
+        != expected_source_identity
+        or (
+            require_reviewed_table
+            and not _source_context_matches_bundle_certificate(
+                source_context=source_context,
+                certificate_identity=bundle.get("certificate_identity"),
+            )
+        )
+        or (
+            time_reversal.get("mapping_type") == "exchanged"
+            and require_reviewed_table
+            and not _completion_context_matches_reviewed_source(
+                records_by_hsp=records_by_hsp,
+                source_context=source_context,
+            )
+        )
     ):
         return False
 
@@ -299,6 +353,9 @@ def validate_tr_completed_unitary_bundle(
         reviewed_source_identity=time_reversal.get(
             "reviewed_time_reversal_source_identity", {}
         ),
+        reviewed_source_context=(
+            source_context if require_reviewed_table else None
+        ),
         independent_hsps=set(independent_hsps),
         expected_spinor=spinor,
     )
@@ -327,6 +384,189 @@ def validate_tr_completed_unitary_bundle(
     )
 
 
+def _completion_context_matches_reviewed_source(
+    *,
+    records_by_hsp: Mapping[str, object],
+    source_context: object,
+) -> bool:
+    if not isinstance(source_context, Mapping):
+        return False
+    source_table = source_context.get("source_table_identity")
+    setting = source_context.get("standard_setting_certificate")
+    lift_record = source_context.get("parent_affine_lift_record")
+    if (
+        not isinstance(source_table, Mapping)
+        or not isinstance(setting, Mapping)
+        or not isinstance(lift_record, Mapping)
+    ):
+        return False
+    from valleyscope.irreps.time_reversal_source import (
+        normalize_time_reversal_standard_setting_context,
+    )
+    expected_table = {
+        "matching_strategy": "bilbao_restricted_character",
+        "subspace_space_group_number": source_table.get(
+            "space_group_number"
+        ),
+        "subspace_space_group_symbol": source_table.get(
+            "space_group_symbol"
+        ),
+        "source_table_sg_number": source_table.get("space_group_number"),
+        "source_table_name": source_table.get("source_table_name"),
+        "source_table_spinor": source_table.get("spinor"),
+    }
+    inferred_count = 0
+    for records in records_by_hsp.values():
+        if not isinstance(records, list):
+            return False
+        for record in records:
+            if not isinstance(record, Mapping):
+                return False
+            if record.get("completion_kind") != "inferred_by_time_reversal":
+                continue
+            inferred_count += 1
+            certificate = record.get("tr_irrep_completion_certificate")
+            reviewed = (
+                certificate.get("reviewed_time_reversal")
+                if isinstance(certificate, Mapping) else None
+            )
+            provenance = record.get("source_candidate_provenance")
+            source_irrep = (
+                provenance.get("irrep_source_provenance")
+                if isinstance(provenance, Mapping) else None
+            )
+            cprime = (
+                source_irrep.get("cprime")
+                if isinstance(source_irrep, Mapping) else None
+            )
+            setting_mapping = (
+                source_irrep.get("standard_setting_hsp_mapping")
+                if isinstance(source_irrep, Mapping) else None
+            )
+            source_setting = (
+                setting_mapping.get("standard_setting_certificate")
+                if isinstance(setting_mapping, Mapping) else None
+            )
+            try:
+                source_setting_identity = (
+                    canonical_identity(source_setting)
+                    if isinstance(source_setting, Mapping) else None
+                )
+            except (TypeError, ValueError):
+                return False
+            if (
+                not isinstance(reviewed, Mapping)
+                or not isinstance(source_setting, Mapping)
+                or not isinstance(cprime, Mapping)
+                or reviewed.get("source_table_identity") != expected_table
+                or lift_record.get("certificate_identity")
+                != cprime.get(
+                    "double_space_group_lift_certificate_identity"
+                )
+                or certificate.get(
+                    "standard_setting_certificate_identity"
+                ) != source_setting_identity
+                or normalize_time_reversal_standard_setting_context(
+                    source_setting
+                ) != setting
+            ):
+                return False
+    return inferred_count > 0
+
+
+def _source_context_matches_bundle_certificate(
+    *,
+    source_context: object,
+    certificate_identity: object,
+) -> bool:
+    """Bind serialized TR source setting to the independent bundle setting."""
+    if not isinstance(source_context, Mapping) or not isinstance(
+        certificate_identity, Mapping
+    ):
+        return False
+    setting = source_context.get("standard_setting_certificate")
+    if not isinstance(setting, Mapping):
+        return False
+    field_map = {
+        "subspace_sg_number": "sg_number",
+        "subspace_sg_symbol": "sg_symbol",
+        "hall_number": "hall_number",
+        "hall_symbol": "hall_symbol",
+        "centering_type": "centering_type",
+        "primitive_conventional_relation": (
+            "primitive_conventional_relation"
+        ),
+        "transform_provenance": "transform_provenance",
+        "validation_status": "validation_status",
+        "operation_mapping_status": "operation_mapping_status",
+        "translation_validation_status": "affine_validation_status",
+        "matched_affine_operations": "affine_matched_operations",
+        "total_parent_operations": "affine_total_operations",
+        "mismatched_translation_count": "affine_mismatch_count",
+        "missing_affine_ingredients": "affine_missing_ingredients",
+        "standard_setting_operation_count": (
+            "affine_standard_setting_op_count"
+        ),
+        "affine_operation_map": "affine_operation_map",
+        "parent_basis_operation_ids": "affine_required_operation_ids",
+        "required_operation_id_count": "affine_required_op_count",
+        "unmatched_parent_operations": (
+            "affine_unmatched_parent_operations"
+        ),
+        "unused_standard_operation_indices": (
+            "affine_unused_standard_operation_indices"
+        ),
+        "operation_closure_validated": "operation_closure_validated",
+        "canonical_setting_status": "canonical_setting_status",
+        "canonical_setting_source": "canonical_setting_source",
+        "canonical_hall_numbers": "canonical_hall_numbers",
+        "canonical_candidate_hall_numbers": (
+            "canonical_candidate_hall_numbers"
+        ),
+        "centering_coset_count": "centering_coset_count",
+        "primitive_conventional_index": "primitive_conventional_index",
+        "expanded_parent_operation_count": (
+            "expanded_parent_operation_count"
+        ),
+        "matched_expanded_operations": "matched_expanded_operations",
+        "centered_affine_operation_map": "centered_affine_operation_map",
+        "unmatched_centered_operation_pairs": (
+            "affine_unmatched_centered_operation_pairs"
+        ),
+        "standard_operation_closure_validated": (
+            "standard_operation_closure_validated"
+        ),
+    }
+    if any(
+        setting.get(source_key) != certificate_identity.get(bundle_key)
+        for source_key, bundle_key in field_map.items()
+    ):
+        return False
+    if (
+        setting.get("parent_to_standard_direct_transform")
+        != certificate_identity.get("normalized_direct_transform")
+        or setting.get("origin_shift_fractional")
+        != certificate_identity.get("normalized_origin_shift")
+        or setting.get("centering_vectors")
+        != certificate_identity.get("normalized_centering_vectors")
+    ):
+        return False
+    hall_number = setting.get("hall_number")
+    hall_symbol = setting.get("hall_symbol")
+    centering_type = setting.get("centering_type")
+    validation_status = setting.get("validation_status")
+    return bool(
+        certificate_identity.get("distinct_setting_identities") == 1
+        and certificate_identity.get("any_unresolved") is False
+        and certificate_identity.get("hall_numbers") == [hall_number]
+        and certificate_identity.get("hall_symbols") == [hall_symbol]
+        and certificate_identity.get("centering_types") == [centering_type]
+        and certificate_identity.get(
+            "certificate_validation_statuses"
+        ) == [validation_status]
+    )
+
+
 def _completion_records_valid(
     *,
     valley: str,
@@ -337,6 +577,7 @@ def _completion_records_valid(
     hsp_mapping: Mapping[str, str],
     irrep_mapping: Mapping[str, str],
     reviewed_source_identity: Mapping[str, object],
+    reviewed_source_context: Mapping[str, object] | None,
     independent_hsps: set[str],
     expected_spinor: bool,
 ) -> tuple[bool, set[str]]:
@@ -462,6 +703,9 @@ def _completion_records_valid(
                             irrep_pairing=irrep_mapping,
                             reviewed_source_identity=(
                                 reviewed_source_identity
+                            ),
+                            reviewed_source_context=(
+                                reviewed_source_context
                             ),
                         )
                     )

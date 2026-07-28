@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 
 import h5py
 import numpy as np
+import pytest
 
 from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
 from valleyscope.analysis.ebr_problem_instances import (
@@ -23,6 +25,9 @@ from valleyscope.analysis.reduced_ebr_mapping import (
 )
 from valleyscope.analysis.scoped_representation_evidence import (
     build_scoped_representation_evidence,
+)
+from valleyscope.analysis.time_reversal_orbits import (
+    build_time_reversal_valley_orbit_report,
 )
 from valleyscope.analysis.tr_irrep_completion import (
     attach_tr_irrep_completion_certificates,
@@ -102,6 +107,12 @@ def _producer_contexts(tmp_path: Path):
         143, "P3", spinor=True
     )
     assert standard_certificate is not None
+    standard_certificate["parent_basis_operation_ids"] = [1, 2, 3]
+    standard_certificate["affine_operation_map"] = {
+        "1": 0,
+        "2": 1,
+        "3": 2,
+    }
     operation_indices = [
         operation.table_index for operation in table.operations
     ]
@@ -254,7 +265,7 @@ def _candidate(
             "subspace_space_group_number": 143,
             "subspace_space_group_symbol": "P3",
             "source_table_sg_number": 143,
-            "source_table_name": "irreptables.StandardIrrepTable",
+            "source_table_name": "P3",
             "source_table_spinor": True,
             "source_hsp_label": "K",
             "standard_setting_hsp_mapping": {
@@ -268,68 +279,7 @@ def _candidate(
     }
 
 
-def _identity(candidate: dict[str, object]) -> dict[str, object]:
-    return {
-        "source": candidate["source"],
-        "workflow_path": candidate["workflow_path"],
-        "valley": candidate["valley"],
-        "source_hsp_label": "K",
-        "sampled_kpoint": candidate["kpoint"],
-        "irrep": candidate["matched_irrep"],
-        "multiplicity": 1,
-    }
-
-
-def _completion_record(
-    *,
-    target_valley: str,
-    target_hsp: str,
-    target_irrep: str,
-    source: dict[str, object],
-    inferred: bool,
-) -> dict[str, object]:
-    record = {
-        "completion_kind": (
-            "inferred_by_time_reversal"
-            if inferred
-            else "observed_at_sampled_kpoint"
-        ),
-        "target_valley": target_valley,
-        "target_source_hsp_label": target_hsp,
-        "irrep": target_irrep,
-        "multiplicity": 1,
-        "evidence_valley": source["valley"],
-        "evidence_source_hsp_label": "K",
-        "evidence_sampled_kpoint": source["kpoint"],
-        "source_candidate_identity": _identity(source),
-        "source_candidate_provenance": {
-            "source": source["source"],
-            "workflow_path": source["workflow_path"],
-            "irrep_source_provenance": deepcopy(
-                source["irrep_source_provenance"]
-            ),
-        },
-        "structural_status": "validated",
-        "readiness_status": "trusted",
-        "blockers": [],
-    }
-    if inferred:
-        record["reviewed_time_reversal_relation"] = {
-            "evidence_valley": source["valley"],
-            "target_valley": target_valley,
-            "evidence_source_hsp_label": "K",
-            "target_source_hsp_label": target_hsp,
-            "evidence_irrep": source["matched_irrep"],
-            "target_irrep": target_irrep,
-        }
-    else:
-        record["sampled_kpoint"] = source["kpoint"]
-    return record
-
-
-def test_tracked_only_exact_completion_uses_real_irreptables_source(
-    tmp_path,
-):
+def _portable_orbit_inputs(tmp_path: Path):
     table, context, cprime, standard_certificate = _producer_contexts(
         tmp_path
     )
@@ -338,25 +288,36 @@ def test_tracked_only_exact_completion_uses_real_irreptables_source(
         table=table,
         source_basis_labels=ebr_source["source_basis_labels"],
     )
+    in_plane_rows = [
+        row for row in reviewed["reviewed_rows"]
+        if row.kpoint_label in {"K", "KA"}
+    ]
+    source_table_identity = {
+        "space_group_number": table.number,
+        "space_group_symbol": table.name,
+        "source_table_name": table.name,
+        "source_table_provenance": "irreptables.StandardIrrepTable",
+        "spinor": table.spinor,
+    }
+    parent_affine_operations = [
+        {
+            "operation_id": operation.table_index,
+            "rotation_frac": operation.rotation_frac,
+            "translation_frac": operation.translation_frac,
+        }
+        for operation in table.operations
+    ]
+    parent_affine_lift_record = next(iter(context.values()))[
+        "raw_inputs"
+    ]["lift_record"]
     tr_source = derive_time_reversal_source_irrep_orbits(
-        reviewed_rows=reviewed["reviewed_rows"],
+        reviewed_rows=in_plane_rows,
         centering_vectors=[[0.0, 0.0, 0.0]],
+        source_table_identity=source_table_identity,
+        standard_setting_certificate=standard_certificate,
+        parent_affine_operations=parent_affine_operations,
+        parent_affine_lift_record=parent_affine_lift_record,
     )
-    assert reviewed["status"] == tr_source["status"] == "validated"
-    assert tr_source["irrep_partner_by_label"]["-K4"] == "-KA4"
-    reviewed_source_content = {
-        "operation_inventory_identity": tr_source[
-            "operation_inventory_identity"
-        ],
-        "spin_convention": tr_source["spin_convention"],
-        "hsp_involution": tr_source["time_reversal_hsp_mapping"],
-        "irrep_pairing": tr_source["irrep_partner_by_label"],
-    }
-    reviewed_source_identity = {
-        **reviewed_source_content,
-        "identity": canonical_identity(reviewed_source_content),
-    }
-
     left = _candidate(
         valley="left",
         sampled_kpoint="K_left",
@@ -371,90 +332,106 @@ def test_tracked_only_exact_completion_uses_real_irreptables_source(
         cprime=cprime["right"],
         standard_setting_certificate=standard_certificate,
     )
-    records = {
-        "left": {
-            "K": [_completion_record(
-                target_valley="left",
-                target_hsp="K",
-                target_irrep="-K4",
-                source=left,
-                inferred=False,
-            )],
-            "KA": [_completion_record(
-                target_valley="left",
-                target_hsp="KA",
-                target_irrep="-KA4",
-                source=right,
-                inferred=True,
-            )],
-        },
-        "right": {
-            "K": [_completion_record(
-                target_valley="right",
-                target_hsp="K",
-                target_irrep="-K4",
-                source=right,
-                inferred=False,
-            )],
-            "KA": [_completion_record(
-                target_valley="right",
-                target_hsp="KA",
-                target_irrep="-KA4",
-                source=left,
-                inferred=True,
-            )],
-        },
+    return {
+        "table": table,
+        "context": context,
+        "standard_certificate": standard_certificate,
+        "reviewed": reviewed,
+        "in_plane_rows": in_plane_rows,
+        "source_table_identity": source_table_identity,
+        "parent_affine_operations": parent_affine_operations,
+        "parent_affine_lift_record": parent_affine_lift_record,
+        "tr_source": tr_source,
+        "candidates": [left, right],
     }
-    report = {
-        "enabled": True,
-        "status": "validated",
-        "theta_square": -1,
-        "time_reversal_valley_mapping": {
-            "left": "right",
-            "right": "left",
-        },
-        "valley_orbits": [{
-            "orbit_id": "portable_orbit",
-            "representative": "left",
-            "members": ["left", "right"],
-            "mapping_type": "exchanged",
+
+
+def _build_portable_orbit_report(inputs, *, sources=None):
+    source = inputs["tr_source"]
+    return build_time_reversal_valley_orbit_report(
+        valley_mapping_report={
             "status": "validated",
-            "blockers": [],
-            "expected_hsps": ["K"],
-            "irreps_by_kpoint": {"K": ["portable_corep"]},
-            "full_unitary_source_hsp_labels": ["K", "KA"],
-            "independent_time_reversal_hsp_labels": ["K"],
-            "time_reversal_hsp_orbits": [{
-                "representative": "K",
-                "members": ["K", "KA"],
-                "self_mapped": False,
+            "enabled": True,
+            "theta_square": -1,
+            "time_reversal_valley_mapping": {
+                "left": "right",
+                "right": "left",
+            },
+            "valley_orbits": [{
+                "representative": "left",
+                "members": ["left", "right"],
+                "mapping_type": "exchanged",
             }],
-            "time_reversal_irrep_pairing": tr_source[
-                "irrep_partner_by_label"
-            ],
-            "reviewed_time_reversal_source_identity": (
-                reviewed_source_identity
-            ),
-            "time_reversal_completed_unitary_valley_irreps": {
-                "left": {"K": {"-K4": 1}, "KA": {"-KA4": 1}},
-                "right": {"K": {"-K4": 1}, "KA": {"-KA4": 1}},
-            },
-            "unitary_valley_irrep_completion_records": records,
-            "independent_source_hsp_to_sampled_kpoint_by_valley": {
-                "left": {"K": "K_left"},
-                "right": {"K": "K_right"},
-            },
-            "observed_source_hsp_to_sampled_kpoint_by_valley": {
-                "left": {"K": "K_left"},
-                "right": {"K": "K_right"},
-            },
-        }],
-    }
+        },
+        source_irrep_orbits_by_valley=(
+            sources
+            if sources is not None
+            else {"left": source, "right": source}
+        ),
+        grey_source_by_valley={},
+        ebr_input_candidates={
+            "status": "has_candidates",
+            "candidate_count": 2,
+            "candidates": inputs["candidates"],
+        },
+    )
+
+
+def _complete_and_export_portable_orbit(inputs, report):
+    completed = attach_tr_irrep_completion_certificates(
+        time_reversal_orbit_report=report,
+        cprime_validation_context=inputs["context"],
+    )
+    problems = build_ebr_problem_instances(
+        ebr_input_candidates={
+            "status": "has_candidates",
+            "candidate_count": 2,
+            "candidates": inputs["candidates"],
+        },
+        time_reversal_orbit_report=completed,
+    )
+    export = build_ebr_export_bundle(
+        ebr_problem_instances=problems,
+    )
+    return completed, problems, export
+
+
+def test_tracked_only_exact_completion_uses_real_irreptables_source(
+    tmp_path,
+):
+    inputs = _portable_orbit_inputs(tmp_path)
+    table = inputs["table"]
+    context = inputs["context"]
+    reviewed = inputs["reviewed"]
+    tr_source = inputs["tr_source"]
+    left, right = inputs["candidates"]
+    assert reviewed["status"] == tr_source["status"] == "validated"
+    assert tr_source["irrep_partner_by_label"]["-K4"] == "-KA4"
+    assert tr_source["reviewed_source_context"]["reviewed_rows"]
+    assert tr_source["reviewed_source_context"]["normalized_centering_vectors"] == [
+        [0.0, 0.0, 0.0],
+    ]
+
+    report = _build_portable_orbit_report(inputs)
+    assert report["status"] == "blocked"
+    orbit = report["valley_orbits"][0]
+    assert orbit["unitary_completion_status"] == "validated"
+    assert orbit["unitary_completion_blockers"] == []
+    assert orbit["joint_corepresentation_status"] == "blocked"
+    assert "grey_group_time_reversal_source_not_validated" in orbit[
+        "joint_corepresentation_blockers"
+    ]
+    assert orbit["unitary_valley_irrep_completion_records"]["left"]["KA"][0][
+        "completion_kind"
+    ] == "inferred_by_time_reversal"
     completed = attach_tr_irrep_completion_certificates(
         time_reversal_orbit_report=report,
         cprime_validation_context=context,
     )
-    assert completed["status"] == "validated", completed
+    assert completed["status"] == "blocked", completed
+    assert completed["valley_orbits"][0]["unitary_completion_status"] == (
+        "validated"
+    )
     problems = build_ebr_problem_instances(
         ebr_input_candidates={
             "status": "has_candidates",
@@ -485,6 +462,12 @@ def test_tracked_only_exact_completion_uses_real_irreptables_source(
         ebr_problem_instances=problems
     )
     assert export["bundle_count"] == 2
+    assert all(
+        bundle["time_reversal"]["reviewed_time_reversal_source_context"][
+            "reviewed_rows"
+        ]
+        for bundle in export["bundles"]
+    )
     assert all(
         validate_tr_completed_unitary_bundle(bundle)
         for bundle in export["bundles"]
@@ -555,3 +538,367 @@ def test_tracked_only_exact_completion_uses_real_irreptables_source(
         "tr_irrep_completion_certificate"
     )
     assert not validate_tr_completed_unitary_bundle(tampered)
+
+
+def test_portable_unitary_completion_rejects_disagreeing_reviewed_models(
+    tmp_path,
+):
+    inputs = _portable_orbit_inputs(tmp_path)
+    rows = inputs["in_plane_rows"]
+    ka5 = next(row for row in rows if row.label == "-KA5")
+    ka4 = next(row for row in rows if row.label == "-KA4")
+    disagreeing_rows = [
+        replace(row, characters=ka4.characters)
+        if row.label == "-KA5"
+        else replace(row, characters=ka5.characters)
+        if row.label == "-KA4"
+        else row
+        for row in rows
+    ]
+    disagreeing = derive_time_reversal_source_irrep_orbits(
+        reviewed_rows=disagreeing_rows,
+        centering_vectors=[[0.0, 0.0, 0.0]],
+        source_table_identity=inputs["source_table_identity"],
+        standard_setting_certificate=inputs["standard_certificate"],
+        parent_affine_operations=inputs["parent_affine_operations"],
+        parent_affine_lift_record=inputs["parent_affine_lift_record"],
+    )
+    assert disagreeing["status"] == "validated"
+    assert disagreeing["irrep_partner_by_label"]["-K4"] == "-KA5"
+
+    report = _build_portable_orbit_report(
+        inputs,
+        sources={
+            "left": inputs["tr_source"],
+            "right": disagreeing,
+        },
+    )
+    orbit = report["valley_orbits"][0]
+    assert orbit["unitary_completion_status"] == "blocked"
+    assert "valley_source_time_reversal_models_disagree" in orbit[
+        "unitary_completion_blockers"
+    ]
+    completed, problems, export = _complete_and_export_portable_orbit(
+        inputs, report
+    )
+    assert all(
+        "tr_irrep_completion_certificate" not in record
+        for by_hsp in completed["valley_orbits"][0][
+            "unitary_valley_irrep_completion_records"
+        ].values()
+        for records in by_hsp.values()
+        for record in records
+        if record["completion_kind"] == "inferred_by_time_reversal"
+    )
+    assert not any(
+        instance["canonical_hsp_vector_ready"]
+        for instance in problems["instances"]
+        if instance["problem_kind"] == "unitary_valley_reduced_ebr"
+    )
+    assert export["bundle_count"] == 0
+
+
+def test_portable_unitary_completion_rejects_missing_or_malformed_raw_context(
+    tmp_path,
+):
+    inputs = _portable_orbit_inputs(tmp_path)
+    for mutation in ("missing", "malformed", "centering_mismatch"):
+        source = deepcopy(inputs["tr_source"])
+        if mutation == "missing":
+            source.pop("reviewed_source_context")
+        else:
+            context = source["reviewed_source_context"]
+            if mutation == "malformed":
+                context["reviewed_rows"] = []
+            else:
+                context["normalized_centering_vectors"] = [
+                    [0.0, 0.0, 0.0],
+                    [0.5, 0.5, 0.0],
+                ]
+            content = {
+                key: deepcopy(value)
+                for key, value in context.items()
+                if key not in {"status", "context_identity", "blockers"}
+            }
+            context["context_identity"] = canonical_identity(content)
+        report = _build_portable_orbit_report(
+            inputs,
+            sources={"left": source, "right": source},
+        )
+        orbit = report["valley_orbits"][0]
+        assert orbit["unitary_completion_status"] == "blocked"
+        assert "time_reversal_source_irrep_orbits_not_validated" in orbit[
+            "unitary_completion_blockers"
+        ]
+        _, problems, export = _complete_and_export_portable_orbit(
+            inputs, report
+        )
+        assert not any(
+            instance["canonical_hsp_vector_ready"]
+            for instance in problems["instances"]
+            if instance["problem_kind"] == "unitary_valley_reduced_ebr"
+        )
+        assert export["bundle_count"] == 0
+
+
+@pytest.mark.parametrize(
+    ("field", "forged_value"),
+    [
+        ("hall_symbol", "FORGED HALL"),
+        ("origin_shift_fractional", [0.125, 0.0, 0.0]),
+        (
+            "parent_to_standard_direct_transform",
+            [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0]],
+        ),
+    ],
+)
+def test_portable_completion_cross_binds_raw_affine_setting_to_local_irrep(
+    tmp_path,
+    field,
+    forged_value,
+):
+    inputs = _portable_orbit_inputs(tmp_path)
+    forged_source = deepcopy(inputs["tr_source"])
+    context = forged_source["reviewed_source_context"]
+    context["standard_setting_certificate"][field] = forged_value
+    content = {
+        key: deepcopy(value)
+        for key, value in context.items()
+        if key not in {"status", "context_identity", "blockers"}
+    }
+    context["context_identity"] = canonical_identity(content)
+
+    report = _build_portable_orbit_report(
+        inputs,
+        sources={"left": forged_source, "right": forged_source},
+    )
+    orbit = report["valley_orbits"][0]
+    assert orbit["unitary_completion_status"] == "blocked"
+
+    completed, problems, export = _complete_and_export_portable_orbit(
+        inputs, report
+    )
+    completed_orbit = completed["valley_orbits"][0]
+    assert completed_orbit["unitary_completion_status"] == "blocked"
+    expected_blocker = "time_reversal_source_irrep_orbits_not_validated"
+    assert any(
+        expected_blocker in blocker
+        for blocker in completed_orbit["unitary_completion_blockers"]
+    )
+    assert all(
+        "tr_irrep_completion_certificate" not in record
+        for by_hsp in completed_orbit[
+            "unitary_valley_irrep_completion_records"
+        ].values()
+        for records in by_hsp.values()
+        for record in records
+        if record["completion_kind"] == "inferred_by_time_reversal"
+    )
+    assert not any(
+        instance["canonical_hsp_vector_ready"]
+        for instance in problems["instances"]
+        if instance["problem_kind"] == "unitary_valley_reduced_ebr"
+    )
+    assert export["bundle_count"] == 0
+
+
+@pytest.mark.parametrize(
+    ("setting_field", "bundle_field", "forged_value"),
+    [
+        ("hall_symbol", "hall_symbol", "FORGED HALL"),
+        (
+            "parent_to_standard_direct_transform",
+            "normalized_direct_transform",
+            [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0]],
+        ),
+        (
+            "origin_shift_fractional",
+            "normalized_origin_shift",
+            [0.125, 0.0, 0.0],
+        ),
+    ],
+)
+def test_portable_unitary_validator_rejects_coordinated_affine_substitution(
+    tmp_path,
+    setting_field,
+    bundle_field,
+    forged_value,
+):
+    inputs = _portable_orbit_inputs(tmp_path)
+    _, _, export = _complete_and_export_portable_orbit(
+        inputs,
+        _build_portable_orbit_report(inputs),
+    )
+    forged = deepcopy(export["bundles"][0])
+    time_reversal = forged["time_reversal"]
+    source_context = time_reversal[
+        "reviewed_time_reversal_source_context"
+    ]
+    source_context["standard_setting_certificate"][setting_field] = (
+        forged_value
+    )
+    if setting_field == "parent_to_standard_direct_transform":
+        transform = np.asarray(forged_value, dtype=float)
+        inverse = np.linalg.inv(transform)
+        for operation in source_context["parent_affine_operations"]:
+            rotation = np.asarray(
+                operation["rotation_frac"], dtype=float
+            )
+            translation = np.asarray(
+                operation["translation_frac"], dtype=float
+            )
+            operation["rotation_frac"] = (
+                inverse @ rotation @ transform
+            ).tolist()
+            operation["translation_frac"] = (
+                inverse @ translation
+            ).tolist()
+    elif setting_field == "origin_shift_fractional":
+        origin = np.asarray(forged_value, dtype=float)
+        for operation in source_context["parent_affine_operations"]:
+            rotation = np.asarray(
+                operation["rotation_frac"], dtype=float
+            )
+            translation = np.asarray(
+                operation["translation_frac"], dtype=float
+            )
+            operation["translation_frac"] = (
+                translation - origin + rotation @ origin
+            ).tolist()
+    source_context["context_identity"] = canonical_identity({
+        key: deepcopy(value)
+        for key, value in source_context.items()
+        if key not in {"status", "context_identity", "blockers"}
+    })
+    forged["certificate_identity"][bundle_field] = forged_value
+    if setting_field == "hall_symbol":
+        forged["certificate_identity"]["hall_symbols"] = [forged_value]
+    for records in forged[
+        "unitary_irrep_completion_records_by_hsp"
+    ].values():
+        for record in records:
+            source_irrep = record["source_candidate_provenance"][
+                "irrep_source_provenance"
+            ]
+            local_setting = source_irrep["standard_setting_hsp_mapping"][
+                "standard_setting_certificate"
+            ]
+            local_setting[setting_field] = forged_value
+            certificate = record.get(
+                "tr_irrep_completion_certificate"
+            )
+            if not isinstance(certificate, dict):
+                continue
+            certificate["standard_setting_certificate_identity"] = (
+                canonical_identity(local_setting)
+            )
+            certificate["reviewed_time_reversal"][
+                "source_context_identity"
+            ] = source_context["context_identity"]
+            certificate["certificate_identity"] = canonical_identity({
+                key: deepcopy(value)
+                for key, value in certificate.items()
+                if key != "certificate_identity"
+            })
+
+    assert forged["certificate_identity"][bundle_field] == forged_value
+    assert not validate_tr_completed_unitary_bundle(forged)
+
+
+def test_portable_promotion_rederives_raw_source_against_coordinated_substitution(
+    tmp_path,
+):
+    inputs = _portable_orbit_inputs(tmp_path)
+    report = _build_portable_orbit_report(inputs)
+    _, _, export = _complete_and_export_portable_orbit(inputs, report)
+    forged = deepcopy(export["bundles"][0])
+    time_reversal = forged["time_reversal"]
+    pairing = dict(time_reversal["time_reversal_irrep_pairing"])
+    pairing.update({
+        "-K4": "-KA5",
+        "-KA5": "-K4",
+        "-K5": "-KA4",
+        "-KA4": "-K5",
+    })
+    time_reversal["time_reversal_irrep_pairing"] = pairing
+    source_identity = dict(
+        time_reversal["reviewed_time_reversal_source_identity"]
+    )
+    source_identity["irrep_pairing"] = pairing
+    source_identity["identity"] = canonical_identity({
+        key: value
+        for key, value in source_identity.items()
+        if key != "identity"
+    })
+    time_reversal["reviewed_time_reversal_source_identity"] = source_identity
+    forged["irreps_by_kpoint"]["KA"] = ["-KA5"]
+    inferred = forged["unitary_irrep_completion_records_by_hsp"]["KA"][0]
+    inferred["irrep"] = "-KA5"
+    inferred["reviewed_time_reversal_relation"]["target_irrep"] = "-KA5"
+    certificate = inferred["tr_irrep_completion_certificate"]
+    certificate["inferred_target"]["irrep"] = "-KA5"
+    certificate["reviewed_time_reversal"]["irrep_pairing"] = pairing
+    certificate["reviewed_time_reversal"][
+        "source_model_identity"
+    ] = source_identity
+    certificate["certificate_identity"] = canonical_identity({
+        key: value
+        for key, value in certificate.items()
+        if key != "certificate_identity"
+    })
+
+    assert not validate_tr_completed_unitary_bundle(forged)
+    forged_export = deepcopy(export)
+    forged_export["bundles"] = [forged]
+    forged_export["bundle_count"] = 1
+    reduced_table = build_auto_canonical_reduced_ebr_table(
+        subspace_sg_number=143,
+        spinor=True,
+        bundle_irreps_by_kpoint=forged["irreps_by_kpoint"],
+        expected_hsps=forged["expected_hsps"],
+        subspace_group_candidate="P3",
+    )
+    mapping = build_reduced_ebr_mapping(
+        ebr_export_bundle=forged_export,
+        table=reduced_table,
+        reduced_ebr_input={"source": "portable_irreptables_runtime"},
+        cprime_validation_context=inputs["context"],
+    )
+    assert mapping["solutions"] == []
+
+
+def test_unitary_problem_builder_cannot_bypass_orbit_source_blocker(
+    tmp_path,
+):
+    inputs = _portable_orbit_inputs(tmp_path)
+    report = _build_portable_orbit_report(inputs)
+    completed, _, _ = _complete_and_export_portable_orbit(inputs, report)
+    forged = deepcopy(completed)
+    orbit = forged["valley_orbits"][0]
+    orbit["unitary_completion_status"] = "blocked"
+    orbit["unitary_completion_blockers"] = [
+        "valley_source_time_reversal_models_disagree"
+    ]
+    assert any(
+        "tr_irrep_completion_certificate" in record
+        for by_hsp in orbit[
+            "unitary_valley_irrep_completion_records"
+        ].values()
+        for records in by_hsp.values()
+        for record in records
+        if record["completion_kind"] == "inferred_by_time_reversal"
+    )
+
+    problems = build_ebr_problem_instances(
+        ebr_input_candidates={
+            "status": "has_candidates",
+            "candidate_count": 2,
+            "candidates": inputs["candidates"],
+        },
+        time_reversal_orbit_report=forged,
+    )
+    assert not any(
+        instance["canonical_hsp_vector_ready"]
+        for instance in problems["instances"]
+        if instance["problem_kind"] == "unitary_valley_reduced_ebr"
+    )

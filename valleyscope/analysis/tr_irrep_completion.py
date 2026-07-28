@@ -49,11 +49,24 @@ def attach_tr_irrep_completion_certificates(
         if orbit.get("mapping_type") != "exchanged":
             orbit["tr_irrep_completion_status"] = "not_applicable"
             continue
-        blockers = [
+        unitary_blockers = [
             value
-            for value in orbit.get("blockers", [])
+            for value in orbit.get("unitary_completion_blockers", [])
             if isinstance(value, str) and value
         ]
+        if (
+            orbit.get("unitary_completion_status") != "validated"
+            or unitary_blockers
+        ):
+            _invalidate_inferred_completion_records(
+                orbit,
+                unitary_blockers
+                or ["tr_irrep_completion_unitary_source_not_validated"],
+            )
+            orbit["tr_irrep_completion_status"] = "blocked"
+            orbit["tr_irrep_completion_certificate_count"] = 0
+            continue
+        blockers: list[str] = []
         records_by_valley = orbit.get(
             "unitary_valley_irrep_completion_records"
         )
@@ -61,8 +74,17 @@ def attach_tr_irrep_completion_certificates(
             orbit.get("time_reversal_hsp_orbits")
         )
         irrep_pairing = orbit.get("time_reversal_irrep_pairing")
-        reviewed_source_identity = orbit.get(
-            "reviewed_time_reversal_source_identity"
+        reviewed_source_context = orbit.get(
+            "reviewed_time_reversal_source_context"
+        )
+        from valleyscope.irreps.time_reversal_source import (
+            validate_reviewed_time_reversal_source_context,
+        )
+        rederived_source = validate_reviewed_time_reversal_source_context(
+            reviewed_source_context,
+        )
+        reviewed_source_identity = _rederived_source_identity(
+            rederived_source
         )
         if (
             not isinstance(records_by_valley, Mapping)
@@ -71,8 +93,26 @@ def attach_tr_irrep_completion_certificates(
             or not _valid_reviewed_source_identity(
                 reviewed_source_identity
             )
+            or rederived_source.get("status") != "validated"
+            or hsp_mapping != rederived_source.get(
+                "time_reversal_hsp_mapping"
+            )
+            or irrep_pairing != rederived_source.get(
+                "irrep_partner_by_label"
+            )
+            or orbit.get("reviewed_time_reversal_source_identity")
+            != reviewed_source_identity
         ):
             blockers.append("tr_irrep_completion_inputs_malformed")
+            orbit["unitary_completion_blockers"] = _deduplicate([
+                *unitary_blockers,
+                "tr_irrep_completion_inputs_malformed",
+            ])
+            orbit["unitary_completion_status"] = "blocked"
+            _invalidate_inferred_completion_records(
+                orbit,
+                ["tr_irrep_completion_inputs_malformed"],
+            )
             _block_orbit(orbit, blockers)
             continue
 
@@ -128,6 +168,9 @@ def attach_tr_irrep_completion_certificates(
                             reviewed_source_identity=(
                                 reviewed_source_identity
                             ),
+                            reviewed_source_context=(
+                                reviewed_source_context
+                            ),
                             cprime_validation_context=(
                                 cprime_validation_context
                             ),
@@ -146,6 +189,11 @@ def attach_tr_irrep_completion_certificates(
         if inferred_row_count and inferred_count == 0:
             blockers.append("tr_irrep_completion_certificate_missing")
         if blockers:
+            orbit["unitary_completion_blockers"] = _deduplicate([
+                *unitary_blockers,
+                *blockers,
+            ])
+            orbit["unitary_completion_status"] = "blocked"
             _block_orbit(orbit, blockers)
             continue
         orbit["tr_irrep_completion_status"] = (
@@ -173,6 +221,54 @@ def attach_tr_irrep_completion_certificates(
     return report
 
 
+def _rederived_source_identity(
+    source_report: Mapping[str, object],
+) -> dict[str, object] | None:
+    content = {
+        "operation_inventory_identity": source_report.get(
+            "operation_inventory_identity"
+        ),
+        "spin_convention": source_report.get("spin_convention"),
+        "hsp_involution": source_report.get(
+            "time_reversal_hsp_mapping"
+        ),
+        "irrep_pairing": source_report.get("irrep_partner_by_label"),
+    }
+    try:
+        identity = canonical_identity(content)
+    except (TypeError, ValueError):
+        return None
+    candidate = {**content, "identity": identity}
+    return candidate if _valid_reviewed_source_identity(candidate) else None
+
+
+def _invalidate_inferred_completion_records(
+    orbit: dict[str, object],
+    blockers: list[str],
+) -> None:
+    records_by_valley = orbit.get(
+        "unitary_valley_irrep_completion_records", {}
+    )
+    if not isinstance(records_by_valley, Mapping):
+        return
+    for by_hsp in records_by_valley.values():
+        if not isinstance(by_hsp, Mapping):
+            continue
+        for records in by_hsp.values():
+            if not isinstance(records, list):
+                continue
+            for record in records:
+                if (
+                    not isinstance(record, dict)
+                    or record.get("completion_kind")
+                    != "inferred_by_time_reversal"
+                ):
+                    continue
+                record.pop("tr_irrep_completion_certificate", None)
+                for blocker in blockers:
+                    _block_record(record, blocker)
+
+
 def validate_tr_irrep_completion_certificate(
     certificate: object,
     *,
@@ -181,6 +277,7 @@ def validate_tr_irrep_completion_certificate(
     hsp_mapping: Mapping[str, str],
     irrep_pairing: Mapping[str, str],
     reviewed_source_identity: Mapping[str, object],
+    reviewed_source_context: Mapping[str, object] | None = None,
     cprime_validation_context: Mapping[str, object] | None = None,
 ) -> bool:
     """Recompute a serialized exact completion certificate fail-closed."""
@@ -250,6 +347,22 @@ def validate_tr_irrep_completion_certificate(
     try:
         setting_identity = canonical_identity(setting_certificate)
     except (TypeError, ValueError):
+        return False
+    source_context_identity = reviewed.get("source_context_identity")
+    if (
+        not valid_sha256_identity(source_context_identity)
+        or (
+            reviewed_source_context is not None
+            and (
+                source_context_identity
+                != reviewed_source_context.get("context_identity")
+                or not _source_context_matches_source_irrep(
+                    reviewed_source_context,
+                    source_irrep,
+                )
+            )
+        )
+    ):
         return False
     relation = completion_record.get("reviewed_time_reversal_relation")
     multiplicity = completion_record.get("multiplicity")
@@ -339,6 +452,7 @@ def _build_completion_certificate(
     hsp_mapping: Mapping[str, str],
     irrep_pairing: Mapping[str, str],
     reviewed_source_identity: Mapping[str, object],
+    reviewed_source_context: Mapping[str, object],
     cprime_validation_context: Mapping[str, object],
 ) -> tuple[dict[str, object] | None, list[str]]:
     blockers: list[str] = []
@@ -419,6 +533,7 @@ def _build_completion_certificate(
         cprime=cprime,
         standard_setting_certificate=setting_certificate,
         cprime_validation_context=cprime_validation_context,
+        reviewed_source_context=reviewed_source_context,
     )
     blockers.extend(context_blockers)
     if (
@@ -435,6 +550,20 @@ def _build_completion_certificate(
     source_table_identity = _source_table_identity(source_irrep)
     if source_table_identity is None:
         blockers.append("tr_irrep_completion_source_table_identity_missing")
+    if not _source_context_matches_source_irrep(
+        reviewed_source_context,
+        source_irrep,
+    ):
+        blockers.append(
+            "tr_irrep_completion_reviewed_source_context_mismatch"
+        )
+    source_context_identity = reviewed_source_context.get(
+        "context_identity"
+    )
+    if not valid_sha256_identity(source_context_identity):
+        blockers.append(
+            "tr_irrep_completion_reviewed_source_context_identity_invalid"
+        )
     try:
         setting_identity = canonical_identity(setting_certificate)
     except (TypeError, ValueError):
@@ -474,6 +603,7 @@ def _build_completion_certificate(
             "irrep_pairing": dict(irrep_pairing),
             "source_model_identity": dict(reviewed_source_identity),
             "source_table_identity": source_table_identity,
+            "source_context_identity": source_context_identity,
         },
         "standard_setting_certificate_identity": setting_identity,
         "producer_context_identity": producer_context_identity,
@@ -518,12 +648,66 @@ def _source_table_identity(
     return identity
 
 
+def _source_context_matches_source_irrep(
+    context: object,
+    source_irrep: object,
+) -> bool:
+    if not isinstance(context, Mapping) or not isinstance(
+        source_irrep, Mapping
+    ):
+        return False
+    raw_table = context.get("source_table_identity")
+    raw_setting = context.get("standard_setting_certificate")
+    lift_record = context.get("parent_affine_lift_record")
+    setting_mapping = source_irrep.get("standard_setting_hsp_mapping")
+    local_setting = (
+        setting_mapping.get("standard_setting_certificate")
+        if isinstance(setting_mapping, Mapping)
+        else None
+    )
+    local_table = _source_table_identity(source_irrep)
+    cprime = source_irrep.get("cprime")
+    if (
+        not isinstance(raw_table, Mapping)
+        or not isinstance(raw_setting, Mapping)
+        or not isinstance(local_setting, Mapping)
+        or not isinstance(lift_record, Mapping)
+        or not isinstance(cprime, Mapping)
+        or local_table is None
+    ):
+        return False
+    expected_table = {
+        "matching_strategy": "bilbao_restricted_character",
+        "subspace_space_group_number": raw_table.get(
+            "space_group_number"
+        ),
+        "subspace_space_group_symbol": raw_table.get(
+            "space_group_symbol"
+        ),
+        "source_table_sg_number": raw_table.get("space_group_number"),
+        "source_table_name": raw_table.get("source_table_name"),
+        "source_table_spinor": raw_table.get("spinor"),
+    }
+    from valleyscope.irreps.time_reversal_source import (
+        normalize_time_reversal_standard_setting_context,
+    )
+    return bool(
+        local_table == expected_table
+        and lift_record.get("certificate_identity")
+        == cprime.get("double_space_group_lift_certificate_identity")
+        and normalize_time_reversal_standard_setting_context(
+            local_setting
+        ) == raw_setting
+    )
+
+
 def _validated_producer_context(
     *,
     completion_record: Mapping[str, object],
     cprime: Mapping[str, object],
     standard_setting_certificate: Mapping[str, object],
     cprime_validation_context: Mapping[str, object],
+    reviewed_source_context: Mapping[str, object] | None = None,
 ) -> tuple[
     Mapping[str, object] | None,
     str | None,
@@ -584,6 +768,11 @@ def _validated_producer_context(
         )
 
     lift_inputs = raw_inputs.get("lift_validation_inputs")
+    raw_lift_record = raw_inputs.get("lift_record")
+    source_lift_record = (
+        reviewed_source_context.get("parent_affine_lift_record")
+        if isinstance(reviewed_source_context, Mapping) else None
+    )
     source_table_evidence = (
         lift_inputs.get("source_table_identity")
         if isinstance(lift_inputs, Mapping)
@@ -612,6 +801,20 @@ def _validated_producer_context(
         blockers.append(
             "tr_irrep_completion_source_table_context_mismatch"
         )
+    if (
+        isinstance(source_lift_record, Mapping)
+        and source_lift_record
+        and (
+            not isinstance(raw_lift_record, Mapping)
+            or source_lift_record.get("certificate_identity")
+            != raw_lift_record.get("certificate_identity")
+            or source_lift_record.get("operation_inventory_identity")
+            != raw_lift_record.get("operation_inventory_identity")
+        )
+    ):
+        blockers.append(
+            "tr_irrep_completion_parent_affine_producer_mismatch"
+        )
     if blockers:
         return (
             source_basis if isinstance(source_basis, Mapping) else None,
@@ -631,6 +834,14 @@ def _validated_producer_context(
             ),
             "standard_setting_certificate_identity": canonical_identity(
                 context_setting_certificate
+            ),
+            "parent_affine_lift_certificate_identity": (
+                raw_lift_record.get("certificate_identity")
+                if isinstance(raw_lift_record, Mapping) else None
+            ),
+            "parent_affine_operation_inventory_identity": (
+                raw_lift_record.get("operation_inventory_identity")
+                if isinstance(raw_lift_record, Mapping) else None
             ),
         })
     except (KeyError, TypeError, ValueError):

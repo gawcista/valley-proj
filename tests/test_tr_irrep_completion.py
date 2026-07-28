@@ -1,25 +1,74 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from unittest.mock import patch
 
+import numpy as np
 import pytest
 
+import valleyscope.irreps.time_reversal_source as _tr_source_module
+import valleyscope.analysis.tr_irrep_completion as _tr_completion_module
+import valleyscope.analysis.ebr_problem_instances as _problem_module
 from valleyscope.analysis.scoped_representation_evidence import (
     build_scoped_representation_evidence,
 )
 from valleyscope.analysis.ebr_problem_instances import (
-    build_ebr_problem_instances,
+    build_ebr_problem_instances as _build_ebr_problem_instances,
 )
 from valleyscope.analysis.tr_irrep_completion import (
-    attach_tr_irrep_completion_certificates,
+    attach_tr_irrep_completion_certificates as _attach_tr_irrep_completion_certificates,
     validate_tr_irrep_completion_certificate,
 )
 from valleyscope.analysis.unitary_provenance import (
     validate_tr_completed_unitary_bundle,
 )
 from valleyscope.io.wavefunction_convention import canonical_identity
+from valleyscope.irreps.tables import ReviewedSourceIrrep
+from valleyscope.irreps.time_reversal_source import (
+    derive_time_reversal_source_irrep_orbits,
+    validate_reviewed_time_reversal_source_context as _validate_reviewed_time_reversal_source_context,
+)
 from tests.test_scoped_representation_evidence import _raw_inputs
 from tests.test_database_ingestion import _tr_completed_unitary_bundle
+
+
+def attach_tr_irrep_completion_certificates(**kwargs):
+    """Exercise structural synthetic rows without weakening production trust."""
+
+    def fixture_validator(context, **_kwargs):
+        return _validate_reviewed_time_reversal_source_context(
+            context,
+            require_reviewed_table=False,
+        )
+
+    with patch.object(
+        _tr_source_module,
+        "validate_reviewed_time_reversal_source_context",
+        fixture_validator,
+    ), patch.object(
+        _tr_completion_module,
+        "_source_context_matches_source_irrep",
+        lambda _context, _source_irrep: True,
+    ):
+        return _attach_tr_irrep_completion_certificates(**kwargs)
+
+
+def build_ebr_problem_instances(**kwargs):
+    """Keep synthetic structural fixtures outside production trust claims."""
+
+    def fixture_certificate_validator(*args, **call_kwargs):
+        call_kwargs.pop("reviewed_source_context", None)
+        return validate_tr_irrep_completion_certificate(
+            *args,
+            **call_kwargs,
+        )
+
+    with patch.object(
+        _problem_module,
+        "validate_tr_irrep_completion_certificate",
+        fixture_certificate_validator,
+    ):
+        return _build_ebr_problem_instances(**kwargs)
 
 
 def _setting_certificate() -> dict[str, object]:
@@ -28,22 +77,59 @@ def _setting_certificate() -> dict[str, object]:
         "validation_status": "validated",
         "hall_number": 1,
         "hall_symbol": "P 1",
+        "centering_vectors": [[0.0, 0.0, 0.0]],
     }
 
 
-def _reviewed_source_identity() -> dict[str, object]:
-    content = {
-        "operation_inventory_identity": canonical_identity({
-            "fixture": "reviewed_tr_source_operations",
-        }),
-        "spin_convention": "spinor_double_group",
-        "hsp_involution": {"K": "KA", "KA": "K"},
-        "irrep_pairing": {
-            "K1": "KA1",
-            "KA1": "K1",
-            "K2": "KA2",
-            "KA2": "K2",
+def _reviewed_source_report() -> dict[str, object]:
+    inventory = canonical_identity({
+        "fixture": "reviewed_tr_source_operations",
+    })
+    rows = [
+        ReviewedSourceIrrep(
+            label=label,
+            kpoint_label=hsp,
+            k_frac=np.asarray(k_frac, dtype=float),
+            dimension=1,
+            characters={1: character},
+            operation_indices=(1,),
+            operation_inventory_identity=inventory,
+            spinor=True,
+            spin_convention="double_group_spinor",
+            source_table="fixture_standard_irrep_table",
+            source_table_status="reviewed_fixture",
+            source_provenance="fixture.StandardIrrepTable",
+        )
+        for label, hsp, k_frac, character in (
+            ("K1", "K", [0.25, 0.0, 0.0], 0.0 + 1.0j),
+            ("K2", "K", [0.25, 0.0, 0.0], 0.5 + 0.5j),
+            ("KA1", "KA", [-0.25, 0.0, 0.0], 0.0 - 1.0j),
+            ("KA2", "KA", [-0.25, 0.0, 0.0], 0.5 - 0.5j),
+        )
+    ]
+    return derive_time_reversal_source_irrep_orbits(
+        reviewed_rows=rows,
+        centering_vectors=[[0.0, 0.0, 0.0]],
+        source_table_identity={
+            "space_group_number": 1,
+            "space_group_symbol": "P1",
+            "source_table_name": "P1",
+            "source_table_provenance": "fixture.StandardIrrepTable",
+            "spinor": True,
         },
+        standard_setting_certificate=_setting_certificate(),
+    )
+
+
+def _reviewed_source_identity() -> dict[str, object]:
+    report = _reviewed_source_report()
+    content = {
+        "operation_inventory_identity": report[
+            "operation_inventory_identity"
+        ],
+        "spin_convention": report["spin_convention"],
+        "hsp_involution": report["time_reversal_hsp_mapping"],
+        "irrep_pairing": report["irrep_partner_by_label"],
     }
     return {**content, "identity": canonical_identity(content)}
 
@@ -204,6 +290,7 @@ def _inferred_record(
 
 
 def _orbit_and_context():
+    reviewed_source = _reviewed_source_report()
     left_context, left_cprime = _local_context(
         valley="left",
         sampled_kpoint="K_left",
@@ -265,6 +352,12 @@ def _orbit_and_context():
                 "members": ["left", "right"],
                 "mapping_type": "exchanged",
                 "status": "validated",
+                "unitary_completion_status": "validated",
+                "unitary_completion_blockers": [],
+                "joint_corepresentation_status": "blocked",
+                "joint_corepresentation_blockers": [
+                    "joint_time_reversal_corepresentation_not_certified"
+                ],
                 "unitary_valley_irrep_completion_records": records,
                 "time_reversal_hsp_orbits": [
                     {
@@ -282,6 +375,9 @@ def _orbit_and_context():
                 "reviewed_time_reversal_source_identity": (
                     _reviewed_source_identity()
                 ),
+                "reviewed_time_reversal_source_context": reviewed_source[
+                    "reviewed_source_context"
+                ],
                 "time_reversal_completed_unitary_valley_irreps": {
                     "left": {
                         "K": {"K1": 1},

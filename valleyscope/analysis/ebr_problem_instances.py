@@ -621,6 +621,9 @@ def _build_time_reversal_problem_instances(
                 "reviewed_time_reversal_source_identity": raw_orbit.get(
                     "reviewed_time_reversal_source_identity", {}
                 ),
+                "reviewed_time_reversal_source_context": raw_orbit.get(
+                    "reviewed_time_reversal_source_context", {}
+                ),
                 "projector_workflow_by_sampled_kpoint": raw_orbit.get(
                     "projector_workflow_by_sampled_kpoint", {}
                 ),
@@ -730,6 +733,19 @@ def _build_tr_unitary_component_instances(
             records_by_hsp = {}
 
         blockers: list[str] = []
+        orbit_unitary_blockers = [
+            str(blocker)
+            for blocker in raw_orbit.get(
+                "unitary_completion_blockers", []
+            )
+            if isinstance(blocker, str) and blocker
+        ]
+        if (
+            raw_orbit.get("unitary_completion_status") != "validated"
+            or orbit_unitary_blockers
+        ):
+            blockers.append("time_reversal_unitary_source_not_validated")
+            blockers.extend(orbit_unitary_blockers)
         fingerprints = {
             _certificate_fingerprint(candidate) for candidate in candidates
         }
@@ -771,6 +787,9 @@ def _build_tr_unitary_component_instances(
             ),
             reviewed_source_identity=raw_orbit.get(
                 "reviewed_time_reversal_source_identity", {}
+            ),
+            reviewed_source_context=raw_orbit.get(
+                "reviewed_time_reversal_source_context", {}
             ),
             require_exact_completion=(
                 raw_orbit.get("mapping_type") == "exchanged"
@@ -968,6 +987,9 @@ def _build_tr_unitary_component_instances(
                 "reviewed_time_reversal_source_identity": raw_orbit.get(
                     "reviewed_time_reversal_source_identity", {}
                 ),
+                "reviewed_time_reversal_source_context": raw_orbit.get(
+                    "reviewed_time_reversal_source_context", {}
+                ),
                 "projector_workflow_by_sampled_kpoint": raw_orbit.get(
                     "projector_workflow_by_sampled_kpoint", {}
                 ),
@@ -1027,6 +1049,7 @@ def _completion_cprime_identity_inventory(
     hsp_mapping: object,
     irrep_pairing: object,
     reviewed_source_identity: object,
+    reviewed_source_context: object,
     require_exact_completion: bool,
 ) -> tuple[dict[str, dict[str, object]], list[str]]:
     inventory: dict[str, dict[str, object]] = {}
@@ -1052,8 +1075,9 @@ def _completion_cprime_identity_inventory(
                 valley_mapping=valley_mapping,
                 hsp_mapping=hsp_mapping,
                 irrep_pairing=irrep_pairing,
-                reviewed_source_identity=reviewed_source_identity,
-                require_exact_completion=require_exact_completion,
+            reviewed_source_identity=reviewed_source_identity,
+            reviewed_source_context=reviewed_source_context,
+            require_exact_completion=require_exact_completion,
             )
             if identity is None:
                 blockers.append(
@@ -1086,6 +1110,7 @@ def _completion_record_cprime_identity(
     hsp_mapping: dict[str, object],
     irrep_pairing: dict[str, object],
     reviewed_source_identity: object,
+    reviewed_source_context: object,
     require_exact_completion: bool,
 ) -> dict[str, object] | None:
     if not isinstance(record, dict):
@@ -1114,6 +1139,11 @@ def _completion_record_cprime_identity(
             reviewed_source_identity=(
                 reviewed_source_identity
                 if isinstance(reviewed_source_identity, dict)
+                else {}
+            ),
+            reviewed_source_context=(
+                reviewed_source_context
+                if isinstance(reviewed_source_context, dict)
                 else {}
             ),
         ):

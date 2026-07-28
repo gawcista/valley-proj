@@ -1235,13 +1235,55 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 row for row in reviewed_rows
                 if getattr(row, "kpoint_label", None) in required_hsps
             ]
+            table = source_table_by_valley.get(valley)
+            source_table_identity = (
+                {
+                    "space_group_number": table.number,
+                    "space_group_symbol": table.name,
+                    "source_table_name": table.name,
+                    "source_table_provenance": (
+                        in_plane_rows[0].source_provenance
+                        if in_plane_rows else ""
+                    ),
+                    "spinor": table.spinor,
+                }
+                if table is not None else None
+            )
+            lift_records = [
+                by_valley[valley]
+                for by_valley in (
+                    double_space_group_lift_certificates.values()
+                )
+                if isinstance(by_valley, dict)
+                and isinstance(by_valley.get(valley), dict)
+                and by_valley[valley].get("status") == "passed"
+            ]
+            shared_lift_record = (
+                lift_records[0]
+                if lift_records
+                and len({
+                    record.get("certificate_identity")
+                    for record in lift_records
+                }) == 1
+                else None
+            )
             source_orbits_by_valley[valley] = (
                 derive_time_reversal_source_irrep_orbits(
                     reviewed_rows=in_plane_rows,
                     centering_vectors=centering_vectors,
+                    source_table_identity=source_table_identity,
+                    standard_setting_certificate=certificate,
+                    parent_affine_operations=(
+                        symmetry_payload.get("detected_operations")
+                        if isinstance(
+                            symmetry_payload.get("detected_operations"),
+                            list,
+                        )
+                        else None
+                    ),
+                    parent_affine_lift_record=shared_lift_record,
                 )
             )
-            table = source_table_by_valley.get(valley)
             source_data = source_ebr_data_by_valley.get(valley)
             if table is not None and isinstance(source_data, dict):
                 grey_source_by_valley[valley] = (

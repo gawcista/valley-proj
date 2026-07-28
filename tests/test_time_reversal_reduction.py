@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 import json
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -22,14 +23,16 @@ from valleyscope.analysis.reduced_ebr_mapping import (
     promote_bundle_for_solve as _promote_bundle_for_solve,
     validate_joint_grey_bundle_provenance,
 )
+import valleyscope.analysis.reduced_ebr_mapping as _mapping_module
+import valleyscope.analysis.ebr_problem_instances as _problem_module
 from valleyscope.analysis.unitary_provenance import (
-    validate_tr_completed_unitary_bundle as _unitary_bundle_completion_evidence_valid,
+    validate_tr_completed_unitary_bundle as _validate_tr_completed_unitary_bundle,
 )
 
 from valleyscope.analysis.time_reversal_orbits import (
     _candidate_source_hsp_to_sampled_kpoint,
     _decompose_grey_counts,
-    build_time_reversal_valley_orbit_report,
+    build_time_reversal_valley_orbit_report as _build_time_reversal_valley_orbit_report,
     derive_time_reversal_valley_mapping,
     validate_time_reversal_valley_mapping,
 )
@@ -37,11 +40,13 @@ from valleyscope.analysis.time_reversal_sewing import (
     build_time_reversal_sewing_report,
 )
 from valleyscope.analysis.tr_irrep_completion import (
-    attach_tr_irrep_completion_certificates,
+    attach_tr_irrep_completion_certificates as _attach_tr_irrep_completion_certificates,
+    validate_tr_irrep_completion_certificate as _validate_tr_irrep_completion_certificate,
 )
 from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector
 from valleyscope.io.wavefunction_convention import canonical_identity
 from valleyscope.irreps.tables import (
+    ReviewedSourceIrrep,
     StandardIrrep,
     StandardIrrepTable,
     StandardTableOperation,
@@ -54,7 +59,11 @@ from valleyscope.irreps.time_reversal_ebr import (
 )
 from valleyscope.irreps.time_reversal_source import (
     derive_time_reversal_source_irrep_orbits,
+    validate_reviewed_time_reversal_source_context as _validate_reviewed_time_reversal_source_context,
 )
+import valleyscope.analysis.time_reversal_orbits as _tr_orbits_module
+import valleyscope.analysis.tr_irrep_completion as _tr_completion_module
+import valleyscope.irreps.time_reversal_source as _tr_source_module
 from tests.reduced_ebr_promo_helpers import (
     attach_real_certificate,
     attach_cprime_fixture_to_candidates,
@@ -64,6 +73,51 @@ from tests.reduced_ebr_promo_helpers import (
     cprime_validation_context_for_export,
     real_primitive_certificate_identity,
 )
+
+
+def build_time_reversal_valley_orbit_report(**kwargs):
+    """Exercise structural synthetic rows without weakening production trust."""
+
+    def fixture_validator(context, **_kwargs):
+        return _validate_reviewed_time_reversal_source_context(
+            context,
+            require_reviewed_table=False,
+        )
+
+    with patch.object(
+        _tr_orbits_module,
+        "validate_reviewed_time_reversal_source_context",
+        fixture_validator,
+    ):
+        return _build_time_reversal_valley_orbit_report(**kwargs)
+
+
+def attach_tr_irrep_completion_certificates(**kwargs):
+    """Exercise structural synthetic rows without weakening production trust."""
+
+    def fixture_validator(context, **_kwargs):
+        return _validate_reviewed_time_reversal_source_context(
+            context,
+            require_reviewed_table=False,
+        )
+
+    with patch.object(
+        _tr_source_module,
+        "validate_reviewed_time_reversal_source_context",
+        fixture_validator,
+    ), patch.object(
+        _tr_completion_module,
+        "_source_context_matches_source_irrep",
+        lambda _context, _source_irrep: True,
+    ):
+        return _attach_tr_irrep_completion_certificates(**kwargs)
+
+
+def _unitary_bundle_completion_evidence_valid(bundle):
+    return _validate_tr_completed_unitary_bundle(
+        bundle,
+        require_reviewed_table=False,
+    )
 
 
 def build_ebr_problem_instances(**kwargs):
@@ -135,7 +189,19 @@ def build_ebr_problem_instances(**kwargs):
                     ),
                 )
             )
-    return _build_ebr_problem_instances(**kwargs)
+    def fixture_certificate_validator(*args, **call_kwargs):
+        call_kwargs.pop("reviewed_source_context", None)
+        return _validate_tr_irrep_completion_certificate(
+            *args,
+            **call_kwargs,
+        )
+
+    with patch.object(
+        _problem_module,
+        "validate_tr_irrep_completion_certificate",
+        fixture_certificate_validator,
+    ):
+        return _build_ebr_problem_instances(**kwargs)
 
 
 def build_ebr_export_bundle(**kwargs):
@@ -156,17 +222,33 @@ def build_reduced_ebr_mapping(**kwargs):
             "cprime_validation_context",
             _fixture_cprime_context(export),
         )
-    return _build_reduced_ebr_mapping(**kwargs)
+    with patch.object(
+        _mapping_module,
+        "validate_tr_completed_unitary_bundle",
+        lambda bundle: _validate_tr_completed_unitary_bundle(
+            bundle,
+            require_reviewed_table=False,
+        ),
+    ):
+        return _build_reduced_ebr_mapping(**kwargs)
 
 
 def promote_bundle_for_solve(*, bundle, table):
-    return _promote_bundle_for_solve(
-        bundle=bundle,
-        table=table,
-        cprime_validation_context=_fixture_cprime_context(
-            {"bundles": [bundle]}
+    with patch.object(
+        _mapping_module,
+        "validate_tr_completed_unitary_bundle",
+        lambda candidate: _validate_tr_completed_unitary_bundle(
+            candidate,
+            require_reviewed_table=False,
         ),
-    )
+    ):
+        return _promote_bundle_for_solve(
+            bundle=bundle,
+            table=table,
+            cprime_validation_context=_fixture_cprime_context(
+                {"bundles": [bundle]}
+            ),
+        )
     return export
 
 
@@ -1096,27 +1178,53 @@ def test_self_mapped_joint_problem_requires_serialized_sewing_evidence():
     )
 
 
+def _derived_fixture_source_report(rows):
+    inventory = canonical_identity({"fixture": "time_reversal_source_rows"})
+    reviewed_rows = [
+        ReviewedSourceIrrep(
+            label=label,
+            kpoint_label=hsp,
+            k_frac=np.asarray(k_frac, dtype=float),
+            dimension=1,
+            characters={1: character},
+            operation_indices=(1,),
+            operation_inventory_identity=inventory,
+            spinor=False,
+            spin_convention="scalar_single_group",
+            source_table="fixture_standard_irrep_table",
+            source_table_status="reviewed_fixture",
+            source_provenance="fixture.StandardIrrepTable",
+        )
+        for label, hsp, k_frac, character in rows
+    ]
+    return derive_time_reversal_source_irrep_orbits(
+        reviewed_rows=reviewed_rows,
+        centering_vectors=[[0.0, 0.0, 0.0]],
+        source_table_identity={
+            "space_group_number": 1,
+            "space_group_symbol": "P1",
+            "source_table_name": "P1",
+            "source_table_provenance": "fixture.StandardIrrepTable",
+            "spinor": False,
+        },
+        standard_setting_certificate={
+            "schema_version": "1.0.0",
+            "validation_status": "validated",
+            "fixture": "time_reversal_source_rows",
+            "centering_vectors": [[0.0, 0.0, 0.0]],
+        },
+    )
+
+
 def _synthetic_source_orbit_report():
-    return {
-        "status": "validated",
-        "operation_inventory_identity": canonical_identity({
-            "fixture": "synthetic_time_reversal_source",
-        }),
-        "spin_convention": "spinor_double_group",
-        "time_reversal_hsp_mapping": {
-            "G": "G", "Q": "QA", "QA": "Q", "M": "M",
-        },
-        "time_reversal_hsp_orbits": [
-            {"representative": "G", "members": ["G"], "self_mapped": True},
-            {"representative": "Q", "members": ["Q", "QA"], "self_mapped": False},
-            {"representative": "M", "members": ["M"], "self_mapped": True},
-        ],
-        "independent_hsp_labels": ["G", "Q", "M"],
-        "irrep_partner_by_label": {
-            "g": "g", "q1": "qa1", "qa1": "q1",
-            "q2": "qa2", "qa2": "q2", "m": "m",
-        },
-    }
+    return _derived_fixture_source_report([
+        ("g", "G", [0.0, 0.0, 0.0], 1.0 + 0.0j),
+        ("q1", "Q", [0.25, 0.0, 0.0], 0.0 + 1.0j),
+        ("qa1", "QA", [-0.25, 0.0, 0.0], 0.0 - 1.0j),
+        ("q2", "Q", [0.25, 0.0, 0.0], 0.5 + 0.5j),
+        ("qa2", "QA", [-0.25, 0.0, 0.0], 0.5 - 0.5j),
+        ("m", "M", [0.5, 0.0, 0.0], 1.0 + 0.0j),
+    ])
 
 
 def _synthetic_grey_report():
@@ -1143,21 +1251,9 @@ def _synthetic_grey_report():
 
 
 def _self_mapped_source_report():
-    return {
-        "status": "validated",
-        "operation_inventory_identity": canonical_identity({
-            "fixture": "self_mapped_source",
-        }),
-        "spin_convention": "spinor_double_group",
-        "time_reversal_hsp_mapping": {"G": "G"},
-        "time_reversal_hsp_orbits": [{
-            "representative": "G",
-            "members": ["G"],
-            "self_mapped": True,
-        }],
-        "independent_hsp_labels": ["G"],
-        "irrep_partner_by_label": {"g": "g"},
-    }
+    return _derived_fixture_source_report([
+        ("g", "G", [0.0, 0.0, 0.0], 1.0 + 0.0j),
+    ])
 
 
 def _self_mapped_grey_report(*, multiplicity: int):
@@ -1298,21 +1394,10 @@ def test_self_mapped_valley_rejects_malformed_or_blocked_sewing_evidence():
 
 
 def _self_mapped_nontrim_source_report():
-    return {
-        "status": "validated",
-        "operation_inventory_identity": canonical_identity({
-            "fixture": "self_mapped_nontrim_source",
-        }),
-        "spin_convention": "scalar_single_group",
-        "time_reversal_hsp_mapping": {"Q": "QA", "QA": "Q"},
-        "time_reversal_hsp_orbits": [{
-            "representative": "Q",
-            "members": ["Q", "QA"],
-            "self_mapped": False,
-        }],
-        "independent_hsp_labels": ["Q"],
-        "irrep_partner_by_label": {"q": "qa", "qa": "q"},
-    }
+    return _derived_fixture_source_report([
+        ("q", "Q", [0.25, 0.0, 0.0], 0.0 + 1.0j),
+        ("qa", "QA", [-0.25, 0.0, 0.0], 0.0 - 1.0j),
+    ])
 
 
 def _self_mapped_nontrim_grey_report():
@@ -2457,7 +2542,7 @@ def test_missing_sampled_evidence_blocks_source_and_dependent_unitary_objects():
     assert export["excluded_count"] == 3
 
 
-def test_independent_unitary_component_remains_ready_when_dependency_is_absent():
+def test_unitary_orbit_blocks_all_components_when_source_dependency_is_absent():
     candidates = _orbit_candidates()
     left_g = next(
         row for row in candidates["candidates"]
@@ -2481,16 +2566,13 @@ def test_independent_unitary_component_remains_ready_when_dependency_is_absent()
         if row["problem_kind"] == "valley_orbit_reduced_ebr"
     )
     assert unitary["left"]["canonical_hsp_vector_ready"] is False
-    assert unitary["right"]["canonical_hsp_vector_ready"] is True
+    assert unitary["right"]["canonical_hsp_vector_ready"] is False
     assert joint["canonical_hsp_vector_ready"] is False
     export = build_ebr_export_bundle(ebr_problem_instances=problems)
-    assert [
-        (bundle["problem_kind"], bundle["valley"])
-        for bundle in export["bundles"]
-    ] == [("unitary_valley_reduced_ebr", "right")]
+    assert export["bundles"] == []
 
 
-def test_self_mapped_inferred_unitary_arm_requires_antiunitary_sewing():
+def test_self_mapped_unitary_completion_is_independent_of_joint_sewing():
     candidates = {"candidates": [{
         "valley": "v",
         "matched_irrep": "q",
@@ -2545,9 +2627,12 @@ def test_self_mapped_inferred_unitary_arm_requires_antiunitary_sewing():
     }
     assert inferred["completion_kind"] == "inferred_by_time_reversal"
     assert inferred["structural_status"] == "validated"
-    assert inferred["readiness_status"] == "blocked"
-    assert "antiunitary_corepresentation_sewing_not_validated" in inferred[
-        "blockers"
+    assert inferred["readiness_status"] == "trusted"
+    assert inferred["blockers"] == []
+    assert orbit["unitary_completion_status"] == "validated"
+    assert orbit["joint_corepresentation_status"] == "blocked"
+    assert "antiunitary_corepresentation_sewing_not_validated" in orbit[
+        "joint_corepresentation_blockers"
     ]
     problems = build_ebr_problem_instances(
         ebr_input_candidates=candidates,
@@ -2558,7 +2643,7 @@ def test_self_mapped_inferred_unitary_arm_requires_antiunitary_sewing():
         if row["problem_kind"] == "unitary_valley_reduced_ebr"
     )
     assert unitary["canonical_hsp_vector_complete"] is True
-    assert unitary["canonical_hsp_vector_ready"] is False
+    assert unitary["canonical_hsp_vector_ready"] is True
 
 
 def test_cross_valley_tr_completion_rejects_missing_sampled_kpoint_binding():
@@ -2648,7 +2733,9 @@ def test_cross_valley_tr_completion_rejects_empty_or_malformed_source_basis(
     )
 
     assert report["status"] == "blocked"
-    assert "time_reversal_source_mapping_malformed" in report["blockers"]
+    assert "time_reversal_serialized_source_model_mismatch" in report[
+        "blockers"
+    ]
     assert report["valley_orbits"][0]["irreps_by_kpoint"] == {}
 
 
