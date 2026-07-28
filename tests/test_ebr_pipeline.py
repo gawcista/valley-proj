@@ -588,8 +588,14 @@ def test_ready_export_bundle_maps_to_public_reduced_ebr_outputs_only(tmp_path):
     assert outputs["valley_ebr_export_bundle_json"].exists()
     assert outputs["valley_reduced_ebr_mapping_json"].exists()
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
-    assert summary["valley_ebr_export_bundle"] == export_bundle
-    assert summary["valley_reduced_ebr_mapping"] == mapping
+    assert "valley_ebr_export_bundle" not in summary
+    assert "valley_reduced_ebr_mapping" not in summary
+    reduced = summary["reduced_ebr_summary"]
+    assert reduced["trusted_bundle_count"] == export_bundle["bundle_count"]
+    assert reduced["mapping_status"] == mapping["status"]
+    assert [row["bundle_id"] for row in reduced["results"]] == [
+        row["bundle_id"] for row in mapping["solutions"]
+    ]
 
 
 def test_ebr_problem_instances_include_irrep_records():

@@ -62,7 +62,8 @@ W_{\rm val} = \sum_a W_a .
 unfolding。`W_val` 依赖真实的 valley center 和 q-cut，不是拓扑不变量。
 
 近简并目标能带中的单条 VASP 本征矢依赖规范选择，因此 ValleyScope 分析整个
-目标子空间，包括投影 valley 矩阵和 valley-adapted basis。稳定摘要字段包括：
+目标子空间，包括投影 valley 矩阵和 valley-adapted basis。详细的子空间权重、
+归属和 projector-quality 证据由 debug profile 保留：
 
 ```text
 S_min:              目标谷子空间权重下界
@@ -274,10 +275,11 @@ Readiness blockers and warnings
 Public output files
 ```
 
-运行上下文包含 `qcut mode:` 和实际 q-cut。`valley_summary.json` 中稳定的
-`Valley projection summary` 与 `Valley subspace analysis` payload 分别为
-`valley_projection_summary` 和 `valley_subspace_analysis`。常见可用性状态
-包括 `fixed_center_not_captured`、`not_derived` 和 `unreliable`。
+运行上下文包含 `qcut mode:` 和实际 q-cut。standard
+`valley_summary.json` 保留紧凑的 `valley_projection_summary`、canonical
+`valley_resolved_irreps`、`reduced_ebr_summary` 和
+`readiness_blocker_summary`。常见投影状态包括
+`fixed_center_not_captured`、`not_derived` 和 `unreliable`。
 
 ## 输入与配置
 
@@ -305,7 +307,7 @@ standard profile 突出以下公开入口：
 | 文件 | 用途 |
 | --- | --- |
 | `valley_summary.txt` | 结果优先的人类可读摘要，应首先查看 |
-| `valley_summary.json` | 机器可读公开记录，包含 canonical `valley_resolved_irreps` |
+| `valley_summary.json` | 紧凑机器记录，包含投影、canonical irrep、权威 reduced-EBR 与 blocker 摘要 |
 | `valley_weights.csv` | 快速扫描每个 (kpoint, VASP band) 的原始 valley 权重 |
 | `valley_ebr_export_bundle.json` | 仅当至少存在一个 ready bundle 时写出 |
 | `valley_reduced_ebr_mapping.json` | 仅当 reduced EBR mapping 已启用且实际完成评估时写出 |
@@ -323,6 +325,8 @@ debug profile 保留 `Valley subspaces`、`Valley subspace analysis`、
 等详细证据。这些是调试入口，不是每位用户都必须逐个检查的主输出。若没有行
 满足相应物理作用域，某些 debug 表可能只有 header-only；这本身不表示运行
 失败。
+数据库 ingestion 从 standalone 公开 bundle/mapping 文件读取完整 EBR
+证据；紧凑 summary 不再复制这些完整 payload。
 
 ## 执行 Reduced EBR Mapping
 

@@ -292,7 +292,7 @@ def test_write_analysis_outputs_plumbs_hsp_star_reports_to_summary(tmp_path):
     write_fixture(h5_path)
     write_config(config_path, h5_path, out_dir)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    raw["output"]["profile"] = "standard"
+    raw["output"]["profile"] = "debug"
     raw["output"].pop("write_detailed_files", None)
     config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -409,25 +409,14 @@ def test_write_analysis_outputs_plumbs_hsp_star_reports_to_summary(tmp_path):
     assert payload["hsp_star_derived_characters"] == hsp_star_derived
     assert payload["irrep_workflow_decisions"] == irrep_workflow_decisions
     assert "C3_like" not in json.dumps(payload)
-    # valley_irrep_matching moved to debug profile; standard uses valley_resolved_irreps
-    assert "valley_irrep_matching" not in payload
+    assert payload["valley_irrep_matching"] == valley_irrep_matching
     assert payload["valley_resolved_irreps"]["status"] == "no_generic_irrep_data"
     assert payload["valley_ebr_input_candidates"] == ebr_input_candidates
     assert payload["valley_ebr_problem_instances"] == ebr_problem_instances
     assert payload["valley_ebr_export_bundle"] == ebr_export_bundle
-    assert (
-        "Valley-projected subspace space group and trusted HSP irreps"
-        in outputs["summary_text"]
-    )
-    assert "Valley irrep matching" not in outputs["summary_text"]
-    assert "Authoritative reduced EBR results" in outputs["summary_text"]
-    assert (
-        "mapping payload absent; "
-        "export status=ready_for_reduced_table_validation, bundles=1"
-        in outputs["summary_text"]
-    )
-    assert "\nEBR export bundle\n" not in outputs["summary_text"]
-    assert "bundle_ebr_instance_001" not in outputs["summary_text"]
+    assert "Valley irrep matching" in outputs["summary_text"]
+    assert "\nEBR export bundle\n" in outputs["summary_text"]
+    assert "bundle_ebr_instance_001" in outputs["summary_text"]
 
 
 def test_single_band_and_not_degenerate_no_subspace_valley_status_mislabel(tmp_path):
@@ -879,10 +868,11 @@ def test_generic_irrep_source_blocked_negative_toy_fixture(tmp_path):
     blocked = [r for r in resolved["rows"] if r["matching_status"] == "blocked"]
     assert len(blocked) == 2
     assert blocked[0]["matching_strategy"] == "bilbao_restricted_character"
-    assert summary["valley_ebr_input_candidates"]["status"] == "no_candidates"
-    assert summary["valley_ebr_input_candidates"]["candidate_count"] == 0
-    assert summary["valley_ebr_problem_instances"]["status"] == "no_canonical_hsp_vectors"
-    assert summary["valley_ebr_export_bundle"]["status"] == "no_bundles"
+    reduced = summary["reduced_ebr_summary"]
+    assert reduced["candidate_status"] == "no_candidates"
+    assert reduced["trusted_candidate_count"] == 0
+    assert reduced["problem_status"] == "no_canonical_hsp_vectors"
+    assert reduced["export_status"] == "no_bundles"
     assert not (out_dir / "valley_reduced_ebr_mapping.json").exists()
 
 
@@ -1139,26 +1129,18 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     assert "legacy_subspace_group_candidate" not in raw_summary
     for cn in ("C2_like", "C3_like", "C4_like"):
         assert cn not in raw_summary
-    assert summary["valley_ebr_input_candidates"]["candidate_count"] == 2
-    assert summary["valley_ebr_problem_instances"]["instance_count"] == 1
-    inst = summary["valley_ebr_problem_instances"]["instances"][0]
-    assert inst["canonical_hsp_vector_complete"] is False
-    assert inst["subspace_group_candidate"] == "P2"
-    assert inst["expected_hsps"] == ["GammaM"]
-    assert inst["required_source_hsp_labels"] == ["GM", "A", "B", "Y"]
-    assert inst["covered_source_hsp_labels"] == ["GM"]
-    assert inst["missing_source_hsp_labels"] == ["A", "B", "Y"]
-    assert inst["status"] == "incomplete_canonical_hsp_vector"
-    assert summary["valley_ebr_export_bundle"]["bundle_count"] == 0
-    assert summary["valley_ebr_export_bundle"]["excluded_count"] == 1
-    result = summary["valley_reduced_ebr_mapping"]
+    result = summary["reduced_ebr_summary"]
+    assert result["trusted_candidate_count"] == 2
+    assert result["problem_instance_count"] == 1
+    assert result["trusted_bundle_count"] == 0
+    assert result["export_excluded_count"] == 1
     # Workflow bundles carry an unresolved standard-setting certificate
     # (Phase E incomplete), so promotion is fail-closed: not_evaluated.
-    assert result["status"] == "not_evaluated"
-    assert result["solutions"] == []
+    assert result["mapping_status"] == "not_evaluated"
+    assert result["results"] == []
     record = load_database_ingestion_record_from_directory(str(out_dir))
     assert record["record_status"] == "no_reduced_ebr_input"
-    assert record["reduced_ebr_mapping_status"] == "not_evaluated"
+    assert record["reduced_ebr_mapping_status"] == "not_available"
 
     bad_out_dir = tmp_path / "bad_out"
     bad_config_path = tmp_path / "bad_cfg.yaml"
@@ -1167,11 +1149,10 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     bad_summary = json.loads(
         bad_outputs["valley_summary_json"].read_text(encoding="utf-8")
     )
-    bad_mapping = bad_summary["valley_reduced_ebr_mapping"]
-    assert bad_mapping["status"] == "not_evaluated"
-    assert bad_mapping["solutions"] == []
-    bad_instance = bad_summary["valley_ebr_problem_instances"]["instances"][0]
-    assert bad_instance["status"] == "incomplete_canonical_hsp_vector"
+    bad_mapping = bad_summary["reduced_ebr_summary"]
+    assert bad_mapping["mapping_status"] == "not_evaluated"
+    assert bad_mapping["results"] == []
+    assert bad_mapping["problem_instance_count"] == 1
 
 
 def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
@@ -1447,7 +1428,7 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
                            "backend": "spglib"},
             "tolerance": {"symprec": 1.0e-5, "angle_tolerance": -1.0},
         },
-        "output": {"directory": str(out_table), "profile": "standard"},
+        "output": {"directory": str(out_table), "profile": "debug"},
     }), encoding="utf-8")
 
     outputs_table = analyze_hsp(cfg_table)
@@ -1486,7 +1467,7 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
                            "backend": "spglib"},
             "tolerance": {"symprec": 1.0e-5, "angle_tolerance": -1.0},
         },
-        "output": {"directory": str(out_spec), "profile": "standard"},
+        "output": {"directory": str(out_spec), "profile": "debug"},
     }), encoding="utf-8")
 
     outputs_spec = analyze_hsp(cfg_spec)
@@ -1526,14 +1507,16 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
     for ms in (mapping_spec_stripped, mapping_table_stripped):
         assert ms["status"] == "not_evaluated"
 
-    # Ingestion records also equivalent modulo reduced_ebr_input.
+    # Ingestion consumes standalone public downstream files only. A
+    # not-evaluated mapping is not written, even when debug summary embeds it.
     rec_table = load_database_ingestion_record_from_directory(str(out_table))
     rec_spec = load_database_ingestion_record_from_directory(str(out_spec))
-    # Both records have valid status; auto-canonical may differ from external.
     assert rec_table["record_status"] == "no_reduced_ebr_input"
     assert rec_spec["record_status"] == "no_reduced_ebr_input"
-    assert rec_table["reduced_ebr_input"]["source"] == "table_file"
-    assert rec_spec["reduced_ebr_input"]["source"] == "spec_file"
+    assert rec_table["reduced_ebr_mapping_status"] == "not_available"
+    assert rec_spec["reduced_ebr_mapping_status"] == "not_available"
+    assert "reduced_ebr_input" not in rec_table
+    assert "reduced_ebr_input" not in rec_spec
 
     # Summary embeddings agree on status and key fields.
     summary_emb_table = dict(summary_table["valley_reduced_ebr_mapping"])
@@ -2203,9 +2186,10 @@ def test_spinful_p3_analyze_hsp_unmocked_feasibility(tmp_path):
         assert row.get("diagnostic_only") is True, (
             "BLOCKER CLEARED: toy fixture has trusted eigenphase rows"
         )
-    assert summary["valley_ebr_input_candidates"]["candidate_count"] == 0
-    assert summary["valley_ebr_problem_instances"]["instance_count"] == 0
-    assert summary["valley_ebr_export_bundle"]["bundle_count"] == 0
+    reduced = summary["reduced_ebr_summary"]
+    assert reduced["trusted_candidate_count"] == 0
+    assert reduced["problem_instance_count"] == 0
+    assert reduced["trusted_bundle_count"] == 0
 
     # Standard outputs exist.
     assert outputs["valley_summary_json"].exists()

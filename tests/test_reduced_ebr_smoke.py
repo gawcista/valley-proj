@@ -325,7 +325,11 @@ def test_reduced_ebr_classifier_payload_written_consistently_to_public_outputs(t
     summary_json = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     summary_text = outputs["valley_summary_txt"].read_text(encoding="utf-8")
     assert mapping_json == mapping
-    assert summary_json["valley_reduced_ebr_mapping"] == mapping
+    assert "valley_reduced_ebr_mapping" not in summary_json
+    reduced_results = summary_json["reduced_ebr_summary"]["results"]
+    assert [row["classification"] for row in reduced_results] == [
+        row["classification"] for row in mapping["solutions"]
+    ]
     assert "classifications: atomic-compatible=1, in integer span, no nonnegative witness=1, outside integer span=1" in summary_text
     assert "reviewed table source: irreptables" in summary_text
     assert "b_atom K: atomic-compatible" in summary_text
@@ -523,10 +527,10 @@ def test_provenance_survives_through_output_writer_to_export_bundle(tmp_path):
         "C3_spinor_phase_+1/2", "C3_spinor_phase_+1/2"
     ]
 
-    # Summary embeds the export bundle with provenance.
+    # Full provenance remains authoritative in the standalone export bundle.
     summary = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
-    embedded = summary["valley_ebr_export_bundle"]["bundles"][0]
-    assert embedded["irrep_records_by_kpoint"] == records
+    assert "valley_ebr_export_bundle" not in summary
+    assert summary["reduced_ebr_summary"]["trusted_bundle_count"] == 1
 
     # Standard profile: no debug/detail files.
     written = {p.name for p in out_dir.iterdir() if p.is_file()}

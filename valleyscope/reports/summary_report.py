@@ -11,7 +11,53 @@ import numpy as np
 from valleyscope.io.config import AppConfig
 from valleyscope.reports.json_report import _json_default
 
-_SCHEMA_VERSION = "2.0.0"
+_SCHEMA_VERSION = "2.1.0"
+
+_REDUCED_EBR_CLASSIFICATIONS = (
+    "atomic-compatible-candidate",
+    "in_integer_span_no_nonnegative_witness",
+    "outside_integer_span",
+    "indeterminate_truncated",
+)
+
+_COMPACT_TABLE_PROVENANCE_FIELDS = (
+    "source",
+    "data_source",
+    "package",
+    "package_version",
+    "space_group_number",
+    "subspace_group_candidate",
+    "spinful",
+    "expected_hsps",
+    "valleyscope_reduction",
+    "unitary_space_group_number",
+    "time_reversal_grey_bns_number",
+    "time_reversal_source",
+)
+
+_COMPACT_RESULT_FIELDS = (
+    "bundle_id",
+    "problem_kind",
+    "physical_object_kind",
+    "valley",
+    "valley_orbit",
+    "subspace_group_candidate",
+    "classification",
+    "search_status",
+    "ebr_decomposition",
+    "integer_solution",
+)
+
+_COMPACT_EXCLUSION_FIELDS = (
+    "source_instance_id",
+    "bundle_id",
+    "problem_kind",
+    "physical_object_kind",
+    "valley",
+    "valley_orbit",
+    "subspace_group_candidate",
+    "status",
+)
 
 
 def build_summary_payload(
@@ -51,34 +97,81 @@ def build_summary_payload(
     }
     if config.projection.qcut_mode == "relative_min_valley_distance":
         qcut_payload["fraction"] = float(config.projection.qcut_fraction)
+    input_payload = {
+        "wavefunction_h5": str(config.input.wavefunction_h5),
+        "operation_structure_file": None
+        if config.symmetry.operations.structure_file is None
+        else str(config.symmetry.operations.structure_file),
+        "operation_detection_backend": config.symmetry.operations.backend,
+        "spinor_input_profile": "vasp_nonmagnetic_soc_default_saxis_v1",
+    }
+    output_files = {
+        name: str(path) for name, path in output_paths.items()
+    }
+    projection_rows = _projection_rows(subspace_payload)
+    valley_resolved_irreps = (
+        _build_valley_resolved_irreps(
+            valley_irrep_matching,
+            valley_projected_representation=valley_projected_representation,
+        )
+        if valley_irrep_matching is not None
+        else _build_valley_resolved_irreps({})
+    )
+    cprime = _compact_cprime_records(
+        source_basis=spinor_source_basis_certificate,
+        lift_by_scope=double_space_group_lift_certificates,
+        representation_by_scope=scoped_representation_evidence,
+        include_diagnostics=config.output.profile == "debug",
+    )
     payload: dict[str, Any] = {
         "schema_version": _SCHEMA_VERSION,
-        "input": {
-            "wavefunction_h5": str(config.input.wavefunction_h5),
-            "operation_structure_file": None
-            if config.symmetry.operations.structure_file is None
-            else str(config.symmetry.operations.structure_file),
-            "operation_detection_backend": config.symmetry.operations.backend,
-            "spinor_input_profile": (
-                "vasp_nonmagnetic_soc_default_saxis_v1"
-            ),
-        },
+        "input": input_payload,
         "target_kpoints": list(config.analysis.kpoints),
         "iband": list(config.analysis.iband),
         "valley_subspaces": [
-            {"label": sector.name, "centers": list(sector.centers)}
-            for sector in config.valley_subspaces
+            {"label": valley.name, "centers": list(valley.centers)}
+            for valley in config.valley_subspaces
         ],
         "qcut": qcut_payload,
-        "valley_projection_summary": _projection_rows(subspace_payload),
-        "valley_subspace_analysis": _subspace_rows(subspace_payload),
-        "valley_projector_quality": _projector_quality_rows(subspace_payload),
-        "symmetry_analysis": _symmetry_analysis(symmetry_payload, config.analysis.kpoints),
-        "symmetry_eigenvalues": eigen_rows,
-        "symmetry_characters": _symmetry_character_rows(eigen_rows),
+        "valley_projection_summary": projection_rows,
+        "cprime": cprime,
         "warnings": warnings,
         "output_profile": config.output.profile,
-        "output_files": {name: str(path) for name, path in output_paths.items()},
+        "output_files": output_files,
+    }
+
+    if config.output.profile == "standard":
+        payload.update({
+            "symmetry_analysis": _compact_standard_symmetry_analysis(
+                symmetry_payload
+            ),
+            "valley_resolved_irreps": valley_resolved_irreps,
+            "reduced_ebr_summary": _build_reduced_ebr_summary(
+                ebr_input_candidates=ebr_input_candidates,
+                ebr_problem_instances=ebr_problem_instances,
+                ebr_export_bundle=ebr_export_bundle,
+                reduced_ebr_mapping=reduced_ebr_mapping,
+            ),
+            "readiness_blocker_summary": _build_readiness_blocker_summary(
+                valley_resolved_irreps=valley_resolved_irreps,
+                ebr_input_candidates=ebr_input_candidates,
+                ebr_problem_instances=ebr_problem_instances,
+                ebr_export_bundle=ebr_export_bundle,
+                reduced_ebr_mapping=reduced_ebr_mapping,
+            ),
+        })
+        return payload
+
+    full_symmetry_analysis = _symmetry_analysis(
+        symmetry_payload,
+        config.analysis.kpoints,
+    )
+    payload.update({
+        "valley_subspace_analysis": _subspace_rows(subspace_payload),
+        "valley_projector_quality": _projector_quality_rows(subspace_payload),
+        "symmetry_analysis": full_symmetry_analysis,
+        "symmetry_eigenvalues": eigen_rows,
+        "symmetry_characters": _symmetry_character_rows(eigen_rows),
         "legend": {
             "W_val": "valley-subspace weight",
             "P_v": "valley purity",
@@ -97,12 +190,7 @@ def build_summary_payload(
                 "epsilon_seed is the seed projector symmetry error"
             ),
         },
-    }
-    payload["cprime"] = _compact_cprime_records(
-        source_basis=spinor_source_basis_certificate,
-        lift_by_scope=double_space_group_lift_certificates,
-        representation_by_scope=scoped_representation_evidence,
-    )
+    })
     if symmetry_eigenvalue_summary:
         payload["symmetry_eigenvalue_summary"] = symmetry_eigenvalue_summary
     if projector_symmetry_report is not None:
@@ -118,15 +206,8 @@ def build_summary_payload(
     if irrep_workflow_decisions is not None:
         payload["irrep_workflow_decisions"] = irrep_workflow_decisions
     if valley_irrep_matching is not None:
-        payload["valley_resolved_irreps"] = _build_valley_resolved_irreps(
-            valley_irrep_matching,
-            valley_projected_representation=valley_projected_representation,
-        )
-        # Full valley_irrep_matching is a debug diagnostic; not exposed
-        # in standard profile to avoid duplicating the valley_resolved_irreps
-        # compact irrep surface.
-        if config.output.profile == "debug":
-            payload["valley_irrep_matching"] = valley_irrep_matching
+        payload["valley_resolved_irreps"] = valley_resolved_irreps
+        payload["valley_irrep_matching"] = valley_irrep_matching
     if ebr_input_candidates is not None:
         payload["valley_ebr_input_candidates"] = ebr_input_candidates
     if ebr_problem_instances is not None:
@@ -137,7 +218,6 @@ def build_summary_payload(
         payload["valley_reduced_ebr_mapping"] = reduced_ebr_mapping
     if (
         valley_projected_representation is not None
-        and config.output.profile == "debug"
     ):
         payload["valley_projected_representations"] = valley_projected_representation
     if folded_center_payload is not None:
@@ -152,6 +232,7 @@ def _compact_cprime_records(
     source_basis: dict[str, Any] | None,
     lift_by_scope: dict[str, Any] | None,
     representation_by_scope: dict[str, Any] | None,
+    include_diagnostics: bool,
 ) -> dict[str, Any]:
     source = source_basis if isinstance(source_basis, dict) else {}
     lifts = lift_by_scope if isinstance(lift_by_scope, dict) else {}
@@ -175,32 +256,34 @@ def _compact_cprime_records(
         evidence = representations.get(kpoint, {}).get(valley, {})
         lift = lift if isinstance(lift, dict) else {}
         evidence = evidence if isinstance(evidence, dict) else {}
-        acceptance_matrix.append(
-            {
-                "kpoint": kpoint,
-                "valley": valley,
+        row = {
+            "kpoint": kpoint,
+            "valley": valley,
+            "double_space_group_lift_status": lift.get(
+                "status", "not_evaluated"
+            ),
+            "double_space_group_lift_identity": lift.get(
+                "certificate_identity"
+            ),
+            "scoped_representation_status": evidence.get(
+                "status", "not_evaluated"
+            ),
+            "scoped_representation_evidence_identity": evidence.get(
+                "evidence_identity"
+            ),
+        }
+        if include_diagnostics:
+            row.update({
                 "scope_kind": (
                     evidence.get("scope", {}).get("scope_kind")
                     if isinstance(evidence.get("scope"), dict)
                     else None
-                ),
-                "double_space_group_lift_status": lift.get(
-                    "status", "not_evaluated"
-                ),
-                "double_space_group_lift_identity": lift.get(
-                    "certificate_identity"
                 ),
                 "double_space_group_lift_blockers": list(
                     lift.get("reason_codes", [])
                 )
                 if isinstance(lift.get("reason_codes", []), list)
                 else ["reason_codes_malformed"],
-                "scoped_representation_status": evidence.get(
-                    "status", "not_evaluated"
-                ),
-                "scoped_representation_evidence_identity": evidence.get(
-                    "evidence_identity"
-                ),
                 "scoped_representation_blockers": list(
                     evidence.get("reason_codes", [])
                 )
@@ -210,9 +293,9 @@ def _compact_cprime_records(
                     _reciprocal_grid_permutation_status(evidence)
                 ),
                 "residual_maxima": _scoped_residual_maxima(evidence),
-            }
-        )
-    return {
+            })
+        acceptance_matrix.append(row)
+    compact = {
         "spinor_source_basis": {
             "profile_identity": source.get("profile_identity"),
             "applicability": source.get("applicability", "not_evaluated"),
@@ -223,7 +306,238 @@ def _compact_cprime_records(
             else ["reason_codes_malformed"],
         },
         "acceptance_matrix": acceptance_matrix,
-        "full_records": "diagnostics.h5:/cprime",
+    }
+    if include_diagnostics:
+        compact["full_records"] = "diagnostics.h5:/cprime"
+    return compact
+
+
+def _compact_standard_symmetry_analysis(
+    symmetry_analysis: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "status": symmetry_analysis.get("status"),
+        "international": symmetry_analysis.get("international"),
+        "spacegroup_number": symmetry_analysis.get("spacegroup_number"),
+        "operation_detection_backend": symmetry_analysis.get(
+            "operation_detection_backend"
+        ),
+    }
+
+
+def _dict_or_empty(value: object) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _dict_rows(report: dict[str, Any], key: str) -> list[dict[str, Any]]:
+    value = report.get(key)
+    return (
+        [row for row in value if isinstance(row, dict)]
+        if isinstance(value, list)
+        else []
+    )
+
+
+def _build_reduced_ebr_summary(
+    *,
+    ebr_input_candidates: dict[str, Any] | None,
+    ebr_problem_instances: dict[str, Any] | None,
+    ebr_export_bundle: dict[str, Any] | None,
+    reduced_ebr_mapping: dict[str, Any] | None,
+) -> dict[str, Any]:
+    candidates = _dict_or_empty(ebr_input_candidates)
+    instances = _dict_or_empty(ebr_problem_instances)
+    export = _dict_or_empty(ebr_export_bundle)
+    mapping = _dict_or_empty(reduced_ebr_mapping)
+    bundle_kind_counts: dict[str, int] = {}
+    for bundle in _dict_rows(export, "bundles"):
+        kind = str(bundle.get("physical_object_kind", "")).strip()
+        if kind:
+            bundle_kind_counts[kind] = bundle_kind_counts.get(kind, 0) + 1
+
+    provenance_by_bundle = _table_provenance_by_bundle(mapping)
+    compact_results = [
+        _compact_reduced_ebr_result(
+            solution,
+            fallback_table_provenance=provenance_by_bundle.get(
+                str(solution.get("bundle_id", ""))
+            ),
+        )
+        for solution in _dict_rows(mapping, "solutions")
+    ]
+    classification_counts = {
+        classification: sum(
+            result.get("classification") == classification
+            for result in compact_results
+        )
+        for classification in _REDUCED_EBR_CLASSIFICATIONS
+    }
+
+    excluded_physical_objects: list[dict[str, Any]] = []
+    for stage, report, key in (
+        ("export", export, "excluded_instances"),
+        ("mapping", mapping, "excluded_bundles"),
+    ):
+        excluded_physical_objects.extend(
+            _compact_reduced_ebr_exclusion(row, stage=stage)
+            for row in _dict_rows(report, key)
+        )
+    excluded_physical_objects.sort(
+        key=lambda row: (
+            str(row.get("stage", "")),
+            str(row.get("source_instance_id", "")),
+            str(row.get("bundle_id", "")),
+        )
+    )
+
+    return {
+        "candidate_status": candidates.get("status", "not_evaluated"),
+        "trusted_candidate_count": candidates.get("candidate_count", 0),
+        "blocked_candidate_count": candidates.get("blocked_count", 0),
+        "problem_status": instances.get("status", "not_evaluated"),
+        "problem_instance_count": instances.get("instance_count", 0),
+        "ready_problem_instance_count": instances.get(
+            "ready_instance_count", 0
+        ),
+        "export_status": export.get("status", "not_evaluated"),
+        "trusted_bundle_count": export.get("bundle_count", 0),
+        "trusted_bundle_counts_by_physical_object_kind": dict(
+            sorted(bundle_kind_counts.items())
+        ),
+        "export_excluded_count": export.get("excluded_count", 0),
+        "mapping_status": mapping.get("status", "not_evaluated"),
+        "mapping_table_status": mapping.get(
+            "table_status", "not_available"
+        ),
+        "result_count": len(compact_results),
+        "classification_counts": classification_counts,
+        "results": compact_results,
+        "excluded_physical_objects": excluded_physical_objects,
+    }
+
+
+def _table_provenance_by_bundle(
+    mapping: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    by_bundle = _dict_or_empty(mapping.get("reduced_ebr_input")).get(
+        "table_input_provenance_by_bundle"
+    )
+    return {
+        str(bundle_id): provenance
+        for bundle_id, provenance in _dict_or_empty(by_bundle).items()
+        if isinstance(provenance, dict)
+    }
+
+
+def _compact_reduced_ebr_result(
+    solution: dict[str, Any],
+    *,
+    fallback_table_provenance: dict[str, Any] | None,
+) -> dict[str, Any]:
+    provenance = solution.get("table_provenance")
+    if not isinstance(provenance, dict):
+        provenance = fallback_table_provenance
+    compact = {field: solution.get(field) for field in _COMPACT_RESULT_FIELDS}
+    compact["valley"] = solution.get("valley", "")
+    for field in ("valley_orbit", "ebr_decomposition", "integer_solution"):
+        compact[field] = (
+            list(solution[field])
+            if isinstance(solution.get(field), list)
+            else []
+        )
+    compact["table_provenance"] = _compact_table_provenance(provenance)
+    return compact
+
+
+def _compact_table_provenance(
+    provenance: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(provenance, dict):
+        return {}
+    return {
+        field: provenance[field]
+        for field in _COMPACT_TABLE_PROVENANCE_FIELDS
+        if field in provenance
+    }
+
+
+def _compact_reduced_ebr_exclusion(
+    row: dict[str, Any],
+    *,
+    stage: str,
+) -> dict[str, Any]:
+    reasons = row.get("exclusion_reasons")
+    if not isinstance(reasons, list):
+        reason = row.get("reason")
+        reasons = [str(reason)] if reason not in (None, "") else []
+    compact = {field: row.get(field) for field in _COMPACT_EXCLUSION_FIELDS}
+    compact["stage"] = stage
+    compact["valley"] = row.get("valley", "")
+    compact["valley_orbit"] = (
+        list(row["valley_orbit"])
+        if isinstance(row.get("valley_orbit"), list)
+        else []
+    )
+    compact["reasons"] = [str(reason) for reason in reasons]
+    return compact
+
+
+def _build_readiness_blocker_summary(
+    *,
+    valley_resolved_irreps: dict[str, Any],
+    ebr_input_candidates: dict[str, Any] | None,
+    ebr_problem_instances: dict[str, Any] | None,
+    ebr_export_bundle: dict[str, Any] | None,
+    reduced_ebr_mapping: dict[str, Any] | None,
+) -> dict[str, Any]:
+    blocker_counts: dict[str, int] = {}
+    for row in valley_resolved_irreps.get("rows", []):
+        if not isinstance(row, dict):
+            continue
+        if (
+            row.get("matching_status") == "matched"
+            and not row.get("diagnostic_only", False)
+            and row.get("readiness_level") == "trusted"
+        ):
+            continue
+        reasons = row.get("blocking_reasons", [])
+        if isinstance(reasons, list) and reasons:
+            for reason in reasons:
+                _count_reason(blocker_counts, reason)
+        else:
+            _count_reason(blocker_counts, row.get("reason"))
+
+    for row in _dict_rows(
+        _dict_or_empty(ebr_input_candidates), "blocked"
+    ):
+        _count_reason(blocker_counts, row.get("reason"))
+
+    for row in _dict_rows(
+        _dict_or_empty(ebr_problem_instances), "instances"
+    ):
+        for reason in row.get("blocked_by", []):
+            _count_reason(blocker_counts, reason)
+
+    for row in _dict_rows(
+        _dict_or_empty(ebr_export_bundle), "excluded_instances"
+    ):
+        for reason in row.get("exclusion_reasons", []):
+            _count_reason(blocker_counts, reason)
+
+    for row in _dict_rows(
+        _dict_or_empty(reduced_ebr_mapping), "excluded_bundles"
+    ):
+        _count_reason(blocker_counts, row.get("reason"))
+
+    reasons = [
+        {"reason": reason, "count": blocker_counts[reason]}
+        for reason in sorted(blocker_counts)
+    ]
+    return {
+        "status": "blocked" if reasons else "ready",
+        "distinct_reason_count": len(reasons),
+        "occurrence_count": sum(blocker_counts.values()),
+        "reasons": reasons,
     }
 
 
@@ -480,64 +794,61 @@ def _render_standard_reduced_ebr(
     summary: dict[str, Any],
 ) -> None:
     _section(lines, "Authoritative reduced EBR results")
-    mapping = summary.get("valley_reduced_ebr_mapping")
-    if not isinstance(mapping, dict):
-        bundle = summary.get("valley_ebr_export_bundle", {})
-        if not isinstance(bundle, dict):
-            bundle = {}
+    reduced = summary.get("reduced_ebr_summary", {})
+    if not isinstance(reduced, dict):
+        reduced = {}
+    mapping_status = reduced.get("mapping_status", "not_evaluated")
+    solutions = reduced.get("results", [])
+    if not isinstance(solutions, list):
+        solutions = []
+    if mapping_status == "not_evaluated":
         lines.append(
             "no authoritative reduced EBR result: "
             "mapping payload absent; "
-            f"export status={bundle.get('status', 'not_available')}, "
-            f"bundles={bundle.get('bundle_count', 0)}, "
-            f"excluded={bundle.get('excluded_count', 0)}"
+            f"export status={reduced.get('export_status', 'not_evaluated')}, "
+            f"bundles={reduced.get('trusted_bundle_count', 0)}, "
+            f"excluded={reduced.get('export_excluded_count', 0)}"
         )
         lines.append("")
         return
 
-    solutions = mapping.get("solutions", [])
-    if not isinstance(solutions, list) or not solutions:
+    if not solutions:
         lines.append(
             "no authoritative reduced EBR result: "
-            f"mapping status={mapping.get('status', 'no_data')}, "
-            f"table status={mapping.get('table_status', 'not_available')}"
+            f"mapping status={mapping_status}, "
+            "table status="
+            f"{reduced.get('mapping_table_status', 'not_available')}"
         )
-        excluded = mapping.get("excluded_bundles", [])
+        excluded = [
+            row
+            for row in reduced.get("excluded_physical_objects", [])
+            if isinstance(row, dict) and row.get("stage") == "mapping"
+        ]
         if isinstance(excluded, list) and excluded:
             lines.append(f"excluded bundles: {len(excluded)}")
         lines.append("")
         return
 
-    provenance_by_bundle: dict[str, Any] = {}
-    reduced_input = mapping.get("reduced_ebr_input", {})
-    if isinstance(reduced_input, dict):
-        candidate = reduced_input.get("table_input_provenance_by_bundle", {})
-        if isinstance(candidate, dict):
-            provenance_by_bundle = candidate
     lines.append(
-        f"mapping status: {mapping.get('status', 'no_data')}; "
-        f"table status: {mapping.get('table_status', '')}"
+        f"mapping status: {mapping_status}; "
+        f"table status: {reduced.get('mapping_table_status', '')}"
     )
-    classifications = [
-        solution.get("classification")
-        for solution in solutions if isinstance(solution, dict)
-    ]
+    classifications = reduced.get("classification_counts", {})
+    if not isinstance(classifications, dict):
+        classifications = {}
     lines.append(
         "classifications: "
-        f"atomic-compatible={classifications.count('atomic-compatible-candidate')}, "
+        "atomic-compatible="
+        f"{classifications.get('atomic-compatible-candidate', 0)}, "
         "in integer span, no nonnegative witness="
-        f"{classifications.count('in_integer_span_no_nonnegative_witness')}, "
-        f"outside integer span={classifications.count('outside_integer_span')}"
+        f"{classifications.get('in_integer_span_no_nonnegative_witness', 0)}, "
+        "outside integer span="
+        f"{classifications.get('outside_integer_span', 0)}"
     )
     for solution in solutions:
         if not isinstance(solution, dict):
             continue
-        bundle_id = str(solution.get("bundle_id", ""))
         table_provenance = solution.get("table_provenance")
-        if not isinstance(table_provenance, dict):
-            table_provenance = provenance_by_bundle.get(bundle_id)
-        if not isinstance(table_provenance, dict):
-            table_provenance = reduced_input
         lines.append(
             f"- physical object: {solution.get('physical_object_kind', '')}; "
             f"valley/orbit: {_standard_valley_orbit(solution)}; "
@@ -616,61 +927,23 @@ def _render_standard_blockers(
     summary: dict[str, Any],
 ) -> None:
     _section(lines, "Readiness blockers and warnings")
-    blocker_counts: dict[str, int] = {}
-
-    resolved = summary.get("valley_resolved_irreps", {})
-    if isinstance(resolved, dict):
-        for row in resolved.get("rows", []):
-            if not isinstance(row, dict):
-                continue
-            if (
-                row.get("matching_status") == "matched"
-                and not row.get("diagnostic_only", False)
-                and row.get("readiness_level") == "trusted"
-            ):
-                continue
-            reasons = row.get("blocking_reasons", [])
-            if isinstance(reasons, list) and reasons:
-                for reason in reasons:
-                    _count_reason(blocker_counts, reason)
-            else:
-                _count_reason(blocker_counts, row.get("reason"))
-
-    candidates = summary.get("valley_ebr_input_candidates", {})
-    if isinstance(candidates, dict):
-        for row in candidates.get("blocked", []):
-            if isinstance(row, dict):
-                _count_reason(blocker_counts, row.get("reason"))
-
-    instances = summary.get("valley_ebr_problem_instances", {})
-    if isinstance(instances, dict):
-        for row in instances.get("instances", []):
-            if not isinstance(row, dict):
-                continue
-            for reason in row.get("blocked_by", []):
-                _count_reason(blocker_counts, reason)
-
-    bundle = summary.get("valley_ebr_export_bundle", {})
-    if isinstance(bundle, dict):
-        for row in bundle.get("excluded_instances", []):
-            if not isinstance(row, dict):
-                continue
-            for reason in row.get("exclusion_reasons", []):
-                _count_reason(blocker_counts, reason)
-
-    mapping = summary.get("valley_reduced_ebr_mapping", {})
-    if isinstance(mapping, dict):
-        for row in mapping.get("excluded_bundles", []):
-            if isinstance(row, dict):
-                _count_reason(blocker_counts, row.get("reason"))
-
-    if blocker_counts:
+    blocker_summary = summary.get("readiness_blocker_summary", {})
+    reasons = (
+        blocker_summary.get("reasons", [])
+        if isinstance(blocker_summary, dict)
+        else []
+    )
+    if isinstance(reasons, list) and reasons:
         lines.append(
-            f"distinct blocker reasons: {len(blocker_counts)} "
-            f"({sum(blocker_counts.values())} occurrences)"
+            "distinct blocker reasons: "
+            f"{blocker_summary.get('distinct_reason_count', len(reasons))} "
+            f"({blocker_summary.get('occurrence_count', 0)} occurrences)"
         )
-        for reason in sorted(blocker_counts):
-            lines.append(f"- [{blocker_counts[reason]}] {reason}")
+        for row in reasons:
+            if isinstance(row, dict):
+                lines.append(
+                    f"- [{row.get('count', 0)}] {row.get('reason', '')}"
+                )
     else:
         lines.append("readiness blockers: none")
 

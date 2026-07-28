@@ -108,9 +108,9 @@ def build_database_ingestion_record(
     valley_summary : dict or None
         Loaded ``valley_summary.json`` payload.  Required.
     valley_ebr_export_bundle : dict or None
-        Loaded ``valley_ebr_export_bundle.json`` payload.  Optional.
+        Loaded standalone ``valley_ebr_export_bundle.json`` payload.  Optional.
     valley_reduced_ebr_mapping : dict or None
-        Loaded ``valley_reduced_ebr_mapping.json`` payload.  Optional.
+        Loaded standalone ``valley_reduced_ebr_mapping.json`` payload.  Optional.
     source_files : dict or None
         Optional map of logical name to file path for provenance.
     output_profile : str
@@ -430,8 +430,6 @@ def load_database_ingestion_record_from_directory(
     if bundle_path.is_file():
         bundle = _load_json_object(bundle_path)
         source_files["valley_ebr_export_bundle"] = str(bundle_path.resolve())
-    elif isinstance(summary.get("valley_ebr_export_bundle"), dict):
-        bundle = dict(summary["valley_ebr_export_bundle"])
 
     # valley_reduced_ebr_mapping.json (optional)
     mapping = None
@@ -439,8 +437,6 @@ def load_database_ingestion_record_from_directory(
     if mapping_path.is_file():
         mapping = _load_json_object(mapping_path)
         source_files["valley_reduced_ebr_mapping"] = str(mapping_path.resolve())
-    elif isinstance(summary.get("valley_reduced_ebr_mapping"), dict):
-        mapping = dict(summary["valley_reduced_ebr_mapping"])
 
     return build_database_ingestion_record(
         valley_summary=summary,

@@ -13,6 +13,39 @@ from valleyscope.reports.analysis_outputs import write_analysis_outputs
 from tests.helpers_io_workflow import write_fixture, write_config
 
 
+_STANDARD_SUMMARY_KEYS = {
+    "schema_version",
+    "input",
+    "target_kpoints",
+    "iband",
+    "valley_subspaces",
+    "qcut",
+    "valley_projection_summary",
+    "symmetry_analysis",
+    "cprime",
+    "valley_resolved_irreps",
+    "reduced_ebr_summary",
+    "readiness_blocker_summary",
+    "warnings",
+    "output_profile",
+    "output_files",
+}
+
+_DEBUG_DETAIL_SUMMARY_KEYS = {
+    "valley_subspace_analysis",
+    "valley_projector_quality",
+    "symmetry_eigenvalues",
+    "symmetry_characters",
+    "symmetry_adapted_valley_analysis",
+    "irrep_workflow_decisions",
+    "valley_ebr_input_candidates",
+    "valley_ebr_problem_instances",
+    "valley_ebr_export_bundle",
+    "folded_center_report",
+    "sampled_k_coverage",
+}
+
+
 def test_default_standard_profile_writes_only_public_outputs(tmp_path):
     """Default output.profile=standard emits only public files."""
     h5_path = tmp_path / "wf.h5"
@@ -52,9 +85,26 @@ def test_default_standard_profile_writes_only_public_outputs(tmp_path):
 
     summary_json = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     assert summary_json.get("output_profile") == "standard"
-    assert "valley_resolved_irreps" in summary_json
-    assert "valley_projected_representations" not in summary_json
-    assert "valley_irrep_matching" not in summary_json
+    assert set(summary_json) == _STANDARD_SUMMARY_KEYS
+    assert set(summary_json["symmetry_analysis"]) == {
+        "status",
+        "international",
+        "spacegroup_number",
+        "operation_detection_backend",
+    }
+    assert "full_records" not in summary_json["cprime"]
+    compact_cprime_row_keys = {
+        "kpoint",
+        "valley",
+        "double_space_group_lift_status",
+        "double_space_group_lift_identity",
+        "scoped_representation_status",
+        "scoped_representation_evidence_identity",
+    }
+    assert all(
+        set(row) == compact_cprime_row_keys
+        for row in summary_json["cprime"]["acceptance_matrix"]
+    )
 
 
 def test_debug_profile_writes_all_detailed_files(tmp_path):
@@ -84,6 +134,9 @@ def test_debug_profile_writes_all_detailed_files(tmp_path):
 
     summary_json = json.loads(outputs["valley_summary_json"].read_text(encoding="utf-8"))
     assert summary_json.get("output_profile") == "debug"
+    assert _DEBUG_DETAIL_SUMMARY_KEYS <= set(summary_json)
+    assert "reduced_ebr_summary" not in summary_json
+    assert "readiness_blocker_summary" not in summary_json
     report = summary_json["valley_projected_representations"]
     assert report["record_count"] == len(report["representation_records"])
     assert "rows" not in report

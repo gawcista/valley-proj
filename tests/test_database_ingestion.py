@@ -1071,7 +1071,7 @@ def test_ingestion_record_missing_reduced_ebr_is_not_an_error():
 
 
 def test_ingestion_record_from_directory(tmp_path):
-    """load_database_ingestion_record_from_directory reads files from dir."""
+    """Only standalone downstream files are authoritative for ingestion."""
     from valleyscope.analysis.database_ingestion_record import (
         load_database_ingestion_record_from_directory,
     )
@@ -1079,12 +1079,24 @@ def test_ingestion_record_from_directory(tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     summary = {"target_kpoints": ["GammaM"], "iband": [1],
-               "input": {"spinor_convention_verified": False}}
+               "input": {"spinor_convention_verified": False},
+               "valley_ebr_export_bundle": {
+                   "status": "ready_for_reduced_table_validation",
+                   "bundle_count": 1,
+                   "bundles": [],
+               },
+               "valley_reduced_ebr_mapping": {
+                   "status": "solved_exact",
+                   "solutions": [],
+               }}
     (run_dir / "valley_summary.json").write_text(json.dumps(summary))
 
     record = load_database_ingestion_record_from_directory(str(run_dir))
     assert record["summary_status"] == "present"
     assert record["final_reduced_ebr_result_count"] == 0
+    assert record["ebr_export_status"] == "not_available"
+    assert record["reduced_ebr_mapping_status"] == "not_available"
+    assert set(record["source_files"]) == {"valley_summary"}
 
 
 def test_cli_collect_database_record(tmp_path, capsys):

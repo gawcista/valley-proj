@@ -103,19 +103,6 @@ def _concise_summary_contract_payload() -> dict[str, object]:
         "hsp_star_conjugation": {"status": "ok", "by_source_kpoint": {}},
         "hsp_star_derived_characters": {"status": "ok", "entries": []},
         "irrep_workflow_decisions": {"workflow_paths": [], "readiness_levels": []},
-        "valley_ebr_input_candidates": {
-            "status": "ready",
-            "candidate_count": 1,
-            "blocked": [{"reason": "source HSP coverage incomplete"}],
-        },
-        "valley_ebr_problem_instances": {
-            "status": "ready",
-            "instance_count": 1,
-            "instances": [{
-                "status": "complete_but_blocked",
-                "blocked_by": ["canonical HSP vector not ready"],
-            }],
-        },
         "valley_resolved_irreps": {
             "status": "ok",
             "matched_count": 1,
@@ -151,33 +138,54 @@ def _concise_summary_contract_payload() -> dict[str, object]:
                 ],
             }],
         },
-        "valley_ebr_export_bundle": {
-            "status": "ready_for_reduced_table_validation",
-            "bundle_count": 1,
-            "excluded_count": 0,
-            "bundles": [],
-            "excluded_instances": [],
-        },
-        "valley_reduced_ebr_mapping": {
-            "status": "solved_exact",
-            "table_status": "loaded",
-            "reduced_ebr_input": {
-                "table_input_provenance_by_bundle": {
-                    "bundle-1": {
-                        "data_source": "reviewed-source",
-                        "package_version": "1.2.3",
-                    },
-                },
+        "reduced_ebr_summary": {
+            "candidate_status": "ready",
+            "trusted_candidate_count": 1,
+            "blocked_candidate_count": 1,
+            "problem_status": "ready",
+            "problem_instance_count": 1,
+            "ready_problem_instance_count": 1,
+            "export_status": "ready_for_reduced_table_validation",
+            "trusted_bundle_count": 1,
+            "trusted_bundle_counts_by_physical_object_kind": {
+                "unitary_valley_projected_subspace": 1,
             },
-            "solutions": [{
+            "export_excluded_count": 0,
+            "mapping_status": "solved_exact",
+            "mapping_table_status": "loaded",
+            "result_count": 1,
+            "classification_counts": {
+                "atomic-compatible-candidate": 1,
+                "in_integer_span_no_nonnegative_witness": 0,
+                "outside_integer_span": 0,
+                "indeterminate_truncated": 0,
+            },
+            "results": [{
                 "bundle_id": "bundle-1",
                 "physical_object_kind": "unitary_valley_projected_subspace",
                 "valley": "alpha",
                 "valley_orbit": ["alpha"],
                 "classification": "atomic-compatible-candidate",
                 "ebr_decomposition": [{"label": "E@1a", "coefficient": 1}],
+                "table_provenance": {
+                    "data_source": "reviewed-source",
+                    "package_version": "1.2.3",
+                },
             }],
-            "excluded_bundles": [],
+            "excluded_physical_objects": [],
+        },
+        "readiness_blocker_summary": {
+            "status": "blocked",
+            "distinct_reason_count": 3,
+            "occurrence_count": 3,
+            "reasons": [
+                {"reason": "canonical HSP vector not ready", "count": 1},
+                {
+                    "reason": "seed projector symmetry-consistency failed",
+                    "count": 1,
+                },
+                {"reason": "source HSP coverage incomplete", "count": 1},
+            ],
         },
         "warnings": ["projection overlap requires review"],
         "output_profile": "standard",
@@ -253,6 +261,18 @@ def test_debug_summary_retains_detailed_diagnostic_report():
         "subspace_space_group_record_counts": {},
         "valley_labels": [],
         "kpoint_labels": [],
+    }
+    summary["valley_ebr_input_candidates"] = {
+        "status": "ready",
+        "candidate_count": 1,
+        "blocked_count": 0,
+        "candidates": [],
+        "blocked": [],
+    }
+    summary["valley_ebr_problem_instances"] = {
+        "status": "ready",
+        "instance_count": 1,
+        "instances": [],
     }
 
     text = render_summary_text(summary)
@@ -334,7 +354,7 @@ def test_summary_text_renders_qcut_fraction_for_relative_mode(tmp_path):
         output_paths={},
     )
 
-    assert summary["schema_version"] == "2.0.0"
+    assert summary["schema_version"] == "2.1.0"
     assert summary["qcut"]["fraction"] == pytest.approx(0.2)
     text = render_summary_text(summary)
     assert "qcut mode: relative_min_valley_distance" in text
@@ -1350,32 +1370,110 @@ def test_summary_exposes_symmetry_characters_as_first_class_rows(tmp_path):
     ]
 
 
-def test_summary_omits_removed_representation_readiness_presets(tmp_path):
+def test_standard_summary_builds_compact_authoritative_result_surfaces(
+    tmp_path,
+    monkeypatch,
+):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "config.yaml"
-    out_dir = tmp_path / "out"
     write_fixture(h5_path)
-    write_config(config_path, h5_path, out_dir)
-    config = load_config(config_path)
+    write_config(config_path, h5_path, tmp_path / "out")
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["output"]["profile"] = "standard"
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     from valleyscope.reports.summary_report import build_summary_payload
 
+    def reject_full_symmetry_analysis(*_args, **_kwargs):
+        raise AssertionError("standard profile must not build debug symmetry payload")
+
+    monkeypatch.setattr(
+        "valleyscope.reports.summary_report._symmetry_analysis",
+        reject_full_symmetry_analysis,
+    )
     summary = build_summary_payload(
-        config=config,
+        config=load_config(config_path),
         qcut=0.5,
         subspace_payload={"kpoints": {}},
-        symmetry_payload={
-            "status": "ok",
-            "detected_operations": [],
-            "candidate_rotations": [],
-            "little_group_check": {"status": "evaluated_per_kpoint"},
-            "valley_preservation_check": {"status": "completed"},
-        },
-        symmetry_rows=[],
+        symmetry_payload={"status": "ok", "detected_operations": []},
         output_paths={},
+        ebr_input_candidates={
+            "status": "partial",
+            "candidate_count": 1,
+            "blocked_count": 1,
+            "blocked": [{"reason": "candidate evidence blocked"}],
+        },
+        ebr_problem_instances={
+            "status": "partial",
+            "instance_count": 2,
+            "ready_instance_count": 1,
+            "instances": [
+                {"blocked_by": ["canonical HSP vector not ready"]},
+            ],
+        },
+        ebr_export_bundle={
+            "status": "partial_export",
+            "bundle_count": 1,
+            "excluded_count": 1,
+            "bundles": [{
+                "bundle_id": "bundle-1",
+                "physical_object_kind": "unitary_valley_projected_subspace",
+            }],
+            "excluded_instances": [{
+                "source_instance_id": "instance-joint",
+                "physical_object_kind": "joint_time_reversal_valley_orbit",
+                "exclusion_reasons": ["joint corepresentation not certified"],
+            }],
+        },
+        reduced_ebr_mapping={
+            "status": "solved_exact",
+            "table_status": "loaded",
+            "solutions": [{
+                "bundle_id": "bundle-1",
+                "physical_object_kind": "unitary_valley_projected_subspace",
+                "valley": "K_valley",
+                "classification": "atomic-compatible-candidate",
+                "ebr_decomposition": [{"label": "EBR-1", "coefficient": 1}],
+                "integer_solution": [-1, 2],
+                "table_provenance": {
+                    "data_source": "irreptables",
+                    "package_version": "3.1.0",
+                    "space_group_number": 143,
+                    "time_reversal_grey_bns_number": "143.2",
+                    "dropped_source_rows": ["not compact"],
+                },
+            }],
+            "excluded_bundles": [],
+        },
     )
 
-    assert "representation_readiness_thresholds" not in summary
-    assert "local_irrep_ready" in summary["legend"]
+    assert summary["schema_version"] == "2.1.0"
+    reduced = summary["reduced_ebr_summary"]
+    assert reduced["trusted_bundle_count"] == 1
+    assert reduced["trusted_bundle_counts_by_physical_object_kind"] == {
+        "unitary_valley_projected_subspace": 1,
+    }
+    assert reduced["classification_counts"]["atomic-compatible-candidate"] == 1
+    result = reduced["results"][0]
+    assert result["ebr_decomposition"] == [{"label": "EBR-1", "coefficient": 1}]
+    assert result["integer_solution"] == [-1, 2]
+    assert result["table_provenance"] == {
+        "data_source": "irreptables",
+        "package_version": "3.1.0",
+        "space_group_number": 143,
+        "time_reversal_grey_bns_number": "143.2",
+    }
+    assert "dropped_source_rows" not in result["table_provenance"]
+    exclusion = reduced["excluded_physical_objects"][0]
+    assert exclusion["stage"] == "export"
+    assert exclusion["reasons"] == ["joint corepresentation not certified"]
+    blockers = summary["readiness_blocker_summary"]
+    assert blockers["status"] == "blocked"
+    assert blockers["distinct_reason_count"] == 3
+    assert blockers["occurrence_count"] == 3
+    assert blockers["reasons"] == sorted(
+        blockers["reasons"],
+        key=lambda row: row["reason"],
+    )
 
 
 # ---------------------------------------------------------------------------

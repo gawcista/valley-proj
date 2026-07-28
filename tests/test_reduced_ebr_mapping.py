@@ -795,7 +795,11 @@ def test_cli_analyze_hsp_omits_not_evaluated_mapping_file(tmp_path):
         tmp_path / "out" / "valley_reduced_ebr_mapping.json"
     ).exists()
     summary = json.loads(outputs["valley_summary_json"].read_text())
-    assert summary["valley_reduced_ebr_mapping"]["status"] == "not_evaluated"
+    assert "valley_reduced_ebr_mapping" not in summary
+    assert (
+        summary["reduced_ebr_summary"]["mapping_status"]
+        == "not_evaluated"
+    )
 
 def test_cli_module_entrypoint_help_lists_map_reduced_ebr():
     """python -m valleyscope.cli must dispatch to argparse, not silently exit."""

@@ -74,9 +74,9 @@ a topological invariant.
 
 For near-degenerate target bands, individual VASP eigenvectors are
 gauge-dependent. ValleyScope therefore analyzes the whole target subspace,
-including its projected valley matrices and a valley-adapted basis. Stable
-summary fields include `S_min` (minimum target-valley-subspace weight),
-`min_concentration`, `assigned_valleys`, and `valley_weights_adapted`.
+including its projected valley matrices and a valley-adapted basis. Detailed
+subspace weights, assignments, and projector-quality evidence are retained by
+the debug profile.
 
 Two projector modes are available:
 
@@ -290,10 +290,15 @@ Public output files
 ```
 
 The run context includes lines such as `qcut mode:` and the effective q-cut.
-In `valley_summary.json`, the stable `Valley projection summary` and
-`Valley subspace analysis` payloads are `valley_projection_summary` and
-`valley_subspace_analysis`. Common availability states include
-`fixed_center_not_captured`, `not_derived`, and `unreliable`.
+The standard `Valley projection summary` is the compact
+`valley_projection_summary`; the same record also keeps canonical
+`valley_resolved_irreps`, `reduced_ebr_summary`, and
+`readiness_blocker_summary`. Common projection states include
+`fixed_center_not_captured`, `not_derived`, and `unreliable`. The debug profile
+retains `Valley subspace analysis`; `S_min` is the
+minimum target-valley-subspace weight, alongside `min_concentration`,
+`assigned_valleys`, and
+`valley_weights_adapted`.
 
 ## Inputs and Configuration
 
@@ -324,7 +329,7 @@ The standard profile emphasizes these public surfaces:
 | File | Purpose |
 | --- | --- |
 | `valley_summary.txt` | Result-first human-readable summary; read this first |
-| `valley_summary.json` | Machine-readable public record, including canonical `valley_resolved_irreps` |
+| `valley_summary.json` | Compact machine-readable record with projection, canonical irrep, authoritative reduced-EBR, and blocker summaries |
 | `valley_weights.csv` | Quick scan of raw per-(kpoint, VASP band) valley weights |
 | `valley_ebr_export_bundle.json` | Written only when at least one ready bundle exists |
 | `valley_reduced_ebr_mapping.json` | Written only when reduced EBR mapping is enabled and evaluated |
@@ -342,6 +347,8 @@ The debug profile retains detailed JSON/HDF5 evidence such as
 `diagnostics.h5`, symmetry reports, restricted representation data, and
 irrep/EBR provenance. These are debugging surfaces, not files that every user
 must inspect.
+Database ingestion reads complete EBR bundle and mapping evidence from the
+standalone public files; the compact summary does not duplicate those payloads.
 Some debug tables may be header-only when no row satisfies their physical
 scope; that alone is not a run failure.
 
