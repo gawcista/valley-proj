@@ -1,5 +1,7 @@
 """Tests for standard-setting HSP k-coordinate mapping."""
 
+from copy import deepcopy
+
 import numpy as np
 import pytest
 import spglib
@@ -37,6 +39,8 @@ def _detected_std_ops(hall_number, ids):
             for i in ids]
 
 from valleyscope.analysis.standard_setting_kmap import (
+    build_standard_setting_transport_view,
+    derive_irreptables_standard_setting_identity,
     resolve_standard_setting_hsp_label,
     _attempt_setting_transform,
     _verify_operation_basis,
@@ -1940,6 +1944,175 @@ def test_generic_centered_expansion_produces_complete_affine_certificate(
     assert {
         row["parent_operation_id"] for row in cert["centered_affine_operation_map"]
     } == set(operation_ids)
+
+
+def test_centered_transport_view_revalidates_complete_coset_map():
+    table, detected, certificate, _ = _resolved_centered_certificate_fixture(
+        5, 9, "C 2y", "C", [7, 19],
+    )
+
+    view = build_standard_setting_transport_view(
+        table=table,
+        standard_setting_certificate=certificate,
+        detected_operations=detected,
+    )
+
+    assert view["status"] == "validated", view
+    assert view["parent_operation_ids"] == [7, 19]
+    assert view["centering_vectors"] == [
+        [0.0, 0.0, 0.0],
+        [0.5, 0.5, 0.0],
+    ]
+    assert len(view["operation_rows"]) == 4
+    assert {
+        (row["parent_operation_id"], row["centering_coset_index"])
+        for row in view["operation_rows"]
+    } == {(7, 0), (7, 1), (19, 0), (19, 1)}
+    assert all(
+        isinstance(row["source_table_operation_index"], int)
+        for row in view["operation_rows"]
+    )
+
+
+def test_primitive_transport_view_preserves_opaque_operation_ids():
+    from valleyscope.irreps.tables import load_standard_irrep_table
+
+    table = load_standard_irrep_table(3, spinor=False)
+    identity = derive_irreptables_standard_setting_identity(table, 3)
+    parent_ids = [7, 19]
+    detected = [
+        {
+            "operation_id": parent_id,
+            "rotation_frac": operation.rotation_frac.tolist(),
+            "translation_frac": operation.translation_frac.tolist(),
+        }
+        for parent_id, operation in zip(parent_ids, table.operations)
+    ]
+    label, blocker, provenance = resolve_standard_setting_hsp_label(
+        k_frac=np.zeros(3),
+        table=table,
+        standard_match={
+            "number": 3,
+            "international_short": table.name,
+            "hall_number": identity["hall_number"],
+            "hall_symbol": identity["hall_symbol"],
+            "operation_ids": parent_ids,
+        },
+        detected_operations=detected,
+        parent_to_standard_direct_transform=np.eye(3),
+        transform_provenance="reviewed_test_direct_setting",
+    )
+    assert label == "GM"
+    assert blocker is None
+
+    view = build_standard_setting_transport_view(
+        table=table,
+        standard_setting_certificate=provenance[
+            "standard_setting_certificate"
+        ],
+        detected_operations=detected,
+    )
+
+    assert view["status"] == "validated", view
+    assert view["parent_operation_ids"] == parent_ids
+    assert view["centering_vectors"] == [[0.0, 0.0, 0.0]]
+    assert [
+        row["source_table_operation_index"]
+        for row in view["operation_rows"]
+    ] == [1, 2]
+
+
+@pytest.mark.parametrize(
+    "field,mutate",
+    [
+        (
+            "centered_affine_operation_map",
+            lambda cert: cert["centered_affine_operation_map"][0].__setitem__(
+                "centering_coset_index", 1
+            ),
+        ),
+        (
+            "centered_affine_operation_map",
+            lambda cert: cert["centered_affine_operation_map"][0].__setitem__(
+                "standard_operation_index",
+                cert["centered_affine_operation_map"][1][
+                    "standard_operation_index"
+                ],
+            ),
+        ),
+        (
+            "parent_to_standard_direct_transform",
+            lambda cert: cert["parent_to_standard_direct_transform"][0].__setitem__(
+                0, cert["parent_to_standard_direct_transform"][0][0] + 0.25
+            ),
+        ),
+        (
+            "origin_shift_fractional",
+            lambda cert: cert.__setitem__(
+                "origin_shift_fractional", [0.125, 0.0, 0.0]
+            ),
+        ),
+        (
+            "hall_number",
+            lambda cert: cert.__setitem__("hall_number", 10),
+        ),
+    ],
+)
+def test_centered_transport_view_rejects_tampered_producer_evidence(
+    field, mutate,
+):
+    table, detected, certificate, _ = _resolved_centered_certificate_fixture(
+        5, 9, "C 2y", "C", [7, 19],
+    )
+    tampered = deepcopy(certificate)
+    mutate(tampered)
+
+    view = build_standard_setting_transport_view(
+        table=table,
+        standard_setting_certificate=tampered,
+        detected_operations=detected,
+    )
+
+    assert view["status"] == "blocked", field
+    assert view["blocker"].startswith("standard_setting_transport_")
+
+
+def test_centered_transport_view_rejects_source_operation_multiplicity():
+    from valleyscope.irreps.tables import (
+        StandardIrrepTable,
+        StandardTableOperation,
+    )
+
+    table, detected, certificate, _ = _resolved_centered_certificate_fixture(
+        5, 9, "C 2y", "C", [7, 19],
+    )
+    source = table.operations[0]
+    duplicate = StandardTableOperation(
+        table_index=99,
+        rotation_frac=source.rotation_frac.copy(),
+        translation_frac=source.translation_frac.copy(),
+        spin_rotation=source.spin_rotation.copy(),
+        time_reversal=source.time_reversal,
+    )
+    malformed_table = StandardIrrepTable(
+        number=table.number,
+        name=table.name,
+        spinor=table.spinor,
+        operations=table.operations + (duplicate,),
+        irreps=table.irreps,
+    )
+
+    view = build_standard_setting_transport_view(
+        table=malformed_table,
+        standard_setting_certificate=certificate,
+        detected_operations=detected,
+    )
+
+    assert view["status"] == "blocked"
+    assert view["blocker"] == (
+        "standard_setting_transport_"
+        "source_table_identity_mismatch"
+    )
 
 
 @pytest.mark.parametrize(

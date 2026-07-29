@@ -1880,26 +1880,6 @@ def test_missing_characters_block_match():
     assert "incomplete" in result["reason"]
 
 
-def test_group_wide_lift_map_uses_opaque_source_table_indices():
-    from valleyscope.irreps.tables import load_standard_irrep_table
-    from valleyscope.workflows.analyze_hsp import (
-        _group_wide_standard_operation_map,
-    )
-    from tests.reduced_ebr_promo_helpers import (
-        real_primitive_certificate_dict,
-    )
-
-    certificate = real_primitive_certificate_dict(
-        3, "P2", spinor=True
-    )
-    table = load_standard_irrep_table(3, spinor=True)
-
-    assert certificate["affine_operation_map"] == {"0": 0, "1": 1}
-    assert _group_wide_standard_operation_map(
-        certificate, table
-    ) == {0: 1, 1: 2}
-
-
 def test_unmock_generic_source_adapter_positive_full_pipeline():
     """Unmock: real load_standard_irrep_table + build_source_payload
     feed through matcher -> EBR -> reduced mapping -> database ingestion."""

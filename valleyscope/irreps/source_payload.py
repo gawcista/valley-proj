@@ -8,6 +8,11 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+import numpy as np
+
+from valleyscope.analysis.standard_setting_kmap import (
+    build_standard_setting_transport_view,
+)
 from valleyscope.irreps.tables import (
     ReviewedSourceIrrep,
     StandardIrrepTable,
@@ -181,14 +186,13 @@ def build_source_payload_for_projected_hsp_matching(
     detected_operations: list[dict[str, Any]],
     valley_preserving_operation_ids: list[int],
     source_hsp_basis: Mapping[str, object] | None = None,
+    standard_setting_certificate: Mapping[str, object] | None = None,
     tol: float = 5e-5,
 ) -> dict[str, Any]:
     """Build a source payload for a representative or validated star arm.
 
-    Star-arm characters are transported only when the classification carries
-    a complete affine conjugation map with zero residual lattice translation.
-    A nontrivial Bloch lattice phase therefore fails closed instead of reusing
-    representative characters by assumption.
+    Star-arm characters require a complete affine conjugation map.  Reciprocal
+    lattice translations are retained through their Bloch phase.
     """
     classification = projected_hsp_classification.get("classification")
     source_hsp = projected_hsp_classification.get("source_hsp_label")
@@ -245,35 +249,63 @@ def build_source_payload_for_projected_hsp_matching(
             "classification has no validated standard little-group operation IDs",
         )
     expected_set = set(expected_table_ids)
-    restricted_table = StandardIrrepTable(
-        number=table.number,
-        name=table.name,
-        spinor=table.spinor,
-        operations=tuple(
-            operation for operation in table.operations
-            if operation.table_index in expected_set
-        ),
-        irreps=table.irreps,
-    )
-    operation_match = match_table_operations(
-        detected_operations=[detected_by_id[op_id] for op_id in vp_ids],
-        table=restricted_table,
-        tolerance=tol,
-        source_hsp_label=None,
-    )
-    source_operation_map = {
-        op_id: operation_match.mapping_by_operation_id[op_id]
-        for op_id in vp_ids
-        if op_id in operation_match.mapping_by_operation_id
-    }
-    if operation_match.unmatched_operation_ids:
-        return _blocked_after_operation_mapping(
-            "table_operation_matching_failed",
-            "valley-preserving operations could not be mapped to the "
-            f"classified standard little group: "
-            f"{operation_match.unmatched_operation_ids}",
-            source_operation_map,
+    parent_phase_by_table: dict[int, complex] = {}
+    certified_transport: dict[str, object] = {}
+    if standard_setting_certificate is not None:
+        mapped = _map_certified_standard_operations(
+            table=table,
+            certificate=standard_setting_certificate,
+            detected_operations=detected_operations,
+            operation_ids=vp_ids,
+            standard_k_frac=projected_hsp_classification.get("standard_k_frac"),
+            tol=tol,
         )
+        source_operation_map = dict(mapped.get("source_operation_map", {}))
+        if mapped.get("status") != "validated":
+            return _blocked_after_operation_mapping(
+                "standard_setting_transport_failed",
+                str(mapped.get("blocker", "unresolved")),
+                source_operation_map,
+            )
+        parent_phase_by_table = dict(mapped["parent_phase_by_table"])
+        certified_transport = dict(mapped["provenance"])
+        unused_table_indices = sorted(
+            {operation.table_index for operation in table.operations}
+            - set(source_operation_map.values())
+        )
+        mapping_provenance = "revalidated_affine_centering_coset_bijection"
+    else:
+        restricted_table = StandardIrrepTable(
+            number=table.number,
+            name=table.name,
+            spinor=table.spinor,
+            operations=tuple(
+                operation for operation in table.operations
+                if operation.table_index in expected_set
+            ),
+            irreps=table.irreps,
+        )
+        operation_match = match_table_operations(
+            detected_operations=[detected_by_id[op_id] for op_id in vp_ids],
+            table=restricted_table,
+            tolerance=tol,
+            source_hsp_label=None,
+        )
+        source_operation_map = {
+            op_id: operation_match.mapping_by_operation_id[op_id]
+            for op_id in vp_ids
+            if op_id in operation_match.mapping_by_operation_id
+        }
+        if operation_match.unmatched_operation_ids:
+            return _blocked_after_operation_mapping(
+                "table_operation_matching_failed",
+                "valley-preserving operations could not be mapped to the "
+                f"classified standard little group: "
+                f"{operation_match.unmatched_operation_ids}",
+                source_operation_map,
+            )
+        unused_table_indices = operation_match.unused_table_operation_indices
+        mapping_provenance = operation_match.provenance
     if set(source_operation_map.values()) != expected_set:
         return _blocked_after_operation_mapping(
             "little_group_operation_mismatch",
@@ -338,12 +370,30 @@ def build_source_payload_for_projected_hsp_matching(
             "inventory",
             source_operation_map,
         )
-    transport_by_target: dict[int, tuple[int, int]] = {}
+    transport_by_target: dict[int, tuple[int, int, complex]] = {}
+    transport_evidence: list[dict[str, object]] = []
     if classification == "representative":
         transport_by_target = {
-            index: (index, 1) for index in expected_table_ids
+            index: (index, 1, 1.0 + 0.0j)
+            for index in expected_table_ids
         }
     else:
+        try:
+            target_standard_k = np.asarray(
+                projected_hsp_classification.get("standard_k_frac"),
+                dtype=float,
+            )
+        except (TypeError, ValueError):
+            target_standard_k = np.asarray([], dtype=float)
+        if (
+            target_standard_k.shape != (3,)
+            or not np.all(np.isfinite(target_standard_k))
+        ):
+            return _blocked_after_operation_mapping(
+                "star_character_transport_target_k_missing",
+                "classification has no finite target standard k coordinate",
+                source_operation_map,
+            )
         raw_transport = projected_hsp_classification.get(
             "character_transport_map", []
         )
@@ -356,12 +406,17 @@ def build_source_payload_for_projected_hsp_matching(
             if not isinstance(row, dict):
                 continue
             lattice_translation = row.get("affine_lattice_translation", [])
-            if not isinstance(lattice_translation, list) or any(
-                int(value) != 0 for value in lattice_translation
+            if (
+                not isinstance(lattice_translation, list)
+                or len(lattice_translation) != 3
+                or any(
+                    not isinstance(value, int) or isinstance(value, bool)
+                    for value in lattice_translation
+                )
             ):
                 return _blocked_after_operation_mapping(
-                    "star_character_transport_requires_bloch_phase",
-                    "affine conjugation differs by a nonzero lattice translation",
+                    "star_character_transport_lattice_translation_malformed",
+                    "affine conjugation lattice translation must be list[int,3]",
                     source_operation_map,
                 )
             target = row.get("star_arm_operation_id")
@@ -369,12 +424,45 @@ def build_source_payload_for_projected_hsp_matching(
             spin_lift_factor = row.get("spin_lift_factor")
             if (
                 isinstance(target, int)
+                and not isinstance(target, bool)
                 and isinstance(source, int)
+                and not isinstance(source, bool)
                 and spin_lift_factor in (-1, 1)
+                and not isinstance(spin_lift_factor, bool)
             ):
-                transport_by_target[target] = (
-                    source, int(spin_lift_factor)
+                try:
+                    target_operation = table.operation_by_index(target)
+                    transformed_k = (
+                        np.linalg.inv(target_operation.rotation_frac).T
+                        @ target_standard_k
+                    )
+                except (KeyError, TypeError, ValueError, np.linalg.LinAlgError):
+                    return _blocked_after_operation_mapping(
+                        "star_character_transport_target_operation_invalid",
+                        f"target source-table operation {target!r} is invalid",
+                        source_operation_map,
+                    )
+                bloch_phase = np.exp(
+                    -2.0j
+                    * np.pi
+                    * float(
+                        transformed_k
+                        @ np.asarray(lattice_translation, dtype=float)
+                    )
                 )
+                transport_by_target[target] = (
+                    source, int(spin_lift_factor), complex(bloch_phase)
+                )
+                transport_evidence.append({
+                    **row,
+                    "bloch_phase": [
+                        float(np.real(bloch_phase)),
+                        float(np.imag(bloch_phase)),
+                    ],
+                    "bloch_phase_convention": (
+                        "exp(-2pii*(R_target^-T k_target)_dot_L)"
+                    ),
+                })
         if set(transport_by_target) != expected_set:
             return _blocked_after_operation_mapping(
                 "incomplete_star_character_transport",
@@ -389,6 +477,7 @@ def build_source_payload_for_projected_hsp_matching(
         for target_index, (
             representative_index,
             spin_lift_factor,
+            bloch_phase,
         ) in transport_by_target.items():
             if representative_index not in irrep.characters:
                 return _blocked_after_operation_mapping(
@@ -398,7 +487,10 @@ def build_source_payload_for_projected_hsp_matching(
                     source_operation_map,
                 )
             transported[target_index] = (
-                spin_lift_factor * irrep.characters[representative_index]
+                spin_lift_factor
+                * irrep.characters[representative_index]
+                / bloch_phase
+                * parent_phase_by_table.get(target_index, 1.0 + 0.0j)
             )
         source_irrep_characters[irrep.label] = transported
 
@@ -422,6 +514,9 @@ def build_source_payload_for_projected_hsp_matching(
         "operation_mapping_evaluated": True,
         "source_irrep_characters": source_irrep_characters,
         "source_operation_map": source_operation_map,
+        "_group_source_operation_map": mapped.get(
+            "group_source_operation_map", {}
+        ) if standard_setting_certificate is not None else {},
         "provenance": {
             "table_sg_number": table.number,
             "table_name": table.name,
@@ -432,17 +527,125 @@ def build_source_payload_for_projected_hsp_matching(
             "source_hsp_classification": classification,
             "valley_preserving_operation_ids": vp_ids,
             "source_table_operation_indices": expected_table_ids,
-            "unused_table_operation_indices": (
-                operation_match.unused_table_operation_indices
-            ),
+            "unused_table_operation_indices": unused_table_indices,
             "table_operations_mapped": len(source_operation_map),
-            "operation_mapping_provenance": operation_match.provenance,
+            "operation_mapping_provenance": mapping_provenance,
             "character_transport_status": transport_status,
-            "character_transport_map": projected_hsp_classification.get(
-                "character_transport_map", []
-            ),
+            "character_transport_map": transport_evidence,
+            "standard_setting_transport": certified_transport,
         },
         "blocker_reasons": [],
+    }
+
+
+def _map_certified_standard_operations(
+    *,
+    table: StandardIrrepTable,
+    certificate: Mapping[str, object],
+    detected_operations: list[dict[str, Any]],
+    operation_ids: list[int],
+    standard_k_frac: object,
+    tol: float,
+) -> dict[str, object]:
+    view = build_standard_setting_transport_view(
+        table=table,
+        standard_setting_certificate=certificate,
+        detected_operations=detected_operations,
+        tolerance=min(tol, 1e-6),
+    )
+    if view.get("status") != "validated":
+        return {"status": "blocked", "blocker": view.get("blocker", "")}
+    try:
+        kpoint = np.asarray(standard_k_frac, dtype=float)
+    except (TypeError, ValueError):
+        kpoint = np.asarray([])
+    if kpoint.shape != (3,) or not np.all(np.isfinite(kpoint)):
+        return {"status": "blocked", "blocker": "standard_k_frac_missing"}
+    centering = view["centering_vectors"]
+    rows = view["operation_rows"]
+    if (
+        not isinstance(centering, list)
+        or not centering
+        or not np.allclose(centering[0], np.zeros(3), atol=tol)
+        or not isinstance(rows, list)
+    ):
+        return {"status": "blocked", "blocker": "centering_rows_malformed"}
+
+    grouped = {
+        parent_id: sorted(
+            (
+                row for row in rows
+                if row.get("parent_operation_id") == parent_id
+            ),
+            key=lambda row: row.get("centering_coset_index", -1),
+        )
+        for parent_id in view["parent_operation_ids"]
+    }
+    group_map: dict[int, int] = {}
+    for parent_id, selected in grouped.items():
+        indices = {
+            row.get("source_table_operation_index") for row in selected
+        }
+        if (
+            len(selected) != len(centering)
+            or [row.get("centering_coset_index") for row in selected]
+            != list(range(len(centering)))
+            or len(indices) != 1
+        ):
+            return {"status": "blocked", "blocker": "incomplete_group_cosets"}
+        group_map[int(parent_id)] = int(indices.pop())
+
+    source_map: dict[int, int] = {}
+    phases: dict[int, complex] = {}
+    max_residual = 0.0
+    for operation_id in operation_ids:
+        selected = grouped.get(operation_id, [])
+        if not selected:
+            return {
+                "status": "blocked",
+                "blocker": f"incomplete_centering_cosets_for_operation_{operation_id}",
+                "source_operation_map": source_map,
+            }
+        table_index = group_map[operation_id]
+        try:
+            operation = table.operation_by_index(table_index)
+            transformed_k = np.linalg.inv(operation.rotation_frac).T @ kpoint
+            row_phases = [
+                np.exp(
+                    -2.0j * np.pi * float(
+                        transformed_k
+                        @ np.asarray(
+                            row["parent_to_source_translation_frac"],
+                            dtype=float,
+                        )
+                    )
+                )
+                for row in selected
+            ]
+        except (KeyError, TypeError, ValueError, np.linalg.LinAlgError):
+            return {"status": "blocked", "blocker": "bloch_phase_malformed"}
+        base_phase = complex(row_phases[0])
+        for row_phase, vector in zip(row_phases, centering):
+            expected = base_phase * np.exp(
+                -2.0j * np.pi
+                * float(transformed_k @ np.asarray(vector, dtype=float))
+            )
+            max_residual = max(max_residual, float(abs(row_phase - expected)))
+        source_map[operation_id] = int(table_index)
+        phases[int(table_index)] = base_phase
+    if max_residual > tol:
+        return {"status": "blocked", "blocker": "centering_bloch_phase_failed"}
+    return {
+        "status": "validated",
+        "source_operation_map": source_map,
+        "group_source_operation_map": group_map,
+        "parent_phase_by_table": phases,
+        "provenance": {
+            "centering_coset_count": len(centering),
+            "operation_pair_count": len(rows),
+            "max_bloch_phase_relation_residual": max_residual,
+            "bloch_phase_convention": "exp(-2pii*(R^-T k)_dot_delta_t)",
+        },
     }
 
 

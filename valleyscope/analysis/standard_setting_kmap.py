@@ -13,6 +13,7 @@ the certificate validates the coordinate convention.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field, asdict
 import numpy as np
 
@@ -2196,6 +2197,282 @@ def derive_irreptables_standard_setting_identity(
             coset_evidence["standard_operation_closure_validated"]
         ),
     })
+    return result
+
+
+def build_standard_setting_transport_view(
+    *,
+    table: object,
+    standard_setting_certificate: Mapping[str, object],
+    detected_operations: list[dict[str, object]],
+    tolerance: float = 1e-8,
+) -> dict[str, object]:
+    """Revalidate the affine certificate for representation transport.
+
+    The returned rows retain every parent-operation/centering-coset pair.
+    Source-table operation indices are opaque irreptables identifiers; Hall
+    operation indices remain zero-based certificate evidence.
+    """
+    cert = standard_setting_certificate
+    if not isinstance(cert, Mapping):
+        return _blocked_transport_view("certificate_missing_or_malformed")
+    sg_number = cert.get("subspace_sg_number")
+    hall_number = cert.get("hall_number")
+    parent_ids = cert.get("parent_basis_operation_ids")
+    if (
+        not _is_exact_operation_id(sg_number)
+        or not _is_exact_operation_id(hall_number)
+        or not isinstance(parent_ids, list)
+        or not parent_ids
+        or any(not _is_exact_operation_id(value) for value in parent_ids)
+        or len(parent_ids) != len(set(parent_ids))
+    ):
+        return _blocked_transport_view("certificate_identity_incomplete")
+    if (
+        cert.get("validation_status") != "validated"
+        or cert.get("operation_mapping_status")
+        != "operation_basis_verification_passed"
+        or cert.get("translation_validation_status") != "passed"
+        or cert.get("operation_closure_validated") is not True
+        or cert.get("standard_operation_closure_validated") is not True
+        or cert.get("unmatched_parent_operations") != []
+        or cert.get("unused_standard_operation_indices") != []
+    ):
+        return _blocked_transport_view("certificate_not_affine_validated")
+
+    source_identity = derive_irreptables_standard_setting_identity(
+        table, sg_number
+    )
+    if (
+        source_identity.get("status") != "unique_match"
+        or source_identity.get("hall_number") != hall_number
+        or getattr(table, "number", None) != sg_number
+        or cert.get("canonical_setting_status") != "unique_match"
+        or cert.get("canonical_hall_numbers") != [hall_number]
+    ):
+        return _blocked_transport_view("source_table_identity_mismatch")
+    centering_vectors = source_identity.get("centering_cosets")
+    serialized_centering_vectors = cert.get(
+        "normalized_centering_vectors", cert.get("centering_vectors")
+    )
+    if (
+        not isinstance(centering_vectors, list)
+        or serialized_centering_vectors != centering_vectors
+        or cert.get("centering_coset_count") != len(centering_vectors)
+        or cert.get("primitive_conventional_index") != len(centering_vectors)
+    ):
+        return _blocked_transport_view("centering_coset_evidence_mismatch")
+
+    try:
+        transform = np.asarray(
+            cert.get("parent_to_standard_direct_transform"), dtype=float
+        )
+        raw_origin = cert.get("origin_shift_fractional")
+        origin = np.asarray(
+            np.zeros(3) if raw_origin is None and len(centering_vectors) == 1
+            else raw_origin,
+            dtype=float,
+        )
+    except (TypeError, ValueError):
+        return _blocked_transport_view("basis_or_origin_malformed")
+    if (
+        transform.shape != (3, 3)
+        or origin.shape != (3,)
+        or not np.all(np.isfinite(transform))
+        or not np.all(np.isfinite(origin))
+    ):
+        return _blocked_transport_view("basis_or_origin_malformed")
+
+    standard_match = {
+        "number": sg_number,
+        "international_short": cert.get("subspace_sg_symbol"),
+        "hall_number": hall_number,
+        "hall_symbol": cert.get("hall_symbol"),
+        "operation_ids": list(parent_ids),
+    }
+    recomputed = _validate_affine_operation_equivalence(
+        vp_operations=detected_operations,
+        vp_operation_ids=list(parent_ids),
+        standard_match=standard_match,
+        parent_to_standard_direct_transform=transform,
+        origin_shift_fractional=origin,
+        tolerance=tolerance,
+    )
+    if recomputed.get("status") != "passed":
+        return _blocked_transport_view(
+            "affine_revalidation_failed",
+            details=recomputed.get("missing_ingredients", []),
+        )
+
+    centered = len(centering_vectors) > 1
+    if centered:
+        serialized_map = cert.get("centered_affine_operation_map")
+        recomputed_map = recomputed.get("centered_operation_map")
+        if (
+            serialized_map != recomputed_map
+            or cert.get("affine_operation_map") is not None
+            or cert.get("unmatched_centered_operation_pairs") != []
+        ):
+            return _blocked_transport_view("centered_operation_map_mismatch")
+        map_rows = recomputed_map
+    else:
+        serialized_map = cert.get("affine_operation_map")
+        recomputed_map = recomputed.get("operation_map")
+        if (
+            serialized_map != recomputed_map
+            or cert.get("centered_affine_operation_map") is not None
+        ):
+            return _blocked_transport_view("primitive_operation_map_mismatch")
+        map_rows = [
+            {
+                "parent_operation_id": parent_id,
+                "centering_coset_index": 0,
+                "standard_operation_index": standard_index,
+            }
+            for parent_id, standard_index in (
+                (int(key), value)
+                for key, value in recomputed_map.items()
+            )
+        ] if isinstance(recomputed_map, dict) else []
+
+    expected_expanded = len(parent_ids) * len(centering_vectors)
+    if (
+        not isinstance(map_rows, list)
+        or len(map_rows) != expected_expanded
+        or cert.get("expanded_parent_operation_count") != expected_expanded
+        or cert.get("matched_expanded_operations") != expected_expanded
+        or cert.get("standard_setting_operation_count") != expected_expanded
+    ):
+        return _blocked_transport_view("expanded_operation_count_mismatch")
+
+    try:
+        import spglib
+        standard = spglib.get_symmetry_from_database(hall_number)
+    except Exception:
+        standard = None
+    operations = getattr(table, "operations", None)
+    if (
+        standard is None
+        or not isinstance(operations, tuple)
+        or not operations
+    ):
+        return _blocked_transport_view("source_operation_inventory_unavailable")
+    standard_rotations = np.asarray(standard["rotations"], dtype=float)
+    standard_translations = np.asarray(standard["translations"], dtype=float)
+    if len(standard_rotations) != expected_expanded:
+        return _blocked_transport_view("standard_operation_count_mismatch")
+
+    detected_by_id = {
+        row.get("operation_id"): row
+        for row in detected_operations
+        if isinstance(row, dict)
+        and _is_exact_operation_id(row.get("operation_id"))
+    }
+    if set(detected_by_id) & set(parent_ids) != set(parent_ids):
+        return _blocked_transport_view("parent_operation_inventory_incomplete")
+
+    transform_inverse = np.linalg.inv(transform)
+    vectors = [np.asarray(vector, dtype=float) for vector in centering_vectors]
+    operation_rows: list[dict[str, object]] = []
+    for raw_row in map_rows:
+        if not isinstance(raw_row, dict):
+            return _blocked_transport_view("operation_map_row_malformed")
+        parent_id = raw_row.get("parent_operation_id")
+        coset_index = raw_row.get("centering_coset_index")
+        standard_index = raw_row.get("standard_operation_index")
+        if (
+            not all(
+                _is_exact_operation_id(value)
+                for value in (parent_id, coset_index, standard_index)
+            )
+            or parent_id not in detected_by_id
+            or not 0 <= coset_index < len(vectors)
+            or not 0 <= standard_index < len(standard_rotations)
+        ):
+            return _blocked_transport_view("operation_map_row_out_of_range")
+        source_matches: list[tuple[object, int, np.ndarray]] = []
+        for source_operation in operations:
+            if not np.array_equal(
+                np.rint(standard_rotations[standard_index]).astype(int),
+                np.asarray(source_operation.rotation_frac, dtype=int),
+            ):
+                continue
+            for source_coset_index, source_coset in enumerate(vectors):
+                delta = (
+                    standard_translations[standard_index]
+                    - np.asarray(source_operation.translation_frac, dtype=float)
+                    - source_coset
+                )
+                lattice = np.rint(delta).astype(int)
+                if np.linalg.norm(delta - lattice) <= tolerance:
+                    source_matches.append(
+                        (source_operation, source_coset_index, lattice)
+                    )
+        if len(source_matches) != 1:
+            return _blocked_transport_view(
+                "source_table_operation_decomposition_not_unique"
+            )
+        source_operation, source_coset_index, hall_lattice = source_matches[0]
+        parent = detected_by_id[parent_id]
+        try:
+            parent_rotation = np.asarray(parent["rotation_frac"], dtype=float)
+            parent_translation = np.asarray(
+                parent["translation_frac"], dtype=float
+            )
+        except (KeyError, TypeError, ValueError):
+            return _blocked_transport_view("parent_operation_malformed")
+        standard_rotation = transform @ parent_rotation @ transform_inverse
+        base_translation = (
+            transform @ parent_translation
+            + origin
+            - standard_rotation @ origin
+        )
+        parent_to_source_translation = (
+            base_translation
+            + vectors[coset_index]
+            - np.asarray(source_operation.translation_frac, dtype=float)
+        )
+        operation_rows.append({
+            "parent_operation_id": parent_id,
+            "centering_coset_index": coset_index,
+            "centering_vector": centering_vectors[coset_index],
+            "standard_operation_index": standard_index,
+            "source_table_operation_index": source_operation.table_index,
+            "source_table_centering_coset_index": source_coset_index,
+            "hall_lattice_translation": hall_lattice.tolist(),
+            "parent_to_source_translation_frac": (
+                parent_to_source_translation.tolist()
+            ),
+            "standard_rotation_frac": np.rint(
+                standard_rotations[standard_index]
+            ).astype(int).tolist(),
+        })
+
+    return {
+        "status": "validated",
+        "parent_operation_ids": list(parent_ids),
+        "centering_vectors": [list(vector) for vector in centering_vectors],
+        "operation_rows": operation_rows,
+        "source_table_identity": source_identity,
+        "blocker": "",
+    }
+
+
+def _blocked_transport_view(
+    reason: str,
+    *,
+    details: object = None,
+) -> dict[str, object]:
+    result: dict[str, object] = {
+        "status": "blocked",
+        "parent_operation_ids": [],
+        "centering_vectors": [],
+        "operation_rows": [],
+        "source_table_identity": {},
+        "blocker": f"standard_setting_transport_{reason}",
+    }
+    if details:
+        result["details"] = details
     return result
 
 

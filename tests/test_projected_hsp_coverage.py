@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from valleyscope.analysis.projected_hsp_coverage import (
     build_projected_hsp_coverage_report,
     classify_projected_subspace_kpoint,
     derive_projected_subspace_source_hsp_basis,
+)
+from valleyscope.analysis.standard_setting_kmap import (
+    resolve_standard_setting_hsp_label,
 )
 from valleyscope.irreps.ebr_data_adapter import load_ebr_source_data
 from valleyscope.irreps.source_payload import (
@@ -130,6 +134,97 @@ def test_primitive_representative_and_centered_star_arm_are_distinct():
     assert star["standard_operation_witness"]["table_index"] == 2
     assert star["reciprocal_shift"] == [1, -1, 0]
     assert star["representation_transport_status"] == "validated"
+
+
+def test_real_centered_certificate_drives_projected_source_adapter():
+    table = load_standard_irrep_table(5, spinor=False)
+    source = load_ebr_source_data(5, False)
+    transform = np.asarray([
+        [0.5, -0.5, 0.0],
+        [0.5, 0.5, 0.0],
+        [0.0, 0.0, 1.0],
+    ])
+    transform_inverse = np.linalg.inv(transform)
+    parent_ids = [7, 19]
+    detected = []
+    for parent_id, operation in zip(parent_ids, table.operations):
+        parent_rotation = (
+            transform_inverse @ operation.rotation_frac @ transform
+        )
+        detected.append({
+            "operation_id": parent_id,
+            "rotation_frac": np.rint(parent_rotation).astype(int).tolist(),
+            "translation_frac": (
+                transform_inverse @ operation.translation_frac
+            ).tolist(),
+        })
+    label, blocker, provenance = resolve_standard_setting_hsp_label(
+        k_frac=np.zeros(3),
+        table=table,
+        standard_match={
+            "number": 5,
+            "international_short": table.name,
+            "hall_number": 9,
+            "hall_symbol": "C 2y",
+            "operation_ids": parent_ids,
+        },
+        detected_operations=detected,
+        parent_to_standard_direct_transform=transform,
+        origin_shift_fractional=np.zeros(3),
+        transform_provenance="reviewed_test_primitive_to_conventional",
+    )
+    assert label == "GM"
+    assert blocker is None
+    certificate = provenance["standard_setting_certificate"]
+    basis = derive_projected_subspace_source_hsp_basis(
+        table=table,
+        ebr_source_basis_labels=source["source_basis_labels"],
+        standard_setting_certificate=certificate,
+        use_2d_momentum_only=True,
+    )
+    classification = classify_projected_subspace_kpoint(
+        parent_k_frac=np.zeros(3),
+        table=table,
+        source_hsp_basis=basis,
+        standard_setting_certificate=certificate,
+    )
+
+    payload = build_source_payload_for_projected_hsp_matching(
+        table=table,
+        projected_hsp_classification=classification,
+        detected_operations=detected,
+        valley_preserving_operation_ids=parent_ids,
+        source_hsp_basis=basis,
+        standard_setting_certificate=certificate,
+    )
+
+    assert payload["status"] == "ok", payload
+    assert payload["source_operation_map"] == {7: 1, 19: 2}
+    assert payload["_group_source_operation_map"] == {7: 1, 19: 2}
+    transport = payload["provenance"]["standard_setting_transport"]
+    assert transport["centering_coset_count"] == 2
+    assert transport["operation_pair_count"] == 4
+    assert transport["max_bloch_phase_relation_residual"] < 1e-12
+
+    duplicated = {
+        **classification,
+        "source_irrep_labels": [
+            classification["source_irrep_labels"][0],
+            classification["source_irrep_labels"][0],
+        ],
+    }
+    blocked = build_source_payload_for_projected_hsp_matching(
+        table=table,
+        projected_hsp_classification=duplicated,
+        detected_operations=detected,
+        valley_preserving_operation_ids=parent_ids,
+        source_hsp_basis=basis,
+        standard_setting_certificate=certificate,
+    )
+    assert blocked["status"] == "blocked"
+    assert blocked["blocker_reasons"][0].startswith(
+        "duplicate_reviewed_source_irrep_labels:"
+    )
 
 
 def test_star_geometry_rejects_little_group_content_mismatch():
@@ -713,7 +808,76 @@ def test_spinful_star_transport_applies_double_group_lift_factor():
     }
 
 
-def test_star_character_transport_with_lattice_phase_fails_closed():
+def test_star_classification_validates_nonzero_bloch_lattice_phase():
+    identity = _operation(1, np.eye(3, dtype=int).tolist())
+    mirror_x = _operation(
+        2, [[-1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    )
+    mirror_y = StandardTableOperation(
+        table_index=3,
+        rotation_frac=np.asarray(
+            [[1, 0, 0], [0, -1, 0], [0, 0, 1]], dtype=int
+        ),
+        translation_frac=np.asarray([0.5, 0.0, 0.0]),
+        spin_rotation=np.eye(2, dtype=complex),
+        time_reversal=False,
+    )
+    mirror_xy = StandardTableOperation(
+        table_index=4,
+        rotation_frac=np.asarray(
+            [[-1, 0, 0], [0, -1, 0], [0, 0, 1]], dtype=int
+        ),
+        translation_frac=np.asarray([0.5, 0.0, 0.0]),
+        spin_rotation=np.eye(2, dtype=complex),
+        time_reversal=False,
+    )
+    table = StandardIrrepTable(
+        number=25,
+        name="Pmm2",
+        spinor=False,
+        operations=(identity, mirror_x, mirror_y, mirror_xy),
+        irreps=(),
+    )
+    certificate = _certificate(
+        sg_number=25,
+        sg_symbol="Pmm2",
+        hall_number=125,
+        hall_symbol="P 2 -2",
+    )
+    basis = {
+        "status": "validated",
+        "projected_subspace_space_group": {
+            "number": 25,
+            "symbol": "Pmm2",
+            "hall_number": 125,
+            "hall_symbol": "P 2 -2",
+        },
+        "source_hsps": [{
+            "source_hsp_label": "Q",
+            "standard_representative_k_frac": [0.5, 0.25, 0.0],
+            "standard_little_group_operation_ids": [1, 2],
+            "source_irrep_labels": ["Q1"],
+        }],
+    }
+
+    classification = classify_projected_subspace_kpoint(
+        parent_k_frac=[0.5, -0.25, 0.0],
+        table=table,
+        source_hsp_basis=basis,
+        standard_setting_certificate=certificate,
+    )
+
+    assert classification["classification"] == "star_equivalent"
+    assert classification["representation_transport_status"] == "validated"
+    transport = {
+        row["star_arm_operation_id"]: row
+        for row in classification["character_transport_map"]
+    }
+    assert transport[2]["affine_lattice_translation"] == [1, 0, 0]
+    assert transport[2]["bloch_phase"] == pytest.approx([-1.0, 0.0])
+
+
+def test_star_character_transport_applies_bloch_lattice_phase():
     table = _centered_c2_table()
     basis = derive_projected_subspace_source_hsp_basis(
         table=table,
@@ -728,11 +892,13 @@ def test_star_character_transport_with_lattice_phase_fails_closed():
             "source_hsp_label": "V",
             "source_irrep_labels": ["-V2"],
             "representation_transport_status": "validated",
+            "standard_k_frac": [0.25, 0.0, 0.0],
             "standard_little_group_operation_ids": [1],
             "character_transport_map": [{
                 "source_representative_operation_id": 1,
                 "star_arm_operation_id": 1,
                 "affine_lattice_translation": [1, 0, 0],
+                "spin_lift_factor": 1,
             }],
         },
         detected_operations=[{
@@ -744,7 +910,40 @@ def test_star_character_transport_with_lattice_phase_fails_closed():
         source_hsp_basis=basis,
     )
 
-    assert payload["status"] == "blocked"
-    assert payload["blocker_reasons"][0].startswith(
-        "star_character_transport_requires_bloch_phase:"
+    assert payload["status"] == "ok", payload
+    assert payload["source_irrep_characters"]["-V2"][1] == pytest.approx(
+        0.0 + 1.0j
+    )
+    phase_row = payload["provenance"]["character_transport_map"][0]
+    assert phase_row["bloch_phase"] == pytest.approx([0.0, -1.0])
+    assert phase_row["bloch_phase_convention"] == (
+        "exp(-2pii*(R_target^-T k_target)_dot_L)"
+    )
+
+    malformed = {
+        **payload["provenance"]["character_transport_map"][0],
+        "star_arm_operation_id": 99,
+    }
+    blocked = build_source_payload_for_projected_hsp_matching(
+        table=table,
+        projected_hsp_classification={
+            "classification": "star_equivalent",
+            "source_hsp_label": "V",
+            "source_irrep_labels": ["-V2"],
+            "representation_transport_status": "validated",
+            "standard_k_frac": [0.25, 0.0, 0.0],
+            "standard_little_group_operation_ids": [1],
+            "character_transport_map": [malformed],
+        },
+        detected_operations=[{
+            "operation_id": 10,
+            "rotation_frac": table.operation_by_index(1).rotation_frac,
+            "translation_frac": table.operation_by_index(1).translation_frac,
+        }],
+        valley_preserving_operation_ids=[10],
+        source_hsp_basis=basis,
+    )
+    assert blocked["status"] == "blocked"
+    assert blocked["blocker_reasons"][0].startswith(
+        "star_character_transport_target_operation_invalid:"
     )

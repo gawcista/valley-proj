@@ -438,6 +438,7 @@ def classify_projected_subspace_kpoint(
             table=table,
             source_operation_ids=expected_little_group,
             witness=witness,
+            target_standard_k=standard_k,
         )
         if conjugation["status"] != "validated":
             transport_status = "blocked"
@@ -450,11 +451,6 @@ def classify_projected_subspace_kpoint(
                 conjugation["conjugated_operation_ids"]
             )
             transport_map = list(conjugation["character_transport_map"])
-            if conjugation.get("nonzero_lattice_translation"):
-                transport_status = "blocked"
-                transport_blocker = (
-                    "star_character_transport_requires_nontrivial_lattice_phase"
-                )
 
     mapped_little_group = sorted(
         int(value) for value in (mapped_standard_little_group_operation_ids or [])
@@ -866,6 +862,7 @@ def _conjugated_little_group(
     table: StandardIrrepTable,
     source_operation_ids: Sequence[int],
     witness: StandardTableOperation,
+    target_standard_k: np.ndarray,
 ) -> dict[str, object]:
     witness_inverse = _inverse_affine(witness)
     conjugated_ids: list[int] = []
@@ -930,17 +927,33 @@ def _conjugated_little_group(
         nonzero_lattice_translation = (
             nonzero_lattice_translation or any(lattice_shift)
         )
+        transformed_k = (
+            np.linalg.inv(target_operation.rotation_frac).T
+            @ np.asarray(target_standard_k, dtype=float)
+        )
+        bloch_phase = np.exp(
+            -2.0j
+            * np.pi
+            * float(transformed_k @ lattice_translation)
+        )
         transport.append({
             "source_representative_operation_id": int(source_id),
             "star_arm_operation_id": target_id,
             "affine_lattice_translation": lattice_shift,
             "spin_lift_factor": spin_lift_factor,
+            "bloch_phase": [
+                float(np.real(bloch_phase)),
+                float(np.imag(bloch_phase)),
+            ],
+            "bloch_phase_convention": (
+                "exp(-2pii*(R_target^-T k_target)_dot_L)"
+            ),
             "character_transport": (
                 "unitary_conjugation"
                 if not any(lattice_shift) and spin_lift_factor == 1
                 else "unitary_conjugation_with_spin_lift"
                 if not any(lattice_shift)
-                else "requires_bloch_lattice_phase"
+                else "unitary_conjugation_with_bloch_phase"
             ),
         })
     return {

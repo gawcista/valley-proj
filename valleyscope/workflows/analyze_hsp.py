@@ -922,6 +922,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     detected_operations=symmetry_payload.get("detected_operations", []),
                     valley_preserving_operation_ids=list(vp_ids),
                     source_hsp_basis=source_basis,
+                    standard_setting_certificate=certificate,
                     tol=tol,
                 )
                 if payload.get("operation_mapping_evaluated") is True:
@@ -968,6 +969,9 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                         standard_setting_certificate=certificate,
                         source_operation_map=dict(
                             payload["source_operation_map"]
+                        ),
+                        certified_group_source_operation_map=dict(
+                            payload.get("_group_source_operation_map", {})
                         ),
                         required_operation_ids=list(vp_ids),
                         symmetry_payload=symmetry_payload,
@@ -1578,6 +1582,7 @@ def _build_local_cprime_records(
     kpoint_frac: np.ndarray,
     valley: str,
     config: AppConfig,
+    certified_group_source_operation_map: dict[int, int] | None = None,
 ) -> tuple[
     dict[str, object],
     dict[str, object] | None,
@@ -1595,10 +1600,7 @@ def _build_local_cprime_records(
         for operation in symmetry_payload.get("detected_operations", [])
         if isinstance(operation, dict)
     }
-    lift_operation_map = _group_wide_standard_operation_map(
-        standard_setting_certificate,
-        table,
-    )
+    lift_operation_map = dict(certified_group_source_operation_map or {})
     if not lift_operation_map:
         lift_operation_map = {
             int(operation_id): int(table_index)
@@ -1752,69 +1754,6 @@ def _build_local_cprime_records(
     }
     scoped = build_scoped_representation_evidence(**scoped_inputs)
     return lift_record, scoped.to_record(), scoped_inputs
-
-
-def _group_wide_standard_operation_map(
-    certificate: dict[str, object],
-    table,
-) -> dict[int, int]:
-    """Map the full parent group to opaque source-table operation indices."""
-    primitive = certificate.get("affine_operation_map")
-    standard_indices: dict[int, int]
-    if isinstance(primitive, dict):
-        standard_indices = {}
-        for raw_parent, raw_standard in primitive.items():
-            try:
-                parent = int(raw_parent)
-            except (TypeError, ValueError):
-                return {}
-            if (
-                isinstance(raw_standard, bool)
-                or not isinstance(raw_standard, int)
-            ):
-                return {}
-            standard_indices[parent] = int(raw_standard)
-    else:
-        centered = certificate.get("centered_affine_operation_map")
-        if not isinstance(centered, list):
-            return {}
-        selected: dict[int, tuple[int, int]] = {}
-        for row in centered:
-            if not isinstance(row, dict):
-                return {}
-            parent = row.get("parent_operation_id")
-            coset = row.get("centering_coset_index")
-            standard = row.get("standard_operation_index")
-            if not all(
-                isinstance(value, int) and not isinstance(value, bool)
-                for value in (parent, coset, standard)
-            ):
-                return {}
-            current = selected.get(parent)
-            candidate = (coset, standard)
-            if current is None or candidate < current:
-                selected[parent] = candidate
-        standard_indices = {
-            parent: candidate[1]
-            for parent, candidate in selected.items()
-        }
-
-    operations = getattr(table, "operations", None)
-    if not isinstance(operations, tuple) or not operations:
-        return {}
-    result: dict[int, int] = {}
-    for parent, standard_index in standard_indices.items():
-        if standard_index < 0 or standard_index >= len(operations):
-            return {}
-        table_index = getattr(
-            operations[standard_index], "table_index", None
-        )
-        if not isinstance(table_index, int) or isinstance(table_index, bool):
-            return {}
-        result[parent] = table_index
-    if len(set(result.values())) != len(result):
-        return {}
-    return result
 
 
 def _projector_range_basis(
