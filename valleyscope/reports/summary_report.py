@@ -572,10 +572,16 @@ def _scoped_residual_maxima(
     group_law = evidence.get("projected_representation_group_law")
     covariance = evidence.get("projector_covariance")
     valley_block = evidence.get("valley_block_quality")
+    target_frame = evidence.get("target_frame")
+    original_gram = (
+        target_frame.get("original_gram")
+        if isinstance(target_frame, dict)
+        else None
+    )
     return {
         "coefficient_gram": _optional_number(
-            target.get("coefficient_gram_error")
-            if isinstance(target, dict) else None
+            original_gram.get("normalized_error")
+            if isinstance(original_gram, dict) else None
         ),
         "target_subspace_unitarity": _max_row_number(
             target, "operation_rows", "unitarity_residual"

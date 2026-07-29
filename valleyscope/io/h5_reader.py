@@ -28,6 +28,7 @@ class WavefunctionMetadata:
     parser_identity: str
     hdf5_layout_identity: str
     extractor_provenance: str | None
+    wavecar_rtag: int | None
     hdf5_payload_identity: str
 
 
@@ -138,6 +139,11 @@ def read_wavefunction_h5(path: str | Path) -> WavefunctionData:
             parser_identity=H5_PARSER_IDENTITY,
             hdf5_layout_identity=H5_LAYOUT_IDENTITY,
             extractor_provenance=extractor_provenance,
+            wavecar_rtag=(
+                int(h5["metadata/wavecar_rtag"][()])
+                if "metadata/wavecar_rtag" in h5
+                else None
+            ),
             hdf5_payload_identity=payload_identity,
         )
     seen_names: set[str] = set()

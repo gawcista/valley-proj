@@ -202,7 +202,9 @@ def _producer_contexts(tmp_path: Path):
                     "relative_norm_residual": 0.0,
                 },
             },
-            "target_coefficients": np.eye(2, dtype=np.complex128),
+            "target_coefficients": np.eye(
+                2, dtype=np.complex128
+            ).reshape(2, 1, 2),
             "projectors": {
                 valley: np.diag([1.0, 0.0]).astype(np.complex128),
             },

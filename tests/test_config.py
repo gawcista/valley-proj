@@ -34,6 +34,17 @@ def test_h5_reader_validates_group_schema(tmp_path):
     assert data.metadata.spinor is False
 
 
+def test_h5_reader_exposes_optional_wavecar_rtag(tmp_path):
+    h5_path = tmp_path / "wf.h5"
+    write_fixture(h5_path)
+    with h5py.File(h5_path, "r+") as h5:
+        h5["metadata/wavecar_rtag"] = 45200
+
+    data = read_wavefunction_h5(h5_path)
+
+    assert data.metadata.wavecar_rtag == 45200
+
+
 def test_config_loader_parses_core_schema(tmp_path):
     h5_path = tmp_path / "wf.h5"
     config_path = tmp_path / "config.yaml"

@@ -4,6 +4,8 @@ import json, pytest, yaml
 from pathlib import Path
 
 import valleyscope.analysis.irreptables_runtime_table_builder as table_builder
+from sympy import Matrix, ZZ
+from sympy.matrices.normalforms import smith_normal_decomp
 
 from valleyscope.io.config import load_config
 from valleyscope.workflows.analyze_hsp import analyze_hsp
@@ -437,6 +439,73 @@ def test_sg143_unitary_table_retains_declared_ka_source_hsp():
         "-KA6" in row
         for row in t["provenance"].get("dropped_source_rows", [])
     )
+    ebr_matrix = Matrix.hstack(
+        *(Matrix(ebr["vector"]) for ebr in t["ebrs"])
+    )
+    diagonal, left, _ = smith_normal_decomp(ebr_matrix, domain=ZZ)
+    targets = [
+        [1, 0, 0, 0, 0, 1, 0, 1, 0, 1],
+        [1, 0, 0, 0, 1, 0, 0, 0, 1, 1],
+    ]
+    transformed = [
+        [int(value) for value in left * Matrix(target)]
+        for target in targets
+    ]
+    assert {
+        "basis": t["irreps"],
+        "matrix": ebr_matrix.tolist(),
+        "rank": ebr_matrix.rank(),
+        "smith_diagonal": [
+            int(diagonal[index, index])
+            for index in range(min(diagonal.shape))
+        ],
+        "torsion_witness": [
+            int(left[6, index]) for index in range(left.cols)
+        ],
+        "target_smith_coordinates": transformed,
+        "target_modulo_three": [
+            values[6] % 3 for values in transformed
+        ],
+        "classifications": [
+            classify_bundle(
+                target,
+                [ebr["vector"] for ebr in t["ebrs"]],
+                [ebr["label"] for ebr in t["ebrs"]],
+                12,
+            )["classification"]
+            for target in targets
+        ],
+    } == {
+        "basis": [
+            "GM:-GM4", "GM:-GM5", "GM:-GM6",
+            "K:-K4", "K:-K5", "K:-K6",
+            "KA:-KA4", "KA:-KA5", "KA:-KA6", "M:-M2",
+        ],
+        "matrix": [
+            [0, 0, 1, 0, 0, 1, 0, 0, 1],
+            [1, 0, 0, 1, 0, 0, 1, 0, 0],
+            [0, 1, 0, 0, 1, 0, 0, 1, 0],
+            [0, 0, 1, 0, 1, 0, 1, 0, 0],
+            [1, 0, 0, 0, 0, 1, 0, 1, 0],
+            [0, 1, 0, 1, 0, 0, 0, 0, 1],
+            [0, 0, 1, 1, 0, 0, 0, 1, 0],
+            [0, 1, 0, 0, 0, 1, 1, 0, 0],
+            [1, 0, 0, 0, 1, 0, 0, 0, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1],
+        ],
+        "rank": 7,
+        "smith_diagonal": [1, 1, 1, 1, 1, 1, 3, 0, 0],
+        "torsion_witness": [-3, -2, -1, 1, 2, 0, 2, 1, 0, 0],
+        "target_smith_coordinates": [
+            [0, 0, 1, 0, -1, 1, -2, 0, 0, 0],
+            [0, 0, 1, -1, -1, 0, -1, 0, 0, 0],
+        ],
+        "target_modulo_three": [1, 2],
+        "classifications": [
+            "outside_integer_span",
+            "outside_integer_span",
+        ],
+    }
 
 # ---------------------------------------------------------------------------
 # Solver uniqueness and truncation

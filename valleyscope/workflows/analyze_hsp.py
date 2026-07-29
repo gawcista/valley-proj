@@ -19,6 +19,7 @@ from valleyscope.analysis.subspace_representation_quality import (
 from valleyscope.analysis.scoped_representation_evidence import (
     build_scoped_representation_evidence,
 )
+from valleyscope.analysis.target_frame import build_target_frame
 from valleyscope.analysis.irrep_workflow_decision import (
     build_irrep_workflow_decisions,
 )
@@ -285,6 +286,8 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     symmetry_representation_payload: dict[str, object] = {}
     raw_representations_by_kpoint: dict[str, dict[object, dict[str, object]]] = {}
     coefficients_by_kpoint: dict[str, np.ndarray] = {}
+    source_coefficients_by_kpoint: dict[str, np.ndarray] = {}
+    target_frame_records_by_kpoint: dict[str, dict[str, object]] = {}
     g_vectors_frac_by_kpoint: dict[str, np.ndarray] = {}
     band_indices_by_kpoint: dict[str, np.ndarray] = {}
     valley_matrices_by_kpoint: dict[str, dict[str, np.ndarray]] = {}
@@ -295,8 +298,19 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     for kpoint_name in config.analysis.kpoints:
         kpoint = wavefunctions.find_kpoint(kpoint_name)
         positions = _target_band_positions(kpoint.band_indices_vasp, config.analysis.iband)
-        coefficients = kpoint.coefficients[positions]
+        source_coefficients = kpoint.coefficients[positions]
+        target_frame = build_target_frame(
+            source_coefficients,
+            wavecar_rtag=wavefunctions.metadata.wavecar_rtag,
+        )
+        coefficients = (
+            target_frame.coefficients
+            if target_frame.coefficients is not None
+            else source_coefficients
+        )
+        source_coefficients_by_kpoint[kpoint_name] = source_coefficients
         coefficients_by_kpoint[kpoint_name] = coefficients
+        target_frame_records_by_kpoint[kpoint_name] = target_frame.record
         g_vectors_frac_by_kpoint[kpoint_name] = np.asarray(
             kpoint.g_vectors_frac
         )
@@ -325,7 +339,10 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             emit_warnings=False,
         )
         projectors_by_kpoint[kpoint_name] = reporting_projectors
-        weights = compute_valley_weights(coefficients, reporting_projectors)
+        weights = compute_valley_weights(
+            source_coefficients,
+            reporting_projectors,
+        )
 
         # --- Readiness seed projectors (always fixed_center) ---
         # Seed matrices, projector symmetry-consistency, symmetry-adapted
@@ -400,7 +417,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 scan_qcuts = [fraction * min_qcut for fraction in config.projection.qcut_scan]
             scan = scan_qcut(
                 q_cart,
-                coefficients,
+                source_coefficients,
                 reporting_centers,
                 config.valley_subspaces,
                 monolayer_recip,
@@ -504,6 +521,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             spinor_wavefunction=bool(symmetry_payload.get("spinor_wavefunction", False)),
             unitarity_tol=float(config.symmetry_adapted_valley.representation_unitarity_fail_tol),
             coefficients_by_kpoint=_coefficients_lookup(coefficients_by_kpoint, raw_representations_by_kpoint),
+            target_frame_records_by_kpoint=target_frame_records_by_kpoint,
         )
         target_subspace_closure_blockers = check_target_subspace_closure_blocked(
             target_subspace_closure_report,
@@ -957,6 +975,13 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                             raw_representations_by_kpoint.get(kp_name, {})
                         ),
                         target_coefficients=coefficients_by_kpoint[kp_name],
+                        source_target_coefficients=(
+                            source_coefficients_by_kpoint[kp_name]
+                        ),
+                        wavecar_rtag=wavefunctions.metadata.wavecar_rtag,
+                        target_frame_record=(
+                            target_frame_records_by_kpoint[kp_name]
+                        ),
                         seed_projectors=(
                             valley_matrices_by_kpoint.get(kp_name, {})
                         ),
@@ -1543,6 +1568,9 @@ def _build_local_cprime_records(
     symmetry_payload: dict[str, object],
     raw_operation_payloads: dict[object, dict[str, object]],
     target_coefficients: np.ndarray,
+    source_target_coefficients: np.ndarray,
+    wavecar_rtag: int | None,
+    target_frame_record: dict[str, object],
     seed_projectors: dict[str, np.ndarray],
     symmetry_adapted_projectors: dict[str, np.ndarray],
     workflow_decision: dict[str, object],
@@ -1713,6 +1741,9 @@ def _build_local_cprime_records(
         "representations": representations,
         "plane_wave_evidence": plane_wave_evidence,
         "target_coefficients": target_coefficients,
+        "source_target_coefficients": source_target_coefficients,
+        "wavecar_rtag": wavecar_rtag,
+        "target_frame_record": target_frame_record,
         "projectors": {
             valley: np.asarray(projector, dtype=np.complex128)
         },

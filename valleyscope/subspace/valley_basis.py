@@ -61,7 +61,7 @@ def _projector_matrix(coefficients: np.ndarray, mask: np.ndarray) -> np.ndarray:
     flat = coeffs.reshape(coeffs.shape[0], -1)
     expanded_mask = np.tile(mask.astype(bool), coeffs.shape[1])
     selected = flat[:, expanded_mask]
-    return selected @ selected.conj().T
+    return selected.conj() @ selected.T
 
 
 def _default_valley_labels(n_valleys: int) -> tuple[list[str], np.ndarray]:

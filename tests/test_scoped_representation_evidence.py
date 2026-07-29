@@ -12,6 +12,7 @@ from valleyscope.analysis.scoped_representation_evidence import (
     build_scoped_representation_evidence,
     validate_scoped_representation_evidence_record,
 )
+from valleyscope.analysis.target_frame import build_target_frame
 from valleyscope.geometry.lattice import (
     cart_rotation_from_fractional,
     cart_translation_from_fractional,
@@ -160,7 +161,9 @@ def _raw_inputs(
             2: plane_wave_row(2),
             5: plane_wave_row(5),
         },
-        "target_coefficients": np.eye(2, dtype=np.complex128),
+        "target_coefficients": np.eye(
+            2, dtype=np.complex128
+        ).reshape(2, 1, 2),
         "projectors": {
             "v0": np.diag([1.0, 0.0]),
             "v1": np.diag([0.0, 1.0]),
@@ -198,7 +201,6 @@ def test_local_irrep_consumes_only_exact_valley_preserving_scope():
     assert record["tolerances"] == {
         "group_law": 1.0e-2,
         "plane_wave_norm": 1.0e-8,
-        "coefficient_gram": 1.0e-6,
         "target_subspace": 1.0e-2,
         "projector_covariance": 1.0e-2,
         "valley_block": 1.0e-2,
@@ -206,6 +208,56 @@ def test_local_irrep_consumes_only_exact_valley_preserving_scope():
     assert validate_scoped_representation_evidence_record(
         record, **inputs
     ).status == "passed"
+
+
+def test_scoped_evidence_binds_recomputed_canonical_target_frame():
+    inputs = _raw_inputs(
+        scope_kind="local_irrep",
+        required_operation_ids=(2,),
+    )
+    overlap = 2.0e-5
+    source_coefficients = np.array(
+        [
+            [[1.0, 0.0]],
+            [[overlap, np.sqrt(1.0 - overlap**2)]],
+        ],
+        dtype=np.complex128,
+    )
+    frame = build_target_frame(
+        source_coefficients,
+        wavecar_rtag=45200,
+    )
+    inputs["source_target_coefficients"] = source_coefficients
+    inputs["target_coefficients"] = frame.coefficients
+    inputs["wavecar_rtag"] = 45200
+    inputs["target_frame_record"] = frame.record
+
+    record = build_scoped_representation_evidence(**inputs).to_record()
+
+    assert record["status"] == "passed"
+    assert record["target_frame"]["status"] == "passed"
+    assert record["target_frame"]["contract_identity"] == (
+        frame.record["contract_identity"]
+    )
+
+
+def test_scoped_evidence_rejects_tampered_target_frame_record():
+    inputs = _raw_inputs(
+        scope_kind="local_irrep",
+        required_operation_ids=(2,),
+    )
+    frame = build_target_frame(
+        inputs["target_coefficients"],
+        wavecar_rtag=None,
+    )
+    tampered = deepcopy(frame.record)
+    tampered["canonicalization"]["post_gram_error"] = 1.0
+    inputs["target_frame_record"] = tampered
+
+    record = build_scoped_representation_evidence(**inputs).to_record()
+
+    assert record["status"] == "blocked"
+    assert "target_frame_recomputation_mismatch" in record["reason_codes"]
 
 
 def test_valley_changing_failure_blocks_sewing_but_not_local_irrep():
@@ -257,7 +309,7 @@ def test_matrix_residuals_are_normalized_by_subspace_rank(rank: int):
     }
     inputs["target_coefficients"] = (
         scale * np.eye(rank, dtype=np.complex128)
-    )
+    ).reshape(rank, 1, rank)
     inputs["projectors"] = {
         "v0": np.eye(rank, dtype=np.complex128),
         "v1": np.eye(rank, dtype=np.complex128),
@@ -274,10 +326,9 @@ def test_matrix_residuals_are_normalized_by_subspace_rank(rank: int):
     ][0]
     block = record["valley_block_quality"]["operation_rows"][0]
 
-    assert target["coefficient_gram_normalization"] == pytest.approx(
-        np.sqrt(rank)
-    )
-    assert target["coefficient_gram_error"] == pytest.approx(epsilon)
+    original_gram = record["target_frame"]["original_gram"]
+    assert original_gram["normalization"] == pytest.approx(np.sqrt(rank))
+    assert original_gram["normalized_error"] == pytest.approx(epsilon)
     assert operation["unitarity_residual_normalization"] == pytest.approx(
         np.sqrt(rank)
     )

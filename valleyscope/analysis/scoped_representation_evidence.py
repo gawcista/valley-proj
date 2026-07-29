@@ -15,6 +15,10 @@ from valleyscope.io.wavefunction_convention import (
     canonical_identity,
     valid_sha256_identity,
 )
+from valleyscope.analysis.target_frame import (
+    build_target_frame,
+    validate_target_frame_record,
+)
 from valleyscope.symmetry.double_space_group_lift import (
     validate_double_space_group_lift_record,
 )
@@ -26,13 +30,12 @@ from valleyscope.symmetry.plane_wave_action import (
 )
 
 
-SCOPED_REPRESENTATION_EVIDENCE_SCHEMA_VERSION = "1.3.0"
+SCOPED_REPRESENTATION_EVIDENCE_SCHEMA_VERSION = "1.4.0"
 SUPPORTED_SCOPE_KINDS = frozenset(
     {"local_irrep", "valley_sewing"}
 )
 DEFAULT_GROUP_LAW_TOLERANCE = 1.0e-2
 DEFAULT_PLANE_WAVE_NORM_TOLERANCE = 1.0e-8
-DEFAULT_COEFFICIENT_GRAM_TOLERANCE = 1.0e-6
 DEFAULT_TARGET_SUBSPACE_TOLERANCE = 1.0e-2
 DEFAULT_PROJECTOR_COVARIANCE_TOLERANCE = 1.0e-2
 DEFAULT_VALLEY_BLOCK_TOLERANCE = 1.0e-2
@@ -79,6 +82,9 @@ def build_scoped_representation_evidence(
     projectors: Mapping[str, np.ndarray],
     valley_bases: Mapping[str, np.ndarray],
     valley_mappings: Mapping[int, Mapping[str, str]],
+    source_target_coefficients: np.ndarray | None = None,
+    wavecar_rtag: int | None = None,
+    target_frame_record: Mapping[str, object] | None = None,
 ) -> ScopedRepresentationEvidence:
     """Derive one immutable scope record from raw numerical inputs.
 
@@ -89,7 +95,6 @@ def build_scoped_representation_evidence(
     reasons: list[str] = []
     group_law_tol = DEFAULT_GROUP_LAW_TOLERANCE
     plane_wave_norm_tol = DEFAULT_PLANE_WAVE_NORM_TOLERANCE
-    gram_tol = DEFAULT_COEFFICIENT_GRAM_TOLERANCE
     target_tol = DEFAULT_TARGET_SUBSPACE_TOLERANCE
     projector_tol = DEFAULT_PROJECTOR_COVARIANCE_TOLERANCE
     block_tol = DEFAULT_VALLEY_BLOCK_TOLERANCE
@@ -143,18 +148,48 @@ def build_scoped_representation_evidence(
     matrices, target_dimension = _representation_matrices(
         operation_ids, representations, reasons
     )
-    (
-        coefficient_gram_raw_fro,
-        coefficient_gram_normalization,
-        coefficient_gram_error,
-    ) = _coefficient_gram_metrics(
-        target_coefficients, target_dimension, reasons
+    frame_source = (
+        target_coefficients
+        if source_target_coefficients is None
+        else source_target_coefficients
     )
+    target_frame = build_target_frame(
+        frame_source,
+        wavecar_rtag=wavecar_rtag,
+    )
+    reasons.extend(target_frame.reason_codes)
+    frame_shape = target_frame.record.get("shape")
     if (
-        coefficient_gram_error is not None
-        and coefficient_gram_error > gram_tol
+        isinstance(frame_shape, Mapping)
+        and frame_shape.get("bands") != target_dimension
     ):
-        reasons.append("target_coefficients_gram_failed")
+        reasons.append("target_frame_dimension_mismatch")
+    if target_frame_record is not None:
+        frame_validation = validate_target_frame_record(
+            dict(target_frame_record),
+            frame_source,
+            wavecar_rtag=wavecar_rtag,
+        )
+        if frame_validation.status == "blocked":
+            reasons.extend(frame_validation.reason_codes)
+    try:
+        supplied_target = np.asarray(
+            target_coefficients,
+            dtype=np.complex128,
+        )
+    except (TypeError, ValueError):
+        supplied_target = None
+    if (
+        target_frame.coefficients is not None
+        and (
+            supplied_target is None
+            or not np.array_equal(
+                supplied_target,
+                target_frame.coefficients,
+            )
+        )
+    ):
+        reasons.append("target_frame_coefficients_mismatch")
     closure_rows = _target_subspace_rows(
         operation_ids, matrices, target_tol, reasons
     )
@@ -228,24 +263,15 @@ def build_scoped_representation_evidence(
         "tolerances": {
             "group_law": group_law_tol,
             "plane_wave_norm": plane_wave_norm_tol,
-            "coefficient_gram": gram_tol,
             "target_subspace": target_tol,
             "projector_covariance": projector_tol,
             "valley_block": block_tol,
         },
         "target_subspace": {
             "dimension": target_dimension,
-            "coefficient_gram_raw_fro": coefficient_gram_raw_fro,
-            "coefficient_gram_normalization": (
-                coefficient_gram_normalization
-            ),
-            "coefficient_gram_error": coefficient_gram_error,
-            "coefficient_gram_passed": (
-                coefficient_gram_error is not None
-                and coefficient_gram_error <= gram_tol
-            ),
             "operation_rows": closure_rows,
         },
+        "target_frame": deepcopy(target_frame.record),
         "plane_wave_mapping": {
             "operation_rows": plane_wave_rows,
             "composition_rows": plane_wave_composition_rows,
@@ -475,33 +501,6 @@ def _representation_matrices(
     if set(matrices) != set(operation_ids):
         reasons.append("required_representation_missing")
     return matrices, dimension
-
-
-def _coefficient_gram_metrics(
-    coefficients: np.ndarray,
-    dimension: int,
-    reasons: list[str],
-) -> tuple[float | None, float | None, float | None]:
-    try:
-        array = np.asarray(coefficients, dtype=np.complex128)
-    except (TypeError, ValueError):
-        reasons.append("target_coefficients_malformed")
-        return None, None, None
-    if array.ndim < 2 or array.shape[0] != dimension or dimension < 1:
-        reasons.append("target_coefficients_malformed")
-        return None, None, None
-    flattened = array.reshape(dimension, -1)
-    raw_fro = float(
-        np.linalg.norm(
-            flattened @ flattened.conj().T - np.eye(dimension), ord="fro"
-        )
-    )
-    normalization = float(np.sqrt(dimension))
-    gram_error = raw_fro / normalization
-    if not np.isfinite(gram_error):
-        reasons.append("target_coefficients_malformed")
-        return None, None, None
-    return raw_fro, normalization, gram_error
 
 
 def _target_subspace_rows(

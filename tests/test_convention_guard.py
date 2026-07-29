@@ -31,6 +31,25 @@ def test_stored_projector_is_standard_convention():
             )
 
 
+def test_stored_projector_uses_bra_conjugation_for_complex_overlap():
+    """Shared complex support fixes the off-diagonal bra/ket convention."""
+    coeffs = np.array(
+        [
+            [[1.0 + 1.0j, 0.0]],
+            [[2.0 - 1.0j, 0.0]],
+        ],
+        dtype=np.complex128,
+    )
+
+    projector = _projector_matrix(
+        coeffs,
+        np.array([True, False]),
+    )
+    expected = coeffs[:, 0, :1].conj() @ coeffs[:, 0, :1].T
+
+    assert np.allclose(projector, expected)
+
+
 def test_correct_transformation_is_d_p_ddag():
     """D @ P_M1 @ Ddag = P_M2 under C3 cyclic mapping."""
     angle = 2 * np.pi / 3

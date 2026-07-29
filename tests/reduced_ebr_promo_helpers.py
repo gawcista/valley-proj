@@ -368,7 +368,9 @@ def _cprime_fixture_scope(
             }
             for operation_id in required_ids
         },
-        "target_coefficients": np.eye(2, dtype=np.complex128),
+        "target_coefficients": np.eye(
+            2, dtype=np.complex128
+        ).reshape(2, 1, 2),
         "projectors": projectors,
         "valley_bases": bases,
         "valley_mappings": mappings,

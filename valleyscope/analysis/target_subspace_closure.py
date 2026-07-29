@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import numpy as np
 
+from valleyscope.analysis.target_frame import build_target_frame
+
 DEFAULT_CLOSURE_UNITARITY_TOL = 1e-3
 DEFAULT_CLOSURE_GROUP_RELATION_TOL = 1e-2
-DEFAULT_GRAM_ORTHONORMALITY_TOL = 1e-6
 DEFAULT_USABLE_WITH_CAUTION_UNITARITY_TOL = 3e-2
 DEFAULT_USABLE_WITH_CAUTION_RESIDUAL_TOL = 3e-2
 DEFAULT_USABLE_WITH_CAUTION_SV_DEVIATION_TOL = 3e-2
@@ -31,6 +32,9 @@ def build_target_subspace_closure_report(
     unitarity_tol: float = DEFAULT_CLOSURE_UNITARITY_TOL,
     group_relation_tol: float = DEFAULT_CLOSURE_GROUP_RELATION_TOL,
     coefficients_by_kpoint: dict[str, np.ndarray] | None = None,
+    target_frame_records_by_kpoint: (
+        dict[str, dict[str, object]] | None
+    ) = None,
 ) -> dict[str, object]:
     """Build per-(kpoint, operation) closure diagnostic with provenance.
 
@@ -39,26 +43,42 @@ def build_target_subspace_closure_report(
     """
     operation_orders = operation_orders or {}
     coeffs_by_kp = dict(coefficients_by_kpoint or {})
+    frame_records = dict(target_frame_records_by_kpoint or {})
     by_kpoint: dict[str, object] = {}
     overall_status = "ok"
 
     for kpoint_name, op_payloads in raw_representations_by_kpoint.items():
         rows: list[dict[str, object]] = []
 
-        # Per-kpoint: target wavefunction Gram matrix diagnostic
+        # Per-kpoint: consume the shared target-frame producer assessment.
         coeffs = coeffs_by_kp.get(kpoint_name)
         gram_err: float | None = None
         gram_diag: str = "not_available"
-        if coeffs is not None:
-            c_arr = np.asarray(coeffs, dtype=np.complex128)
-            if c_arr.ndim == 3:
-                n_bands = c_arr.shape[0]
-                c_flat = c_arr.reshape(n_bands, -1)
-                gram = c_flat @ c_flat.conj().T
-                gram_err = float(
-                    np.linalg.norm(gram - np.eye(n_bands, dtype=np.complex128), ord="fro")
-                )
-                gram_diag = "available"
+        frame_record = frame_records.get(kpoint_name)
+        if frame_record is None and coeffs is not None:
+            frame_record = build_target_frame(
+                coeffs,
+                wavecar_rtag=None,
+            ).record
+        frame_status = "not_available"
+        frame_reason_codes: list[str] = []
+        frame_identity: str | None = None
+        if isinstance(frame_record, dict):
+            frame_status = str(frame_record.get("status", "blocked"))
+            raw_reasons = frame_record.get("reason_codes", [])
+            if isinstance(raw_reasons, list):
+                frame_reason_codes = [
+                    str(value) for value in raw_reasons
+                ]
+            identity_value = frame_record.get("contract_identity")
+            if isinstance(identity_value, str):
+                frame_identity = identity_value
+            original_gram = frame_record.get("original_gram")
+            if isinstance(original_gram, dict):
+                raw_error = original_gram.get("raw_fro_error")
+                if isinstance(raw_error, (int, float)):
+                    gram_err = float(raw_error)
+                    gram_diag = "available"
 
         for op_id, op_data in op_payloads.items():
             if not isinstance(op_data, dict):
@@ -111,10 +131,11 @@ def build_target_subspace_closure_report(
                 little_group_passed=little_group_passed,
                 mapping_miss_count=mapping_miss_count,
                 gram_err=gram_err,
+                target_frame_status=frame_status,
+                target_frame_reason_codes=frame_reason_codes,
                 raw_unitarity=raw_unitarity,
                 singular_values=sv_list,
                 unitarity_tol=unitarity_tol,
-                gram_tol=DEFAULT_GRAM_ORTHONORMALITY_TOL,
             )
             closure_quality = _closure_quality(
                 classification=classification,
@@ -159,6 +180,9 @@ def build_target_subspace_closure_report(
                 worst_source_state=worst_idx if worst_idx >= 0 else None,
                 target_wavefunction_gram_error=gram_err,
                 target_wavefunction_gram_status=gram_diag,
+                target_frame_status=frame_status,
+                target_frame_reason_codes=frame_reason_codes,
+                target_frame_contract_identity=frame_identity,
                 classification=classification,
                 closure_quality=closure_quality,
                 provenance_notes=class_reason,
@@ -192,8 +216,8 @@ def build_target_subspace_closure_report(
             "closure_residual_by_source_state = max(0, 1 - projected_norm) "
             "quantifies target-subspace leakage. "
             "D_raw_singular_values reports the SVD spectrum. "
-            "target_wavefunction_gram_error = ||C^dag C - I||_F checks input "
-            "wavefunction orthonormality. "
+            "target_wavefunction_gram_error is the shared target-frame "
+            "producer's raw ||C C^dag - I||_F diagnostic. "
             "plane_wave_norm_preservation: not_available from current "
             "build_plane_wave_representation (no pre-projection norm tracked). "
             "expanded_band_sensitivity: not_available unless HDF5 contains "
@@ -273,6 +297,9 @@ def _closure_row(
     worst_source_state: int | None = None,
     target_wavefunction_gram_error: float | None = None,
     target_wavefunction_gram_status: str = "not_available",
+    target_frame_status: str = "not_available",
+    target_frame_reason_codes: list[str] | None = None,
+    target_frame_contract_identity: str | None = None,
 ) -> dict[str, object]:
     row: dict[str, object] = {
         "operation_id": op_id,
@@ -304,6 +331,13 @@ def _closure_row(
     if target_wavefunction_gram_error is not None:
         row["target_wavefunction_gram_error"] = target_wavefunction_gram_error
     row["target_wavefunction_gram_status"] = target_wavefunction_gram_status
+    row["target_frame_status"] = target_frame_status
+    row["target_frame_reason_codes"] = list(
+        target_frame_reason_codes or []
+    )
+    row["target_frame_contract_identity"] = (
+        target_frame_contract_identity
+    )
     # Provenance fields that are not available from current implementation
     row["plane_wave_norm_preservation"] = (
         "not_available: build_plane_wave_representation does not track "
@@ -341,21 +375,19 @@ def _classify_provenance(
     little_group_passed: bool,
     mapping_miss_count: int,
     gram_err: float | None,
+    target_frame_status: str,
+    target_frame_reason_codes: list[str],
     raw_unitarity: float,
     singular_values: list[float],
     unitarity_tol: float,
-    gram_tol: float,
 ) -> tuple[str, str]:
     """Classify the D_raw non-unitarity into a root-cause category.
 
     Priority order:
     1. insufficient_provenance (not in little group)
     2. plane_wave_mapping_loss
-    3. input_wavefunctions_nonorthonormal (gram_err > 1e-3, physical)
+    3. input_wavefunctions_nonorthonormal (shared target frame blocked)
     4. target_subspace_not_closed (dominant: D_raw non-unitary)
-
-    Mild gram errors (< 1e-3) are noted but do not override the
-    target-subspace closure classification.
     """
     if not little_group_passed:
         return "insufficient_provenance", "not in little group"
@@ -364,28 +396,22 @@ def _classify_provenance(
             "plane_wave_mapping_loss",
             f"plane-wave mapping_miss_count={mapping_miss_count}",
         )
-    # Only classify as input non-orthonormal if physically significant
-    gram_fail_tol = max(gram_tol, 1e-3)
-    if gram_err is not None and gram_err > gram_fail_tol:
+    if target_frame_status == "blocked":
         return (
             "input_wavefunctions_nonorthonormal",
-            f"target wavefunction Gram error={gram_err:.2e} > tol={gram_fail_tol:.2e}",
+            "shared target-frame contract blocked: "
+            + ", ".join(target_frame_reason_codes),
         )
     if raw_unitarity <= unitarity_tol:
-        msg = "D_raw is unitary in target subspace"
-        if gram_err is not None and gram_err > gram_tol:
-            msg += f" (mild gram_error={gram_err:.2e} noted)"
-        return "raw_representation_ok", msg
+        return "raw_representation_ok", (
+            "D_raw is unitary in the canonical target frame"
+        )
     # Subspace not closed
     min_sv = float(np.min(singular_values)) if singular_values else 0.0
     max_sv = float(np.max(singular_values)) if singular_values else 0.0
     msg_parts = [
         f"D_raw unitarity error={raw_unitarity:.2e} > tol={unitarity_tol:.2e}"
     ]
-    if gram_err is not None and gram_err > gram_tol:
-        msg_parts.append(
-            f"mild gram_error={gram_err:.2e} noted but not primary cause"
-        )
     if min_sv < 0.9 or max_sv > 1.1:
         msg_parts.append(
             f"singular values [{min_sv:.4f}, {max_sv:.4f}] "
