@@ -442,15 +442,14 @@ def test_sg143_unitary_table_retains_declared_ka_source_hsp():
     ebr_matrix = Matrix.hstack(
         *(Matrix(ebr["vector"]) for ebr in t["ebrs"])
     )
-    diagonal, left, _ = smith_normal_decomp(ebr_matrix, domain=ZZ)
+    diagonal, _, _ = smith_normal_decomp(ebr_matrix, domain=ZZ)
     targets = [
         [1, 0, 0, 0, 0, 1, 0, 1, 0, 1],
         [1, 0, 0, 0, 1, 0, 0, 0, 1, 1],
     ]
-    transformed = [
-        [int(value) for value in left * Matrix(target)]
-        for target in targets
-    ]
+    torsion_witness = Matrix(
+        [[-3, -2, -1, 1, 2, 0, 2, 1, 0, 0]]
+    )
     assert {
         "basis": t["irreps"],
         "matrix": ebr_matrix.tolist(),
@@ -459,12 +458,13 @@ def test_sg143_unitary_table_retains_declared_ka_source_hsp():
             int(diagonal[index, index])
             for index in range(min(diagonal.shape))
         ],
-        "torsion_witness": [
-            int(left[6, index]) for index in range(left.cols)
+        "torsion_witness": list(torsion_witness),
+        "ebr_modulo_three": [
+            int(value) % 3 for value in torsion_witness * ebr_matrix
         ],
-        "target_smith_coordinates": transformed,
         "target_modulo_three": [
-            values[6] % 3 for values in transformed
+            int((torsion_witness * Matrix(target))[0]) % 3
+            for target in targets
         ],
         "classifications": [
             classify_bundle(
@@ -496,10 +496,7 @@ def test_sg143_unitary_table_retains_declared_ka_source_hsp():
         "rank": 7,
         "smith_diagonal": [1, 1, 1, 1, 1, 1, 3, 0, 0],
         "torsion_witness": [-3, -2, -1, 1, 2, 0, 2, 1, 0, 0],
-        "target_smith_coordinates": [
-            [0, 0, 1, 0, -1, 1, -2, 0, 0, 0],
-            [0, 0, 1, -1, -1, 0, -1, 0, 0, 0],
-        ],
+        "ebr_modulo_three": [0] * 9,
         "target_modulo_three": [1, 2],
         "classifications": [
             "outside_integer_span",
