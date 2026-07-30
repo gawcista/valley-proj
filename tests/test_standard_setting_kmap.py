@@ -2056,6 +2056,30 @@ def test_primitive_transport_view_preserves_opaque_operation_ids():
             "hall_number",
             lambda cert: cert.__setitem__("hall_number", 10),
         ),
+        (
+            "subspace_sg_symbol",
+            lambda cert: cert.__setitem__("subspace_sg_symbol", "P1"),
+        ),
+        (
+            "hall_symbol",
+            lambda cert: cert.__setitem__("hall_symbol", "P 1"),
+        ),
+        (
+            "centering_type",
+            lambda cert: cert.__setitem__("centering_type", "P"),
+        ),
+        (
+            "canonical_setting_source",
+            lambda cert: cert.__setitem__(
+                "canonical_setting_source", "unreviewed"
+            ),
+        ),
+        (
+            "canonical_candidate_hall_numbers",
+            lambda cert: cert.__setitem__(
+                "canonical_candidate_hall_numbers", [9]
+            ),
+        ),
     ],
 )
 def test_centered_transport_view_rejects_tampered_producer_evidence(

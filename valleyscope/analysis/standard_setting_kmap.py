@@ -2200,6 +2200,11 @@ def derive_irreptables_standard_setting_identity(
     return result
 
 
+def _normalized_crystallographic_symbol(value: object) -> str:
+    """Normalize spacing without discarding crystallographic sign content."""
+    return "".join(str(value or "").split())
+
+
 def build_standard_setting_transport_view(
     *,
     table: object,
@@ -2247,8 +2252,23 @@ def build_standard_setting_transport_view(
         source_identity.get("status") != "unique_match"
         or source_identity.get("hall_number") != hall_number
         or getattr(table, "number", None) != sg_number
+        or _normalized_crystallographic_symbol(
+            cert.get("subspace_sg_symbol")
+        ) != _normalized_crystallographic_symbol(
+            source_identity.get("space_group_symbol")
+        )
+        or _normalized_crystallographic_symbol(
+            cert.get("hall_symbol")
+        ) != _normalized_crystallographic_symbol(
+            source_identity.get("hall_symbol")
+        )
+        or cert.get("centering_type") != source_identity.get("centering_type")
         or cert.get("canonical_setting_status") != "unique_match"
-        or cert.get("canonical_hall_numbers") != [hall_number]
+        or cert.get("canonical_setting_source") != source_identity.get("source")
+        or cert.get("canonical_hall_numbers")
+        != source_identity.get("affine_matching_hall_numbers")
+        or cert.get("canonical_candidate_hall_numbers")
+        != source_identity.get("candidate_hall_numbers")
     ):
         return _blocked_transport_view("source_table_identity_mismatch")
     centering_vectors = source_identity.get("centering_cosets")
