@@ -6,6 +6,7 @@ from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector
 from valleyscope.symmetry.little_group import is_little_group_operation
 from valleyscope.symmetry.operation_classifier import classify_operation, operation_order, rotation_axis_angle
 from valleyscope.symmetry.plane_wave_action import (
+    apply_plane_wave_action,
     build_plane_wave_representation,
     build_reciprocal_grid_map,
     reciprocal_grid_identity,
@@ -244,6 +245,62 @@ def test_plane_wave_action_non_origin_c2_rotation_phase():
     )
     assert result.mapping_miss_count == 0
     np.testing.assert_allclose(result.matrix, expected, atol=1e-12)
+
+
+def test_cross_grid_action_uses_distinct_target_order_and_basis():
+    """Catches accidentally reusing the source grid/frame for cross-k sewing."""
+    source_q = np.array(
+        [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        dtype=float,
+    )
+    target_q = np.array(
+        [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        dtype=float,
+    )
+    rotation = np.array(
+        [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    source_coefficients = np.eye(2, dtype=np.complex128).reshape(2, 1, 2)
+    target_coefficients = np.array(
+        [[[0.0, 1.0]], [[1.0, 0.0]]],
+        dtype=np.complex128,
+    )
+
+    grid = build_reciprocal_grid_map(
+        source_q,
+        rotation,
+        tolerance=1.0e-8,
+        target_q_cart=target_q,
+    )
+    action = apply_plane_wave_action(
+        source_coefficients,
+        source_q,
+        rotation,
+        np.zeros(3),
+        tolerance=1.0e-8,
+        target_q_cart=target_q,
+    )
+    representation = build_plane_wave_representation(
+        source_coefficients,
+        source_q,
+        rotation,
+        np.zeros(3),
+        tolerance=1.0e-8,
+        target_coefficients=target_coefficients,
+        target_q_cart=target_q,
+    )
+
+    assert grid.mapping.tolist() == [1, 0]
+    assert grid.mapping_miss_count == 0
+    np.testing.assert_allclose(
+        action.transformed_coefficients,
+        target_coefficients,
+        atol=1.0e-12,
+    )
+    np.testing.assert_allclose(representation.matrix, np.eye(2), atol=1.0e-12)
+    assert representation.mapping.tolist() == [1, 0]
+    assert representation.mapping_miss_count == 0
+    assert representation.relative_target_subspace_residual == pytest.approx(0.0)
 
 
 def test_plane_wave_action_recovers_c3_angular_momentum_eigenvalue():

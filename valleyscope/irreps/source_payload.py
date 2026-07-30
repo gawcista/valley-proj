@@ -252,7 +252,7 @@ def build_source_payload_for_projected_hsp_matching(
     parent_phase_by_table: dict[int, complex] = {}
     certified_transport: dict[str, object] = {}
     if standard_setting_certificate is not None:
-        mapped = _map_certified_standard_operations(
+        mapped = build_certified_standard_operation_transport(
             table=table,
             certificate=standard_setting_certificate,
             detected_operations=detected_operations,
@@ -538,7 +538,7 @@ def build_source_payload_for_projected_hsp_matching(
     }
 
 
-def _map_certified_standard_operations(
+def build_certified_standard_operation_transport(
     *,
     table: StandardIrrepTable,
     certificate: Mapping[str, object],
@@ -597,6 +597,7 @@ def _map_certified_standard_operations(
 
     source_map: dict[int, int] = {}
     phases: dict[int, complex] = {}
+    phase_rows: list[dict[str, object]] = []
     max_residual = 0.0
     for operation_id in operation_ids:
         selected = grouped.get(operation_id, [])
@@ -631,6 +632,15 @@ def _map_certified_standard_operations(
                 * float(transformed_k @ np.asarray(vector, dtype=float))
             )
             max_residual = max(max_residual, float(abs(row_phase - expected)))
+        phase_rows.extend({
+            **row,
+            "bloch_phase": [
+                float(row_phase.real), float(row_phase.imag),
+            ],
+            "bloch_phase_convention": (
+                "exp(-2pii*(R^-T k)_dot_delta_t)"
+            ),
+        } for row, row_phase in zip(selected, row_phases))
         source_map[operation_id] = int(table_index)
         phases[int(table_index)] = base_phase
     if max_residual > tol:
@@ -640,6 +650,7 @@ def _map_certified_standard_operations(
         "source_operation_map": source_map,
         "group_source_operation_map": group_map,
         "parent_phase_by_table": phases,
+        "operation_rows": phase_rows,
         "provenance": {
             "centering_coset_count": len(centering),
             "operation_pair_count": len(rows),

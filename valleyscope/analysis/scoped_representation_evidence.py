@@ -20,10 +20,12 @@ from valleyscope.analysis.target_frame import (
     validate_target_frame_record,
 )
 from valleyscope.symmetry.double_space_group_lift import (
+    spin_lift_from_orthogonal,
     validate_double_space_group_lift_record,
 )
 from valleyscope.symmetry.plane_wave_action import (
     RECIPROCAL_GRID_ACTION_CONVENTION,
+    build_plane_wave_representation,
     build_reciprocal_grid_map,
     reciprocal_grid_identity,
     validate_reciprocal_grid_permutation,
@@ -344,6 +346,337 @@ def validate_scoped_representation_evidence_record(
     return ScopedEvidenceValidation(expected_status, expected_reasons)
 
 
+def build_directed_valley_sewing_evidence(
+    **raw_inputs: object,
+) -> ScopedRepresentationEvidence:
+    """Recompute one source-HSP to target-HSP unitary sewing scope."""
+    reasons: list[str] = []
+    source_basis = raw_inputs.get("source_basis_record")
+    lift_record = raw_inputs.get("lift_record")
+    lift_inputs = raw_inputs.get("lift_validation_inputs")
+    if not isinstance(source_basis, Mapping):
+        reasons.append("source_basis_certificate_malformed")
+        source_basis = {}
+    if validate_spinor_source_basis_record(source_basis).status != "passed":
+        reasons.append("source_basis_certificate_not_passed")
+    payload_identity = raw_inputs.get("extracted_wavefunction_payload_identity")
+    if (
+        not valid_sha256_identity(payload_identity)
+        or payload_identity
+        != source_basis.get("extracted_wavefunction_payload_identity")
+    ):
+        reasons.append("extracted_payload_identity_mismatch")
+
+    operation_rows = raw_inputs.get("detected_operations")
+    operations = {
+        row.get("operation_id"): row
+        for row in operation_rows
+        if isinstance(row, Mapping)
+        and isinstance(row.get("operation_id"), int)
+        and not isinstance(row.get("operation_id"), bool)
+    } if isinstance(operation_rows, Sequence) else {}
+    sewing_id = raw_inputs.get("sewing_operation_id")
+    source_ids = _opaque_operation_ids(
+        raw_inputs.get("source_little_group_operation_ids", ()), reasons
+    )
+    target_ids = _opaque_operation_ids(
+        raw_inputs.get("target_little_group_operation_ids", ()), reasons
+    )
+    required_ids = list(dict.fromkeys([*source_ids, *target_ids, sewing_id]))
+    if (
+        not isinstance(lift_record, Mapping)
+        or not isinstance(lift_inputs, Mapping)
+        or not isinstance(sewing_id, int)
+        or isinstance(sewing_id, bool)
+        or sewing_id not in operations
+    ):
+        reasons.append("directed_sewing_lift_context_malformed")
+    else:
+        lift_validation = _validate_lift(
+            lift_record=lift_record,
+            source_basis_record=source_basis,
+            lift_validation_inputs=lift_inputs,
+            required_operation_ids=required_ids,
+        )
+        if lift_validation.status != "passed":
+            reasons.extend(
+                ["double_space_group_lift_not_passed", *lift_validation.reason_codes]
+            )
+
+    source_k = np.asarray(
+        _kpoint_record(raw_inputs.get("source_k_frac"), reasons), dtype=float
+    )
+    target_k = np.asarray(
+        _kpoint_record(raw_inputs.get("target_k_frac"), reasons), dtype=float
+    )
+    source_valley = raw_inputs.get("source_valley")
+    target_valley = raw_inputs.get("target_valley")
+    orbit = _unique_strings(
+        raw_inputs.get("valley_orbit", ()), "valley_orbit_malformed", reasons
+    )
+    sewing = operations.get(sewing_id, {})
+    mapping = sewing.get("sector_mapping") if isinstance(sewing, Mapping) else None
+    derived_orbit, current = [], source_valley
+    while (
+        isinstance(mapping, Mapping)
+        and isinstance(current, str)
+        and current not in derived_orbit
+        and len(derived_orbit) <= len(mapping)
+    ):
+        derived_orbit.append(current)
+        current = mapping.get(current)
+    if (
+        not isinstance(source_valley, str)
+        or not isinstance(target_valley, str)
+        or source_valley not in orbit
+        or target_valley not in orbit
+        or not isinstance(mapping, Mapping)
+        or mapping.get(source_valley) != target_valley
+        or len(set(mapping.values())) != len(mapping)
+        or current != source_valley
+        or set(derived_orbit) != set(orbit)
+    ):
+        reasons.append("directed_valley_mapping_failed")
+    reciprocal_shift = _directed_hsp_shift(sewing, source_k, target_k)
+    if reciprocal_shift is None:
+        reasons.append("directed_hsp_mapping_failed")
+    for side, ids, kpoint, valley in (
+        ("source", source_ids, source_k, source_valley),
+        ("target", target_ids, target_k, target_valley),
+    ):
+        if any(
+            not _operation_preserves(
+                operations.get(operation_id, {}), kpoint, valley
+            )
+            for operation_id in ids
+        ):
+            reasons.append(f"{side}_little_group_scope_failed")
+
+    source_coefficients = np.asarray(
+        raw_inputs.get("source_coefficients"), dtype=np.complex128
+    )
+    target_coefficients = np.asarray(
+        raw_inputs.get("target_coefficients"), dtype=np.complex128
+    )
+    wavecar_rtag = raw_inputs.get("wavecar_rtag")
+    source_frame = build_target_frame(source_coefficients, wavecar_rtag=wavecar_rtag)
+    target_frame = build_target_frame(target_coefficients, wavecar_rtag=wavecar_rtag)
+    reasons.extend(source_frame.reason_codes)
+    reasons.extend(target_frame.reason_codes)
+    source_q = np.asarray(raw_inputs.get("source_q_cart"), dtype=float)
+    target_q = np.asarray(raw_inputs.get("target_q_cart"), dtype=float)
+    try:
+        sewing_spin = spin_lift_from_orthogonal(sewing["rotation_cart"])
+        cross = build_plane_wave_representation(
+            source_coefficients,
+            source_q,
+            sewing["rotation_cart"],
+            sewing["translation_cart"],
+            spin_rotation=sewing_spin,
+            target_coefficients=target_coefficients,
+            target_q_cart=target_q,
+        )
+    except (KeyError, TypeError, ValueError):
+        sewing_spin = None
+        cross = None
+        reasons.append("directed_plane_wave_action_failed")
+    permutation_status = "blocked"
+    if cross is not None:
+        permutation = validate_reciprocal_grid_permutation(
+            cross.mapping, dimension=len(target_q)
+        )
+        permutation_status = permutation.status
+        if permutation.status != "passed":
+            reasons.extend(permutation.reason_codes)
+        if cross.relative_norm_preservation_residual > DEFAULT_PLANE_WAVE_NORM_TOLERANCE:
+            reasons.append("plane_wave_mapping_failed")
+        if cross.relative_target_subspace_residual > DEFAULT_TARGET_SUBSPACE_TOLERANCE:
+            reasons.append("target_subspace_closure_failed")
+
+    source_projector = np.asarray(
+        raw_inputs.get("source_projector"), dtype=np.complex128
+    )
+    target_projector = np.asarray(
+        raw_inputs.get("target_projector"), dtype=np.complex128
+    )
+    full_sewing = (
+        cross.matrix if cross is not None else np.empty((0, 0), dtype=np.complex128)
+    )
+    source_valley_basis = np.asarray(
+        raw_inputs.get("source_valley_basis"), dtype=np.complex128
+    )
+    target_valley_basis = np.asarray(
+        raw_inputs.get("target_valley_basis"), dtype=np.complex128
+    )
+    rank = (
+        source_valley_basis.shape[1]
+        if source_valley_basis.ndim == 2 else 0
+    )
+    shape_ok = (
+        rank > 0
+        and full_sewing.shape[0] == full_sewing.shape[1]
+        and source_projector.shape == full_sewing.shape
+        and target_projector.shape == full_sewing.shape
+        and source_valley_basis.shape == (full_sewing.shape[0], rank)
+        and target_valley_basis.shape == (full_sewing.shape[0], rank)
+    )
+    if shape_ok:
+        sewing_matrix = (
+            target_valley_basis.conj().T
+            @ full_sewing @ source_valley_basis
+        )
+        normalization = float(np.sqrt(rank))
+        unitarity = float(
+            np.linalg.norm(sewing_matrix.conj().T @ sewing_matrix - np.eye(rank))
+            / normalization
+        )
+        covariance = float(
+            np.linalg.norm(
+                full_sewing @ source_projector @ full_sewing.conj().T
+                - target_projector
+            ) / normalization
+        )
+        source_block = full_sewing @ source_valley_basis
+        target_range = (
+            target_valley_basis @ target_valley_basis.conj().T
+        )
+        block = float(
+            np.linalg.norm(source_block - target_range @ source_block)
+            / max(np.linalg.norm(source_block), np.finfo(float).tiny)
+        )
+        basis_residual = max(
+            _valley_basis_residual(source_projector, source_valley_basis),
+            _valley_basis_residual(target_projector, target_valley_basis),
+            float(
+                np.linalg.norm(
+                    target_valley_basis
+                    - full_sewing @ source_valley_basis
+                ) / normalization
+            ),
+        )
+    else:
+        sewing_matrix = np.empty((0, 0), dtype=np.complex128)
+        unitarity = covariance = block = float("inf")
+        basis_residual = float("inf")
+        reasons.append("directed_sewing_matrix_shape_mismatch")
+    if basis_residual > DEFAULT_TARGET_SUBSPACE_TOLERANCE:
+        reasons.append("valley_basis_range_failed")
+    if unitarity > DEFAULT_TARGET_SUBSPACE_TOLERANCE:
+        reasons.append("valley_sewing_unitarity_failed")
+    if covariance > DEFAULT_PROJECTOR_COVARIANCE_TOLERANCE:
+        reasons.append("projector_covariance_failed")
+    if block > DEFAULT_VALLEY_BLOCK_TOLERANCE:
+        reasons.append("valley_block_failed")
+
+    conjugation_rows = []
+    for source_id in source_ids:
+        row = _directed_conjugation_row(
+            source_id=source_id,
+            target_ids=target_ids,
+            sewing=sewing,
+            operations=operations,
+            source_k=source_k,
+            target_k=target_k,
+            source_q=source_q,
+            target_q=target_q,
+            source_coefficients=source_coefficients,
+            target_coefficients=target_coefficients,
+            sewing_matrix=sewing_matrix,
+            source_valley_basis=source_valley_basis,
+            target_valley_basis=target_valley_basis,
+            sewing_map=cross.mapping if cross is not None else np.empty(0, dtype=int),
+        )
+        conjugation_rows.append(row)
+        if not row.get("passed"):
+            reasons.extend(row.get("reason_codes", []))
+    if {row.get("target_operation_id") for row in conjugation_rows} != set(target_ids):
+        reasons.append("little_group_conjugation_not_bijective")
+
+    content = {
+        "schema_version": SCOPED_REPRESENTATION_EVIDENCE_SCHEMA_VERSION,
+        "source_basis_certificate_identity": source_basis.get("certificate_identity"),
+        "double_space_group_lift_certificate_identity": (
+            lift_record.get("certificate_identity")
+            if isinstance(lift_record, Mapping) else None
+        ),
+        "extracted_wavefunction_payload_identity": payload_identity,
+        "scope": {
+            "scope_kind": "valley_sewing",
+            "source_kpoint_label": str(raw_inputs.get("source_kpoint_label", "")),
+            "target_kpoint_label": str(raw_inputs.get("target_kpoint_label", "")),
+            "source_k_frac": source_k.tolist(),
+            "target_k_frac": target_k.tolist(),
+            "source_valley": source_valley,
+            "target_valley": target_valley,
+            "valley_orbit": orbit,
+            "sewing_operation_id": sewing_id,
+            "source_little_group_operation_ids": source_ids,
+            "target_little_group_operation_ids": target_ids,
+            "reciprocal_lattice_shift": reciprocal_shift,
+        },
+        "source_target_frames": {
+            "source": deepcopy(source_frame.record),
+            "target": deepcopy(target_frame.record),
+            "target_basis_kind": str(
+                raw_inputs.get("target_basis_kind", "canonical_unitary_transport")
+            ),
+            "independent_target_numerical_evidence": bool(
+                raw_inputs.get("independent_target_numerical_evidence", False)
+            ),
+        },
+        "reciprocal_grid": {
+            "source_identity": reciprocal_grid_identity(source_q),
+            "target_identity": reciprocal_grid_identity(target_q),
+            "source_to_target_map": (
+                cross.mapping.tolist() if cross is not None else []
+            ),
+            "permutation_status": permutation_status,
+            "relative_norm_residual": (
+                cross.relative_norm_preservation_residual
+                if cross is not None else None
+            ),
+            "relative_target_subspace_residual": (
+                cross.relative_target_subspace_residual
+                if cross is not None else None
+            ),
+        },
+        "valley_sewing_matrix": {
+            "matrix": _complex_matrix(sewing_matrix),
+            "spin_rotation": _complex_matrix(sewing_spin),
+            "rank_normalized_unitarity_residual": unitarity,
+            "valley_basis_range_residual": basis_residual,
+        },
+        "directed_group_law": {"rows": conjugation_rows},
+        "intertwining": {"rows": conjugation_rows},
+        "projector_covariance": {
+            "rank_normalized_residual": covariance,
+            "passed": covariance <= DEFAULT_PROJECTOR_COVARIANCE_TOLERANCE,
+        },
+        "valley_block_quality": {
+            "relative_residual": block,
+            "passed": block <= DEFAULT_VALLEY_BLOCK_TOLERANCE,
+        },
+        "grey_group_matching_allowed": False,
+    }
+    return ScopedRepresentationEvidence(content, tuple(_unique(reasons)))
+
+
+def validate_directed_valley_sewing_evidence_record(
+    record: Mapping[str, object], **raw_inputs: object
+) -> ScopedEvidenceValidation:
+    """Recompute a directed unitary sewing scope and require exact equality."""
+    try:
+        recomputed = build_directed_valley_sewing_evidence(**raw_inputs).to_record()
+    except (KeyError, TypeError, ValueError):
+        return ScopedEvidenceValidation("blocked", ("evidence_recomputation_failed",))
+    if dict(record) != recomputed:
+        return ScopedEvidenceValidation("blocked", ("recomputed_evidence_mismatch",))
+    return ScopedEvidenceValidation(
+        str(record.get("status")),
+        tuple(str(value) for value in record.get("reason_codes", [])),
+    )
+
+
 def validate_scoped_representation_evidence_link(
     record: Mapping[str, object],
     *,
@@ -415,6 +748,199 @@ def _validate_lift(
         expected_operations=lift_validation_inputs["expected_operations"],
         required_operation_ids=required_operation_ids,
     )
+
+
+def _directed_conjugation_row(
+    *,
+    source_id,
+    target_ids,
+    sewing,
+    operations,
+    source_k,
+    target_k,
+    source_q,
+    target_q,
+    source_coefficients,
+    target_coefficients,
+    sewing_matrix,
+    source_valley_basis,
+    target_valley_basis,
+    sewing_map,
+):
+    reasons: list[str] = []
+    target_id = None
+    lattice_translation = np.zeros(3, dtype=int)
+    try:
+        source = operations[source_id]
+        sewing_r = np.asarray(sewing["rotation_frac"], dtype=float)
+        sewing_t = np.asarray(sewing["translation_frac"], dtype=float)
+        inverse_r = np.linalg.inv(sewing_r)
+        inverse_t = -inverse_r @ sewing_t
+        rotation, translation = _compose_affine(
+            sewing_r,
+            sewing_t,
+            *_compose_affine(
+                np.asarray(source["rotation_frac"], dtype=float),
+                np.asarray(source["translation_frac"], dtype=float),
+                inverse_r,
+                inverse_t,
+            ),
+        )
+        matches = []
+        for candidate_id in target_ids:
+            candidate = operations[candidate_id]
+            delta = translation - np.asarray(
+                candidate["translation_frac"], dtype=float
+            )
+            lattice = np.rint(delta).astype(int)
+            if np.allclose(
+                rotation,
+                candidate["rotation_frac"],
+                atol=1.0e-8,
+                rtol=0.0,
+            ) and np.linalg.norm(delta - lattice) <= 1.0e-8:
+                matches.append((candidate_id, lattice))
+        if len(matches) != 1:
+            raise ValueError
+        target_id, lattice_translation = matches[0]
+        target = operations[target_id]
+        source_spin = spin_lift_from_orthogonal(source["rotation_cart"])
+        target_spin = spin_lift_from_orthogonal(target["rotation_cart"])
+        sewing_spin = spin_lift_from_orthogonal(sewing["rotation_cart"])
+        conjugated_spin = sewing_spin @ source_spin @ np.linalg.inv(sewing_spin)
+        if np.linalg.norm(conjugated_spin - target_spin) <= 1.0e-8:
+            spin_factor = 1
+        elif np.linalg.norm(conjugated_spin + target_spin) <= 1.0e-8:
+            spin_factor = -1
+        else:
+            raise ValueError
+        source_rep = build_plane_wave_representation(
+            source_coefficients,
+            source_q,
+            source["rotation_cart"],
+            source["translation_cart"],
+            spin_rotation=source_spin,
+        )
+        target_rep = build_plane_wave_representation(
+            target_coefficients,
+            target_q,
+            target["rotation_cart"],
+            target["translation_cart"],
+            spin_rotation=target_spin,
+        )
+        source_matrix = (
+            source_valley_basis.conj().T
+            @ source_rep.matrix @ source_valley_basis
+        )
+        target_matrix = (
+            target_valley_basis.conj().T
+            @ target_rep.matrix @ target_valley_basis
+        )
+        target_character = complex(np.trace(target_matrix))
+        source_permutation = validate_reciprocal_grid_permutation(
+            source_rep.mapping, dimension=len(source_q)
+        )
+        target_permutation = validate_reciprocal_grid_permutation(
+            target_rep.mapping, dimension=len(target_q)
+        )
+        left_map = target_rep.mapping[np.asarray(sewing_map, dtype=int)]
+        right_map = np.asarray(sewing_map, dtype=int)[source_rep.mapping]
+        map_composition_passed = bool(
+            source_permutation.status == "passed"
+            and target_permutation.status == "passed"
+            and np.array_equal(left_map, right_map)
+        )
+        if not map_composition_passed:
+            reasons.append("directed_plane_wave_composition_failed")
+        transformed_k = (
+            np.linalg.inv(
+                np.asarray(target["rotation_frac"], dtype=float)
+            ).T @ target_k
+        )
+        phase = np.exp(
+            -2.0j * np.pi * float(transformed_k @ lattice_translation)
+        )
+        factor = spin_factor * phase
+        rank = sewing_matrix.shape[1]
+        residual = float(
+            np.linalg.norm(
+                target_matrix @ sewing_matrix
+                - factor * sewing_matrix @ source_matrix
+            ) / np.sqrt(rank)
+        )
+        if residual > DEFAULT_GROUP_LAW_TOLERANCE:
+            reasons.append("rank_normalized_intertwining_failed")
+    except (KeyError, TypeError, ValueError, IndexError, np.linalg.LinAlgError):
+        spin_factor = phase = residual = target_character = None
+        map_composition_passed = False
+        reasons.append("directed_little_group_conjugation_failed")
+    return {
+        "source_operation_id": source_id,
+        "target_operation_id": target_id,
+        "affine_lattice_translation": lattice_translation.tolist(),
+        "bloch_phase": (
+            [float(phase.real), float(phase.imag)] if phase is not None else None
+        ),
+        "double_group_cocycle_factor": spin_factor,
+        "source_to_target_map_composition_passed": map_composition_passed,
+        "rank_normalized_residual": residual,
+        "target_character": (
+            [float(target_character.real), float(target_character.imag)]
+            if target_character is not None else None
+        ),
+        "passed": not reasons,
+        "reason_codes": reasons,
+    }
+
+
+def _directed_hsp_shift(sewing, source_k, target_k):
+    try:
+        mapped = np.linalg.inv(
+            np.asarray(sewing["rotation_frac"], dtype=float)
+        ).T @ source_k
+        delta = mapped - target_k
+        shift = np.rint(delta).astype(int)
+    except (KeyError, TypeError, ValueError, np.linalg.LinAlgError):
+        return None
+    return shift.tolist() if np.linalg.norm(delta - shift) <= 1.0e-8 else None
+
+
+def _operation_preserves(operation, kpoint, valley):
+    mapping = operation.get("sector_mapping")
+    return bool(
+        isinstance(mapping, Mapping)
+        and mapping.get(valley) == valley
+        and _directed_hsp_shift(operation, kpoint, kpoint) is not None
+    )
+
+
+def _valley_basis_residual(projector, basis):
+    rank = basis.shape[1]
+    hermitian = 0.5 * (projector + projector.conj().T)
+    eigenvalues, eigenvectors = np.linalg.eigh(hermitian)
+    selected = eigenvalues > 0.5
+    if int(np.count_nonzero(selected)) != rank:
+        return float("inf")
+    spectral = eigenvectors[:, selected] @ eigenvectors[:, selected].conj().T
+    supplied = basis @ basis.conj().T
+    orthogonality = np.linalg.norm(basis.conj().T @ basis - np.eye(rank))
+    return float(max(
+        orthogonality, np.linalg.norm(spectral - supplied)
+    ) / np.sqrt(rank))
+
+
+def _compose_affine(left_r, left_t, right_r, right_t):
+    return left_r @ right_r, left_r @ right_t + left_t
+
+
+def _complex_matrix(value):
+    if value is None:
+        return None
+    array = np.asarray(value, dtype=np.complex128)
+    return [
+        [[float(item.real), float(item.imag)] for item in row]
+        for row in array
+    ]
 
 
 def _kpoint_record(value: np.ndarray, reasons: list[str]) -> list[float]:

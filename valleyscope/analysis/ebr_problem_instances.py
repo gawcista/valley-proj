@@ -13,11 +13,15 @@ compatibility relations, or new physics.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from copy import deepcopy
 
 import numpy as np
 
 from valleyscope.analysis.tr_irrep_completion import (
     validate_tr_irrep_completion_certificate,
+)
+from valleyscope.analysis.unitary_valley_sewing_completion import (
+    validate_unitary_valley_sewing_certificate,
 )
 from valleyscope.io.wavefunction_convention import valid_sha256_identity
 
@@ -27,6 +31,9 @@ def build_ebr_problem_instances(
     ebr_input_candidates: dict[str, object] | None,
     projected_hsp_coverage: dict[str, object] | None = None,
     time_reversal_orbit_report: dict[str, object] | None = None,
+    unitary_valley_sewing_validation_contexts: (
+        dict[str, object] | None
+    ) = None,
 ) -> dict[str, object]:
     """Build EBR problem instances from trusted input candidates.
 
@@ -95,22 +102,34 @@ def build_ebr_problem_instances(
 
         direct_provenance_blockers: list[str] = []
         spin_values = set()
-        cprime_identities_by_kpoint: dict[
-            str, set[tuple[str, str, str]]
+        cprime_identities_by_scope: dict[
+            tuple[str, str], set[tuple[str, str, str]]
         ] = {}
         for candidate in cands:
             candidate_source = candidate.get("source")
             candidate_workflow = candidate.get("workflow_path")
+            inferred_by_sewing = candidate.get("completion_kind") == (
+                "inferred_by_unitary_valley_sewing"
+            )
             source_provenance = candidate.get("irrep_source_provenance")
             if not isinstance(candidate_source, str) or not candidate_source:
                 direct_provenance_blockers.append(
                     "direct_candidate_source_provenance_missing"
                 )
             if candidate_workflow not in (
-                "direct_qcut", "symmetry_adapted",
+                "direct_qcut",
+                "symmetry_adapted",
+                "unitary_valley_sewing_completion",
             ):
                 direct_provenance_blockers.append(
                     "direct_candidate_projector_workflow_invalid"
+                )
+            if inferred_by_sewing and not _unitary_sewing_candidate_valid(
+                candidate,
+                unitary_valley_sewing_validation_contexts,
+            ):
+                direct_provenance_blockers.append(
+                    "unitary_valley_sewing_certificate_revalidation_failed"
                 )
             if not isinstance(source_provenance, dict):
                 direct_provenance_blockers.append(
@@ -129,48 +148,63 @@ def build_ebr_problem_instances(
                 )
             else:
                 spin_values.add(source_spinor)
-            cprime = source_provenance.get("cprime")
-            if not isinstance(cprime, dict):
+            cprime_rows = _candidate_cprime_rows(candidate)
+            if not cprime_rows:
                 direct_provenance_blockers.append(
                     "direct_candidate_cprime_provenance_missing"
                 )
                 continue
-            identity_values = (
-                cprime.get("spinor_source_basis_certificate_identity"),
-                cprime.get(
-                    "double_space_group_lift_certificate_identity"
-                ),
-                cprime.get(
-                    "scoped_representation_evidence_identity"
-                ),
-            )
-            if not all(valid_sha256_identity(value) for value in identity_values):
-                direct_provenance_blockers.append(
-                    "direct_candidate_cprime_identity_malformed"
+            for evidence_kpoint, evidence_valley, cprime in cprime_rows:
+                identity_values = tuple(
+                    cprime.get(key) for key in (
+                        "spinor_source_basis_certificate_identity",
+                        "double_space_group_lift_certificate_identity",
+                        "scoped_representation_evidence_identity",
+                    )
                 )
-            else:
-                cprime_identities_by_kpoint.setdefault(
-                    str(candidate.get("kpoint", "")), set()
-                ).add(
-                    tuple(str(value) for value in identity_values)
-                )
+                if not all(
+                    valid_sha256_identity(value) for value in identity_values
+                ):
+                    direct_provenance_blockers.append(
+                        "direct_candidate_cprime_identity_malformed"
+                    )
+                else:
+                    cprime_identities_by_scope.setdefault(
+                        (
+                            str(evidence_kpoint or ""),
+                            str(evidence_valley or ""),
+                        ),
+                        set(),
+                    ).add(tuple(str(value) for value in identity_values))
         if len(spin_values) != 1:
             direct_provenance_blockers.append(
                 "direct_candidate_spin_provenance_mismatch"
             )
         if any(
             len(values) != 1
-            for values in cprime_identities_by_kpoint.values()
+            for values in cprime_identities_by_scope.values()
         ):
             direct_provenance_blockers.append(
                 "direct_candidate_cprime_identity_mismatch"
             )
+        sewing_candidates = any(
+            candidate.get("completion_kind")
+            == "inferred_by_unitary_valley_sewing"
+            for candidate in cands
+        )
         cprime_identity_by_kpoint: dict[str, dict[str, object]] = {}
-        for kpoint, identities in cprime_identities_by_kpoint.items():
+        cprime_scope_metadata: dict[str, dict[str, str]] = {}
+        for (kpoint, evidence_valley), identities in sorted(
+            cprime_identities_by_scope.items()
+        ):
             if len(identities) != 1:
                 continue
+            key = (
+                f"scope_{len(cprime_scope_metadata) + 1:03d}"
+                if sewing_candidates else kpoint
+            )
             values = next(iter(identities))
-            cprime_identity_by_kpoint[kpoint] = {
+            cprime_identity_by_kpoint[key] = {
                 "spinor_source_basis_certificate_identity": (
                     values[0]
                 ),
@@ -179,6 +213,11 @@ def build_ebr_problem_instances(
                 ),
                 "scoped_representation_evidence_identity": values[2],
             }
+            if sewing_candidates:
+                cprime_scope_metadata[key] = {
+                    "sampled_kpoint": kpoint,
+                    "evidence_valley": evidence_valley,
+                }
 
         # --- Aggregate provenance ---
         workflow_paths = sorted({
@@ -195,11 +234,17 @@ def build_ebr_problem_instances(
         irreps_by_kpoint: dict[str, list[str]] = {}
         operations_by_kpoint: dict[str, list[object]] = {}
         irrep_records_by_kpoint: dict[str, list[dict[str, object]]] = {}
+        completion_records_by_hsp: dict[
+            str, list[dict[str, object]]
+        ] = {}
         for c in cands:
-            kp = str(c.get("kpoint", ""))
+            inferred_by_sewing = c.get("completion_kind") == (
+                "inferred_by_unitary_valley_sewing"
+            )
+            kp = "" if inferred_by_sewing else str(c.get("kpoint", ""))
             irrep = c.get("matched_irrep")
             op_id = c.get("operation_id")
-            if irrep:
+            if irrep and not inferred_by_sewing:
                 multiplicity = _positive_multiplicity(c.get("irrep_multiplicity"))
                 irreps_by_kpoint.setdefault(kp, []).extend(
                     [str(irrep)] * multiplicity
@@ -267,7 +312,45 @@ def build_ebr_problem_instances(
             ):
                 if key in c:
                     record[key] = c[key]
-            irrep_records_by_kpoint.setdefault(kp, []).append(record)
+            if inferred_by_sewing:
+                source_hsp = record["source_hsp_label"]
+                completion_records_by_hsp.setdefault(
+                    str(source_hsp), []
+                ).append({
+                    "completion_kind": (
+                        "inferred_by_unitary_valley_sewing"
+                    ),
+                    "target_valley": valley,
+                    "target_source_hsp_label": source_hsp,
+                    "irrep": c.get("matched_irrep"),
+                    "multiplicity": _positive_multiplicity(
+                        c.get("irrep_multiplicity")
+                    ),
+                    "evidence_sampled_kpoint": c.get(
+                        "evidence_sampled_kpoint"
+                    ),
+                    "evidence_valley": c.get("evidence_valley"),
+                    "evidence_source_hsp_label": c.get(
+                        "evidence_source_hsp_label"
+                    ),
+                    "evidence_irrep_vector": deepcopy(
+                        c.get("evidence_irrep_vector", [])
+                    ),
+                    "structural_status": "validated",
+                    "readiness_status": "trusted",
+                    "blockers": [],
+                    "unitary_valley_sewing_certificates": deepcopy(
+                        c.get("unitary_valley_sewing_certificates", [])
+                    ),
+                    "source_candidate_identity": record[
+                        "source_candidate_identity"
+                    ],
+                    "source_candidate_provenance": record[
+                        "source_candidate_provenance"
+                    ],
+                })
+            else:
+                irrep_records_by_kpoint.setdefault(kp, []).append(record)
 
         # --- HSP basis ---
         actual_hsps = sorted(irreps_by_kpoint.keys())
@@ -317,7 +400,47 @@ def build_ebr_problem_instances(
             )
             and len(set(mapped_expected)) == len(mapped_expected)
         )
-        if source_mapping_complete:
+        if completion_records_by_hsp:
+            source_by_sample = {
+                sampled: source_hsp
+                for source_hsp, sampled in source_to_sampled.items()
+            }
+            canonical_irreps: dict[str, list[str]] = {}
+            canonical_records: dict[str, list[dict[str, object]]] = {}
+            for sampled, labels in irreps_by_kpoint.items():
+                source_hsp = source_by_sample.get(sampled)
+                if isinstance(source_hsp, str):
+                    canonical_irreps.setdefault(source_hsp, []).extend(labels)
+                    canonical_records.setdefault(source_hsp, []).extend(
+                        irrep_records_by_kpoint.get(sampled, [])
+                    )
+            for source_hsp, records in completion_records_by_hsp.items():
+                for record in records:
+                    canonical_irreps.setdefault(source_hsp, []).extend(
+                        [str(record["irrep"])] * int(record["multiplicity"])
+                    )
+            irreps_by_kpoint = canonical_irreps
+            irrep_records_by_kpoint = canonical_records
+            actual_hsps = sorted(canonical_irreps)
+            expected_hsps = list(required_source_hsps)
+            completed_hsps = set(completion_records_by_hsp)
+            canonical_hsp_vector_complete = (
+                bool(required_source_hsps)
+                and set(actual_hsps) == set(required_source_hsps)
+                and set(missing_source_hsps) == completed_hsps
+            )
+            canonical_hsp_vector_ready = (
+                canonical_hsp_vector_complete
+                and not direct_provenance_blockers
+            )
+            coverage_complete = canonical_hsp_vector_complete
+            coverage_ready = canonical_hsp_vector_ready
+            source_mapping_complete = True
+            covered_source_hsps = list(required_source_hsps)
+            trusted_source_hsps = list(required_source_hsps)
+            missing_source_hsps = []
+            trusted_missing_source_hsps = []
+        if source_mapping_complete and not completion_records_by_hsp:
             source_by_sample = {
                 sampled: source_hsp
                 for source_hsp, sampled in source_to_sampled.items()
@@ -331,22 +454,28 @@ def build_ebr_problem_instances(
                 direct_provenance_blockers.append(
                     "direct_candidate_source_hsp_binding_mismatch"
                 )
-        if coverage_present and coverage_complete and source_mapping_complete:
+        if (
+            coverage_present
+            and coverage_complete
+            and source_mapping_complete
+            and not completion_records_by_hsp
+        ):
             expected_hsps = [str(label) for label in mapped_expected]
 
         has_hsps = bool(actual_hsps)
-        canonical_hsp_vector_complete = (
-            has_hsps
-            and coverage_present
-            and coverage_complete
-            and source_mapping_complete
-            and actual_hsps == sorted(expected_hsps)
-        )
-        canonical_hsp_vector_ready = (
-            canonical_hsp_vector_complete and coverage_ready
-            and not trusted_missing_source_hsps
-            and not direct_provenance_blockers
-        )
+        if not completion_records_by_hsp:
+            canonical_hsp_vector_complete = (
+                has_hsps
+                and coverage_present
+                and coverage_complete
+                and source_mapping_complete
+                and actual_hsps == sorted(expected_hsps)
+            )
+            canonical_hsp_vector_ready = (
+                canonical_hsp_vector_complete and coverage_ready
+                and not trusted_missing_source_hsps
+                and not direct_provenance_blockers
+            )
         status = _canonical_vector_status(
             complete=canonical_hsp_vector_complete,
             ready=canonical_hsp_vector_ready,
@@ -389,12 +518,27 @@ def build_ebr_problem_instances(
             "spinor": next(iter(spin_values), None),
             "certificate_identity": cert_identity,
             "cprime_identity_by_kpoint": cprime_identity_by_kpoint,
-            "workflow_path": workflow_path,
+            "cprime_scope_metadata": cprime_scope_metadata,
+            "workflow_path": (
+                "unitary_valley_sewing_completion"
+                if completion_records_by_hsp else workflow_path
+            ),
             "workflow_paths": workflow_paths,
-            "unitary_vector_construction": {
-                "kind": "direct_observed_unitary_rows",
-                "source": "trusted_ebr_input_candidates",
-            },
+            "unitary_vector_construction": (
+                {
+                    "kind": (
+                        "unitary_valley_sewing_completed_unitary_rows"
+                    ),
+                    "source": (
+                        "validated_unitary_valley_sewing_certificates"
+                    ),
+                }
+                if completion_records_by_hsp
+                else {
+                    "kind": "direct_observed_unitary_rows",
+                    "source": "trusted_ebr_input_candidates",
+                }
+            ),
             "readiness_level": readiness_level,
             "readiness_evidence": readiness_levels,
             "irreps_by_kpoint": {k: v for k, v in sorted(irreps_by_kpoint.items())},
@@ -405,6 +549,12 @@ def build_ebr_problem_instances(
             "irrep_records_by_kpoint": {
                 k: sorted(v, key=lambda r: (_sort_key(r.get("operation_id"))))
                 for k, v in sorted(irrep_records_by_kpoint.items())
+            },
+            "unitary_irrep_completion_records_by_hsp": {
+                key: value
+                for key, value in sorted(
+                    completion_records_by_hsp.items()
+                )
             },
             "candidate_count": len(cands),
             "status": status,
@@ -453,6 +603,48 @@ def _coverage_for_valley(
         return {}
     row = by_valley.get(valley, {})
     return dict(row) if isinstance(row, dict) else {}
+
+
+def _unitary_sewing_candidate_valid(
+    candidate: dict[str, object],
+    contexts: dict[str, object] | None,
+) -> bool:
+    certificates = candidate.get("unitary_valley_sewing_certificates")
+    if not isinstance(certificates, list) or not certificates:
+        return False
+    for certificate in certificates:
+        if not isinstance(certificate, dict):
+            return False
+        identity = certificate.get("certificate_identity")
+        context = contexts.get(identity) if isinstance(contexts, dict) else None
+        if (
+            not isinstance(context, dict)
+            or context.get("certificate") != certificate
+            or not isinstance(context.get("raw_inputs"), dict)
+            or validate_unitary_valley_sewing_certificate(
+                certificate, **context["raw_inputs"]
+            ).status != "passed"
+        ):
+            return False
+    return True
+
+
+def _candidate_cprime_rows(candidate):
+    if candidate.get("completion_kind") != "inferred_by_unitary_valley_sewing":
+        provenance = candidate.get("irrep_source_provenance")
+        cprime = provenance.get("cprime") if isinstance(provenance, dict) else None
+        return [(
+            candidate.get("kpoint"), candidate.get("valley"), cprime
+        )] if isinstance(cprime, dict) else []
+    rows = []
+    for certificate in candidate.get("unitary_valley_sewing_certificates", []):
+        source = certificate.get("source") if isinstance(certificate, dict) else None
+        cprime = source.get("cprime") if isinstance(source, dict) else None
+        if isinstance(cprime, dict):
+            rows.append((
+                source.get("sampled_kpoint"), source.get("valley"), cprime
+            ))
+    return rows
 
 
 def _build_time_reversal_problem_instances(

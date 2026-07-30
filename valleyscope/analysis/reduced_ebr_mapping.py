@@ -30,6 +30,8 @@ from valleyscope.analysis.promotion_identity import (
 )
 from valleyscope.analysis.unitary_provenance import (
     unitary_bundle_claims_time_reversal_completion,
+    unitary_bundle_claims_valley_sewing_completion,
+    validate_unitary_bundle_provenance,
     validate_direct_unitary_bundle,
     validate_tr_completed_unitary_bundle,
 )
@@ -232,6 +234,7 @@ def promote_bundle_for_solve(
         table_spinful=table_spinful,
         blockers=blockers,
         report=report,
+        validation_contexts=cprime_validation_context,
     )
 
     # ---- A2. Independent table standard-setting evidence (spglib) ----
@@ -508,6 +511,7 @@ def _validate_problem_kind_compatibility(
     table_spinful: object,
     blockers: list[dict[str, str]],
     report: dict[str, object],
+    validation_contexts: dict[str, object] | None,
 ) -> None:
     """Keep unitary and type-II grey reduced problems physically distinct."""
     unitary_kind = "unitary_valley_reduced_ebr"
@@ -552,8 +556,27 @@ def _validate_problem_kind_compatibility(
             ))
             report["problem_kind_check"] = "failed"
             report["completion_provenance_check"] = "failed"
+        elif unitary_bundle_claims_valley_sewing_completion(
+            bundle
+        ) and (
+            not validation_contexts
+            or not validate_unitary_bundle_provenance(
+                bundle,
+                unitary_valley_sewing_validation_contexts=(
+                    validation_contexts
+                ),
+            )
+        ):
+            blockers.append(_blocker(
+                "unitary_sewing_completion_provenance_invalid",
+                "unitary valley-sewing completion lacks recomputable "
+                "row-level producer evidence",
+            ))
+            report["problem_kind_check"] = "failed"
+            report["completion_provenance_check"] = "failed"
         elif (
             not unitary_bundle_claims_time_reversal_completion(bundle)
+            and not unitary_bundle_claims_valley_sewing_completion(bundle)
             and not validate_direct_unitary_bundle(bundle)
         ):
             blockers.append(_blocker(
@@ -1640,24 +1663,70 @@ def _validate_cprime_bundle_identity(
         and construction.get("kind")
         == "time_reversal_completed_unitary_rows"
     )
+    sewing_completed = (
+        isinstance(construction, dict)
+        and construction.get("kind")
+        == "unitary_valley_sewing_completed_unitary_rows"
+    )
     joint_problem = (
         bundle.get("problem_kind") == "valley_orbit_reduced_ebr"
     )
     records_by_kpoint = bundle.get(
         "unitary_irrep_completion_records_by_hsp"
-        if tr_completed
+        if tr_completed or sewing_completed
         else "irrep_records_by_kpoint"
     )
+    cprime_scope_metadata = bundle.get("cprime_scope_metadata")
+    if sewing_completed and isinstance(records_by_kpoint, dict):
+        all_records = [
+            record
+            for inventory in (
+                bundle.get("unitary_irrep_completion_records_by_hsp", {}),
+                bundle.get("irrep_records_by_kpoint", {}),
+            )
+            if isinstance(inventory, dict)
+            for records in inventory.values()
+            if isinstance(records, list)
+            for record in records
+            if isinstance(record, dict)
+        ]
+        records_by_kpoint = {
+            scope_key: [
+                record for record in all_records
+                if _sewing_source_for_scope(
+                    record,
+                    cprime_scope_metadata.get(scope_key)
+                    if isinstance(cprime_scope_metadata, dict)
+                    else None,
+                ) is not None
+            ]
+            for scope_key in by_kpoint
+        } if isinstance(by_kpoint, dict) else {}
     ok = True
     if (
         not isinstance(by_kpoint, dict)
         or not isinstance(irreps_by_kpoint, dict)
-        or set(by_kpoint) != set(irreps_by_kpoint)
+        or (
+            not sewing_completed
+            and set(by_kpoint) != set(irreps_by_kpoint)
+        )
+        or (
+            sewing_completed
+            and (
+                not isinstance(cprime_scope_metadata, dict)
+                or set(cprime_scope_metadata) != set(by_kpoint)
+            )
+        )
         or (
             not joint_problem
             and (
                 not isinstance(records_by_kpoint, dict)
-                or set(records_by_kpoint) != set(irreps_by_kpoint)
+                or set(records_by_kpoint)
+                != (
+                    set(by_kpoint)
+                    if sewing_completed
+                    else set(irreps_by_kpoint)
+                )
             )
         )
     ):
@@ -1824,6 +1893,32 @@ def _validate_cprime_bundle_identity(
                     record.get("completion_kind")
                     == "observed_at_sampled_kpoint"
                 )
+            elif sewing_completed and isinstance(record, dict):
+                source = _sewing_source_for_scope(
+                    record, cprime_scope_metadata.get(kpoint)
+                )
+                cprime = (
+                    {
+                        key: source["cprime"].get(key)
+                        for key in expected_keys
+                    }
+                    if isinstance(source, dict)
+                    and isinstance(source.get("cprime"), dict)
+                    else None
+                )
+                certificate_valid = (
+                    (
+                        record.get("completion_kind")
+                        == "inferred_by_unitary_valley_sewing"
+                    )
+                    if record.get("completion_kind")
+                    else (
+                        record.get("workflow_path") in (
+                            "direct_qcut", "symmetry_adapted"
+                        )
+                        and record.get("readiness_level") == "trusted"
+                    )
+                )
             else:
                 provenance = (
                     record.get("irrep_source_provenance")
@@ -1846,6 +1941,37 @@ def _validate_cprime_bundle_identity(
                 ok = False
                 break
     report["cprime_identity_check"] = "passed" if ok else "failed"
+
+
+def _sewing_source_for_scope(record, scope):
+    if not isinstance(scope, dict):
+        return None
+    for certificate in record.get(
+        "unitary_valley_sewing_certificates", []
+    ):
+        source = (
+            certificate.get("source")
+            if isinstance(certificate, dict) else None
+        )
+        if (
+            isinstance(source, dict)
+            and source.get("sampled_kpoint")
+            == scope.get("sampled_kpoint")
+            and source.get("valley") == scope.get("evidence_valley")
+        ):
+            return source
+    provenance = record.get("irrep_source_provenance")
+    cprime = (
+        provenance.get("cprime")
+        if isinstance(provenance, dict) else None
+    )
+    if (
+        record.get("sampled_kpoint") == scope.get("sampled_kpoint")
+        and record.get("valley") == scope.get("evidence_valley")
+        and isinstance(cprime, dict)
+    ):
+        return {"cprime": cprime}
+    return None
 
 
 def _tr_irrep_completion_maps(

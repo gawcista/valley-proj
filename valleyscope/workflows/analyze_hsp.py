@@ -11,12 +11,12 @@ from valleyscope.analysis.projector_symmetry import (
 from valleyscope.analysis.hsp_star import build_hsp_star_report
 from valleyscope.analysis.hsp_star_conjugation import (
     build_hsp_star_conjugation_report,
-    compute_target_kpoint_key,
 )
 from valleyscope.analysis.subspace_representation_quality import (
     build_subspace_representation_quality_report,
 )
 from valleyscope.analysis.scoped_representation_evidence import (
+    build_directed_valley_sewing_evidence,
     build_scoped_representation_evidence,
 )
 from valleyscope.analysis.target_frame import build_target_frame
@@ -34,6 +34,9 @@ from valleyscope.analysis.ebr_problem_instances import (
 )
 from valleyscope.analysis.ebr_export_bundle import (
     build_ebr_export_bundle,
+)
+from valleyscope.analysis.unitary_valley_sewing_completion import (
+    build_unitary_valley_sewing_completion_report,
 )
 from valleyscope.analysis.projected_hsp_coverage import (
     build_projected_hsp_coverage_report,
@@ -54,6 +57,7 @@ from valleyscope.analysis.tr_irrep_completion import (
 from valleyscope.irreps.tables import (
     build_spinful_source_table_evidence,
     load_standard_irrep_table,
+    match_table_operations,
 )
 from valleyscope.irreps.ebr_data_adapter import load_ebr_source_data
 from valleyscope.irreps.time_reversal_ebr import (
@@ -75,7 +79,6 @@ from valleyscope.analysis.reduced_ebr_mapping import (
 )
 from valleyscope.analysis.hsp_star_derived_characters import (
     build_hsp_star_derived_characters,
-    collect_derived_characters_by_target,
 )
 from valleyscope.analysis.target_subspace_closure import (
     build_target_subspace_closure_report,
@@ -136,9 +139,14 @@ from valleyscope.subspace.valley_basis import (
     diagnose_valley_separability,
     summarize_valley_projector_quality,
 )
+from valleyscope.symmetry.plane_wave_action import (
+    apply_plane_wave_action,
+    build_plane_wave_representation,
+)
 from valleyscope.symmetry.operation_classifier import classify_operation
 from valleyscope.symmetry.double_space_group_lift import (
     build_double_space_group_lift_certificate,
+    spin_lift_from_orthogonal,
 )
 from valleyscope.symmetry.spglib_finder import find_symmetry_operations
 from valleyscope.symmetry.valley_preservation import map_valley_sectors
@@ -289,6 +297,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     source_coefficients_by_kpoint: dict[str, np.ndarray] = {}
     target_frame_records_by_kpoint: dict[str, dict[str, object]] = {}
     g_vectors_frac_by_kpoint: dict[str, np.ndarray] = {}
+    q_cart_by_kpoint: dict[str, np.ndarray] = {}
     band_indices_by_kpoint: dict[str, np.ndarray] = {}
     valley_matrices_by_kpoint: dict[str, dict[str, np.ndarray]] = {}
     kpoint_frac_by_name: dict[str, np.ndarray] = {}
@@ -319,6 +328,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         )
         kpoint_frac_by_name[kpoint_name] = np.asarray(kpoint.frac, dtype=float)
         q_cart = kpoint.cart.reshape(1, 3) + kpoint.g_vectors_cart
+        q_cart_by_kpoint[kpoint_name] = np.asarray(q_cart, dtype=float)
         # --- Reporting projectors (may use k-dependent centers) ---
         reporting_centers = config.valley_centers
         if config.projection.projector_mode == "k_resolved_parent_valley":
@@ -573,14 +583,6 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 valley_names=valley_names,
             )
         )
-        # Apply derived character gate as post-processing
-        if hsp_star_derived_characters is not None:
-            _apply_derived_characters_to_report(
-                symmetry_adapted_valley_report=symmetry_adapted_valley_report,
-                hsp_star_derived_characters=hsp_star_derived_characters,
-                kpoint_frac_by_name=symmetry_payload.get("kpoint_frac_by_name", {}),
-                operations=symmetry_payload.get("detected_operations", []),
-            )
 
     sector_names = list(projectors_by_kpoint[next(iter(projectors_by_kpoint))].sector_masks)
     symmetry_eigenvalue_summary = _build_symmetry_eigenvalue_summary(symmetry_payload, symmetry_rows)
@@ -1202,6 +1204,53 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         irrep_workflow_decisions=irrep_workflow_decisions,
         valley_irrep_matching=valley_irrep_matching,
     )
+    observed_ebr_input_candidates = {
+        **ebr_input_candidates,
+        "candidates": list(ebr_input_candidates.get("candidates", [])),
+    }
+    unitary_sewing_completion = (
+        build_unitary_valley_sewing_completion_report(
+            attempts=_build_unitary_valley_sewing_attempts(
+                ebr_input_candidates=ebr_input_candidates,
+                projected_hsp_coverage=projected_hsp_coverage,
+                source_hsp_basis_by_valley=source_hsp_basis_by_valley,
+                symmetry_payload=symmetry_payload,
+                kpoint_frac_by_name=kpoint_frac_by_name,
+                q_cart_by_kpoint=q_cart_by_kpoint,
+                coefficients_by_kpoint=coefficients_by_kpoint,
+                seed_projectors_by_kpoint=valley_matrices_by_kpoint,
+                symmetry_adapted_projectors_by_kpoint=(
+                    symmetry_adapted_projectors_by_kpoint
+                ),
+                workflow_decisions=irrep_workflow_decisions,
+                source_tables=source_table_by_valley,
+                source_certificates=source_certificate_by_valley,
+                cprime_validation_context=cprime_validation_context,
+                source_basis_record=source_basis_record,
+                wavecar_rtag=wavefunctions.metadata.wavecar_rtag,
+            )
+        )
+    )
+    unitary_sewing_validation_contexts = unitary_sewing_completion.pop(
+        "_validation_contexts", {}
+    )
+    cprime_validation_context.update(unitary_sewing_validation_contexts)
+    inferred_candidates = unitary_sewing_completion.get(
+        "inferred_candidates", []
+    )
+    if isinstance(inferred_candidates, list) and inferred_candidates:
+        ebr_input_candidates["candidates"].extend(inferred_candidates)
+        ebr_input_candidates["candidate_count"] = len(
+            ebr_input_candidates["candidates"]
+        )
+        ebr_input_candidates["status"] = "has_candidates"
+        _apply_unitary_sewing_completion_to_coverage(
+            projected_hsp_coverage,
+            inferred_candidates,
+        )
+    projected_hsp_coverage["unitary_valley_sewing_completion"] = (
+        unitary_sewing_completion
+    )
     valley_mapping_report = derive_time_reversal_valley_mapping(
         enabled=config.time_reversal.enabled,
         centers=config.valley_centers,
@@ -1331,7 +1380,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 valley_mapping_report=valley_mapping_report,
                 source_irrep_orbits_by_valley=source_orbits_by_valley,
                 grey_source_by_valley=grey_source_by_valley,
-                ebr_input_candidates=ebr_input_candidates,
+                ebr_input_candidates=observed_ebr_input_candidates,
                 antiunitary_sewing_report=antiunitary_sewing_report,
                 trusted_projector_provenance_by_kpoint=(
                     trusted_projector_provenance_by_kpoint
@@ -1351,12 +1400,18 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         ebr_input_candidates=ebr_input_candidates,
         projected_hsp_coverage=projected_hsp_coverage,
         time_reversal_orbit_report=None,
+        unitary_valley_sewing_validation_contexts=(
+            unitary_sewing_validation_contexts
+        ),
     )
     if time_reversal_orbit_report is not None:
         tr_ebr_problem_instances = build_ebr_problem_instances(
-            ebr_input_candidates=ebr_input_candidates,
+            ebr_input_candidates=observed_ebr_input_candidates,
             projected_hsp_coverage=projected_hsp_coverage,
             time_reversal_orbit_report=time_reversal_orbit_report,
+            unitary_valley_sewing_validation_contexts=(
+                unitary_sewing_validation_contexts
+            ),
         )
         ebr_problem_instances = _merge_ebr_problem_instance_reports(
             local_ebr_problem_instances,
@@ -2619,49 +2674,6 @@ def _build_valley_preserving_subspace_reports(
     return reports
 
 
-def _apply_derived_characters_to_report(
-    *,
-    symmetry_adapted_valley_report: dict[str, object],
-    hsp_star_derived_characters: dict[str, object],
-    kpoint_frac_by_name: dict[str, list[float]],
-    operations: list[dict[str, object]] | None = None,
-) -> None:
-    """Post-process: apply HSP-star derived characters to EBR readiness.
-
-    For each subspace, computes the target HSP-star key for each
-    full-space-group preserving operation, then checks whether a trusted
-    derived character exists for exactly (target_kpoint_key, valley, op).
-    """
-    by_kpoint = symmetry_adapted_valley_report.get("by_kpoint", {})
-    if not isinstance(by_kpoint, dict):
-        return
-    for kpoint_name, kpoint_data in by_kpoint.items():
-        if not isinstance(kpoint_data, dict):
-            continue
-        k_frac = kpoint_frac_by_name.get(kpoint_name)
-        for subspace in kpoint_data.get("valley_preserving_subspaces", []):
-            if not isinstance(subspace, dict):
-                continue
-            ebr_mapping = subspace.get("ebr_mapping_input")
-            if not isinstance(ebr_mapping, dict):
-                continue
-            valley = str(subspace.get("orbit", [""])[0] if subspace.get("orbit") else "")
-            subspace_sg = subspace.get("subspace_space_group", {})
-            if not isinstance(subspace_sg, dict):
-                subspace_sg = {}
-            full_preserving_ops = subspace_sg.get("valley_preserving_operation_ids", [])
-            _apply_hsp_star_derived_character_gate(
-                ebr_mapping=ebr_mapping,
-                valley=valley,
-                hsp_star_derived_characters=hsp_star_derived_characters,
-                full_preserving_ops=full_preserving_ops,
-                kpoint_name=kpoint_name,
-                k_frac=k_frac,
-                kpoint_frac_by_name=kpoint_frac_by_name,
-                operations=operations,
-            )
-
-
 def _build_hsp_star_derived_character_layer(
     *,
     symmetry_payload: dict[str, object],
@@ -2976,117 +2988,6 @@ def _build_subspace_space_group_for_valley(
         "source": source,
         "reason": reason,
     }
-
-
-def _apply_hsp_star_derived_character_gate(
-    *,
-    ebr_mapping: dict[str, object],
-    valley: str,
-    hsp_star_derived_characters: dict[str, object] | None,
-    full_preserving_ops: list[object] | None = None,
-    kpoint_name: str = "",
-    k_frac: list[float] | None = None,
-    kpoint_frac_by_name: dict[str, list[float]] | None = None,
-    operations: list[dict[str, object]] | None = None,
-) -> None:
-    """Apply HSP-star derived character status to EBR readiness.
-
-    For each non-identity full-space-group valley-preserving operation,
-    computes the target HSP-star key that this operation maps the current
-    kpoint to, then checks for an exact (target_key, valley, op_id) match
-    in the trusted derived character set.
-
-    Success is recorded in resolved_by and character_source, not blocked_by.
-    """
-    if hsp_star_derived_characters is None:
-        return
-    blockers: list[str] = list(ebr_mapping.get("blocked_by", []) or [])
-
-    relevant_blockers = {"hsp_local_preserving_character_missing",
-                         "hsp_star_derivation_not_available"}
-    if not any(b in blockers for b in relevant_blockers):
-        return
-
-    preserving_ops = list(full_preserving_ops or [])
-    kpfbn = dict(kpoint_frac_by_name or {})
-    ops = list(operations or [])
-    derived_by_target = collect_derived_characters_by_target(hsp_star_derived_characters)
-
-    # Build operation rotation lookup
-    op_rotation: dict[object, np.ndarray] = {}
-    for op in ops:
-        op_id = op.get("operation_id")
-        rot = op.get("rotation_frac")
-        if op_id is not None and rot is not None:
-            op_rotation[op_id] = np.asarray(rot, dtype=float)
-
-    # For each non-identity preserving op, compute the target HSP-star key
-    # and check for exact (target_key, valley, op_id) match.
-    has_exact_derived_match = False
-    matched_targets: list[str] = []
-    source_frac = np.asarray(k_frac, dtype=float) if k_frac is not None else None
-
-    for op_id in preserving_ops:
-        if op_id == 0 or op_id == "__identity__":
-            continue
-        # Compute target key: where does this op map the current kpoint?
-        if source_frac is not None and op_id in op_rotation:
-            target_key = compute_target_kpoint_key(
-                source_frac=source_frac,
-                operation_rotation=op_rotation[op_id],
-                kpoint_frac_by_name=kpfbn,
-            )
-        else:
-            # Fallback: check all targets (non-precise).
-            target_key = None
-
-        # Check exact match in derived characters
-        if target_key is not None:
-            kp_data = derived_by_target.get(target_key, {})
-            valley_data = kp_data.get(valley, {})
-            if op_id in valley_data:
-                has_exact_derived_match = True
-                matched_targets.append(f"{target_key}:{valley}:{op_id}")
-        else:
-            # Fallback: check any target (kept for backward compat when
-            # k_frac or operation info is unavailable).
-            for tk, kp_data in derived_by_target.items():
-                valley_data = kp_data.get(valley, {})
-                if op_id in valley_data:
-                    has_exact_derived_match = True
-                    matched_targets.append(f"{tk}:{valley}:{op_id}")
-                    break
-
-    resolved_by: list[str] = list(ebr_mapping.get("resolved_by", []) or [])
-
-    if has_exact_derived_match:
-        new_blockers = [b for b in blockers if b not in relevant_blockers]
-        ebr_mapping["blocked_by"] = new_blockers
-        ebr_mapping["character_source"] = "hsp_star_derived"
-        if "hsp_star_character_derived" not in resolved_by:
-            resolved_by.append("hsp_star_character_derived")
-        ebr_mapping["resolved_by"] = resolved_by
-        if matched_targets:
-            ebr_mapping["derived_character_targets"] = matched_targets
-        notes = str(ebr_mapping.get("notes", "") or "")
-        if "HSP-star derived character available" not in notes:
-            ebr_mapping["notes"] = notes + (
-                " HSP-star derived character available; "
-                "local character was sourced from symmetry conjugation."
-            )
-        if not new_blockers:
-            ebr_mapping["ready"] = True
-    else:
-        new_blockers = [
-            "hsp_star_derivation_not_available"
-            if b in relevant_blockers else b
-            for b in blockers
-        ]
-        deduped: list[str] = []
-        for b in new_blockers:
-            if b not in deduped:
-                deduped.append(b)
-        ebr_mapping["blocked_by"] = deduped
 
 
 def _apply_target_subspace_closure_gate(
@@ -3533,3 +3434,475 @@ def _warn_fixed_center_distance(
                     "This is a k/center mismatch, not necessarily non-parent-valley. "
                     "Consider k_resolved_parent_valley projector_mode."
                 )
+
+
+def _build_unitary_valley_sewing_attempts(
+    *,
+    ebr_input_candidates,
+    projected_hsp_coverage,
+    source_hsp_basis_by_valley,
+    symmetry_payload,
+    kpoint_frac_by_name,
+    q_cart_by_kpoint,
+    coefficients_by_kpoint,
+    seed_projectors_by_kpoint,
+    symmetry_adapted_projectors_by_kpoint,
+    workflow_decisions,
+    source_tables,
+    source_certificates,
+    cprime_validation_context,
+    source_basis_record,
+    wavecar_rtag,
+):
+    """Assemble directed attempts for genuinely missing source-HSP rows."""
+    candidates = ebr_input_candidates.get("candidates", [])
+    if not isinstance(candidates, list):
+        return []
+    operations = [
+        row for row in symmetry_payload.get("detected_operations", [])
+        if isinstance(row, dict)
+    ]
+    missing_targets = []
+    coverage_by_valley = projected_hsp_coverage.get("by_valley", {})
+    for target_valley, coverage in coverage_by_valley.items():
+        if (
+            not isinstance(coverage, dict)
+            or target_valley not in source_tables
+            or target_valley not in source_certificates
+            or target_valley not in source_hsp_basis_by_valley
+        ):
+            continue
+        for missing in coverage.get("missing_source_hsp_representatives", []):
+            if not isinstance(missing, dict):
+                continue
+            target_k = missing.get("inverse_parent_k_frac")
+            target_hsp = missing.get("source_hsp_label")
+            target_ids = _valley_preserving_little_group_ids(
+                operations, target_k, target_valley
+            )
+            classification = classify_projected_subspace_kpoint(
+                parent_k_frac=target_k,
+                table=source_tables[target_valley],
+                source_hsp_basis=source_hsp_basis_by_valley[target_valley],
+                standard_setting_certificate=source_certificates[target_valley],
+                override_source_hsp_label=target_hsp,
+                valley=target_valley,
+            )
+            payload = build_source_payload_for_projected_hsp_matching(
+                table=source_tables[target_valley],
+                projected_hsp_classification=classification,
+                detected_operations=operations,
+                valley_preserving_operation_ids=target_ids,
+                source_hsp_basis=source_hsp_basis_by_valley[target_valley],
+                standard_setting_certificate=source_certificates[target_valley],
+            )
+            if payload.get("operation_mapping_evaluated") is True:
+                classification = classify_projected_subspace_kpoint(
+                    parent_k_frac=target_k,
+                    table=source_tables[target_valley],
+                    source_hsp_basis=source_hsp_basis_by_valley[target_valley],
+                    standard_setting_certificate=source_certificates[target_valley],
+                    mapped_standard_little_group_operation_ids=list(
+                        payload.get("source_operation_map", {}).values()
+                    ),
+                    override_source_hsp_label=target_hsp,
+                    valley=target_valley,
+                )
+                payload = build_source_payload_for_projected_hsp_matching(
+                    table=source_tables[target_valley],
+                    projected_hsp_classification=classification,
+                    detected_operations=operations,
+                    valley_preserving_operation_ids=target_ids,
+                    source_hsp_basis=source_hsp_basis_by_valley[target_valley],
+                    standard_setting_certificate=source_certificates[
+                        target_valley
+                    ],
+                )
+            if (
+                payload.get("status") == "ok"
+                and classification.get("validation_status") == "validated"
+                and classification.get("representation_transport_status")
+                == "validated"
+                and classification.get("source_hsp_label") == target_hsp
+            ):
+                missing_targets.append({
+                    "valley": target_valley,
+                    "source_hsp_label": target_hsp,
+                    "k_frac": np.asarray(target_k, dtype=float),
+                    "operation_ids": target_ids,
+                    "source_operation_map": payload["source_operation_map"],
+                    "source_irrep_characters": payload[
+                        "source_irrep_characters"
+                    ],
+                    "source_payload_provenance": payload.get(
+                        "provenance", {}
+                    ),
+                    "source_payload_context": {
+                        "record": payload,
+                        "raw_inputs": {
+                            "table": source_tables[target_valley],
+                            "projected_hsp_classification": classification,
+                            "detected_operations": operations,
+                            "valley_preserving_operation_ids": target_ids,
+                            "source_hsp_basis": (
+                                source_hsp_basis_by_valley[target_valley]
+                            ),
+                            "standard_setting_certificate": (
+                                source_certificates[target_valley]
+                            ),
+                        },
+                    },
+                    "subspace_space_group": (
+                        source_hsp_basis_by_valley[target_valley].get(
+                            "projected_subspace_space_group", {}
+                        )
+                    ),
+                })
+    attempts = []
+    for source in candidates:
+        if (
+            not isinstance(source, dict)
+            or source.get("ready_for_ebr_input") is not True
+            or source.get("completion_kind")
+            == "inferred_by_unitary_valley_sewing"
+        ):
+            continue
+        source_kpoint = source.get("kpoint")
+        source_valley = source.get("valley")
+        if not isinstance(source_kpoint, str) or not isinstance(
+            source_valley, str
+        ):
+            continue
+        source_projector = _trusted_or_available_projector(
+            kpoint=source_kpoint,
+            valley=source_valley,
+            workflow_decisions=workflow_decisions,
+            seed_projectors=seed_projectors_by_kpoint,
+            symmetry_adapted_projectors=symmetry_adapted_projectors_by_kpoint,
+        )
+        source_ids = source.get("valley_preserving_operation_ids")
+        cprime = source.get("irrep_source_provenance", {}).get(
+            "cprime", {}
+        )
+        context = (
+            cprime_validation_context.get(
+                cprime.get("scoped_representation_evidence_identity")
+            )
+            if isinstance(cprime, dict) else None
+        )
+        if not all((
+            source_projector is not None,
+            isinstance(source_ids, list) and source_ids,
+            isinstance(context, dict),
+            source_valley in source_tables,
+            source_valley in source_certificates,
+        )):
+            continue
+        parent_lift_context = _build_parent_double_group_lift_context(
+            symmetry_payload=symmetry_payload,
+            source_cprime_context=context,
+        )
+        if parent_lift_context is None:
+            parent_lift_context = {"record": {}, "raw_inputs": {}}
+        for target in missing_targets:
+            target_valley = target["valley"]
+            for operation in operations:
+                mapping = operation.get("sector_mapping")
+                if (
+                    not isinstance(mapping, dict)
+                    or mapping.get(source_valley) != target_valley
+                    or not _unitary_operation_maps_kpoint(
+                        operation,
+                        kpoint_frac_by_name.get(source_kpoint),
+                        target["k_frac"],
+                    )
+                ):
+                    continue
+                rotation = np.asarray(
+                    operation.get("rotation_cart"), dtype=float
+                )
+                translation = np.asarray(
+                    operation.get("translation_cart"), dtype=float
+                )
+                source_q = np.asarray(
+                    q_cart_by_kpoint[source_kpoint], dtype=float
+                )
+                rotated_q = source_q @ rotation.T
+                order = np.lexsort(
+                    (rotated_q[:, 2], rotated_q[:, 1], rotated_q[:, 0])
+                )
+                target_q = rotated_q[order]
+                try:
+                    spin = spin_lift_from_orthogonal(rotation)
+                    target_coefficients = apply_plane_wave_action(
+                        coefficients_by_kpoint[source_kpoint],
+                        source_q,
+                        rotation,
+                        translation,
+                        spin_rotation=spin,
+                        target_q_cart=target_q,
+                    ).transformed_coefficients
+                    cross = build_plane_wave_representation(
+                        coefficients_by_kpoint[source_kpoint],
+                        source_q,
+                        rotation,
+                        translation,
+                        spin_rotation=spin,
+                        target_coefficients=target_coefficients,
+                        target_q_cart=target_q,
+                    )
+                    target_projector = (
+                        cross.matrix @ source_projector
+                        @ cross.matrix.conj().T
+                    )
+                    source_valley_basis = _projector_range_basis(
+                        source_projector
+                    )
+                    if source_valley_basis is None:
+                        raise ValueError("source valley basis unavailable")
+                    target_valley_basis = (
+                        cross.matrix @ source_valley_basis
+                    )
+                except (TypeError, ValueError, np.linalg.LinAlgError):
+                    target_coefficients = np.empty((0, 0, 0))
+                    target_projector = np.empty((0, 0))
+                    source_valley_basis = target_valley_basis = np.empty(
+                        (0, 0)
+                    )
+                directed_raw = {
+                    "source_basis_record": source_basis_record,
+                    "lift_record": parent_lift_context["record"],
+                    "lift_validation_inputs": parent_lift_context[
+                        "raw_inputs"
+                    ],
+                    "extracted_wavefunction_payload_identity": (
+                        source_basis_record.get(
+                            "extracted_wavefunction_payload_identity", ""
+                        )
+                    ),
+                    "source_kpoint_label": source_kpoint,
+                    "target_kpoint_label": (
+                        f"unitary_target/{target['source_hsp_label']}/"
+                        f"{target_valley}"
+                    ),
+                    "source_k_frac": kpoint_frac_by_name[source_kpoint],
+                    "target_k_frac": target["k_frac"],
+                    "source_valley": source_valley,
+                    "target_valley": target_valley,
+                    "valley_orbit": _operation_valley_orbit(
+                        mapping, source_valley
+                    ),
+                    "sewing_operation_id": operation.get("operation_id"),
+                    "source_little_group_operation_ids": source_ids,
+                    "target_little_group_operation_ids": target[
+                        "operation_ids"
+                    ],
+                    "detected_operations": operations,
+                    "source_q_cart": source_q,
+                    "target_q_cart": target_q,
+                    "source_coefficients": coefficients_by_kpoint[
+                        source_kpoint
+                    ],
+                    "target_coefficients": target_coefficients,
+                    "source_projector": source_projector,
+                    "target_projector": target_projector,
+                    "source_valley_basis": source_valley_basis,
+                    "target_valley_basis": target_valley_basis,
+                    "wavecar_rtag": wavecar_rtag,
+                    "target_basis_kind": "canonical_unitary_transport",
+                    "independent_target_numerical_evidence": False,
+                }
+                directed_record = build_directed_valley_sewing_evidence(
+                    **directed_raw
+                ).to_record()
+                attempts.append({
+                    "source_candidate": source,
+                    "target_context": {
+                        "valley": target_valley,
+                        "source_hsp_label": target["source_hsp_label"],
+                        "valley_preserving_operation_ids": target[
+                            "operation_ids"
+                        ],
+                        "source_operation_map": target[
+                            "source_operation_map"
+                        ],
+                        "source_irrep_characters": target[
+                            "source_irrep_characters"
+                        ],
+                        "source_payload_provenance": target[
+                            "source_payload_provenance"
+                        ],
+                        "source_payload_context": target[
+                            "source_payload_context"
+                        ],
+                        "subspace_space_group": target[
+                            "subspace_space_group"
+                        ],
+                    },
+                    "directed_scoped_evidence_context": {
+                        "record": directed_record,
+                        "raw_inputs": directed_raw,
+                    },
+                    "detected_operations": operations,
+                    "source_standard_setting_certificate": (
+                        context["standard_setting_certificate"]
+                    ),
+                    "target_standard_setting_certificate": (
+                        source_certificates[target_valley]
+                    ),
+                    "source_table": source_tables[source_valley],
+                    "target_table": source_tables[target_valley],
+                    "source_cprime_context": context,
+                })
+    return attempts
+
+
+def _operation_valley_orbit(mapping, source):
+    orbit, current = [], source
+    while (
+        isinstance(mapping, dict)
+        and current not in orbit
+        and len(orbit) <= len(mapping)
+    ):
+        orbit.append(current)
+        current = mapping.get(current)
+    return orbit if current == source else []
+
+
+def _valley_preserving_little_group_ids(operations, kpoint, valley):
+    return [
+        operation["operation_id"]
+        for operation in operations
+        if isinstance(operation.get("operation_id"), int)
+        and isinstance(operation.get("sector_mapping"), dict)
+        and operation["sector_mapping"].get(valley) == valley
+        and _unitary_operation_maps_kpoint(operation, kpoint, kpoint)
+    ]
+
+
+def _build_parent_double_group_lift_context(
+    *, symmetry_payload, source_cprime_context
+):
+    raw = source_cprime_context.get("raw_inputs", {})
+    source_basis = raw.get("source_basis_record")
+    operations = symmetry_payload.get("detected_operations", [])
+    sg_number = symmetry_payload.get("spacegroup_number")
+    if (
+        not isinstance(source_basis, dict)
+        or not isinstance(operations, list)
+        or not isinstance(sg_number, int)
+    ):
+        return None
+    try:
+        table = load_standard_irrep_table(sg_number, spinor=True)
+        matched = match_table_operations(
+            detected_operations=operations,
+            table=table,
+        )
+        operation_map = matched.mapping_by_operation_id
+        if (
+            matched.unmatched_operation_ids
+            or set(operation_map)
+            != {row.get("operation_id") for row in operations}
+        ):
+            return None
+        source_evidence = build_spinful_source_table_evidence(
+            table,
+            required_operation_indices=list(operation_map.values()),
+        )
+        setting_evidence = {
+            "schema_version": "1.0.0",
+            "parent_to_standard_direct_transform": np.eye(3).tolist(),
+            "origin_shift_fractional": [0.0, 0.0, 0.0],
+            "parent_to_standard_operation_map": {
+                str(key): value for key, value in operation_map.items()
+            },
+        }
+        lattice = np.asarray(
+            symmetry_payload.get("lattice_direct_cart"), dtype=float
+        )
+        record = build_double_space_group_lift_certificate(
+            source_basis,
+            operations,
+            source_table_identity=source_evidence,
+            standard_setting_identity=setting_evidence,
+            direct_lattice_cart=lattice,
+        ).to_record()
+    except (KeyError, TypeError, ValueError):
+        return None
+    return {
+        "record": record,
+        "raw_inputs": {
+            "source_basis_record": source_basis,
+            "source_table_identity": source_evidence,
+            "standard_setting_identity": setting_evidence,
+            "direct_lattice_cart": lattice,
+            "expected_operations": operations,
+        },
+    } if record.get("status") == "passed" else None
+
+
+def _unitary_operation_maps_kpoint(operation, source_k, target_k):
+    try:
+        rotation = np.asarray(operation["rotation_frac"], dtype=float)
+        source = np.asarray(source_k, dtype=float)
+        target = np.asarray(target_k, dtype=float)
+        delta = np.linalg.inv(rotation).T @ source - target
+    except (KeyError, TypeError, ValueError, np.linalg.LinAlgError):
+        return False
+    return bool(
+        rotation.shape == (3, 3)
+        and source.shape == (3,)
+        and target.shape == (3,)
+        and np.linalg.norm(delta - np.rint(delta)) <= 1.0e-8
+    )
+
+
+def _trusted_or_available_projector(
+    *,
+    kpoint,
+    valley,
+    workflow_decisions,
+    seed_projectors,
+    symmetry_adapted_projectors,
+):
+    decision = (
+        workflow_decisions.get("by_kpoint", {})
+        .get(kpoint, {})
+        .get(valley, {})
+        if isinstance(workflow_decisions, dict) else {}
+    )
+    path = decision.get("workflow_path")
+    adapted = symmetry_adapted_projectors.get(kpoint, {}).get(valley)
+    seed = seed_projectors.get(kpoint, {}).get(valley)
+    if path == "symmetry_adapted" and adapted is not None:
+        return adapted
+    if path == "direct_qcut" and seed is not None:
+        return seed
+    return None
+
+
+def _apply_unitary_sewing_completion_to_coverage(
+    coverage,
+    inferred_candidates,
+):
+    by_valley = coverage.get("by_valley", {})
+    for candidate in inferred_candidates:
+        valley = candidate.get("valley")
+        provenance = candidate.get("irrep_source_provenance", {})
+        hsp = provenance.get("source_hsp_label")
+        row = by_valley.get(valley) if isinstance(by_valley, dict) else None
+        if not isinstance(row, dict) or hsp not in row.get(
+            "required_source_hsp_labels", []
+        ):
+            continue
+        completed = row.setdefault(
+            "unitary_completed_source_hsp_labels", []
+        )
+        if hsp not in completed:
+            completed.append(hsp)
+        required = set(row.get("required_source_hsp_labels", []))
+        trusted = set(row.get("trusted_matched_source_hsp_labels", []))
+        row["unitary_completion_ready_for_ebr_promotion"] = (
+            required == trusted | set(completed)
+        )

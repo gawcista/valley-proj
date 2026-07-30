@@ -2858,9 +2858,10 @@ def _completion_kind_summary(records_by_hsp: object) -> str:
                     "observed_at_sampled_kpoint"
                 ):
                     observed += 1
-                elif record.get("completion_kind") == (
-                    "inferred_by_time_reversal"
-                ):
+                elif record.get("completion_kind") in {
+                    "inferred_by_time_reversal",
+                    "inferred_by_unitary_valley_sewing",
+                }:
                     inferred += 1
     return f"observed={observed}, inferred={inferred}"
 

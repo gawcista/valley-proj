@@ -12,6 +12,9 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from valleyscope.analysis.symmetry_adapted_representations import (
+    build_valley_sewing_matrices,
+)
 
 @dataclass(frozen=True)
 class ProjectorQualityDiagnostics:
@@ -387,12 +390,14 @@ def compute_projector_quality_diagnostics(
     )
 
     # True valley sewing matrices: B_{ba}(g) = U_b^dag D_g U_a, b = pi_g(a)
-    sewing, sewing_err = _compute_valley_sewing(
-        eigenvectors=eigenvectors,
+    sewing_result = build_valley_sewing_matrices(
+        valley_bases=eigenvectors,
         representations=representations,
         valley_mappings=valley_mappings,
         orbit=orbit,
     )
+    sewing = sewing_result["sewing_matrices"]
+    sewing_err = sewing_result["unitarity_error"]
 
     # Status — ordered by priority
     status = "ok"
@@ -506,44 +511,6 @@ def _compute_projector_overlap(
             expected = p_a if a == b else np.zeros_like(p_a)
             deviation[(a, b)] = float(np.linalg.norm(o - expected, ord="fro"))
     return matrices, deviation
-
-
-def _compute_valley_sewing(
-    *,
-    eigenvectors: dict[str, np.ndarray],
-    representations: dict[object, np.ndarray],
-    valley_mappings: dict[object, dict[str, str]],
-    orbit: list[str],
-) -> tuple[dict[tuple[object, str, str], np.ndarray], dict[tuple[object, str, str], float]]:
-    """Valley sewing matrices B_{ba}(g) = U_b^dag D_g U_a for b = pi_g(a).
-
-    These are r x r matrices where r = selected_rank.  For exact symmetry-
-    adapted projectors, each B_{ba}(g) should be unitary.
-    """
-    sewing: dict[tuple[object, str, str], np.ndarray] = {}
-    unitarity_err: dict[tuple[object, str, str], float] = {}
-    orbit_set = set(orbit)
-
-    for op_id, d_g in representations.items():
-        mapping = valley_mappings.get(op_id, {})
-        for src in orbit:
-            tgt = mapping.get(src)
-            if tgt is None or str(tgt) not in orbit_set:
-                continue
-            if src not in eigenvectors or str(tgt) not in eigenvectors:
-                continue
-            u_src = np.asarray(eigenvectors[src], dtype=np.complex128)
-            u_tgt = np.asarray(eigenvectors[str(tgt)], dtype=np.complex128)
-            d_mat = np.asarray(d_g, dtype=np.complex128)
-            b = u_tgt.conj().T @ d_mat @ u_src
-            key = (op_id, str(src), str(tgt))
-            sewing[key] = b
-            # Unitarity check: B^dag B should be identity
-            r = b.shape[0]
-            unitarity_err[key] = float(
-                np.linalg.norm(b.conj().T @ b - np.eye(r, dtype=np.complex128), ord="fro")
-            )
-    return sewing, unitarity_err
 
 
 # ---------------------------------------------------------------------------

@@ -30,6 +30,7 @@ class PlaneWaveRepresentationResult:
     mapping_miss_count: int
     norm_preservation_residual: float
     relative_norm_preservation_residual: float
+    relative_target_subspace_residual: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,8 @@ def build_plane_wave_representation(
     *,
     spin_rotation: np.ndarray | None = None,
     tolerance: float = 1e-6,
+    target_coefficients: np.ndarray | None = None,
+    target_q_cart: np.ndarray | None = None,
 ) -> PlaneWaveRepresentationResult:
     action = apply_plane_wave_action(
         coefficients,
@@ -73,13 +76,20 @@ def build_plane_wave_representation(
         translation_cart,
         spin_rotation=spin_rotation,
         tolerance=tolerance,
+        target_q_cart=target_q_cart,
     )
     coeffs = np.asarray(coefficients, dtype=np.complex128)
+    target = (
+        coeffs
+        if target_coefficients is None
+        else np.asarray(target_coefficients, dtype=np.complex128)
+    )
     flat_original = coeffs.reshape(coeffs.shape[0], -1)
+    flat_target = target.reshape(target.shape[0], -1)
     flat_transformed = action.transformed_coefficients.reshape(
         coeffs.shape[0], -1
     )
-    matrix = flat_original.conj() @ flat_transformed.T
+    matrix = flat_target.conj() @ flat_transformed.T
     original_norm = float(np.linalg.norm(flat_original))
     transformed_norm = float(np.linalg.norm(flat_transformed))
     absolute_norm_residual = abs(transformed_norm - original_norm)
@@ -94,6 +104,10 @@ def build_plane_wave_representation(
         mapping_miss_count=action.mapping_miss_count,
         norm_preservation_residual=absolute_norm_residual,
         relative_norm_preservation_residual=relative_norm_residual,
+        relative_target_subspace_residual=float(
+            np.linalg.norm(flat_transformed - matrix.T @ flat_target)
+            / max(original_norm, np.finfo(float).tiny)
+        ),
     )
 
 
@@ -105,6 +119,7 @@ def apply_plane_wave_action(
     *,
     spin_rotation: np.ndarray | None = None,
     tolerance: float = 1e-6,
+    target_q_cart: np.ndarray | None = None,
 ) -> PlaneWaveActionResult:
     coeffs = np.asarray(coefficients, dtype=np.complex128)
     q = np.asarray(q_cart, dtype=float)
@@ -122,17 +137,21 @@ def apply_plane_wave_action(
         if spin.shape != (n_spinor, n_spinor):
             raise ValueError("spin_rotation shape must match nspinor")
 
+    target_q = q if target_q_cart is None else np.asarray(target_q_cart, dtype=float)
     reciprocal_grid_map = build_reciprocal_grid_map(
         q,
         rot,
         tolerance=tolerance,
+        target_q_cart=target_q,
     )
     mapping = reciprocal_grid_map.mapping
     q_rotated = np.empty_like(q)
     for source_idx, q_source in enumerate(q):
         q_rotated[source_idx] = rot @ q_source
 
-    transformed = np.zeros_like(coeffs)
+    transformed = np.zeros(
+        (n_bands, n_spinor, len(target_q)), dtype=np.complex128
+    )
     for source_idx, target_idx in enumerate(mapping):
         if target_idx < 0:
             continue
@@ -152,6 +171,7 @@ def build_reciprocal_grid_map(
     rotation_cart: np.ndarray,
     *,
     tolerance: float = DEFAULT_RECIPROCAL_GRID_MAPPING_TOLERANCE,
+    target_q_cart: np.ndarray | None = None,
 ) -> ReciprocalGridMapResult:
     """Map every source reciprocal-grid vector under one spatial operation."""
     q = np.asarray(q_cart, dtype=float)
@@ -166,12 +186,19 @@ def build_reciprocal_grid_map(
     if not np.isfinite(tolerance) or tolerance <= 0.0:
         raise ValueError("tolerance must be positive and finite")
 
-    lookup = _q_vector_lookup(q, tolerance)
+    target_q = q if target_q_cart is None else np.asarray(target_q_cart, dtype=float)
+    if (
+        target_q.ndim != 2
+        or target_q.shape[1:] != (3,)
+        or not np.all(np.isfinite(target_q))
+    ):
+        raise ValueError("target_q_cart must be finite with shape [nG,3]")
+    lookup = _q_vector_lookup(target_q, tolerance)
     mapping = np.full(len(q), -1, dtype=int)
     for source_idx, q_source in enumerate(q):
         mapping[source_idx] = _lookup_q_vector(
             rotation @ q_source,
-            q,
+            target_q,
             lookup,
             tolerance,
         )

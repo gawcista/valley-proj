@@ -306,6 +306,11 @@ def test_summary_distinguishes_unitary_and_joint_tr_ebr_objects():
                 "unitary_irrep_completion_records_by_hsp": {
                     "GM": [{"completion_kind": "observed_at_sampled_kpoint"}],
                     "KA": [{"completion_kind": "inferred_by_time_reversal"}],
+                    "Y": [{
+                        "completion_kind": (
+                            "inferred_by_unitary_valley_sewing"
+                        )
+                    }],
                 },
             }, {
                 "instance_id": "j",
@@ -322,7 +327,7 @@ def test_summary_distinguishes_unitary_and_joint_tr_ebr_objects():
     text = "\n".join(lines)
     assert "unitary_valley_projected_subspace" in text
     assert "joint_time_reversal_valley_orbit" in text
-    assert "observed=1, inferred=1" in text
+    assert "observed=1, inferred=2" in text
 
 def test_summary_text_renders_qcut_fraction_for_relative_mode(tmp_path):
     h5_path = tmp_path / "wf.h5"

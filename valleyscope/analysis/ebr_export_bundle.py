@@ -51,6 +51,9 @@ def build_ebr_export_bundle(
                 "cprime_identity_by_kpoint": inst.get(
                     "cprime_identity_by_kpoint", {}
                 ),
+                "cprime_scope_metadata": inst.get(
+                    "cprime_scope_metadata", {}
+                ),
                 "workflow_path": inst.get("workflow_path", ""),
                 "unitary_vector_construction": (
                     _unitary_vector_construction(inst)

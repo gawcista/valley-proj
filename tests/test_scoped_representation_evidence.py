@@ -9,7 +9,9 @@ from valleyscope.analysis.representation_readiness import (
     compose_representation_readiness,
 )
 from valleyscope.analysis.scoped_representation_evidence import (
+    build_directed_valley_sewing_evidence,
     build_scoped_representation_evidence,
+    validate_directed_valley_sewing_evidence_record,
     validate_scoped_representation_evidence_record,
 )
 from valleyscope.analysis.target_frame import build_target_frame
@@ -182,6 +184,197 @@ def _raw_inputs(
 def _build(**kwargs) -> tuple[dict[str, object], dict[str, object]]:
     inputs = _raw_inputs(**kwargs)
     return build_scoped_representation_evidence(**inputs).to_record(), inputs
+
+
+def _directed_sewing_inputs() -> dict[str, object]:
+    source = _source_record()
+    operations = [
+        {
+            **_operation(11, np.eye(3, dtype=int)),
+            "sector_mapping": {"v0": "v0", "v1": "v1"},
+        },
+        {
+            **_operation(47, -np.eye(3, dtype=int)),
+            "sector_mapping": {"v0": "v1", "v1": "v0"},
+        },
+    ]
+    source_table = {
+        "schema_version": "1.0.0",
+        "provider": "irreptables",
+        "data_source": "irreptables.StandardIrrepTable",
+        "space_group_number": 2,
+        "spinor": True,
+        "operations": [
+            {
+                "table_index": index,
+                "rotation_frac": operation["rotation_frac"].tolist(),
+                "translation_frac": [0.0, 0.0, 0.0],
+                "spin_rotation": _complex_record(
+                    spin_lift_from_orthogonal(operation["rotation_cart"])
+                ),
+            }
+            for index, operation in enumerate(operations)
+        ],
+    }
+    setting = {
+        "schema_version": "1.0.0",
+        "parent_to_standard_direct_transform": np.eye(3).tolist(),
+        "origin_shift_fractional": [0.0, 0.0, 0.0],
+        "parent_to_standard_operation_map": {"11": 0, "47": 1},
+    }
+    lift_inputs = {
+        "expected_operations": operations,
+        "source_table_identity": source_table,
+        "standard_setting_identity": setting,
+        "direct_lattice_cart": np.eye(3),
+    }
+    lift = build_double_space_group_lift_certificate(
+        source,
+        operations,
+        source_table_identity=source_table,
+        standard_setting_identity=setting,
+        direct_lattice_cart=np.eye(3),
+    ).to_record()
+    source_coefficients = np.zeros((2, 2, 2), dtype=np.complex128)
+    source_coefficients[0, 0, 0] = 1.0
+    source_coefficients[1, 1, 1] = 1.0
+    target_coefficients = np.zeros_like(source_coefficients)
+    target_coefficients[0, 0, 1] = 1.0
+    target_coefficients[1, 1, 0] = 1.0
+    q_cart = np.array(
+        [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]],
+        dtype=float,
+    )
+    return {
+        "source_basis_record": source,
+        "lift_record": lift,
+        "lift_validation_inputs": lift_inputs,
+        "extracted_wavefunction_payload_identity": "sha256:" + "1" * 64,
+        "source_kpoint_label": "source_arm",
+        "target_kpoint_label": "target_arm",
+        "source_k_frac": np.array([1.0 / 3.0, 0.0, 0.0]),
+        "target_k_frac": np.array([-1.0 / 3.0, 0.0, 0.0]),
+        "source_valley": "v0",
+        "target_valley": "v1",
+        "valley_orbit": ("v0", "v1"),
+        "sewing_operation_id": 47,
+        "source_little_group_operation_ids": (11,),
+        "target_little_group_operation_ids": (11,),
+        "detected_operations": operations,
+        "source_q_cart": q_cart,
+        "target_q_cart": q_cart,
+        "source_coefficients": source_coefficients,
+        "target_coefficients": target_coefficients,
+        "source_projector": np.diag([1.0, 0.0]),
+        "target_projector": np.diag([1.0, 0.0]),
+        "source_valley_basis": np.array([[1.0], [0.0]]),
+        "target_valley_basis": np.array([[1.0], [0.0]]),
+        "wavecar_rtag": None,
+    }
+
+
+def test_directed_valley_sewing_scope_recomputes_cross_arm_groupoid_evidence():
+    """Catches replacing cross-arm scoped evidence with a self-signed B matrix."""
+    inputs = _directed_sewing_inputs()
+
+    record = build_directed_valley_sewing_evidence(**inputs).to_record()
+
+    assert record["status"] == "passed"
+    assert record["scope"]["scope_kind"] == "valley_sewing"
+    assert record["scope"]["source_kpoint_label"] == "source_arm"
+    assert record["scope"]["target_kpoint_label"] == "target_arm"
+    assert record["reciprocal_grid"]["source_to_target_map"] == [1, 0]
+    assert record["reciprocal_grid"]["permutation_status"] == "passed"
+    assert record["directed_group_law"]["rows"][0]["passed"] is True
+    assert record["projector_covariance"]["passed"] is True
+    assert record["valley_block_quality"]["passed"] is True
+    assert record["intertwining"]["rows"][0][
+        "rank_normalized_residual"
+    ] == pytest.approx(0.0)
+    assert record["intertwining"]["rows"][0]["target_character"] == [
+        1.0,
+        0.0,
+    ]
+    assert validate_directed_valley_sewing_evidence_record(
+        record, **inputs
+    ).status == "passed"
+
+
+@pytest.mark.parametrize(
+    ("tamper", "reason"),
+    [
+        ("target_k", "directed_hsp_mapping_failed"),
+        ("valley_mapping", "directed_valley_mapping_failed"),
+        ("target_grid", "source_coverage_incomplete"),
+        ("target_projector", "projector_covariance_failed"),
+        ("source_coefficients", "valley_sewing_unitarity_failed"),
+        ("lift_inputs", "double_space_group_lift_not_passed"),
+    ],
+)
+def test_directed_valley_sewing_scope_fails_closed_on_raw_tamper(
+    tamper,
+    reason,
+):
+    """Catches accepting one altered producer boundary as trusted sewing."""
+    inputs = _directed_sewing_inputs()
+    if tamper == "target_k":
+        inputs["target_k_frac"][0] = 1.0 / 3.0
+    elif tamper == "valley_mapping":
+        inputs["detected_operations"][1]["sector_mapping"]["v0"] = "v0"
+    elif tamper == "target_grid":
+        inputs["target_q_cart"][1] = inputs["target_q_cart"][0]
+    elif tamper == "target_projector":
+        inputs["target_projector"] = np.diag([0.0, 1.0])
+    elif tamper == "source_coefficients":
+        inputs["source_coefficients"][0, 0, 0] = 0.5
+    else:
+        inputs["lift_validation_inputs"]["expected_operations"][0][
+            "translation_frac"
+        ][0] = 0.25
+
+    record = build_directed_valley_sewing_evidence(**inputs).to_record()
+
+    assert record["status"] == "blocked"
+    assert reason in record["reason_codes"]
+
+
+def test_directed_valley_sewing_validator_rejects_serialized_tamper():
+    """Catches trusting a rewritten target character plus a stale identity."""
+    inputs = _directed_sewing_inputs()
+    record = build_directed_valley_sewing_evidence(**inputs).to_record()
+    forged = deepcopy(record)
+    forged["intertwining"]["rows"][0]["target_character"] = [0.0, 0.0]
+
+    validation = validate_directed_valley_sewing_evidence_record(
+        forged, **inputs
+    )
+
+    assert validation.status == "blocked"
+    assert validation.reason_codes == ("recomputed_evidence_mismatch",)
+
+
+def test_directed_valley_sewing_accepts_generic_three_valley_permutation():
+    inputs = _directed_sewing_inputs()
+    inputs["detected_operations"][0]["sector_mapping"]["v2"] = "v2"
+    inputs["detected_operations"][1]["sector_mapping"]["v2"] = "v2"
+
+    record = build_directed_valley_sewing_evidence(**inputs).to_record()
+
+    assert record["status"] == "passed"
+    assert len(inputs["detected_operations"][1]["sector_mapping"]) == 3
+
+
+def test_directed_valley_block_uses_range_not_seed_eigenvalue():
+    inputs = _directed_sewing_inputs()
+    inputs["source_projector"] = np.diag([0.9, 0.0])
+    inputs["target_projector"] = np.diag([0.9, 0.0])
+
+    record = build_directed_valley_sewing_evidence(**inputs).to_record()
+
+    assert record["status"] == "passed"
+    assert record["valley_block_quality"]["relative_residual"] == (
+        pytest.approx(0.0)
+    )
 
 
 def test_local_irrep_consumes_only_exact_valley_preserving_scope():

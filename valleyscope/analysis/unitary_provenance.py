@@ -11,7 +11,13 @@ from valleyscope.analysis.time_reversal_sewing import (
 from valleyscope.analysis.tr_irrep_completion import (
     validate_tr_irrep_completion_certificate,
 )
-from valleyscope.io.wavefunction_convention import canonical_identity
+from valleyscope.analysis.unitary_valley_sewing_completion import (
+    validate_unitary_valley_sewing_certificate,
+)
+from valleyscope.io.wavefunction_convention import (
+    canonical_identity,
+    valid_sha256_identity,
+)
 
 
 _PROJECTOR_WORKFLOWS = frozenset({"direct_qcut", "symmetry_adapted"})
@@ -34,19 +40,234 @@ def unitary_bundle_claims_time_reversal_completion(
         construction_kind == "time_reversal_completed_unitary_rows",
         bundle.get("workflow_path")
         == "time_reversal_completed_unitary_valley",
-        bool(bundle.get("valley_orbit")),
-        bool(bundle.get("unitary_irrep_completion_records_by_hsp")),
         bool(bundle.get("time_reversal")),
     ))
 
 
-def validate_unitary_bundle_provenance(
+def unitary_bundle_claims_valley_sewing_completion(
     bundle: Mapping[str, object],
 ) -> bool:
-    """Validate either disjoint unitary-vector construction contract."""
+    construction = bundle.get("unitary_vector_construction")
+    return bool(
+        isinstance(construction, Mapping)
+        and construction.get("kind")
+        == "unitary_valley_sewing_completed_unitary_rows"
+    )
+
+
+def validate_unitary_bundle_provenance(
+    bundle: Mapping[str, object],
+    *,
+    unitary_valley_sewing_validation_contexts: (
+        Mapping[str, object] | None
+    ) = None,
+) -> bool:
+    """Validate one explicitly dispatched unitary-vector construction."""
     if unitary_bundle_claims_time_reversal_completion(bundle):
         return validate_tr_completed_unitary_bundle(bundle)
+    if unitary_bundle_claims_valley_sewing_completion(bundle):
+        return validate_valley_sewing_completed_unitary_bundle(
+            bundle,
+            validation_contexts=(
+                unitary_valley_sewing_validation_contexts
+            ),
+        )
     return validate_direct_unitary_bundle(bundle)
+
+
+def validate_valley_sewing_completed_unitary_bundle(
+    bundle: Mapping[str, object],
+    *,
+    validation_contexts: Mapping[str, object] | None,
+) -> bool:
+    """Rebuild all directed sewing certificates and the canonical vector."""
+    valley, expected = bundle.get("valley"), bundle.get("required_source_hsp_labels")
+    completed = bundle.get("unitary_irrep_completion_records_by_hsp")
+    direct = bundle.get("irrep_records_by_kpoint")
+    irreps, source_to_sample = (
+        bundle.get("irreps_by_kpoint"),
+        bundle.get("source_hsp_to_sampled_kpoint"),
+    )
+    if (
+        bundle.get("problem_kind") != "unitary_valley_reduced_ebr"
+        or bundle.get("physical_object_kind") != "unitary_valley_projected_subspace"
+        or bundle.get("workflow_path") != "unitary_valley_sewing_completion"
+        or bundle.get("valley_orbit") not in ([], None)
+        or bundle.get("time_reversal") not in ({}, None)
+        or not isinstance(valley, str) or not valley
+        or not isinstance(completed, Mapping) or not completed
+        or not isinstance(irreps, Mapping)
+        or not isinstance(direct, Mapping)
+        or not isinstance(source_to_sample, Mapping)
+        or not isinstance(expected, list)
+        or set(expected) != set(irreps)
+        or set(direct) != set(expected) - set(completed)
+        or set(source_to_sample) != set(direct)
+    ):
+        return False
+    declared_scopes = bundle.get("cprime_scope_metadata")
+    if not isinstance(declared_scopes, Mapping):
+        return False
+    rebuilt, cprime_inventory, used_scopes = {}, {}, {}
+    for hsp in expected:
+        records, inferred = (
+            (completed.get(hsp), True) if hsp in completed
+            else (direct.get(hsp), False)
+        )
+        if not isinstance(records, list) or not records:
+            return False
+        counts = Counter()
+        for record in records:
+            if not isinstance(record, Mapping):
+                return False
+            if inferred:
+                valid, irrep, multiplicity, cprime_rows = _validate_sewing_record(
+                    record, hsp, valley, validation_contexts
+                )
+            else:
+                irrep, multiplicity = (
+                    record.get("matched_irrep"),
+                    record.get("irrep_multiplicity"),
+                )
+                provenance = record.get("irrep_source_provenance")
+                cprime = provenance.get("cprime") if isinstance(provenance, Mapping) else None
+                valid = bool(
+                    record.get("valley") == valley
+                    and record.get("source_hsp_label") == hsp
+                    and record.get("sampled_kpoint") == source_to_sample.get(hsp)
+                    and record.get("workflow_path") in _PROJECTOR_WORKFLOWS
+                    and record.get("readiness_level") == "trusted"
+                    and isinstance(cprime, Mapping)
+                )
+                cprime_rows = [(
+                    record.get("sampled_kpoint"), valley, cprime
+                )]
+            if not valid or not isinstance(irrep, str) or not _positive_int(multiplicity):
+                return False
+            counts[irrep] += multiplicity
+            for sampled, evidence_valley, cprime in cprime_rows:
+                key = _scope_key(
+                    declared_scopes, sampled, evidence_valley
+                )
+                if key is None:
+                    return False
+                cprime_inventory[key] = _cprime_links(cprime)
+                used_scopes[key] = declared_scopes[key]
+        rebuilt[hsp] = counts
+    return (
+        dict(bundle.get("cprime_identity_by_kpoint", {})) == cprime_inventory
+        and dict(declared_scopes) == used_scopes
+        and all(
+            isinstance(labels, list) and Counter(labels) == rebuilt.get(hsp)
+            for hsp, labels in irreps.items()
+        )
+    )
+
+
+def _validate_sewing_record(record, hsp, valley, contexts):
+    certificates = record.get("unitary_valley_sewing_certificates")
+    if (
+        record.get("completion_kind") != "inferred_by_unitary_valley_sewing"
+        or "sampled_kpoint" in record
+        or record.get("target_valley") != valley
+        or record.get("target_source_hsp_label") != hsp
+        or record.get("structural_status") != "validated"
+        or record.get("readiness_status") != "trusted"
+        or record.get("blockers") not in ([], None)
+        or not isinstance(certificates, list) or not certificates
+    ):
+        return False, None, None, []
+    first_source = certificates[0].get("source")
+    if (
+        not isinstance(first_source, Mapping)
+        or record.get("evidence_sampled_kpoint")
+        != first_source.get("sampled_kpoint")
+        or record.get("evidence_valley") != first_source.get("valley")
+        or record.get("evidence_source_hsp_label")
+        != first_source.get("source_hsp_label")
+    ):
+        return False, None, None, []
+    sources, cprime_rows = set(), []
+    for certificate in certificates:
+        source, target = (
+            certificate.get("source"), certificate.get("target")
+        ) if isinstance(certificate, Mapping) else (None, None)
+        context = (
+            contexts.get(certificate.get("certificate_identity"))
+            if isinstance(contexts, Mapping) and isinstance(certificate, Mapping)
+            else None
+        )
+        if (
+            not isinstance(source, Mapping) or not isinstance(target, Mapping)
+            or not _sewing_certificate_valid(certificate, context)
+            or target.get("valley") != valley
+            or target.get("source_hsp_label") != hsp
+            or target.get("irrep_multiplicities", {}).get(record.get("irrep"))
+            != record.get("multiplicity")
+            or not isinstance(source.get("cprime"), Mapping)
+        ):
+            return False, None, None, []
+        sources.add((source.get("irrep"), source.get("multiplicity")))
+        cprime_rows.append((
+            source.get("sampled_kpoint"),
+            source.get("valley"),
+            source["cprime"],
+        ))
+    declared = record.get("evidence_irrep_vector")
+    declared_set = {
+        (item.get("irrep"), item.get("multiplicity"))
+        for item in declared if isinstance(item, Mapping)
+    } if isinstance(declared, list) else set()
+    return (
+        sources == declared_set,
+        record.get("irrep"),
+        record.get("multiplicity"),
+        cprime_rows,
+    )
+
+
+def _sewing_certificate_valid(certificate, context):
+    if isinstance(context, Mapping):
+        return bool(
+            context.get("certificate") == certificate
+            and isinstance(context.get("raw_inputs"), Mapping)
+            and validate_unitary_valley_sewing_certificate(
+                certificate, **context["raw_inputs"]
+            ).status == "passed"
+        )
+    content = {
+        key: value for key, value in certificate.items()
+        if key not in {"status", "reason_codes", "certificate_identity"}
+    }
+    return bool(
+        certificate.get("status") == "passed"
+        and certificate.get("reason_codes") == []
+        and valid_sha256_identity(certificate.get("certificate_identity"))
+        and canonical_identity(content) == certificate.get(
+            "certificate_identity"
+        )
+    )
+
+
+def _cprime_links(cprime):
+    return {
+        key: cprime.get(key)
+        for key in (
+            "spinor_source_basis_certificate_identity",
+            "double_space_group_lift_certificate_identity",
+            "scoped_representation_evidence_identity",
+        )
+    }
+
+
+def _scope_key(scopes, sampled, valley):
+    matches = [
+        key for key, value in scopes.items()
+        if isinstance(value, Mapping)
+        and value.get("sampled_kpoint") == sampled
+        and value.get("evidence_valley") == valley
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 def validate_direct_unitary_bundle(

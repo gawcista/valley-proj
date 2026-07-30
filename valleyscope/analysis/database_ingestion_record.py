@@ -16,6 +16,7 @@ from typing import Any
 
 from valleyscope.analysis.unitary_provenance import (
     unitary_bundle_claims_time_reversal_completion,
+    unitary_bundle_claims_valley_sewing_completion,
     validate_unitary_bundle_provenance,
 )
 from valleyscope.analysis.promotion_identity import (
@@ -477,16 +478,27 @@ def _validate_bundle_cprime_against_summary(
         by_scope[key] = row
     bundle_links = bundle.get("cprime_identity_by_kpoint")
     irreps = bundle.get("irreps_by_kpoint")
+    expected_scopes = set(irreps) if isinstance(irreps, dict) else set()
+    scope_metadata = {}
+    if unitary_bundle_claims_valley_sewing_completion(bundle):
+        scope_metadata = bundle.get("cprime_scope_metadata", {})
+        expected_scopes = (
+            set(scope_metadata)
+            if isinstance(scope_metadata, dict) else set()
+        )
     if (
         not isinstance(bundle_links, dict)
         or not isinstance(irreps, dict)
-        or set(bundle_links) != set(irreps)
+        or set(bundle_links) != expected_scopes
     ):
         return "bundle C-prime identity inventory is incomplete"
-    for kpoint, identity in bundle_links.items():
-        row = by_scope.get((str(kpoint), valley))
+    for scope_key, identity in bundle_links.items():
+        scope = scope_metadata.get(scope_key, {})
+        kpoint = scope.get("sampled_kpoint", scope_key)
+        scope_valley = scope.get("evidence_valley", valley)
+        row = by_scope.get((str(kpoint), str(scope_valley)))
         if not isinstance(row, dict) or not isinstance(identity, dict):
-            return f"summary C-prime scope missing for {kpoint}/{valley}"
+            return f"summary C-prime scope missing for {kpoint}/{scope_valley}"
         expected = {
             "spinor_source_basis_certificate_identity": source_identity,
             "double_space_group_lift_certificate_identity": row.get(
@@ -696,12 +708,29 @@ def _extract_irrep_records(
             source_instance_id=source_instance_id,
         )
         return None
+    if unitary_bundle_claims_valley_sewing_completion(bundle):
+        if not validate_unitary_bundle_provenance(
+            bundle,
+        ):
+            return (
+                f"bundle {source_bundle_id or '<unknown>'}: invalid "
+                "unitary valley-sewing completion provenance"
+            )
+        _append_tr_completed_unitary_records(
+            bundle=bundle,
+            out=out,
+            source_bundle_id=source_bundle_id,
+            source_instance_id=source_instance_id,
+        )
+        return None
 
     if (
         bundle.get("problem_kind") == "unitary_valley_reduced_ebr"
         and bundle.get("physical_object_kind")
         == "unitary_valley_projected_subspace"
-        and not validate_unitary_bundle_provenance(bundle)
+        and not validate_unitary_bundle_provenance(
+            bundle,
+        )
     ):
         return (
             f"bundle {source_bundle_id or '<unknown>'}: invalid direct "
@@ -829,7 +858,45 @@ def _append_tr_completed_unitary_records(
 ) -> None:
     valley = str(bundle["valley"])
     records_by_hsp = bundle["unitary_irrep_completion_records_by_hsp"]
-    for source_hsp in bundle["expected_hsps"]:
+    if unitary_bundle_claims_valley_sewing_completion(bundle):
+        for source_hsp, records in bundle.get(
+            "irrep_records_by_kpoint", {}
+        ).items():
+            if not isinstance(records, list):
+                continue
+            for record in records:
+                if not isinstance(record, dict):
+                    continue
+                out.append({
+                    "kpoint": record.get("sampled_kpoint"),
+                    "source_hsp_label": source_hsp,
+                    "valley": valley,
+                    "subspace_group_candidate": bundle.get(
+                        "subspace_group_candidate", ""
+                    ),
+                    "matched_irrep": record.get("matched_irrep"),
+                    "irrep_multiplicity": record.get(
+                        "irrep_multiplicity"
+                    ),
+                    "completion_kind": "observed_at_sampled_kpoint",
+                    "workflow_path": record.get("workflow_path", ""),
+                    "readiness_level": record.get("readiness_level", ""),
+                    "source": record.get("source", ""),
+                    "source_bundle_id": source_bundle_id,
+                    "source_instance_id": source_instance_id,
+                    "certificate_identity": bundle.get(
+                        "certificate_identity", {}
+                    ),
+                    "irrep_source_provenance": record.get(
+                        "irrep_source_provenance", {}
+                    ),
+                })
+    source_hsps = (
+        records_by_hsp
+        if unitary_bundle_claims_valley_sewing_completion(bundle)
+        else bundle["expected_hsps"]
+    )
+    for source_hsp in source_hsps:
         for record in records_by_hsp[source_hsp]:
             kind = record["completion_kind"]
             entry: dict[str, Any] = {
@@ -866,8 +933,21 @@ def _append_tr_completed_unitary_records(
                     "evidence_source_hsp_label",
                     "evidence_sampled_kpoint",
                     "reviewed_time_reversal_relation",
+                    "evidence_irrep_vector",
                 ):
-                    entry[key] = record[key]
+                    if key in record:
+                        entry[key] = record[key]
+                certificates = record.get(
+                    "unitary_valley_sewing_certificates"
+                )
+                if isinstance(certificates, list):
+                    entry[
+                        "unitary_valley_sewing_certificate_identities"
+                    ] = [
+                        certificate.get("certificate_identity")
+                        for certificate in certificates
+                        if isinstance(certificate, dict)
+                    ]
             out.append(entry)
 
 
