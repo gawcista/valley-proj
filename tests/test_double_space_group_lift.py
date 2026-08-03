@@ -12,6 +12,7 @@ from valleyscope.geometry.lattice import (
     cart_translation_from_fractional,
 )
 from valleyscope.symmetry.double_space_group_lift import (
+    _complex_matrix_record,
     axial_spin_rotation,
     build_double_space_group_lift_certificate,
     seitz_product,
@@ -54,13 +55,6 @@ def _op(
             translation, direct
         ),
     }
-
-
-def _complex_matrix_record(matrix):
-    return [
-        [[float(value.real), float(value.imag)] for value in row]
-        for row in np.asarray(matrix, dtype=np.complex128)
-    ]
 
 
 def _identities(

@@ -230,7 +230,7 @@ def build_target_frame(
             ),
         },
         "status": "passed" if not reasons else "blocked",
-        "reason_codes": _unique(reasons),
+        "reason_codes": list(dict.fromkeys(reasons)),
     }
     record_content["contract_identity"] = canonical_identity(record_content)
     return TargetFrameResult(
@@ -346,7 +346,3 @@ def _complex_matrix_record(matrix: np.ndarray) -> list[list[list[float]]]:
         ]
         for row in np.asarray(matrix, dtype=np.complex128)
     ]
-
-
-def _unique(values: list[str]) -> list[str]:
-    return list(dict.fromkeys(values))

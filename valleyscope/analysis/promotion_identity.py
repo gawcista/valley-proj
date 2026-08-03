@@ -47,6 +47,21 @@ def merge_table_input_provenance(
     return merged
 
 
+def normalize_operation_key(value: object) -> int | None:
+    """Normalize an opaque operation ID key; reject aliases such as 0 and "0"."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        normalized = int(value)
+    except ValueError:
+        return None
+    if str(normalized) != value:
+        return None
+    return normalized
+
+
 def table_input_for_bundle(
     reduced_ebr_input: dict[str, Any] | None,
     bundle_id: str,

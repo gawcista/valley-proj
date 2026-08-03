@@ -185,7 +185,7 @@ def validate_spinor_source_basis_record(
     ):
         reasons.append("certificate_identity_mismatch")
 
-    reasons = _unique(reasons)
+    reasons = list(dict.fromkeys(reasons))
     if reasons:
         return SourceBasisValidation("blocked", tuple(reasons))
     return SourceBasisValidation(expected_status, tuple(expected_reasons))
@@ -208,7 +208,3 @@ def _profile_assumptions() -> dict[str, Any]:
         "time_reversal": True,
         "saxis_cart": [0.0, 0.0, 1.0],
     }
-
-
-def _unique(values: list[str]) -> list[str]:
-    return list(dict.fromkeys(values))

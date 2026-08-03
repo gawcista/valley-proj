@@ -27,6 +27,7 @@ from valleyscope.analysis.tr_irrep_completion import (
 from valleyscope.analysis.promotion_identity import (
     build_promotion_input_identity,
     merge_table_input_provenance,
+    normalize_operation_key,
 )
 from valleyscope.analysis.unitary_provenance import (
     unitary_bundle_claims_time_reversal_completion,
@@ -480,16 +481,6 @@ def _table_provenance_for_output(
     if source is not None:
         result["source"] = source
     return result
-
-
-def _merge_table_input_provenance(
-    table_provenance: dict,
-    reduced_ebr_input: dict[str, object] | None,
-) -> dict:
-    return merge_table_input_provenance(
-        table_provenance,
-        reduced_ebr_input,
-    )
 
 
 def _normalized_hsp_set(value: object) -> set[str] | None:
@@ -1154,22 +1145,6 @@ def _unitary_completion_records_valid(
     return (
         rebuilt == counts_by_hsp
         and set(observed_source_to_sampled) == observed_hsps
-    )
-
-
-def _nonempty_involutive_string_mapping(value: object) -> bool:
-    return (
-        isinstance(value, dict)
-        and bool(value)
-        and all(
-            isinstance(key, str)
-            and bool(key)
-            and isinstance(partner, str)
-            and bool(partner)
-            and value.get(partner) == key
-            for key, partner in value.items()
-        )
-        and set(value) == set(value.values())
     )
 
 
@@ -2448,20 +2423,6 @@ def _finite_nonsingular_3x3(m: object) -> bool:
     return abs(det) > 1e-9
 
 
-def _normalize_operation_map_key(value: object) -> int | None:
-    if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        normalized = int(value)
-    except ValueError:
-        return None
-    if str(normalized) != value:
-        return None
-    return normalized
-
-
 def _validate_operation_map_structure(op_map: dict, required_ids,
                                       req_op_count, std_op_count, cert_id,
                                       reasons: list[str]):
@@ -2489,7 +2450,7 @@ def _validate_operation_map_structure(op_map: dict, required_ids,
     # Keys are opaque integer IDs.  Reject aliases such as 0 and "0".
     keys: list[int] = []
     for raw_key in op_map:
-        key = _normalize_operation_map_key(raw_key)
+        key = normalize_operation_key(raw_key)
         if key is None:
             reasons.append("affine_operation_map_keys_non_integer")
             return
@@ -2916,7 +2877,7 @@ def build_reduced_ebr_mapping(
                     "blocker_reasons": promo["blocker_reasons"],
                     "validation_report": promo["validation_report"],
                     "certificate_identity": promo["certificate_identity"],
-                    "table_provenance": _merge_table_input_provenance(
+                    "table_provenance": merge_table_input_provenance(
                         promo["table_provenance"], reduced_ebr_input
                     ),
                 })
@@ -3007,7 +2968,7 @@ def build_reduced_ebr_mapping(
             if isinstance(promo_prov.get("validation_report"), dict):
                 solution["validation_report"] = promo_prov["validation_report"]
             if isinstance(promo_prov.get("table_provenance"), dict):
-                solution["table_provenance"] = _merge_table_input_provenance(
+                solution["table_provenance"] = merge_table_input_provenance(
                     promo_prov["table_provenance"], reduced_ebr_input
                 )
             if isinstance(promo_prov.get("certificate_identity"), dict):

@@ -17,6 +17,7 @@ from copy import deepcopy
 
 import numpy as np
 
+from valleyscope.analysis.promotion_identity import normalize_operation_key
 from valleyscope.analysis.tr_irrep_completion import (
     validate_tr_irrep_completion_certificate,
 )
@@ -1830,20 +1831,6 @@ def _normalize_strict_string_list(value: object) -> tuple[str, ...] | None:
     return tuple(sorted(value))
 
 
-def _normalize_operation_id_key(value: object) -> int | None:
-    if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        normalized = int(value)
-    except ValueError:
-        return None
-    if str(normalized) != value:
-        return None
-    return normalized
-
-
 def _normalize_affine_operation_map(
     value: object,
 ) -> tuple[tuple[int, int], ...] | None:
@@ -1852,7 +1839,7 @@ def _normalize_affine_operation_map(
         return None
     normalized: dict[int, int] = {}
     for raw_key, raw_value in value.items():
-        key = _normalize_operation_id_key(raw_key)
+        key = normalize_operation_key(raw_key)
         if key is None or key in normalized:
             return None
         if not isinstance(raw_value, int) or isinstance(raw_value, bool):

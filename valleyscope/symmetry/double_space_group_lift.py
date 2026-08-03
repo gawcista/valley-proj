@@ -237,7 +237,7 @@ def build_double_space_group_lift_certificate(
     }
     return DoubleSpaceGroupLiftCertificate(
         _content=content,
-        _reason_codes=tuple(_unique(reasons)),
+        _reason_codes=tuple(dict.fromkeys(reasons)),
     )
 
 
@@ -360,7 +360,7 @@ def validate_double_space_group_lift_record(
     ):
         reasons.append("certificate_identity_mismatch")
 
-    reasons = _unique(reasons)
+    reasons = list(dict.fromkeys(reasons))
     if reasons:
         return LiftValidation("blocked", tuple(reasons))
     return LiftValidation(expected_status, tuple(serialized_reasons))
@@ -786,8 +786,8 @@ def _derive_source_and_setting_identities(
             }
         )
 
-    source_reasons = _unique(source_reasons)
-    setting_reasons = _unique(setting_reasons)
+    source_reasons = list(dict.fromkeys(source_reasons))
+    setting_reasons = list(dict.fromkeys(setting_reasons))
     source_content: dict[str, object] = {
         "schema_version": "1.0.0",
         "provider": source_raw.get("provider"),
@@ -1240,7 +1240,3 @@ def _json_value(value: object) -> object:
     if isinstance(value, np.generic):
         return value.item()
     return value
-
-
-def _unique(values: list[str]) -> list[str]:
-    return list(dict.fromkeys(values))

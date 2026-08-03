@@ -286,7 +286,7 @@ def build_scoped_representation_evidence(
     }
     return ScopedRepresentationEvidence(
         _content=content,
-        _reason_codes=tuple(_unique(reasons)),
+        _reason_codes=tuple(dict.fromkeys(reasons)),
     )
 
 
@@ -339,7 +339,7 @@ def validate_scoped_representation_evidence_record(
         expected_reasons = tuple(
             value for value in serialized if isinstance(value, str)
         )
-    reasons = _unique(reasons)
+    reasons = list(dict.fromkeys(reasons))
     if reasons:
         return ScopedEvidenceValidation("blocked", tuple(reasons))
     return ScopedEvidenceValidation(expected_status, expected_reasons)
@@ -688,7 +688,7 @@ def build_directed_valley_sewing_evidence(
         },
         "grey_group_matching_allowed": False,
     }
-    return ScopedRepresentationEvidence(content, tuple(_unique(reasons)))
+    return ScopedRepresentationEvidence(content, tuple(dict.fromkeys(reasons)))
 
 
 def validate_directed_valley_sewing_evidence_record(
@@ -1554,7 +1554,3 @@ def _valley_block_rows(
                 }
             )
     return rows
-
-
-def _unique(values: list[str]) -> list[str]:
-    return list(dict.fromkeys(values))
