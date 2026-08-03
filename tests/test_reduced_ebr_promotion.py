@@ -658,6 +658,8 @@ def test_sg79_centered_resolver_to_exact_solve_uses_default_irreptables_table():
         ("expanded_parent_operation_count", 7),
         ("matched_expanded_operations", 7),
         ("standard_operation_closure_validated", False),
+        ("primitive_conventional_relation",
+         "spglib_affine_subgroup_standardization"),
     ],
 )
 def test_malformed_or_incomplete_centered_affine_evidence_blocks(field, value):

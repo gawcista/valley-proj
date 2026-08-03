@@ -7,6 +7,9 @@ import hashlib
 
 import numpy as np
 
+from valleyscope.analysis.tr_irrep_completion import _deduplicate
+from valleyscope.symmetry.double_space_group_lift import _vector3
+
 
 _TOL = 1e-3
 _K_TOL = 5e-6
@@ -1054,16 +1057,6 @@ def _projector_identity(
     return shape, f"sha256:{digest}"
 
 
-def _vector3(value: object) -> np.ndarray | None:
-    try:
-        vector = np.asarray(value, dtype=float)
-    except (TypeError, ValueError):
-        return None
-    if vector.shape != (3,) or not np.all(np.isfinite(vector)):
-        return None
-    return vector
-
-
 def _integer_g_vectors(value: object) -> np.ndarray | None:
     try:
         vectors = np.asarray(value, dtype=float)
@@ -1087,11 +1080,3 @@ def _integer_vector(value: object) -> np.ndarray | None:
     if vector.ndim != 1 or not np.issubdtype(vector.dtype, np.integer):
         return None
     return vector.astype(int)
-
-
-def _deduplicate(values: list[str]) -> list[str]:
-    out: list[str] = []
-    for value in values:
-        if value not in out:
-            out.append(value)
-    return out

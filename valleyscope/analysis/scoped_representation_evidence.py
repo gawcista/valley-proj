@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
+import functools
 
 import numpy as np
 
@@ -65,6 +66,61 @@ class ScopedRepresentationEvidence:
         return record
 
 
+def _jsonable_raw(value: object) -> object:
+    """Canonicalize raw builder inputs into JSON-serializable content.
+
+    numpy arrays, complex numbers, and producer objects such as irreptables
+    ``IrrepTable`` are converted so their full current content binds the
+    run-local memo key.
+    """
+    if isinstance(value, Mapping):
+        return {str(key): _jsonable_raw(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable_raw(item) for item in value]
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, complex):
+        return [float(value.real), float(value.imag)]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if hasattr(value, "__dict__"):
+        return _jsonable_raw(vars(value))
+    raise TypeError(f"cannot canonicalize {type(value).__name__} for memo key")
+
+
+def _run_local_memoized(func):
+    """Memoize a pure builder on the canonical identity of its full raw inputs.
+
+    The SHA-256 key binds every input that can change the physical result, so
+    each trust boundary still recomputes exact identities for the current raw
+    context; the cache only skips rebuilding the same context.  Unserializable
+    inputs run uncached.
+    """
+    cache: dict[str, object] = {}
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            key = canonical_identity(
+                {
+                    "builder": f"{func.__module__}.{func.__name__}",
+                    "raw": _jsonable_raw((args, kwargs)),
+                }
+            )
+        except (TypeError, ValueError):
+            return func(*args, **kwargs)
+        if key in cache:
+            return cache[key]
+        value = func(*args, **kwargs)
+        cache[key] = value
+        return value
+
+    return wrapper
+
+
+@_run_local_memoized
 def build_scoped_representation_evidence(
     *,
     source_basis_record: Mapping[str, object],
@@ -345,6 +401,7 @@ def validate_scoped_representation_evidence_record(
     return ScopedEvidenceValidation(expected_status, expected_reasons)
 
 
+@_run_local_memoized
 def build_directed_valley_sewing_evidence(
     **raw_inputs: object,
 ) -> ScopedRepresentationEvidence:
@@ -483,14 +540,15 @@ def build_directed_valley_sewing_evidence(
         ).T
         order = np.lexsort((rotated_q[:, 2], rotated_q[:, 1], rotated_q[:, 0]))
         target_q = rotated_q[order]
-        target_coefficients = apply_plane_wave_action(
+        directed_action = apply_plane_wave_action(
             source_coefficients,
             source_q,
             sewing["rotation_cart"],
             sewing["translation_cart"],
             spin_rotation=sewing_spin,
             target_q_cart=target_q,
-        ).transformed_coefficients
+        )
+        target_coefficients = directed_action.transformed_coefficients
         cross = build_plane_wave_representation(
             source_coefficients,
             source_q,
@@ -499,6 +557,7 @@ def build_directed_valley_sewing_evidence(
             spin_rotation=sewing_spin,
             target_coefficients=target_coefficients,
             target_q_cart=target_q,
+            action=directed_action,
         )
     except (KeyError, TypeError, ValueError):
         sewing_spin = None

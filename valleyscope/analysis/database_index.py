@@ -392,16 +392,6 @@ def build_database_index(
     }
 
 
-def load_database_index_from_files(
-    record_paths: list[str],
-) -> dict[str, Any]:
-    """Load ingestion records from file paths and build a database index.
-
-    This compatibility entry point delegates to the mixed-input loader.
-    """
-    return load_database_index_from_inputs(record_paths)
-
-
 def load_database_index_from_inputs(
     input_paths: list[str],
 ) -> dict[str, Any]:

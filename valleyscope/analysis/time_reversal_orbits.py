@@ -13,6 +13,10 @@ from valleyscope.analysis.reduced_ebr_solver import (
 from valleyscope.analysis.time_reversal_sewing import (
     validate_time_reversal_sewing_report,
 )
+from valleyscope.analysis.tr_irrep_completion import (
+    _deduplicate,
+    _valid_operation_inventory_identity,
+)
 from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector
 from valleyscope.io.wavefunction_convention import (
     canonical_identity,
@@ -21,6 +25,7 @@ from valleyscope.io.wavefunction_convention import (
 from valleyscope.irreps.time_reversal_source import (
     validate_reviewed_time_reversal_source_context,
 )
+from valleyscope.symmetry.double_space_group_lift import _vector3
 
 
 _TOL = 5e-6
@@ -728,17 +733,6 @@ def _reviewed_time_reversal_source_identity(
     }
 
 
-def _valid_operation_inventory_identity(value: object) -> bool:
-    return bool(
-        valid_sha256_identity(value)
-        or (
-            isinstance(value, str)
-            and len(value) == 64
-            and all(character in "0123456789abcdef" for character in value)
-        )
-    )
-
-
 def _candidate_unitary_completion_records(
     candidates: Sequence[object],
     members: Sequence[str],
@@ -1120,20 +1114,6 @@ def _block_completion_record(
     record["readiness_status"] = "blocked"
 
 
-def _block_completion_record_readiness(
-    record: dict[str, object],
-    blocker: str,
-) -> None:
-    """Block promotion without erasing structurally complete TR evidence."""
-    blockers = record.get("blockers")
-    if not isinstance(blockers, list):
-        blockers = []
-        record["blockers"] = blockers
-    if blocker not in blockers:
-        blockers.append(blocker)
-    record["readiness_status"] = "blocked"
-
-
 def _candidate_source_hsp_to_sampled_kpoint(
     candidates: Sequence[object],
     members: Sequence[str],
@@ -1382,13 +1362,8 @@ def _candidate_source_hsp_bindings(
 
 
 def _finite_vector3(value: object) -> list[float] | None:
-    try:
-        vector = np.asarray(value, dtype=float)
-    except (TypeError, ValueError):
-        return None
-    if vector.shape != (3,) or not np.all(np.isfinite(vector)):
-        return None
-    return [float(item) for item in vector]
+    vector = _vector3(value)
+    return [float(item) for item in vector] if vector is not None else None
 
 
 def _decompose_grey_counts(
@@ -1542,11 +1517,3 @@ def _centers_are_time_reversal_partners(
     except np.linalg.LinAlgError:
         return False
     return np.linalg.norm(delta_frac - np.rint(delta_frac)) <= _TOL
-
-
-def _deduplicate(values: Sequence[str]) -> list[str]:
-    out: list[str] = []
-    for value in values:
-        if value not in out:
-            out.append(value)
-    return out

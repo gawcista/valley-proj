@@ -68,16 +68,18 @@ def build_plane_wave_representation(
     tolerance: float = 1e-6,
     target_coefficients: np.ndarray | None = None,
     target_q_cart: np.ndarray | None = None,
+    action: PlaneWaveActionResult | None = None,
 ) -> PlaneWaveRepresentationResult:
-    action = apply_plane_wave_action(
-        coefficients,
-        q_cart,
-        rotation_cart,
-        translation_cart,
-        spin_rotation=spin_rotation,
-        tolerance=tolerance,
-        target_q_cart=target_q_cart,
-    )
+    if action is None:
+        action = apply_plane_wave_action(
+            coefficients,
+            q_cart,
+            rotation_cart,
+            translation_cart,
+            spin_rotation=spin_rotation,
+            tolerance=tolerance,
+            target_q_cart=target_q_cart,
+        )
     coeffs = np.asarray(coefficients, dtype=np.complex128)
     target = (
         coeffs
@@ -145,19 +147,31 @@ def apply_plane_wave_action(
         target_q_cart=target_q,
     )
     mapping = reciprocal_grid_map.mapping
-    q_rotated = np.empty_like(q)
-    for source_idx, q_source in enumerate(q):
-        q_rotated[source_idx] = rot @ q_source
-
     transformed = np.zeros(
         (n_bands, n_spinor, len(target_q)), dtype=np.complex128
     )
-    for source_idx, target_idx in enumerate(mapping):
-        if target_idx < 0:
-            continue
-        phase = np.exp(-1.0j * float(q_rotated[source_idx] @ trans))
-        for band in range(n_bands):
-            transformed[band, :, target_idx] += phase * (spin @ coeffs[band, :, source_idx])
+    valid = mapping >= 0
+    if np.any(valid):
+        source_idx = np.flatnonzero(valid)
+        target_idx = mapping[source_idx]
+        phase = np.exp(-1.0j * ((q[source_idx] @ rot.T) @ trans))
+        # Explicit spinor-row accumulation mirrors the per-band reference
+        # ``spin @ coeffs[band, :, source]`` exactly (ascending spinor index,
+        # scalar complex multiply-accumulate), instead of a BLAS batched
+        # matmul whose kernel summation order can differ in the last bit.
+        spin_coeffs = np.zeros_like(coeffs[:, :, source_idx])
+        for spinor_row in range(n_spinor):
+            row = np.zeros_like(spin_coeffs[:, 0, :])
+            for spinor_col in range(n_spinor):
+                row = row + spin[spinor_row, spinor_col] * coeffs[
+                    :, spinor_col, source_idx
+                ]
+            spin_coeffs[:, spinor_row, :] = row
+        np.add.at(
+            transformed,
+            (slice(None), slice(None), target_idx),
+            phase[None, None, :] * spin_coeffs,
+        )
 
     return PlaneWaveActionResult(
         transformed_coefficients=transformed,
@@ -193,14 +207,18 @@ def build_reciprocal_grid_map(
         or not np.all(np.isfinite(target_q))
     ):
         raise ValueError("target_q_cart must be finite with shape [nG,3]")
-    lookup = _q_vector_lookup(target_q, tolerance)
+    rot_q = q @ rotation.T
+    base_source = np.rint(rot_q / tolerance).astype(np.int64)
+    base_target = np.rint(target_q / tolerance).astype(np.int64)
+    lookup = _q_vector_lookup(base_target)
+    q_flat = target_q.tolist()
+    tol_sq = tolerance * tolerance
     mapping = np.full(len(q), -1, dtype=int)
-    for source_idx, q_source in enumerate(q):
+    for source_idx, ((bx, by, bz), (qx, qy, qz)) in enumerate(
+        zip(base_source.tolist(), rot_q.tolist())
+    ):
         mapping[source_idx] = _lookup_q_vector(
-            rotation @ q_source,
-            target_q,
-            lookup,
-            tolerance,
+            bx, by, bz, qx, qy, qz, lookup, q_flat, tol_sq,
         )
     return ReciprocalGridMapResult(
         mapping=mapping,
@@ -229,7 +247,26 @@ def validate_reciprocal_grid_permutation(
         if mapping.ndim != 1 or mapping.dtype.kind not in "iu":
             candidates: object = None
         else:
-            candidates = mapping.tolist()
+            in_range = (
+                mapping[(mapping >= 0) & (mapping < dimension)]
+                if mapping.dtype.kind == "i"
+                else mapping[mapping < dimension]
+            )
+            reasons: list[str] = []
+            if len(mapping) != dimension:
+                reasons.append("source_coverage_incomplete")
+            if mapping.dtype.kind == "i" and bool(np.count_nonzero(mapping < 0)):
+                reasons.append("source_coverage_incomplete")
+            if bool(np.count_nonzero(mapping >= dimension)):
+                reasons.append("target_index_out_of_range")
+            if len(np.unique(in_range)) != len(in_range):
+                reasons.append("target_index_collision")
+            if len(np.unique(in_range)) != dimension:
+                reasons.append("target_coverage_incomplete")
+            return ReciprocalGridPermutationValidation(
+                "passed" if not reasons else "blocked",
+                tuple(dict.fromkeys(reasons)),
+            )
     elif isinstance(mapping, (list, tuple)):
         candidates = list(mapping)
     else:
@@ -280,38 +317,40 @@ def reciprocal_grid_identity(q_cart: np.ndarray) -> str:
     )
 
 
-def _q_vector_lookup(q_cart: np.ndarray, tolerance: float) -> dict[tuple[int, int, int], list[int]]:
+def _q_vector_lookup(base: np.ndarray) -> dict[tuple[int, int, int], list[int]]:
     lookup: dict[tuple[int, int, int], list[int]] = {}
-    for idx, vector in enumerate(q_cart):
-        lookup.setdefault(_q_key(vector, tolerance), []).append(idx)
+    for idx, key in enumerate(map(tuple, base.tolist())):
+        lookup.setdefault(key, []).append(idx)
     return lookup
 
 
 def _lookup_q_vector(
-    target: np.ndarray,
-    q_cart: np.ndarray,
+    bx: int,
+    by: int,
+    bz: int,
+    qx: float,
+    qy: float,
+    qz: float,
     lookup: dict[tuple[int, int, int], list[int]],
-    tolerance: float,
+    q_flat: list[list[float]],
+    tol_sq: float,
 ) -> int:
-    base_key = _q_key(target, tolerance)
+    """Nearest candidate within ``sqrt(tol_sq)`` over the 27-cell neighborhood."""
     best_idx = -1
     best_distance_sq = float("inf")
-    tol_sq = tolerance * tolerance
     for dx in (-1, 0, 1):
         for dy in (-1, 0, 1):
             for dz in (-1, 0, 1):
-                key = (base_key[0] + dx, base_key[1] + dy, base_key[2] + dz)
-                for idx in lookup.get(key, []):
-                    diff = q_cart[idx] - target
-                    distance_sq = float(diff @ diff)
+                cell = lookup.get((bx + dx, by + dy, bz + dz))
+                if cell is None:
+                    continue
+                for idx in cell:
+                    vx, vy, vz = q_flat[idx]
+                    diff_x = vx - qx
+                    diff_y = vy - qy
+                    diff_z = vz - qz
+                    distance_sq = diff_x * diff_x + diff_y * diff_y + diff_z * diff_z
                     if distance_sq <= tol_sq and distance_sq < best_distance_sq:
                         best_idx = idx
                         best_distance_sq = distance_sq
     return best_idx
-
-
-def _q_key(vector: np.ndarray, tolerance: float) -> tuple[int, int, int]:
-    if tolerance <= 0.0:
-        raise ValueError("tolerance must be positive")
-    scaled = np.rint(np.asarray(vector, dtype=float) / tolerance).astype(np.int64)
-    return (int(scaled[0]), int(scaled[1]), int(scaled[2]))

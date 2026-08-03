@@ -9,6 +9,7 @@ from valleyscope.analysis.time_reversal_sewing import (
     validate_time_reversal_sewing_report,
 )
 from valleyscope.analysis.tr_irrep_completion import (
+    _positive_int,
     validate_tr_irrep_completion_certificate,
 )
 from valleyscope.analysis.unitary_valley_sewing_completion import (
@@ -1130,7 +1131,3 @@ def _reviewed_hsp_involution(
             mapping[members[0]] = members[1]
             mapping[members[1]] = members[0]
     return mapping, representatives
-
-
-def _positive_int(value: object) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and value > 0

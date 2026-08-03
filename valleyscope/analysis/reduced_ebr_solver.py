@@ -11,71 +11,7 @@ EBR tables and valley-preserving irrep vectors.  It does not import
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any
-
-
-def get_reduced_ebr_matrix(table: Mapping[str, Any]) -> list[list[int]]:
-    """Return reduced EBR matrix columns from a validated table-like mapping."""
-    ebrs = table.get("ebrs", [])
-    if not isinstance(ebrs, Sequence) or isinstance(ebrs, (str, bytes)):
-        raise ValueError("table['ebrs'] must be a sequence")
-    vectors: list[list[int]] = []
-    expected_length: int | None = None
-    for i, ebr in enumerate(ebrs):
-        if not isinstance(ebr, Mapping):
-            raise ValueError(f"table['ebrs'][{i}] must be a mapping")
-        vector = list(ebr.get("vector", []))
-        _validate_nonnegative_integer_vector(vector, field=f"EBR vector {i}")
-        if expected_length is None:
-            expected_length = len(vector)
-        elif len(vector) != expected_length:
-            raise ValueError("all EBR vector lengths must match")
-        vectors.append(vector)
-    if not vectors:
-        raise ValueError("table['ebrs'] must be non-empty")
-    return vectors
-
-
-def create_reduced_symmetry_vector(
-    irrep_counts: Mapping[str, int],
-    irrep_basis: Sequence[str],
-    *,
-    strict: bool = True,
-) -> list[int]:
-    """Create an ordered reduced irrep vector from multiplicity counts."""
-    basis = _validate_irrep_basis(irrep_basis)
-    index = {label: i for i, label in enumerate(basis)}
-    vector = [0 for _ in basis]
-    if not isinstance(irrep_counts, Mapping):
-        raise ValueError("irrep_counts must be a mapping")
-    for label, count in irrep_counts.items():
-        if not isinstance(label, str) or not label:
-            raise ValueError("irrep_counts keys must be non-empty strings")
-        if not isinstance(count, int) or isinstance(count, bool) or count < 0:
-            raise ValueError(f"irrep_counts[{label!r}] must be a nonnegative integer")
-        if label not in index:
-            if strict:
-                raise ValueError(f"irrep count {label!r} is not in reduced irrep basis")
-            continue
-        vector[index[label]] = count
-    return vector
-
-
-def compute_reduced_ebr_decomposition(
-    *,
-    target_vector: Sequence[int],
-    ebr_matrix: Sequence[Sequence[int]],
-    ebr_labels: Sequence[str],
-    max_coefficient: int,
-) -> dict:
-    """Compute exact reduced EBR decomposition/classification."""
-    return classify_bundle(
-        list(target_vector),
-        [list(vector) for vector in ebr_matrix],
-        list(ebr_labels),
-        max_coefficient,
-    )
+from collections.abc import Sequence
 
 
 def check_integer_span(
@@ -150,18 +86,6 @@ def derive_coefficient_bounds(
                     bound = cap
         bounds.append(bound)
     return bounds
-
-
-def search_nonnegative_bounded(
-    target: list[int],
-    ebr_vectors: list[list[int]],
-    bounds: list[int],
-) -> list[int] | None:
-    """Bounded search returning the first nonnegative solution (or None)."""
-    witnesses = search_nonnegative_witnesses(
-        target, ebr_vectors, bounds, max_witnesses=1,
-    )
-    return witnesses[0] if witnesses else None
 
 
 def search_nonnegative_witnesses(
@@ -369,20 +293,3 @@ def _validate_nonnegative_integer_vector(
     for i, value in enumerate(vector):
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
             raise ValueError(f"{field}[{i}] must be a nonnegative integer")
-
-
-def _validate_irrep_basis(irrep_basis: Sequence[str]) -> list[str]:
-    if not isinstance(irrep_basis, Sequence) or isinstance(irrep_basis, (str, bytes)):
-        raise ValueError("irrep_basis must be a sequence")
-    basis: list[str] = []
-    seen: set[str] = set()
-    for i, label in enumerate(irrep_basis):
-        if not isinstance(label, str) or not label:
-            raise ValueError(f"irrep_basis[{i}] must be a non-empty string")
-        if label in seen:
-            raise ValueError(f"duplicate reduced irrep basis label {label!r}")
-        basis.append(label)
-        seen.add(label)
-    if not basis:
-        raise ValueError("irrep_basis must be non-empty")
-    return basis

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from valleyscope.analysis.hsp_star import _canonical_frac
 from valleyscope.symmetry.little_group import (
     reciprocal_transform,
     is_little_group_operation,
@@ -282,14 +283,6 @@ def _conjugation_entry(
     if derived_target_operation_ids is not None:
         entry["derived_target_operation_ids"] = derived_target_operation_ids
     return entry
-
-
-def _canonical_frac(frac: np.ndarray) -> np.ndarray:
-    arr = np.asarray(frac, dtype=float)
-    canonical = arr - np.floor(arr)
-    canonical[np.isclose(canonical, 1.0, atol=1e-10)] = 0.0
-    canonical[np.isclose(canonical, 0.0, atol=1e-10)] = 0.0
-    return canonical
 
 
 def _make_target_key(

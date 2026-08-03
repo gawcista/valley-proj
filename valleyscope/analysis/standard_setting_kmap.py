@@ -1622,6 +1622,11 @@ def resolve_standard_setting_hsp_label(
                 "transform_provenance", "operation_basis_reconstruction",
             )
         )
+        # transform_provenance is a derivation-method marker; the canonical
+        # primitive-conventional relation for this path is always
+        # operation-basis reconstruction (the complete affine operation
+        # bijection above was verified).
+        basis_relation = "operation_basis_reconstruction"
         # Transform k_frac from parent reciprocal basis to standard setting.
         # The reciprocal transform is the transpose of the inverse of the
         # direct-lattice transform: k_std = T^(-T) * k_parent.
@@ -1664,7 +1669,7 @@ def resolve_standard_setting_hsp_label(
                         parent_k_frac=k_frac,
                     )
                     cert.standard_setting_source = basis_provenance
-                    cert.primitive_conventional_relation = basis_provenance
+                    cert.primitive_conventional_relation = basis_relation
                     cert.operation_mapping_status = (
                         "operation_basis_verification_passed"
                     )
@@ -1696,7 +1701,7 @@ def resolve_standard_setting_hsp_label(
                     transform_provenance=basis_provenance,
                     parent_k_frac=k_frac,
                 )
-                cert.primitive_conventional_relation = basis_provenance
+                cert.primitive_conventional_relation = basis_relation
                 if aff is not None:
                     _apply_affine_validation_to_certificate(cert, aff)
                 prov["standard_setting_certificate"] = cert.to_dict()
@@ -1716,7 +1721,7 @@ def resolve_standard_setting_hsp_label(
                 resolved_hsp_label=transformed_label,
             )
             cert.standard_setting_source = basis_provenance
-            cert.primitive_conventional_relation = basis_provenance
+            cert.primitive_conventional_relation = basis_relation
             if derive_affine_certificate_only:
                 cert.standard_setting_source = (
                     "complete_parent_affine_operation_derivation"

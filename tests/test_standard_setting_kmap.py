@@ -916,6 +916,61 @@ def test_basis_reconstruction_certificate_records_relation(monkeypatch):
     assert tc["transform_provenance"] == "operation_basis_reconstruction"
 
 
+def test_standardization_marker_never_becomes_conventional_relation(monkeypatch):
+    """The derivation-method marker emitted by the real affine-subgroup
+    standardization must not leak into ``primitive_conventional_relation``;
+    it stays in the provenance fields while the relation uses the canonical
+    operation-basis-reconstruction vocabulary."""
+    import valleyscope.analysis.standard_setting_kmap as kmap
+
+    class _SecondCallTable:
+        def __init__(self):
+            self.calls = 0
+
+        def match_kpoint_label(self, k_frac, *, tolerance=1e-6):
+            self.calls += 1
+            return "M" if self.calls > 1 else None
+
+    monkeypatch.setattr(
+        kmap,
+        "_compute_standard_setting_basis_transform",
+        lambda **kwargs: {
+            "status": "accepted",
+            "transform_matrix": np.eye(3).tolist(),
+            # Exact shape emitted by _standardize_affine_subgroup_cell:
+            # the marker describes the derivation method, not the relation.
+            "transform_provenance": "spglib_affine_subgroup_standardization",
+            "operation_basis_verification": {"status": "passed"},
+        },
+    )
+
+    label, blocker, prov = kmap.resolve_standard_setting_hsp_label(
+        k_frac=np.array([0.123, 0.456, 0.0]),
+        table=_SecondCallTable(),
+        standard_match={
+            "number": 143, "international_short": "P3",
+            "hall_number": 430, "hall_symbol": "P 3",
+            "operation_ids": [0, 1, 2],
+        },
+        detected_operations=[{
+            "operation_id": 0,
+            "rotation_frac": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            "translation_frac": [0.0, 0.0, 0.0],
+        }],
+    )
+    assert label is None
+    cert = prov["standard_setting_certificate"]
+    assert (
+        cert["primitive_conventional_relation"]
+        == "operation_basis_reconstruction"
+    )
+    assert (
+        cert["standard_setting_source"]
+        == "spglib_affine_subgroup_standardization"
+    )
+    assert cert["transform_provenance"] == "spglib_affine_subgroup_standardization"
+
+
 # ---------------------------------------------------------------------------
 # Hall-number convention guard tests
 # ---------------------------------------------------------------------------

@@ -10,6 +10,7 @@ import numpy as np
 from valleyscope.analysis.generic_irrep_matching import match_restricted_characters
 from valleyscope.analysis.scoped_representation_evidence import (
     ScopedEvidenceValidation,
+    _run_local_memoized,
     validate_directed_valley_sewing_evidence_record,
     validate_scoped_representation_evidence_record,
 )
@@ -27,6 +28,7 @@ _CPRIME_KEYS = (
 )
 
 
+@_run_local_memoized
 def build_unitary_valley_sewing_certificate(**raw: object) -> dict[str, object]:
     """Recompute one target irrep from producer-owned directed evidence."""
     reasons: list[str] = []

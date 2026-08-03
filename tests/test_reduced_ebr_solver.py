@@ -7,12 +7,91 @@ import pytest
 from valleyscope.analysis.reduced_ebr_solver import (
     check_integer_span,
     classify_bundle,
-    compute_reduced_ebr_decomposition,
-    create_reduced_symmetry_vector,
     derive_coefficient_bounds,
-    get_reduced_ebr_matrix,
-    search_nonnegative_bounded,
+    search_nonnegative_witnesses,
+    _validate_nonnegative_integer_vector,
 )
+
+
+# Test-side compact wrappers over the production solver API.  Production
+# never calls them, so they live in the test package instead of the solver
+# module; they exercise the public classification/witness code paths.
+
+def _validate_irrep_basis(irrep_basis):
+    if not isinstance(irrep_basis, (list, tuple)):
+        raise ValueError("irrep_basis must be a sequence")
+    basis: list[str] = []
+    seen: set[str] = set()
+    for i, label in enumerate(irrep_basis):
+        if not isinstance(label, str) or not label:
+            raise ValueError(f"irrep_basis[{i}] must be a non-empty string")
+        if label in seen:
+            raise ValueError(f"duplicate reduced irrep basis label {label!r}")
+        basis.append(label)
+        seen.add(label)
+    if not basis:
+        raise ValueError("irrep_basis must be non-empty")
+    return basis
+
+
+def get_reduced_ebr_matrix(table):
+    """Return reduced EBR matrix columns from a validated table-like mapping."""
+    ebrs = table.get("ebrs", [])
+    vectors: list[list[int]] = []
+    expected_length: int | None = None
+    for i, ebr in enumerate(ebrs):
+        vector = list(ebr.get("vector", []))
+        _validate_nonnegative_integer_vector(vector, field=f"EBR vector {i}")
+        if expected_length is None:
+            expected_length = len(vector)
+        elif len(vector) != expected_length:
+            raise ValueError("all EBR vector lengths must match")
+        vectors.append(vector)
+    if not vectors:
+        raise ValueError("table['ebrs'] must be non-empty")
+    return vectors
+
+
+def create_reduced_symmetry_vector(
+    irrep_counts, irrep_basis, *, strict: bool = True,
+):
+    """Create an ordered reduced irrep vector from multiplicity counts."""
+    basis = _validate_irrep_basis(irrep_basis)
+    index = {label: i for i, label in enumerate(basis)}
+    vector = [0 for _ in basis]
+    if not isinstance(irrep_counts, dict):
+        raise ValueError("irrep_counts must be a mapping")
+    for label, count in irrep_counts.items():
+        if not isinstance(label, str) or not label:
+            raise ValueError("irrep_counts keys must be non-empty strings")
+        if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+            raise ValueError(f"irrep_counts[{label!r}] must be a nonnegative integer")
+        if label not in index:
+            if strict:
+                raise ValueError(f"irrep count {label!r} is not in reduced irrep basis")
+            continue
+        vector[index[label]] = count
+    return vector
+
+
+def compute_reduced_ebr_decomposition(
+    *, target_vector, ebr_matrix, ebr_labels, max_coefficient,
+):
+    """Compute exact reduced EBR decomposition/classification."""
+    return classify_bundle(
+        list(target_vector),
+        [list(vector) for vector in ebr_matrix],
+        list(ebr_labels),
+        max_coefficient,
+    )
+
+
+def search_nonnegative_bounded(target, ebr_vectors, bounds):
+    """Bounded search returning the first nonnegative solution (or None)."""
+    witnesses = search_nonnegative_witnesses(
+        target, ebr_vectors, bounds, max_witnesses=1,
+    )
+    return witnesses[0] if witnesses else None
 
 
 _TABLE = {
