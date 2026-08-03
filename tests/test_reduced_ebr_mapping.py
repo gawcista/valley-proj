@@ -220,7 +220,7 @@ def test_missing_table():
 def test_null_bundle():
     r = _map_with_explicit_low_level_cprime_fixture(ebr_export_bundle=None)
     assert r["status"] == "not_evaluated"
-    assert r["schema_version"] == "2.0.0"
+    assert r["schema_version"] == "2.1.0"
     assert "mapping_status" not in r
     assert "reduced_ebr_decomposition_status" not in r
     assert r["solutions"] == []
@@ -256,7 +256,7 @@ def test_schema_fields():
     for k in ["status", "schema_version", "table_status",
               "solutions", "excluded_bundles", "solver"]:
         assert k in r, f"missing: {k}"
-    assert r["schema_version"] == "2.0.0"
+    assert r["schema_version"] == "2.1.0"
     assert "mapping_status" not in r
     assert "reduced_ebr_decomposition_status" not in r
 

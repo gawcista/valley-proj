@@ -104,6 +104,10 @@ D_g P_a^0 D_g^\dagger \approx P_{\pi_g(a)}^0 .
 把 \(a\) 映射到另一 valley 的操作是 **valley-changing operation**。它提供
 valley orbit 和 **valley sewing matrix（谷缝合矩阵）** 数据，不能被强行
 纳入 \(G_k^{(a)}\) 的单 valley irrep。
+如果一个经过独立验证的酉 valley sewing operation 把已观测 source row 与
+未采样 row 联系起来，ValleyScope 可以输运真实的投影子空间、在目标侧重新
+匹配表示，并补全 valley-resolved unitary irrep vector。该补全要求可重算的
+波函数系数、projector、仿射操作和倒格点映射证据。
 
 ValleyScope 把对称表示限制在真实的 valley-preserving operation set 上；
 SOC 波函数使用 double-valued irreps。匹配依赖经过验证的
@@ -116,6 +120,7 @@ Parent TRS **不意味着** one-valley subspace 保持 TRS。一般情况下，�
 联系一对 time-reversed valleys：
 
 - 单 valley irrep 是其 valley-preserving subgroup 的酉不可约表示；
+- unitary valley-sewing completion 与时间反演是不同的物理构造；
 - time-reversal completion 是独立的 valley 间构造；
 - one-valley 结果不会默认匹配到 grey group；
 - 只有所需反酉与 valley 间证据存在并通过验证时，才使用联合 grey-group

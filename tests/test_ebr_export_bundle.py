@@ -204,7 +204,7 @@ def test_schema_fields():
             "excluded_instances", "interpretation"}
     assert keys <= set(r)
     assert "reduced_ebr_decomposition_status" not in r
-    assert r["schema_version"] == "2.0.0"
+    assert r["schema_version"] == "2.1.0"
     b = r["bundles"][0]
     for k in ["bundle_id", "source_instance_id", "valley",
               "irreps_by_kpoint", "operations_by_kpoint",
@@ -269,7 +269,7 @@ def test_schema_1_2_preserves_required_operation_ids_in_certificate_identity():
         ebr_problem_instances={"instances": [instance]},
     )
 
-    assert report["schema_version"] == "2.0.0"
+    assert report["schema_version"] == "2.1.0"
     exported_identity = report["bundles"][0]["certificate_identity"]
     assert exported_identity["affine_required_operation_ids"] == [-3, 4]
 
@@ -313,7 +313,7 @@ def test_schema_1_2_preserves_centered_expansion_identity_without_loss():
         ebr_problem_instances={"instances": [instance]},
     )
 
-    assert report["schema_version"] == "2.0.0"
+    assert report["schema_version"] == "2.1.0"
     assert report["bundles"][0]["certificate_identity"] == certificate_identity
 
 

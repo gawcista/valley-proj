@@ -27,7 +27,7 @@ from valleyscope.analysis.promotion_identity import (
 )
 from valleyscope.io.wavefunction_convention import valid_sha256_identity
 
-_SCHEMA_VERSION = "2.0.0"
+_SCHEMA_VERSION = "2.1.0"
 
 _PROMOTION_REQUIRED_PASSED_CHECKS = frozenset({
     "table_provenance_check",

@@ -1933,7 +1933,7 @@ def test_tmote2_projected_source_hsp_coverage_and_tr_orbit_are_explicit():
             assert target["projector_fingerprint"].startswith("sha256:")
 
     export = s["valley_ebr_export_bundle"]
-    assert export["schema_version"] == "2.0.0"
+    assert export["schema_version"] == "2.1.0"
     assert export["bundle_count"] == 3
     assert export["excluded_count"] == 0
     assert export["excluded_instances"] == []
@@ -2119,7 +2119,7 @@ def test_tmote2_reduced_ebr_is_authoritative_after_tr_completion():
     s = _read_fixture_summary()
     mapping = s["valley_reduced_ebr_mapping"]
 
-    assert mapping["schema_version"] == "2.0.0"
+    assert mapping["schema_version"] == "2.1.0"
     assert mapping["status"] == "no_exact_solution"
     assert mapping["table_status"] == "loaded"
     assert len(mapping["solutions"]) == 3

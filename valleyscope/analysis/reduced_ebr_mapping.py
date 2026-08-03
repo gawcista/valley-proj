@@ -42,7 +42,7 @@ from valleyscope.analysis.scoped_representation_evidence import (
 
 _REQUIRED_TABLE_KEYS = {"schema_version", "subspace_group_candidate",
                          "expected_hsps", "irreps", "ebrs"}
-_OUTPUT_SCHEMA_VERSION = "2.0.0"
+_OUTPUT_SCHEMA_VERSION = "2.1.0"
 _SOLVER_NAME = "smith_normal_form_plus_bounded_nonnegative_search"
 
 # Standard-setting certificate convention — REAL producer vocabulary.

@@ -1270,7 +1270,7 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
 
     record = load_database_ingestion_record_from_directory(run_dir)
 
-    assert record["schema_version"] == "2.0.0"
+    assert record["schema_version"] == "2.1.0"
     assert record["record_status"] == (
         "has_reduced_table_validation_candidates"
     )
@@ -2071,12 +2071,12 @@ def test_database_index_input_exclusions_have_source_record():
     }
 
 
-def test_ingestion_record_schema_version_is_2_0_0():
-    """Ingestion record schema reflects the C-prime breaking reset."""
+def test_ingestion_record_schema_version_is_2_1_0():
+    """Ingestion schema includes unitary valley-sewing provenance."""
     from valleyscope.analysis.database_ingestion_record import build_database_ingestion_record
     summary = {"target_kpoints": [], "iband": [], "input": {}}
     record = build_database_ingestion_record(valley_summary=summary)
-    assert record["schema_version"] == "2.0.0"
+    assert record["schema_version"] == "2.1.0"
 
 
 # -----------------------------------------------------------------------
@@ -2196,7 +2196,7 @@ def test_ingestion_preserves_centered_certificate_identity_from_bundle():
         valley_ebr_export_bundle=bundle,
     )
 
-    assert record["schema_version"] == "2.0.0"
+    assert record["schema_version"] == "2.1.0"
     assert record["valley_irrep_records"][0]["certificate_identity"] == (
         certificate_identity
     )

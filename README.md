@@ -110,6 +110,11 @@ D_g P_a^0 D_g^\dagger \approx P_{\pi_g(a)}^0 .
 An operation that maps \(a\) to another valley is a **valley-changing
 operation**. It contributes valley-orbit and **valley sewing matrix** data; it
 must not be forced into the single-valley irrep of \(G_k^{(a)}\).
+When an independently validated unitary valley sewing operation connects an
+observed source row to an unsampled row, ValleyScope can transport the actual
+projected subspace, re-match the target representation, and complete the
+valley-resolved unitary irrep vector. This completion requires recomputable
+coefficient, projector, affine-operation, and reciprocal-grid evidence.
 
 ValleyScope restricts each symmetry representation to the actual
 valley-preserving operation set and matches double-valued irreps for SOC
@@ -124,6 +129,7 @@ Parent TRS does **not** imply that a one-valley subspace is TR-invariant. In
 general, time reversal relates distinct time-reversed valleys:
 
 - a single-valley irrep is a unitary irrep of its valley-preserving subgroup;
+- unitary valley-sewing completion is distinct from time reversal;
 - time-reversal completion is a separate inter-valley construction;
 - a one-valley result is not matched to a grey group by default;
 - joint grey-group data are used only when the required antiunitary and
