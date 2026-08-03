@@ -123,7 +123,7 @@ def build_unitary_valley_sewing_certificate(**raw: object) -> dict[str, object]:
             "matching_reason": matching.get("reason", ""),
             "reviewed_irrep_source_identity": canonical_identity(_json(target_source)),
         },
-        "valley_orbit": scope.get("valley_orbit", []),
+        "full_valley_orbit": scope.get("full_valley_orbit", []),
         "hsp_mapping": {
             key: scope.get(key)
             for key in ("source_k_frac", "target_k_frac", "reciprocal_lattice_shift")
@@ -177,6 +177,21 @@ def validate_unitary_valley_sewing_certificate(
     return ScopedEvidenceValidation(
         "blocked" if reasons else str(certificate.get("status")),
         tuple(dict.fromkeys(reasons or certificate.get("reason_codes", []))),
+    )
+
+
+def validate_unitary_valley_sewing_certificate_context(
+    certificate: Mapping[str, object],
+    context: Mapping[str, object],
+) -> bool:
+    """Require the exact producer certificate and recompute its raw evidence."""
+    raw_inputs = context.get("raw_inputs")
+    return bool(
+        context.get("certificate") == certificate
+        and isinstance(raw_inputs, Mapping)
+        and validate_unitary_valley_sewing_certificate(
+            certificate, **raw_inputs
+        ).status == "passed"
     )
 
 

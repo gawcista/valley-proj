@@ -238,9 +238,6 @@ def _directed_sewing_inputs() -> dict[str, object]:
     source_coefficients = np.zeros((2, 2, 2), dtype=np.complex128)
     source_coefficients[0, 0, 0] = 1.0
     source_coefficients[1, 1, 1] = 1.0
-    target_coefficients = np.zeros_like(source_coefficients)
-    target_coefficients[0, 0, 1] = 1.0
-    target_coefficients[1, 1, 0] = 1.0
     q_cart = np.array(
         [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]],
         dtype=float,
@@ -256,19 +253,14 @@ def _directed_sewing_inputs() -> dict[str, object]:
         "target_k_frac": np.array([-1.0 / 3.0, 0.0, 0.0]),
         "source_valley": "v0",
         "target_valley": "v1",
-        "valley_orbit": ("v0", "v1"),
         "sewing_operation_id": 47,
         "source_little_group_operation_ids": (11,),
         "target_little_group_operation_ids": (11,),
         "detected_operations": operations,
         "source_q_cart": q_cart,
-        "target_q_cart": q_cart,
         "source_coefficients": source_coefficients,
-        "target_coefficients": target_coefficients,
         "source_projector": np.diag([1.0, 0.0]),
-        "target_projector": np.diag([1.0, 0.0]),
         "source_valley_basis": np.array([[1.0], [0.0]]),
-        "target_valley_basis": np.array([[1.0], [0.0]]),
         "wavecar_rtag": None,
     }
 
@@ -283,7 +275,7 @@ def test_directed_valley_sewing_scope_recomputes_cross_arm_groupoid_evidence():
     assert record["scope"]["scope_kind"] == "valley_sewing"
     assert record["scope"]["source_kpoint_label"] == "source_arm"
     assert record["scope"]["target_kpoint_label"] == "target_arm"
-    assert record["reciprocal_grid"]["source_to_target_map"] == [1, 0]
+    assert record["reciprocal_grid"]["source_to_target_map"] == [0, 1]
     assert record["reciprocal_grid"]["permutation_status"] == "passed"
     assert record["directed_group_law"]["rows"][0]["passed"] is True
     assert record["projector_covariance"]["passed"] is True
@@ -305,8 +297,8 @@ def test_directed_valley_sewing_scope_recomputes_cross_arm_groupoid_evidence():
     [
         ("target_k", "directed_hsp_mapping_failed"),
         ("valley_mapping", "directed_valley_mapping_failed"),
-        ("target_grid", "source_coverage_incomplete"),
-        ("target_projector", "projector_covariance_failed"),
+        ("source_grid", "target_coverage_incomplete"),
+        ("source_projector", "valley_basis_range_failed"),
         ("source_coefficients", "valley_sewing_unitarity_failed"),
         ("lift_inputs", "double_space_group_lift_not_passed"),
     ],
@@ -321,10 +313,10 @@ def test_directed_valley_sewing_scope_fails_closed_on_raw_tamper(
         inputs["target_k_frac"][0] = 1.0 / 3.0
     elif tamper == "valley_mapping":
         inputs["detected_operations"][1]["sector_mapping"]["v0"] = "v0"
-    elif tamper == "target_grid":
-        inputs["target_q_cart"][1] = inputs["target_q_cart"][0]
-    elif tamper == "target_projector":
-        inputs["target_projector"] = np.diag([0.0, 1.0])
+    elif tamper == "source_grid":
+        inputs["source_q_cart"][1] = inputs["source_q_cart"][0]
+    elif tamper == "source_projector":
+        inputs["source_projector"] = np.diag([0.0, 1.0])
     elif tamper == "source_coefficients":
         inputs["source_coefficients"][0, 0, 0] = 0.5
     else:
@@ -364,10 +356,34 @@ def test_directed_valley_sewing_accepts_generic_three_valley_permutation():
     assert len(inputs["detected_operations"][1]["sector_mapping"]) == 3
 
 
+def test_directed_sewing_distinguishes_full_orbit_from_selected_cycle():
+    inputs = _directed_sewing_inputs()
+    inputs["detected_operations"] = deepcopy(inputs["detected_operations"])
+    selected = inputs["detected_operations"][1]["sector_mapping"]
+    selected.update({"v2": "v2", "v3": "v3"})
+    inputs["detected_operations"][0]["sector_mapping"].update({
+        "v2": "v2", "v3": "v3",
+    })
+    inputs["detected_operations"].append({
+        **_operation(89, -np.eye(3, dtype=int)),
+        "sector_mapping": {
+            "v0": "v2", "v2": "v0", "v1": "v3", "v3": "v1",
+        },
+    })
+
+    record = build_directed_valley_sewing_evidence(**inputs).to_record()
+
+    assert record["status"] == "passed"
+    assert record["scope"]["full_valley_orbit"] == [
+        "v0", "v1", "v2", "v3",
+    ]
+    assert record["scope"]["sewing_operation_valley_permutation"] == selected
+    assert record["scope"]["source_operation_cycle"] == ["v0", "v1"]
+
+
 def test_directed_valley_block_uses_range_not_seed_eigenvalue():
     inputs = _directed_sewing_inputs()
     inputs["source_projector"] = np.diag([0.9, 0.0])
-    inputs["target_projector"] = np.diag([0.9, 0.0])
 
     record = build_directed_valley_sewing_evidence(**inputs).to_record()
 
@@ -459,34 +475,7 @@ def test_valley_changing_failure_blocks_sewing_but_not_local_irrep():
         required_operation_ids=(2,),
         bad_valley_changing_operation=True,
     )
-    sewing, _ = _build(
-        scope_kind="valley_sewing",
-        required_operation_ids=(2, 5),
-        bad_valley_changing_operation=True,
-    )
-
     assert local["status"] == "passed"
-    assert sewing["status"] == "blocked"
-    assert sewing["scope"]["valley_changing_operation_ids"] == [5]
-    assert any(
-        reason in sewing["reason_codes"]
-        for reason in (
-            "target_subspace_closure_failed",
-            "projected_representation_group_law_failed",
-            "valley_block_quality_failed",
-        )
-    )
-
-
-def test_clean_valley_sewing_scope_passes_without_antiunitary_evidence():
-    record, _ = _build(
-        scope_kind="valley_sewing",
-        required_operation_ids=(2, 5),
-    )
-
-    assert record["status"] == "passed"
-    assert record["scope"]["valley_changing_operation_ids"] == [5]
-    assert "antiunitary_evidence" not in record
 
 
 @pytest.mark.parametrize("rank", [2, 4])
@@ -557,8 +546,8 @@ def test_tr_completed_scope_is_not_a_supported_representation_scope():
 
 def test_scoped_evidence_binds_payload_certificates_kpoint_valley_and_opaque_ids():
     record, _ = _build(
-        scope_kind="valley_sewing",
-        required_operation_ids=(2, 5),
+        scope_kind="local_irrep",
+        required_operation_ids=(2,),
     )
 
     assert record["source_basis_certificate_identity"] == _source_record()[
@@ -574,18 +563,18 @@ def test_scoped_evidence_binds_payload_certificates_kpoint_valley_and_opaque_ids
     assert record["scope"]["kpoint_frac"] == [0.0, 0.0, 0.0]
     assert record["scope"]["source_valleys"] == ["v0"]
     assert record["scope"]["valley_orbit"] == ["v0", "v1"]
-    assert record["scope"]["required_operation_ids"] == [2, 5]
+    assert record["scope"]["required_operation_ids"] == [2]
     assert record["evidence_identity"].startswith("sha256:")
 
 
 def test_scoped_evidence_recomputes_exact_reciprocal_grid_permutation():
     record, _ = _build(
-        scope_kind="valley_sewing",
-        required_operation_ids=(2, 5),
+        scope_kind="local_irrep",
+        required_operation_ids=(2,),
     )
 
     rows = record["plane_wave_mapping"]["operation_rows"]
-    assert [row["source_to_target_map"] for row in rows] == [[0, 1], [0, 1]]
+    assert [row["source_to_target_map"] for row in rows] == [[0, 1]]
     assert all(row["reciprocal_grid_permutation_passed"] for row in rows)
     assert record["plane_wave_mapping"]["composition_rows"]
     assert all(
@@ -663,12 +652,12 @@ def test_scoped_evidence_rejects_negative_or_nonfinite_norm_residual(
         ),
         (
             ("scope", "required_operation_ids"),
-            [2],
+            [5],
             "recomputed_evidence_mismatch",
         ),
         (
             ("status",),
-            "passed",
+            "blocked",
             "derived_status_mismatch",
         ),
         (
@@ -680,8 +669,8 @@ def test_scoped_evidence_rejects_negative_or_nonfinite_norm_residual(
 )
 def test_scoped_evidence_rejects_serialized_tampering(path, value, reason):
     record, inputs = _build(
-        scope_kind="valley_sewing",
-        required_operation_ids=(2, 5),
+        scope_kind="local_irrep",
+        required_operation_ids=(2,),
         bad_valley_changing_operation=True,
     )
     tampered = deepcopy(record)
@@ -709,7 +698,6 @@ def test_readiness_composer_revalidates_and_fails_closed_on_identity_tampering()
     blocked = compose_representation_readiness(tampered, **inputs)
 
     assert ready["local_irrep_ready"] is True
-    assert ready["valley_sewing_ready"] is False
     assert "tr_completed_ready" not in ready
     assert blocked["local_irrep_ready"] is False
     assert "scoped_representation_evidence_invalid" in blocked["blockers"]

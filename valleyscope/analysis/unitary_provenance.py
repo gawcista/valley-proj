@@ -12,7 +12,7 @@ from valleyscope.analysis.tr_irrep_completion import (
     validate_tr_irrep_completion_certificate,
 )
 from valleyscope.analysis.unitary_valley_sewing_completion import (
-    validate_unitary_valley_sewing_certificate,
+    validate_unitary_valley_sewing_certificate_context,
 )
 from valleyscope.io.wavefunction_convention import (
     canonical_identity,
@@ -81,6 +81,35 @@ def validate_valley_sewing_completed_unitary_bundle(
     validation_contexts: Mapping[str, object] | None,
 ) -> bool:
     """Rebuild all directed sewing certificates and the canonical vector."""
+    if not isinstance(validation_contexts, Mapping):
+        return False
+
+    def certificate_valid(certificate):
+        context = validation_contexts.get(certificate.get("certificate_identity"))
+        return isinstance(context, Mapping) and (
+            validate_unitary_valley_sewing_certificate_context(
+                certificate, context
+            )
+        )
+
+    return _validate_valley_sewing_completed_unitary_bundle(
+        bundle, certificate_validator=certificate_valid
+    )
+
+
+def validate_serialized_valley_sewing_completed_unitary_bundle(
+    bundle: Mapping[str, object],
+) -> bool:
+    """Validate serialized structure only; this is not raw-evidence trust."""
+    return _validate_valley_sewing_completed_unitary_bundle(
+        bundle,
+        certificate_validator=_serialized_sewing_certificate_valid,
+    )
+
+
+def _validate_valley_sewing_completed_unitary_bundle(
+    bundle: Mapping[str, object], *, certificate_validator
+) -> bool:
     valley, expected = bundle.get("valley"), bundle.get("required_source_hsp_labels")
     completed = bundle.get("unitary_irrep_completion_records_by_hsp")
     direct = bundle.get("irrep_records_by_kpoint")
@@ -122,7 +151,7 @@ def validate_valley_sewing_completed_unitary_bundle(
                 return False
             if inferred:
                 valid, irrep, multiplicity, cprime_rows = _validate_sewing_record(
-                    record, hsp, valley, validation_contexts
+                    record, hsp, valley, certificate_validator
                 )
             else:
                 irrep, multiplicity = (
@@ -164,7 +193,7 @@ def validate_valley_sewing_completed_unitary_bundle(
     )
 
 
-def _validate_sewing_record(record, hsp, valley, contexts):
+def _validate_sewing_record(record, hsp, valley, certificate_validator):
     certificates = record.get("unitary_valley_sewing_certificates")
     if (
         record.get("completion_kind") != "inferred_by_unitary_valley_sewing"
@@ -192,14 +221,9 @@ def _validate_sewing_record(record, hsp, valley, contexts):
         source, target = (
             certificate.get("source"), certificate.get("target")
         ) if isinstance(certificate, Mapping) else (None, None)
-        context = (
-            contexts.get(certificate.get("certificate_identity"))
-            if isinstance(contexts, Mapping) and isinstance(certificate, Mapping)
-            else None
-        )
         if (
             not isinstance(source, Mapping) or not isinstance(target, Mapping)
-            or not _sewing_certificate_valid(certificate, context)
+            or not certificate_validator(certificate)
             or target.get("valley") != valley
             or target.get("source_hsp_label") != hsp
             or target.get("irrep_multiplicities", {}).get(record.get("irrep"))
@@ -226,27 +250,23 @@ def _validate_sewing_record(record, hsp, valley, contexts):
     )
 
 
-def _sewing_certificate_valid(certificate, context):
-    if isinstance(context, Mapping):
-        return bool(
-            context.get("certificate") == certificate
-            and isinstance(context.get("raw_inputs"), Mapping)
-            and validate_unitary_valley_sewing_certificate(
-                certificate, **context["raw_inputs"]
-            ).status == "passed"
-        )
+def _serialized_sewing_certificate_valid(certificate):
+    if not isinstance(certificate, Mapping):
+        return False
     content = {
         key: value for key, value in certificate.items()
         if key not in {"status", "reason_codes", "certificate_identity"}
     }
-    return bool(
-        certificate.get("status") == "passed"
-        and certificate.get("reason_codes") == []
-        and valid_sha256_identity(certificate.get("certificate_identity"))
-        and canonical_identity(content) == certificate.get(
-            "certificate_identity"
+    try:
+        return bool(
+            certificate.get("status") == "passed"
+            and certificate.get("reason_codes") == []
+            and canonical_identity(content) == certificate.get(
+                "certificate_identity"
+            )
         )
-    )
+    except (TypeError, ValueError):
+        return False
 
 
 def _cprime_links(cprime):

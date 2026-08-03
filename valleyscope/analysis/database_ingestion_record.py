@@ -17,6 +17,7 @@ from typing import Any
 from valleyscope.analysis.unitary_provenance import (
     unitary_bundle_claims_time_reversal_completion,
     unitary_bundle_claims_valley_sewing_completion,
+    validate_serialized_valley_sewing_completed_unitary_bundle,
     validate_unitary_bundle_provenance,
 )
 from valleyscope.analysis.promotion_identity import (
@@ -205,6 +206,13 @@ def build_database_ingestion_record(
                         errors.append(cprime_error)
                         continue
                     validation_candidate_count += 1
+                    if (
+                        unitary_bundle_claims_valley_sewing_completion(bundle)
+                        and not _serialized_sewing_bundle_has_strict_promotion(
+                            bundle, valley_reduced_ebr_mapping
+                        )
+                    ):
+                        continue
                     # Validation candidates contain trusted valley-preserving
                     # irreps; preserve them independently of EBR readiness.
                     binding_error = _extract_irrep_records(
@@ -638,6 +646,20 @@ def _has_passed_promotion_provenance(solution: dict[str, Any]) -> bool:
     return True
 
 
+def _serialized_sewing_bundle_has_strict_promotion(bundle, mapping):
+    solutions = mapping.get("solutions") if isinstance(mapping, dict) else None
+    matches = [
+        row for row in solutions or []
+        if isinstance(row, dict) and row.get("bundle_id") == bundle.get("bundle_id")
+    ]
+    return bool(
+        len(matches) == 1
+        and _has_passed_promotion_provenance(matches[0])
+        and matches[0]["promotion_provenance"].get("promotion_input_identity")
+        == build_promotion_input_identity(bundle)
+    )
+
+
 def _solution_validation_error(
     *,
     solution: dict[str, Any],
@@ -670,7 +692,13 @@ def _solution_validation_error(
     ):
         return "table input provenance does not match current mapping input"
     if bundle.get("problem_kind") == "unitary_valley_reduced_ebr":
-        if not validate_unitary_bundle_provenance(bundle):
+        if unitary_bundle_claims_valley_sewing_completion(bundle):
+            valid = validate_serialized_valley_sewing_completed_unitary_bundle(
+                bundle
+            )
+        else:
+            valid = validate_unitary_bundle_provenance(bundle)
+        if not valid:
             return "current unitary provenance is invalid"
         return None
     if bundle.get("problem_kind") == "valley_orbit_reduced_ebr":
@@ -695,27 +723,16 @@ def _extract_irrep_records(
     """Flatten trusted irrep_records_by_kpoint into a list of per-record dicts."""
     source_bundle_id = bundle.get("bundle_id", "")
     source_instance_id = bundle.get("source_instance_id", "")
-    if unitary_bundle_claims_time_reversal_completion(bundle):
-        if not validate_unitary_bundle_provenance(bundle):
-            return (
-                f"bundle {source_bundle_id or '<unknown>'}: invalid "
-                "TR-completed unitary provenance"
-            )
-        _append_tr_completed_unitary_records(
-            bundle=bundle,
-            out=out,
-            source_bundle_id=source_bundle_id,
-            source_instance_id=source_instance_id,
+    tr_completed = unitary_bundle_claims_time_reversal_completion(bundle)
+    sewing_completed = unitary_bundle_claims_valley_sewing_completion(bundle)
+    if tr_completed or sewing_completed:
+        valid = (
+            validate_serialized_valley_sewing_completed_unitary_bundle(bundle)
+            if sewing_completed else validate_unitary_bundle_provenance(bundle)
         )
-        return None
-    if unitary_bundle_claims_valley_sewing_completion(bundle):
-        if not validate_unitary_bundle_provenance(
-            bundle,
-        ):
-            return (
-                f"bundle {source_bundle_id or '<unknown>'}: invalid "
-                "unitary valley-sewing completion provenance"
-            )
+        if not valid:
+            kind = "unitary valley-sewing completion" if sewing_completed else "TR-completed unitary"
+            return f"bundle {source_bundle_id or '<unknown>'}: invalid {kind} provenance"
         _append_tr_completed_unitary_records(
             bundle=bundle,
             out=out,
@@ -728,9 +745,7 @@ def _extract_irrep_records(
         bundle.get("problem_kind") == "unitary_valley_reduced_ebr"
         and bundle.get("physical_object_kind")
         == "unitary_valley_projected_subspace"
-        and not validate_unitary_bundle_provenance(
-            bundle,
-        )
+        and not validate_unitary_bundle_provenance(bundle)
     ):
         return (
             f"bundle {source_bundle_id or '<unknown>'}: invalid direct "

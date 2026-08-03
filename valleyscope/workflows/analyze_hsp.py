@@ -57,7 +57,6 @@ from valleyscope.analysis.tr_irrep_completion import (
 from valleyscope.irreps.tables import (
     build_spinful_source_table_evidence,
     load_standard_irrep_table,
-    match_table_operations,
 )
 from valleyscope.irreps.ebr_data_adapter import load_ebr_source_data
 from valleyscope.irreps.time_reversal_ebr import (
@@ -67,7 +66,12 @@ from valleyscope.irreps.time_reversal_source import (
     derive_time_reversal_source_irrep_orbits,
 )
 from valleyscope.irreps.source_payload import (
+    build_certified_standard_operation_transport,
     build_source_payload_for_projected_hsp_matching,
+)
+from valleyscope.analysis.standard_setting_kmap import (
+    derive_irreptables_standard_setting_identity,
+    resolve_standard_setting_hsp_label,
 )
 from valleyscope.analysis.valley_projected_representation import (
     build_valley_projected_representation_report,
@@ -139,14 +143,9 @@ from valleyscope.subspace.valley_basis import (
     diagnose_valley_separability,
     summarize_valley_projector_quality,
 )
-from valleyscope.symmetry.plane_wave_action import (
-    apply_plane_wave_action,
-    build_plane_wave_representation,
-)
 from valleyscope.symmetry.operation_classifier import classify_operation
 from valleyscope.symmetry.double_space_group_lift import (
     build_double_space_group_lift_certificate,
-    spin_lift_from_orthogonal,
 )
 from valleyscope.symmetry.spglib_finder import find_symmetry_operations
 from valleyscope.symmetry.valley_preservation import map_valley_sectors
@@ -227,9 +226,6 @@ def _resolve_generic_irrep_hsp_label_with_provenance(
     standard-setting HSP k-coordinate mapping using crystallographic
     setting provenance from the per-valley standard group match.
     """
-    from valleyscope.analysis.standard_setting_kmap import (
-        resolve_standard_setting_hsp_label,
-    )
     if k_frac is not None:
         label, blocker, prov = resolve_standard_setting_hsp_label(
             k_frac=np.asarray(k_frac, dtype=float),
@@ -472,8 +468,8 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 valley_names=valley_names,
             )
         if symmetry_payload["status"] == "ok" and symmetry_payload.get("symmetry_eigenvalue_enabled", True):
-            # Build D_raw for ALL proper little-group ops before per-valley gate,
-            # so valley-permuting operations (e.g. C3 cycling M1/M2/M3) are included
+            # Build D_raw for all proper little-group operations before the
+            # per-valley gate so valley-changing operations remain included
             # in the projector symmetry-consistency diagnostic.
             if seed_matrices is not None:
                 raw_representations_by_kpoint[kpoint_name] = (
@@ -3618,57 +3614,12 @@ def _build_unitary_valley_sewing_attempts(
                     )
                 ):
                     continue
-                rotation = np.asarray(
-                    operation.get("rotation_cart"), dtype=float
-                )
-                translation = np.asarray(
-                    operation.get("translation_cart"), dtype=float
-                )
                 source_q = np.asarray(
                     q_cart_by_kpoint[source_kpoint], dtype=float
                 )
-                rotated_q = source_q @ rotation.T
-                order = np.lexsort(
-                    (rotated_q[:, 2], rotated_q[:, 1], rotated_q[:, 0])
-                )
-                target_q = rotated_q[order]
-                try:
-                    spin = spin_lift_from_orthogonal(rotation)
-                    target_coefficients = apply_plane_wave_action(
-                        coefficients_by_kpoint[source_kpoint],
-                        source_q,
-                        rotation,
-                        translation,
-                        spin_rotation=spin,
-                        target_q_cart=target_q,
-                    ).transformed_coefficients
-                    cross = build_plane_wave_representation(
-                        coefficients_by_kpoint[source_kpoint],
-                        source_q,
-                        rotation,
-                        translation,
-                        spin_rotation=spin,
-                        target_coefficients=target_coefficients,
-                        target_q_cart=target_q,
-                    )
-                    target_projector = (
-                        cross.matrix @ source_projector
-                        @ cross.matrix.conj().T
-                    )
-                    source_valley_basis = _projector_range_basis(
-                        source_projector
-                    )
-                    if source_valley_basis is None:
-                        raise ValueError("source valley basis unavailable")
-                    target_valley_basis = (
-                        cross.matrix @ source_valley_basis
-                    )
-                except (TypeError, ValueError, np.linalg.LinAlgError):
-                    target_coefficients = np.empty((0, 0, 0))
-                    target_projector = np.empty((0, 0))
-                    source_valley_basis = target_valley_basis = np.empty(
-                        (0, 0)
-                    )
+                source_valley_basis = _projector_range_basis(source_projector)
+                if source_valley_basis is None:
+                    source_valley_basis = np.empty((0, 0))
                 directed_raw = {
                     "source_basis_record": source_basis_record,
                     "lift_record": parent_lift_context["record"],
@@ -3689,9 +3640,6 @@ def _build_unitary_valley_sewing_attempts(
                     "target_k_frac": target["k_frac"],
                     "source_valley": source_valley,
                     "target_valley": target_valley,
-                    "valley_orbit": _operation_valley_orbit(
-                        mapping, source_valley
-                    ),
                     "sewing_operation_id": operation.get("operation_id"),
                     "source_little_group_operation_ids": source_ids,
                     "target_little_group_operation_ids": target[
@@ -3699,18 +3647,12 @@ def _build_unitary_valley_sewing_attempts(
                     ],
                     "detected_operations": operations,
                     "source_q_cart": source_q,
-                    "target_q_cart": target_q,
                     "source_coefficients": coefficients_by_kpoint[
                         source_kpoint
                     ],
-                    "target_coefficients": target_coefficients,
                     "source_projector": source_projector,
-                    "target_projector": target_projector,
                     "source_valley_basis": source_valley_basis,
-                    "target_valley_basis": target_valley_basis,
                     "wavecar_rtag": wavecar_rtag,
-                    "target_basis_kind": "canonical_unitary_transport",
-                    "independent_target_numerical_evidence": False,
                 }
                 directed_record = build_directed_valley_sewing_evidence(
                     **directed_raw
@@ -3757,18 +3699,6 @@ def _build_unitary_valley_sewing_attempts(
     return attempts
 
 
-def _operation_valley_orbit(mapping, source):
-    orbit, current = [], source
-    while (
-        isinstance(mapping, dict)
-        and current not in orbit
-        and len(orbit) <= len(mapping)
-    ):
-        orbit.append(current)
-        current = mapping.get(current)
-    return orbit if current == source else []
-
-
 def _valley_preserving_little_group_ids(operations, kpoint, valley):
     return [
         operation["operation_id"]
@@ -3795,13 +3725,42 @@ def _build_parent_double_group_lift_context(
         return None
     try:
         table = load_standard_irrep_table(sg_number, spinor=True)
-        matched = match_table_operations(
-            detected_operations=operations,
-            table=table,
+        lattice = np.asarray(
+            symmetry_payload.get("lattice_direct_cart"), dtype=float
         )
-        operation_map = matched.mapping_by_operation_id
+        identity = derive_irreptables_standard_setting_identity(
+            table, sg_number
+        )
+        operation_ids = [row.get("operation_id") for row in operations]
+        if identity.get("status") != "unique_match":
+            return None
+        _, _, provenance = resolve_standard_setting_hsp_label(
+            k_frac=np.zeros(3),
+            table=table,
+            standard_match={
+                "number": identity["space_group_number"],
+                "international_short": identity["space_group_symbol"],
+                "hall_number": identity["hall_number"],
+                "hall_symbol": identity["hall_symbol"],
+                "operation_ids": operation_ids,
+            },
+            lattice_direct_cart=lattice,
+            detected_operations=operations,
+            derive_affine_certificate_only=True,
+        )
+        certificate = provenance.get("standard_setting_certificate", {})
+        transport = build_certified_standard_operation_transport(
+            table=table,
+            certificate=certificate,
+            detected_operations=operations,
+            operation_ids=operation_ids,
+            standard_k_frac=np.zeros(3),
+            tol=1e-8,
+        )
+        operation_map = transport.get("group_source_operation_map", {})
         if (
-            matched.unmatched_operation_ids
+            certificate.get("validation_status") != "validated"
+            or transport.get("status") != "validated"
             or set(operation_map)
             != {row.get("operation_id") for row in operations}
         ):
@@ -3812,15 +3771,16 @@ def _build_parent_double_group_lift_context(
         )
         setting_evidence = {
             "schema_version": "1.0.0",
-            "parent_to_standard_direct_transform": np.eye(3).tolist(),
-            "origin_shift_fractional": [0.0, 0.0, 0.0],
+            "parent_to_standard_direct_transform": certificate[
+                "parent_to_standard_direct_transform"
+            ],
+            "origin_shift_fractional": certificate[
+                "origin_shift_fractional"
+            ],
             "parent_to_standard_operation_map": {
                 str(key): value for key, value in operation_map.items()
             },
         }
-        lattice = np.asarray(
-            symmetry_payload.get("lattice_direct_cart"), dtype=float
-        )
         record = build_double_space_group_lift_certificate(
             source_basis,
             operations,
@@ -3832,6 +3792,7 @@ def _build_parent_double_group_lift_context(
         return None
     return {
         "record": record,
+        "standard_setting_certificate": certificate,
         "raw_inputs": {
             "source_basis_record": source_basis,
             "source_table_identity": source_evidence,

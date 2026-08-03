@@ -21,7 +21,7 @@ from valleyscope.analysis.tr_irrep_completion import (
     validate_tr_irrep_completion_certificate,
 )
 from valleyscope.analysis.unitary_valley_sewing_completion import (
-    validate_unitary_valley_sewing_certificate,
+    validate_unitary_valley_sewing_certificate_context,
 )
 from valleyscope.io.wavefunction_convention import valid_sha256_identity
 
@@ -620,10 +620,9 @@ def _unitary_sewing_candidate_valid(
         if (
             not isinstance(context, dict)
             or context.get("certificate") != certificate
-            or not isinstance(context.get("raw_inputs"), dict)
-            or validate_unitary_valley_sewing_certificate(
-                certificate, **context["raw_inputs"]
-            ).status != "passed"
+            or not validate_unitary_valley_sewing_certificate_context(
+                certificate, context
+            )
         ):
             return False
     return True

@@ -1127,6 +1127,7 @@ def resolve_standard_setting_hsp_label(
     parent_to_standard_direct_transform: np.ndarray | None = None,
     origin_shift_fractional: np.ndarray | None = None,
     transform_provenance: str | None = None,
+    derive_affine_certificate_only: bool = False,
 ) -> tuple[str | None, str | None, dict[str, object]]:
     """Resolve a standard-setting Bilbao HSP label for a sampled k-point.
 
@@ -1269,6 +1270,7 @@ def resolve_standard_setting_hsp_label(
         direct_label is not None
         and parent_to_standard_direct_transform is None
         and direct_match_trusted
+        and not derive_affine_certificate_only
     ):
         prov["direct_match_succeeded"] = True
         is_primitive_group = (
@@ -1715,6 +1717,11 @@ def resolve_standard_setting_hsp_label(
             )
             cert.standard_setting_source = basis_provenance
             cert.primitive_conventional_relation = basis_provenance
+            if derive_affine_certificate_only:
+                cert.standard_setting_source = (
+                    "complete_parent_affine_operation_derivation"
+                )
+                cert.origin_shift_status = "derived_from_affine_operations"
             cert.operation_mapping_status = (
                 "operation_basis_verification_passed"
             )
@@ -2732,13 +2739,16 @@ def _reconstruct_subgroup_standard_cell(
     hall_number = int(hall_number)
     hall_symbol = str(standard_match.get("hall_symbol") or "").strip()
     centering = _hall_centering_symbol(hall_symbol)
-    if centering in {"A", "B", "C", "F", "I", "R"}:
-        return _standardize_affine_subgroup_cell(
-            lattice_direct_cart=lattice_direct_cart,
-            vp_operations=vp_operations,
-            standard_match=standard_match,
-            tolerance=tolerance,
-        )
+    standardized = _standardize_affine_subgroup_cell(
+        lattice_direct_cart=lattice_direct_cart,
+        vp_operations=vp_operations,
+        standard_match=standard_match,
+        tolerance=tolerance,
+    )
+    if standardized.get("status") == "accepted" or centering in {
+        "A", "B", "C", "F", "I", "R",
+    }:
+        return standardized
 
     # 1. Load standard-setting operations from spglib database.
     try:

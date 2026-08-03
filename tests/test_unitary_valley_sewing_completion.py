@@ -46,12 +46,16 @@ from valleyscope.irreps.ebr_data_adapter import load_ebr_source_data
 from valleyscope.irreps.source_payload import (
     build_source_payload_for_projected_hsp_matching,
 )
+from valleyscope.io.wavefunction_convention import (
+    canonical_identity,
+    valid_sha256_identity,
+)
 from valleyscope.symmetry.double_space_group_lift import (
     build_double_space_group_lift_certificate,
     spin_lift_from_orthogonal,
 )
-from valleyscope.symmetry.plane_wave_action import apply_plane_wave_action
 from valleyscope.workflows.analyze_hsp import (
+    _build_parent_double_group_lift_context,
     _build_unitary_valley_sewing_attempts,
 )
 
@@ -224,7 +228,7 @@ def test_certificate_recomputation_rejects_raw_and_serialized_tamper():
     certificate = build_unitary_valley_sewing_certificate(**raw)
     raw_tamper = deepcopy(raw)
     raw_tamper["directed_scoped_evidence_context"]["raw_inputs"][
-        "target_projector"
+        "source_projector"
     ] = np.diag([0.0, 1.0])
 
     raw_validation = validate_unitary_valley_sewing_certificate(
@@ -291,9 +295,7 @@ def test_multiple_unitary_paths_must_agree():
         "directed_scoped_evidence_context"
     ]["raw_inputs"]
     directed["source_projector"] = np.eye(2)
-    directed["target_projector"] = np.eye(2)
     directed["source_valley_basis"] = np.eye(2)
-    directed["target_valley_basis"] = np.eye(2)
     disagreeing["directed_scoped_evidence_context"]["record"] = (
         build_directed_valley_sewing_evidence(**directed).to_record()
     )
@@ -541,6 +543,40 @@ def test_inferred_row_reaches_export_exact_mapping_and_ingestion():
         ],
     )
 
+    forged_rehashed = deepcopy(bundle)
+    forged_certificate = forged_rehashed[
+        "unitary_irrep_completion_records_by_hsp"
+    ]["GM"][0]["unitary_valley_sewing_certificates"][0]
+    forged_certificate["target_character_vector"]["11"] = [0.0, 0.0]
+    forged_content = {
+        key: value for key, value in forged_certificate.items()
+        if key not in {"status", "reason_codes", "certificate_identity"}
+    }
+    forged_certificate["certificate_identity"] = canonical_identity(
+        forged_content
+    )
+    assert valid_sha256_identity(forged_certificate["certificate_identity"])
+    assert not validate_unitary_bundle_provenance(forged_rehashed)
+    assert not validate_unitary_bundle_provenance(
+        forged_rehashed,
+        unitary_valley_sewing_validation_contexts=completion[
+            "_validation_contexts"
+        ],
+    )
+
+    forged_candidate = deepcopy(completion["inferred_candidates"][0])
+    forged_candidate["unitary_valley_sewing_certificates"] = [
+        deepcopy(forged_certificate)
+    ]
+    forged_problems = build_ebr_problem_instances(
+        ebr_input_candidates={"candidates": [forged_candidate]},
+        projected_hsp_coverage=_coverage(),
+        unitary_valley_sewing_validation_contexts=completion[
+            "_validation_contexts"
+        ],
+    )
+    assert forged_problems["ready_instance_count"] == 0
+
     cprime_record = raw["source_cprime_context"]["record"]
     validation_context = {
         cprime_record["evidence_identity"]: raw["source_cprime_context"],
@@ -552,6 +588,14 @@ def test_inferred_row_reaches_export_exact_mapping_and_ingestion():
         cprime_validation_context=validation_context,
     )
     assert solved["status"] == "solved_exact"
+    forged_export = deepcopy(export)
+    forged_export["bundles"][0] = forged_rehashed
+    forged_mapping = build_auto_reduced_ebr_mapping(
+        ebr_export_bundle=forged_export,
+        spinor=True,
+        cprime_validation_context=validation_context,
+    )
+    assert forged_mapping["status"] == "blocked"
     summary = {
         "schema_version": "2.0.0",
         "target_kpoints": [],
@@ -589,6 +633,11 @@ def test_inferred_row_reaches_export_exact_mapping_and_ingestion():
     assert ingestion["valley_irrep_records"][0]["completion_kind"] == (
         "inferred_by_unitary_valley_sewing"
     )
+    structural_only = build_database_ingestion_record(
+        valley_summary=summary,
+        valley_ebr_export_bundle=export,
+    )
+    assert structural_only["valley_irrep_records"] == []
 
 
 def test_analyze_hsp_producer_builds_missing_unitary_valley_row():
@@ -666,8 +715,97 @@ def test_analyze_hsp_producer_builds_missing_unitary_valley_row():
     assert evidence["source_target_frames"][
         "independent_target_numerical_evidence"
     ] is False
+    parent_context = _build_parent_double_group_lift_context(
+        symmetry_payload={
+            "detected_operations": operations,
+            "spacegroup_number": 2,
+            "lattice_direct_cart": np.eye(3).tolist(),
+        },
+        source_cprime_context=raw["source_cprime_context"],
+    )
+    assert parent_context is not None
+    parent_certificate = parent_context["standard_setting_certificate"]
+    assert parent_certificate["validation_status"] == "validated"
+    assert parent_certificate["transform_provenance"] == (
+        "spglib_affine_subgroup_standardization"
+    )
+    assert np.allclose(
+        parent_certificate["parent_to_standard_direct_transform"], np.eye(3)
+    )
+    assert np.allclose(parent_certificate["origin_shift_fractional"], 0.0)
+    assert parent_certificate["standard_setting_source"] == (
+        "complete_parent_affine_operation_derivation"
+    )
     assert report["status"] == "has_inferred_rows"
     assert report["inferred_candidates"][0]["valley"] == "v1"
+
+
+def test_parent_affine_setting_derives_nontrivial_basis_and_origin():
+    table = load_standard_irrep_table(75, spinor=True)
+    expected_transform = np.array([
+        [1.0, 1.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ])
+    expected_origin = np.array([0.125, 0.0, 0.0])
+    direct_lattice = expected_transform.T @ np.diag([1.0, 1.0, 2.0])
+    operations = []
+    for index, standard in enumerate(table.operations):
+        rotation = (
+            np.linalg.inv(expected_transform)
+            @ standard.rotation_frac
+            @ expected_transform
+        )
+        translation = np.linalg.inv(expected_transform) @ (
+            standard.translation_frac
+            - expected_origin
+            + standard.rotation_frac @ expected_origin
+        )
+        operations.append({
+            "operation_id": 10 + 3 * index,
+            "rotation_frac": np.rint(rotation).astype(int),
+            "translation_frac": translation,
+            "rotation_cart": cart_rotation_from_fractional(
+                rotation, direct_lattice
+            ),
+            "translation_cart": cart_translation_from_fractional(
+                translation, direct_lattice
+            ),
+        })
+
+    raw = _completion_inputs()
+    context = _build_parent_double_group_lift_context(
+        symmetry_payload={
+            "detected_operations": operations,
+            "spacegroup_number": 75,
+            "lattice_direct_cart": direct_lattice,
+        },
+        source_cprime_context=raw["source_cprime_context"],
+    )
+    assert context is not None
+    certificate = context["standard_setting_certificate"]
+    assert certificate["validation_status"] == "validated"
+    assert certificate["transform_provenance"] == (
+        "spglib_affine_subgroup_standardization"
+    )
+    assert not np.allclose(
+        certificate["parent_to_standard_direct_transform"], np.eye(3)
+    )
+    assert not np.allclose(certificate["origin_shift_fractional"], 0.0)
+    assert certificate["unmatched_parent_operations"] == []
+    assert certificate["unused_standard_operation_indices"] == []
+
+    tampered = deepcopy(operations)
+    tampered[1]["translation_frac"][0] += 0.2
+    rejected = _build_parent_double_group_lift_context(
+        symmetry_payload={
+            "detected_operations": tampered,
+            "spacegroup_number": 75,
+            "lattice_direct_cart": direct_lattice,
+        },
+        source_cprime_context=raw["source_cprime_context"],
+    )
+    assert rejected is None
 
 
 def test_centered_setting_keeps_all_coset_transport_rows_and_bloch_phases():
@@ -700,6 +838,18 @@ def test_centered_setting_keeps_all_coset_transport_rows_and_bloch_phases():
             cycle if operation["operation_id"] == sewing_id
             else {valley: valley for valley in cycle}
         )
+    parent_context = _build_parent_double_group_lift_context(
+        symmetry_payload={
+            "detected_operations": operations,
+            "spacegroup_number": 79,
+            "lattice_direct_cart": direct_lattice,
+        },
+        source_cprime_context=_completion_inputs()["source_cprime_context"],
+    )
+    assert parent_context is not None
+    derived_parent = parent_context["standard_setting_certificate"]
+    assert derived_parent["validation_status"] == "validated"
+    assert len(derived_parent["centered_affine_operation_map"]) == 8
     cprime_record, cprime_raw = _cprime_fixture_scope(
         bundle={"valley": "v0", "valley_orbit": list(cycle)},
         kpoint="centered_source",
@@ -740,19 +890,6 @@ def test_centered_setting_keeps_all_coset_transport_rows_and_bloch_phases():
     source_coefficients = np.eye(
         2, dtype=np.complex128
     ).reshape(2, 2, 1)
-    sewing = next(
-        operation for operation in operations
-        if operation["operation_id"] == sewing_id
-    )
-    target_coefficients = apply_plane_wave_action(
-        source_coefficients,
-        np.zeros((1, 3)),
-        sewing["rotation_cart"],
-        sewing["translation_cart"],
-        spin_rotation=spin_lift_from_orthogonal(
-            sewing["rotation_cart"]
-        ),
-    ).transformed_coefficients
     directed_raw = {
         "source_basis_record": source_basis,
         "lift_record": lift,
@@ -766,19 +903,14 @@ def test_centered_setting_keeps_all_coset_transport_rows_and_bloch_phases():
         "target_k_frac": np.zeros(3),
         "source_valley": "v0",
         "target_valley": "v1",
-        "valley_orbit": list(cycle),
         "sewing_operation_id": sewing_id,
         "source_little_group_operation_ids": [identity_id],
         "target_little_group_operation_ids": [identity_id],
         "detected_operations": operations,
         "source_q_cart": np.zeros((1, 3)),
-        "target_q_cart": np.zeros((1, 3)),
         "source_coefficients": source_coefficients,
-        "target_coefficients": target_coefficients,
         "source_projector": np.eye(2),
-        "target_projector": np.eye(2),
         "source_valley_basis": np.eye(2),
-        "target_valley_basis": np.eye(2),
         "wavecar_rtag": None,
     }
     directed_record = build_directed_valley_sewing_evidence(

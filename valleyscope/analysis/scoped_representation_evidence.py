@@ -25,6 +25,7 @@ from valleyscope.symmetry.double_space_group_lift import (
 )
 from valleyscope.symmetry.plane_wave_action import (
     RECIPROCAL_GRID_ACTION_CONVENTION,
+    apply_plane_wave_action,
     build_plane_wave_representation,
     build_reciprocal_grid_map,
     reciprocal_grid_identity,
@@ -33,9 +34,7 @@ from valleyscope.symmetry.plane_wave_action import (
 
 
 SCOPED_REPRESENTATION_EVIDENCE_SCHEMA_VERSION = "1.4.0"
-SUPPORTED_SCOPE_KINDS = frozenset(
-    {"local_irrep", "valley_sewing"}
-)
+SUPPORTED_SCOPE_KINDS = frozenset({"local_irrep"})
 DEFAULT_GROUP_LAW_TOLERANCE = 1.0e-2
 DEFAULT_PLANE_WAVE_NORM_TOLERANCE = 1.0e-8
 DEFAULT_TARGET_SUBSPACE_TOLERANCE = 1.0e-2
@@ -411,30 +410,48 @@ def build_directed_valley_sewing_evidence(
     )
     source_valley = raw_inputs.get("source_valley")
     target_valley = raw_inputs.get("target_valley")
-    orbit = _unique_strings(
-        raw_inputs.get("valley_orbit", ()), "valley_orbit_malformed", reasons
-    )
     sewing = operations.get(sewing_id, {})
     mapping = sewing.get("sector_mapping") if isinstance(sewing, Mapping) else None
-    derived_orbit, current = [], source_valley
+    reviewed_labels = list(mapping) if isinstance(mapping, Mapping) else []
+    reviewed_label_set = set(reviewed_labels)
+    mappings = [
+        row.get("sector_mapping") for row in operations.values()
+        if isinstance(row, Mapping)
+    ]
+    mappings_are_bijections = bool(reviewed_labels) and all(
+        isinstance(item, Mapping)
+        and set(item) == reviewed_label_set
+        and set(item.values()) == reviewed_label_set
+        for item in mappings
+    )
+    full_orbit = {source_valley} if isinstance(source_valley, str) else set()
+    frontier = list(full_orbit)
+    while frontier and mappings_are_bijections:
+        current = frontier.pop()
+        for item in mappings:
+            target = item[current]
+            if target not in full_orbit:
+                full_orbit.add(target)
+                frontier.append(target)
+    orbit = [label for label in reviewed_labels if label in full_orbit]
+    selected_cycle, current = [], source_valley
     while (
         isinstance(mapping, Mapping)
         and isinstance(current, str)
-        and current not in derived_orbit
-        and len(derived_orbit) <= len(mapping)
+        and current not in selected_cycle
+        and len(selected_cycle) <= len(mapping)
     ):
-        derived_orbit.append(current)
+        selected_cycle.append(current)
         current = mapping.get(current)
     if (
         not isinstance(source_valley, str)
         or not isinstance(target_valley, str)
         or source_valley not in orbit
         or target_valley not in orbit
+        or not mappings_are_bijections
         or not isinstance(mapping, Mapping)
         or mapping.get(source_valley) != target_valley
-        or len(set(mapping.values())) != len(mapping)
         or current != source_valley
-        or set(derived_orbit) != set(orbit)
     ):
         reasons.append("directed_valley_mapping_failed")
     reciprocal_shift = _directed_hsp_shift(sewing, source_k, target_k)
@@ -455,18 +472,25 @@ def build_directed_valley_sewing_evidence(
     source_coefficients = np.asarray(
         raw_inputs.get("source_coefficients"), dtype=np.complex128
     )
-    target_coefficients = np.asarray(
-        raw_inputs.get("target_coefficients"), dtype=np.complex128
-    )
     wavecar_rtag = raw_inputs.get("wavecar_rtag")
     source_frame = build_target_frame(source_coefficients, wavecar_rtag=wavecar_rtag)
-    target_frame = build_target_frame(target_coefficients, wavecar_rtag=wavecar_rtag)
     reasons.extend(source_frame.reason_codes)
-    reasons.extend(target_frame.reason_codes)
     source_q = np.asarray(raw_inputs.get("source_q_cart"), dtype=float)
-    target_q = np.asarray(raw_inputs.get("target_q_cart"), dtype=float)
     try:
         sewing_spin = spin_lift_from_orthogonal(sewing["rotation_cart"])
+        rotated_q = source_q @ np.asarray(
+            sewing["rotation_cart"], dtype=float
+        ).T
+        order = np.lexsort((rotated_q[:, 2], rotated_q[:, 1], rotated_q[:, 0]))
+        target_q = rotated_q[order]
+        target_coefficients = apply_plane_wave_action(
+            source_coefficients,
+            source_q,
+            sewing["rotation_cart"],
+            sewing["translation_cart"],
+            spin_rotation=sewing_spin,
+            target_q_cart=target_q,
+        ).transformed_coefficients
         cross = build_plane_wave_representation(
             source_coefficients,
             source_q,
@@ -479,7 +503,11 @@ def build_directed_valley_sewing_evidence(
     except (KeyError, TypeError, ValueError):
         sewing_spin = None
         cross = None
+        target_q = np.empty((0, 3))
+        target_coefficients = np.empty((0, 0, 0), dtype=np.complex128)
         reasons.append("directed_plane_wave_action_failed")
+    target_frame = build_target_frame(target_coefficients, wavecar_rtag=wavecar_rtag)
+    reasons.extend(target_frame.reason_codes)
     permutation_status = "blocked"
     if cross is not None:
         permutation = validate_reciprocal_grid_permutation(
@@ -496,17 +524,19 @@ def build_directed_valley_sewing_evidence(
     source_projector = np.asarray(
         raw_inputs.get("source_projector"), dtype=np.complex128
     )
-    target_projector = np.asarray(
-        raw_inputs.get("target_projector"), dtype=np.complex128
-    )
     full_sewing = (
         cross.matrix if cross is not None else np.empty((0, 0), dtype=np.complex128)
     )
     source_valley_basis = np.asarray(
         raw_inputs.get("source_valley_basis"), dtype=np.complex128
     )
-    target_valley_basis = np.asarray(
-        raw_inputs.get("target_valley_basis"), dtype=np.complex128
+    target_projector = (
+        full_sewing @ source_projector @ full_sewing.conj().T
+        if cross is not None else np.empty((0, 0), dtype=np.complex128)
+    )
+    target_valley_basis = (
+        full_sewing @ source_valley_basis
+        if cross is not None else np.empty((0, 0), dtype=np.complex128)
     )
     rank = (
         source_valley_basis.shape[1]
@@ -608,7 +638,9 @@ def build_directed_valley_sewing_evidence(
             "target_k_frac": target_k.tolist(),
             "source_valley": source_valley,
             "target_valley": target_valley,
-            "valley_orbit": orbit,
+            "full_valley_orbit": orbit,
+            "sewing_operation_valley_permutation": dict(mapping or {}),
+            "source_operation_cycle": selected_cycle,
             "sewing_operation_id": sewing_id,
             "source_little_group_operation_ids": source_ids,
             "target_little_group_operation_ids": target_ids,
@@ -617,12 +649,8 @@ def build_directed_valley_sewing_evidence(
         "source_target_frames": {
             "source": deepcopy(source_frame.record),
             "target": deepcopy(target_frame.record),
-            "target_basis_kind": str(
-                raw_inputs.get("target_basis_kind", "canonical_unitary_transport")
-            ),
-            "independent_target_numerical_evidence": bool(
-                raw_inputs.get("independent_target_numerical_evidence", False)
-            ),
+            "target_basis_kind": "canonical_unitary_transport",
+            "independent_target_numerical_evidence": False,
         },
         "reciprocal_grid": {
             "source_identity": reciprocal_grid_identity(source_q),
@@ -632,28 +660,28 @@ def build_directed_valley_sewing_evidence(
             ),
             "permutation_status": permutation_status,
             "relative_norm_residual": (
-                cross.relative_norm_preservation_residual
+                _finite_scalar(cross.relative_norm_preservation_residual)
                 if cross is not None else None
             ),
             "relative_target_subspace_residual": (
-                cross.relative_target_subspace_residual
+                _finite_scalar(cross.relative_target_subspace_residual)
                 if cross is not None else None
             ),
         },
         "valley_sewing_matrix": {
             "matrix": _complex_matrix(sewing_matrix),
             "spin_rotation": _complex_matrix(sewing_spin),
-            "rank_normalized_unitarity_residual": unitarity,
-            "valley_basis_range_residual": basis_residual,
+            "rank_normalized_unitarity_residual": _finite_scalar(unitarity),
+            "valley_basis_range_residual": _finite_scalar(basis_residual),
         },
         "directed_group_law": {"rows": conjugation_rows},
         "intertwining": {"rows": conjugation_rows},
         "projector_covariance": {
-            "rank_normalized_residual": covariance,
+            "rank_normalized_residual": _finite_scalar(covariance),
             "passed": covariance <= DEFAULT_PROJECTOR_COVARIANCE_TOLERANCE,
         },
         "valley_block_quality": {
-            "relative_residual": block,
+            "relative_residual": _finite_scalar(block),
             "passed": block <= DEFAULT_VALLEY_BLOCK_TOLERANCE,
         },
         "grey_group_matching_allowed": False,
@@ -674,57 +702,6 @@ def validate_directed_valley_sewing_evidence_record(
     return ScopedEvidenceValidation(
         str(record.get("status")),
         tuple(str(value) for value in record.get("reason_codes", [])),
-    )
-
-
-def validate_scoped_representation_evidence_link(
-    record: Mapping[str, object],
-    *,
-    expected_evidence_identity: str,
-    expected_source_basis_certificate_identity: str,
-    expected_lift_certificate_identity: str,
-    expected_payload_identity: str,
-) -> ScopedEvidenceValidation:
-    """Validate a downstream identity link without accepting a self-signed hash."""
-    reasons: list[str] = []
-    if record.get("evidence_identity") != expected_evidence_identity:
-        reasons.append("evidence_identity_link_mismatch")
-    if (
-        record.get("source_basis_certificate_identity")
-        != expected_source_basis_certificate_identity
-    ):
-        reasons.append("source_basis_identity_link_mismatch")
-    if (
-        record.get("double_space_group_lift_certificate_identity")
-        != expected_lift_certificate_identity
-    ):
-        reasons.append("lift_identity_link_mismatch")
-    if (
-        record.get("extracted_wavefunction_payload_identity")
-        != expected_payload_identity
-    ):
-        reasons.append("payload_identity_link_mismatch")
-    content = {
-        key: deepcopy(value)
-        for key, value in record.items()
-        if key not in {"status", "reason_codes", "evidence_identity"}
-    }
-    try:
-        derived_identity = canonical_identity(content)
-    except (TypeError, ValueError):
-        derived_identity = None
-    if derived_identity != expected_evidence_identity:
-        reasons.append("evidence_content_identity_mismatch")
-    if record.get("status") not in {"passed", "blocked"}:
-        reasons.append("derived_status_malformed")
-    if not isinstance(record.get("reason_codes"), list):
-        reasons.append("reason_codes_malformed")
-    reasons = _unique(reasons)
-    if reasons:
-        return ScopedEvidenceValidation("blocked", tuple(reasons))
-    return ScopedEvidenceValidation(
-        str(record["status"]),
-        tuple(str(value) for value in record["reason_codes"]),
     )
 
 
@@ -941,6 +918,10 @@ def _complex_matrix(value):
         [[float(item.real), float(item.imag)] for item in row]
         for row in array
     ]
+
+
+def _finite_scalar(value):
+    return float(value) if np.isfinite(value) else None
 
 
 def _kpoint_record(value: np.ndarray, reasons: list[str]) -> list[float]:
@@ -1289,8 +1270,6 @@ def _validate_scope_semantics(
 ) -> None:
     if scope_kind == "local_irrep" and changing_ids:
         reasons.append("local_irrep_scope_contains_valley_changing_operation")
-    if scope_kind == "valley_sewing" and not changing_ids:
-        reasons.append("valley_changing_scope_evidence_missing")
     if scope_kind == "local_irrep" and not preserving_ids:
         reasons.append("valley_preserving_scope_evidence_missing")
 
