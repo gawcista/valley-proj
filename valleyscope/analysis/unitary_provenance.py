@@ -1094,6 +1094,7 @@ def _tr_completion_record_scope(
         if (
             record.get("target_source_hsp_label") == hsp
             and record.get("target_valley") == valley
+            and record.get("evidence_source_hsp_label") == hsp
             and record.get("evidence_sampled_kpoint") == sampled
             and record.get("evidence_valley") == valley
             and isinstance(sampled, str)

@@ -933,6 +933,15 @@ def test_tr_completed_unitary_bundle_accepts_valid_scope_metadata():
     assert _validate_tr_completed_unitary_bundle_fixture(bundle)
 
 
+def test_tr_completed_unitary_bundle_rejects_observed_scope_field_conflict():
+    """Serialized validator rejects contradictory observed-source metadata."""
+    bundle = _tr_completed_bundle_with_certificates()
+    bundle["unitary_irrep_completion_records_by_hsp"]["GM"][0][
+        "evidence_source_hsp_label"
+    ] = "forged_source_hsp"
+    assert not _validate_tr_completed_unitary_bundle_fixture(bundle)
+
+
 @pytest.mark.parametrize(
     "mutation",
     [
