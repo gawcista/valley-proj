@@ -449,13 +449,17 @@ def run_installed_portable_acceptance(
     """Run the full portable production chain and return its evidence.
 
     Raises AssertionError with details when any physical step fails.  The
-    returned summary is JSON-serializable for the release gate report.
+    returned summary is JSON-serializable for the release gate report.  A
+    caller-supplied workdir is kept; otherwise a temporary directory is
+    created and removed on exit.
     """
-    root = (
-        Path(workdir)
-        if workdir is not None
-        else Path(tempfile.mkdtemp(prefix="valleyscope_acceptance_"))
-    )
+    if workdir is not None:
+        return _run_portable_acceptance_in(Path(workdir))
+    with tempfile.TemporaryDirectory(prefix="valleyscope_acceptance_") as tmp:
+        return _run_portable_acceptance_in(Path(tmp))
+
+
+def _run_portable_acceptance_in(root: Path) -> dict[str, object]:
     inputs = _portable_orbit_inputs(root)
     report = _build_portable_orbit_report(inputs)
     completed, problems, export = _complete_and_export_portable_orbit(
