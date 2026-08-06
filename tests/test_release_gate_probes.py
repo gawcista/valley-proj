@@ -24,9 +24,13 @@ from scripts.release_gate import (
     _checkout_clean,
     _extract_head_archive,
     _audit_archive,
+    _prepare_workspace,
     _snapshot_matches_head,
 )
-from scripts.release_gate_installed_check import _module_in_venv
+from scripts.release_gate_installed_check import (
+    _check_import_provenance,
+    _module_in_venv,
+)
 
 NEEDS_GIT = pytest.mark.skipif(
     shutil.which("git") is None, reason="git is required for snapshot probes"
@@ -115,6 +119,20 @@ def test_archive_snapshot_matches_head(tmp_path: Path) -> None:
     assert (srctree / "tracked.txt").read_text() == "committed"
     assert _snapshot_matches_head(repo, srctree) == []
 
+    # Extra files from a reused workspace must invalidate snapshot identity.
+    (srctree / "stale.py").write_text("not from HEAD")
+    assert _snapshot_matches_head(repo, srctree) == ["stale.py"]
+
+
+def test_reused_nonempty_workspace_is_rejected(tmp_path: Path) -> None:
+    workspace = tmp_path / "release-gate"
+    _prepare_workspace(workspace)
+    assert workspace.is_dir()
+
+    (workspace / "stale-artifact.whl").write_text("stale")
+    with pytest.raises(SystemExit, match="absent or empty"):
+        _prepare_workspace(workspace)
+
 
 def test_user_site_valleyscope_cannot_satisfy_provenance(tmp_path: Path) -> None:
     venv_purelib = tmp_path / "venv" / "lib" / "python3.13" / "site-packages"
@@ -124,6 +142,20 @@ def test_user_site_valleyscope_cannot_satisfy_provenance(tmp_path: Path) -> None
     assert _module_in_venv(
         venv_purelib / "valleyscope" / "__init__.py", roots
     ) is True
+
+
+def test_site_packages_must_be_under_current_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import valleyscope
+
+    source_root = Path(valleyscope.__file__).resolve().parent.parent
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "venv"))
+    monkeypatch.setattr(
+        "scripts.release_gate_installed_check._venv_site_packages",
+        lambda: [source_root],
+    )
+    assert _check_import_provenance({}) is False
 
 
 def test_pythonpath_injection_cannot_satisfy_provenance(tmp_path: Path) -> None:

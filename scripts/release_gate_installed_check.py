@@ -18,6 +18,7 @@ import importlib.metadata
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import sysconfig
@@ -56,7 +57,7 @@ def _venv_site_packages() -> list[Path]:
     for key in ("purelib", "platlib"):
         path = sysconfig.get_path(key)
         if path:
-            paths.append(Path(path))
+            paths.append(Path(path).resolve())
     return paths
 
 
@@ -66,6 +67,16 @@ def _check_import_provenance(report: dict[str, object]) -> bool:
     module_path = Path(valleyscope.__file__).resolve()
     site_packages = _venv_site_packages()
     report["venv_purelib_platlib"] = [str(path) for path in site_packages]
+    prefix = Path(sys.prefix).resolve()
+    if not site_packages or any(
+        not site_path.is_relative_to(prefix) for site_path in site_packages
+    ):
+        print(
+            "FAIL: purelib/platlib are not contained under this interpreter's "
+            f"sys.prefix {prefix}: {site_packages}",
+            file=sys.stderr,
+        )
+        return False
     if not _module_in_venv(module_path, site_packages):
         print(
             "FAIL: valleyscope resolves to "
@@ -229,10 +240,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--commit",
-        default="unknown",
+        required=True,
         help="Full commit hash the gate is bound to (provenance identity).",
     )
     args = parser.parse_args(argv)
+    if re.fullmatch(r"[0-9a-f]{40}", args.commit) is None:
+        parser.error("--commit must be a full 40-character lowercase Git hash")
 
     checkout_root = args.checkout.resolve()
     sys.path[:] = [

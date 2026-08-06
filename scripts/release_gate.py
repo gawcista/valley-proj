@@ -64,7 +64,7 @@ def _git_head_commit(checkout: Path) -> str:
 
 
 def _checkout_clean(checkout: Path) -> str | None:
-    """Return a description of any tracked difference from HEAD, else None."""
+    """Return a description of any non-ignored difference from HEAD, else None."""
     result = subprocess.run(
         ["git", "-C", str(checkout), "status", "--porcelain"],
         capture_output=True,
@@ -76,6 +76,20 @@ def _checkout_clean(checkout: Path) -> str | None:
     if entries:
         return "\n".join(entries)
     return None
+
+
+def _prepare_workspace(workspace: Path) -> None:
+    """Create an empty gate workspace or reject stale caller-owned state."""
+    if workspace.exists():
+        if not workspace.is_dir():
+            raise SystemExit(f"FAIL: release-gate workspace is not a directory: {workspace}")
+        if any(workspace.iterdir()):
+            raise SystemExit(
+                "FAIL: --work-dir must be absent or empty; refusing to reuse "
+                f"stale release-gate state under {workspace}"
+            )
+    else:
+        workspace.mkdir(parents=True)
 
 
 def _extract_head_archive(checkout: Path, target: Path) -> int:
@@ -96,7 +110,7 @@ def _extract_head_archive(checkout: Path, target: Path) -> int:
 
 
 def _snapshot_matches_head(checkout: Path, srctree: Path) -> list[str]:
-    """Prove every snapshot file is byte-identical to HEAD's blob."""
+    """Prove the snapshot file set and contents are identical to HEAD."""
     tree = subprocess.run(
         ["git", "-C", str(checkout), "ls-tree", "-r", "HEAD"],
         capture_output=True,
@@ -112,21 +126,29 @@ def _snapshot_matches_head(checkout: Path, srctree: Path) -> list[str]:
             for entry in tree.stdout.splitlines()
         )
     }
+    actual_names = {
+        path.relative_to(srctree).as_posix()
+        for path in srctree.rglob("*")
+        if path.is_file() or path.is_symlink()
+    }
+    expected_names = set(expected)
+    mismatches = expected_names.symmetric_difference(actual_names)
+    common_names = sorted(expected_names & actual_names)
     hashed = subprocess.run(
         ["git", "-C", str(checkout), "hash-object", "--stdin-paths"],
-        input="".join(str(srctree / name) + "\n" for name in expected),
+        input="".join(str(srctree / name) + "\n" for name in common_names),
         capture_output=True,
         text=True,
     )
     if hashed.returncode != 0:
         raise SystemExit("FAIL: git hash-object --stdin-paths failed")
     actual = hashed.stdout.splitlines()
-    mismatches = [
+    mismatches.update(
         name
-        for name, blob in zip(expected, actual)
+        for name, blob in zip(common_names, actual)
         if blob != expected[name]
-    ]
-    return mismatches
+    )
+    return sorted(mismatches)
 
 
 def _copy_snapshot_subtree(srctree: Path, rel_dir: str, target: Path) -> int:
@@ -240,7 +262,7 @@ def main(argv: list[str] | None = None) -> int:
         if owned_workspace
         else args.work_dir.resolve()
     )
-    workspace.mkdir(parents=True, exist_ok=True)
+    _prepare_workspace(workspace)
     print(f"workspace: {workspace}")
 
     srctree = workspace / "srctree"
