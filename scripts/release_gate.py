@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import io
 import os
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -253,7 +254,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     print(
         f"snapshot identity verified: srctree matches HEAD "
-        f"({len(mismatches)} blobs checked, 0 mismatches)"
+        f"({file_count} entries checked, 0 mismatches)"
     )
 
     dist_dir = workspace / "dist"
