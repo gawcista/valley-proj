@@ -673,6 +673,11 @@ def _tr_completed_unitary_bundle():
             ],
         },
         "irrep_records_by_kpoint": {},
+        "cprime_scope_metadata": {
+            "GM": {"sampled_kpoint": "GammaM", "evidence_valley": "K"},
+            "K": {"sampled_kpoint": "KM_K", "evidence_valley": "K"},
+            "KA": {"sampled_kpoint": "KM_Kp", "evidence_valley": "Kp"},
+        },
         "unitary_irrep_completion_records_by_hsp": {
             "GM": [{
                 "completion_kind": "observed_at_sampled_kpoint",
@@ -681,6 +686,9 @@ def _tr_completed_unitary_bundle():
                 "irrep": "A",
                 "multiplicity": 1,
                 "sampled_kpoint": "GammaM",
+                "evidence_valley": "K",
+                "evidence_source_hsp_label": "GM",
+                "evidence_sampled_kpoint": "GammaM",
                 "source_candidate_identity": observed_identity,
                 "source_candidate_provenance": provenance,
                 "structural_status": "validated",
@@ -694,6 +702,9 @@ def _tr_completed_unitary_bundle():
                 "irrep": "B",
                 "multiplicity": 1,
                 "sampled_kpoint": "KM_K",
+                "evidence_valley": "K",
+                "evidence_source_hsp_label": "K",
+                "evidence_sampled_kpoint": "KM_K",
                 "source_candidate_identity": {
                     **observed_identity,
                     "source": "fixture/K/K",

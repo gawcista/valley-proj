@@ -501,22 +501,6 @@ def test_tracked_only_exact_completion_uses_real_irreptables_source(
     source_basis_identity = next(iter(
         first_bundle["cprime_identity_by_kpoint"].values()
     ))["spinor_source_basis_certificate_identity"]
-    acceptance_matrix = [
-        {
-            "kpoint": hsp,
-            "valley": bundle["valley"],
-            "double_space_group_lift_status": "passed",
-            "double_space_group_lift_identity": links[
-                "double_space_group_lift_certificate_identity"
-            ],
-            "scoped_representation_status": "passed",
-            "scoped_representation_evidence_identity": links[
-                "scoped_representation_evidence_identity"
-            ],
-        }
-        for bundle in export["bundles"]
-        for hsp, links in bundle["cprime_identity_by_kpoint"].items()
-    ]
     ingestion = build_database_ingestion_record(
         valley_summary={
             "schema_version": "2.0.0",
@@ -529,12 +513,13 @@ def test_tracked_only_exact_completion_uses_real_irreptables_source(
                     "identity": source_basis_identity,
                     "blockers": [],
                 },
-                "acceptance_matrix": acceptance_matrix,
+                "acceptance_matrix": _cprime_acceptance_matrix(export),
             },
         },
         valley_ebr_export_bundle=export,
         valley_reduced_ebr_mapping=mapping,
     )
+    assert ingestion["validation_errors"] == [], ingestion
     assert ingestion["final_reduced_ebr_result_count"] == 2, ingestion
 
     tampered = deepcopy(export["bundles"][0])
@@ -542,6 +527,116 @@ def test_tracked_only_exact_completion_uses_real_irreptables_source(
         "tr_irrep_completion_certificate"
     )
     assert not validate_tr_completed_unitary_bundle(tampered)
+
+
+def _portable_reduced_table(first_bundle):
+    return build_auto_canonical_reduced_ebr_table(
+        subspace_sg_number=143,
+        spinor=True,
+        bundle_irreps_by_kpoint=first_bundle["irreps_by_kpoint"],
+        expected_hsps=first_bundle["expected_hsps"],
+        subspace_group_candidate="P3",
+    )
+
+
+def test_tracked_only_reduced_mapping_rejects_tampered_tr_scope_metadata(
+    tmp_path,
+):
+    inputs = _portable_orbit_inputs(tmp_path)
+    report = _build_portable_orbit_report(inputs)
+    _, _, export = _complete_and_export_portable_orbit(inputs, report)
+    assert len(export["bundles"]) == 2
+    tampered = export["bundles"][0]
+    tampered["cprime_scope_metadata"]["K"]["sampled_kpoint"] = "forged_sample"
+
+    mapping = build_reduced_ebr_mapping(
+        ebr_export_bundle=export,
+        table=_portable_reduced_table(tampered),
+        reduced_ebr_input={"source": "portable_irreptables_runtime"},
+        cprime_validation_context=inputs["context"],
+    )
+    assert len(mapping["solutions"]) == 1, mapping
+    assert len(mapping["excluded_bundles"]) == 1, mapping
+    blocked = mapping["excluded_bundles"][0]
+    assert blocked["bundle_id"] == tampered["bundle_id"]
+    assert any(
+        blocker["code"] == "cprime_record_link_mismatch"
+        for blocker in blocked["blocker_reasons"]
+    ), blocked
+
+
+def _cprime_acceptance_matrix(export):
+    """Build the scope-keyed summary acceptance matrix from an export."""
+    matrix = []
+    seen_scopes: set[tuple[str, str]] = set()
+    for bundle in export["bundles"]:
+        for hsp, links in bundle["cprime_identity_by_kpoint"].items():
+            scope = bundle["cprime_scope_metadata"][hsp]
+            scope_key = (scope["sampled_kpoint"], scope["evidence_valley"])
+            if scope_key in seen_scopes:
+                continue
+            seen_scopes.add(scope_key)
+            matrix.append({
+                "kpoint": scope["sampled_kpoint"],
+                "valley": scope["evidence_valley"],
+                "double_space_group_lift_status": "passed",
+                "double_space_group_lift_identity": links[
+                    "double_space_group_lift_certificate_identity"
+                ],
+                "scoped_representation_status": "passed",
+                "scoped_representation_evidence_identity": links[
+                    "scoped_representation_evidence_identity"
+                ],
+            })
+    return matrix
+
+
+def test_tracked_only_ingestion_rejects_tampered_tr_scope_metadata(
+    tmp_path,
+):
+    inputs = _portable_orbit_inputs(tmp_path)
+    report = _build_portable_orbit_report(inputs)
+    _, _, export = _complete_and_export_portable_orbit(inputs, report)
+    assert len(export["bundles"]) == 2
+    # The summary acceptance matrix is independent published evidence:
+    # build it from an untouched copy, then tamper the bundle scope.
+    clean_export = deepcopy(export)
+    first_bundle = export["bundles"][0]
+    scope = first_bundle["cprime_scope_metadata"]["K"]
+    scope["sampled_kpoint"] = "forged_sample"
+
+    source_basis_identity = next(iter(
+        first_bundle["cprime_identity_by_kpoint"].values()
+    ))["spinor_source_basis_certificate_identity"]
+    ingestion = build_database_ingestion_record(
+        valley_summary={
+            "schema_version": "2.0.0",
+            "target_kpoints": ["K_left", "K_right"],
+            "iband": [1, 2],
+            "input": {},
+            "cprime": {
+                "spinor_source_basis": {
+                    "status": "passed",
+                    "identity": source_basis_identity,
+                    "blockers": [],
+                },
+                "acceptance_matrix": _cprime_acceptance_matrix(
+                    clean_export
+                ),
+            },
+        },
+        valley_ebr_export_bundle=export,
+    )
+    # Fail closed on the tampered bundle, reporting the actual evidence
+    # valley from the declared scope in the error. The untouched right
+    # bundle still contributes its 2 rows (1 observed + 1 inferred).
+    assert ingestion["validation_errors"] == [
+        "summary C-prime scope missing for forged_sample/left"
+    ], ingestion["validation_errors"]
+    assert len(ingestion["valley_irrep_records"]) == 2, ingestion
+    assert ingestion["reduced_table_validation_candidate_bundle_count"] == (
+        1
+    ), ingestion
 
 
 def test_portable_unitary_completion_rejects_disagreeing_reviewed_models(

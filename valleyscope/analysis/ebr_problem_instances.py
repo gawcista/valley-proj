@@ -988,6 +988,15 @@ def _build_tr_unitary_component_instances(
             ),
         )
         blockers.extend(cprime_blockers)
+        (
+            tr_cprime_scope_metadata,
+            scope_blockers,
+        ) = _completion_cprime_scope_metadata(
+            valley=valley,
+            records_by_hsp=records_by_hsp,
+            required_hsps=full_hsps,
+        )
+        blockers.extend(scope_blockers)
 
         complete_counts = (
             bool(full_hsps)
@@ -1092,6 +1101,7 @@ def _build_tr_unitary_component_instances(
             "cprime_identity_by_kpoint": dict(
                 tr_cprime_identity_by_hsp
             ),
+            "cprime_scope_metadata": dict(tr_cprime_scope_metadata),
             "workflow_path": "time_reversal_completed_unitary_valley",
             "workflow_paths": workflow_paths,
             "unitary_vector_construction": {
@@ -1293,6 +1303,120 @@ def _completion_cprime_identity_inventory(
             f"tr_irrep_completion_cprime_inventory_incomplete:{valley}"
         )
     return inventory, _deduplicate_strings(blockers)
+
+
+def _completion_cprime_scope_metadata(
+    *,
+    valley: str,
+    records_by_hsp: dict[str, object],
+    required_hsps: Sequence[str],
+) -> tuple[dict[str, dict[str, str]], list[str]]:
+    """Derive the evidence scope behind every source-HSP C-prime inventory key.
+
+    Each scope is the exact sampled kpoint and evidence valley of the
+    observed evidence: observed records report their own sample; inferred
+    records report the validated completion certificate's observed_source,
+    cross-checked against the redundant record-level evidence fields. The
+    scope is never inferred from the source-HSP label itself.
+    """
+    metadata: dict[str, dict[str, str]] = {}
+    blockers: list[str] = []
+    for hsp in required_hsps:
+        records = records_by_hsp.get(hsp)
+        if not isinstance(records, list) or not records:
+            blockers.append(
+                f"tr_irrep_completion_scope_record_missing:{valley}:{hsp}"
+            )
+            continue
+        scopes: list[tuple[str, str]] = []
+        for record in records:
+            scope = _completion_record_evidence_scope(record, hsp)
+            if scope is None:
+                blockers.append(
+                    f"tr_irrep_completion_scope_invalid:{valley}:{hsp}"
+                )
+                continue
+            scopes.append(scope)
+        if not scopes:
+            continue
+        if any(scope != scopes[0] for scope in scopes[1:]):
+            blockers.append(
+                f"tr_irrep_completion_scope_mismatch:{valley}:{hsp}"
+            )
+            continue
+        sampled_kpoint, evidence_valley = scopes[0]
+        metadata[hsp] = {
+            "sampled_kpoint": sampled_kpoint,
+            "evidence_valley": evidence_valley,
+        }
+    if set(metadata) != set(required_hsps):
+        blockers.append(
+            f"tr_irrep_completion_scope_inventory_incomplete:{valley}"
+        )
+    return metadata, _deduplicate_strings(blockers)
+
+
+def _completion_record_evidence_scope(
+    record: object,
+    hsp: str,
+) -> tuple[str, str] | None:
+    """Exact evidence scope of one completion record, or None if malformed."""
+    if not isinstance(record, dict):
+        return None
+    kind = record.get("completion_kind")
+    if kind == "observed_at_sampled_kpoint":
+        sampled = record.get("sampled_kpoint")
+        evidence_valley = record.get("evidence_valley")
+        if (
+            not isinstance(sampled, str)
+            or not sampled
+            or record.get("evidence_sampled_kpoint") != sampled
+            or record.get("target_source_hsp_label") != hsp
+            or record.get("evidence_source_hsp_label") != hsp
+            or not isinstance(evidence_valley, str)
+            or not evidence_valley
+            or record.get("target_valley") != evidence_valley
+        ):
+            return None
+        return sampled, evidence_valley
+    if kind == "inferred_by_time_reversal":
+        certificate = record.get("tr_irrep_completion_certificate")
+        observed = (
+            certificate.get("observed_source")
+            if isinstance(certificate, dict)
+            else None
+        )
+        if isinstance(observed, dict):
+            # Exact inferred rows: the certificate's observed_source is the
+            # evidence scope, cross-checked against the redundant record
+            # fields.
+            sampled = observed.get("sampled_kpoint")
+            evidence_valley = observed.get("valley")
+            evidence_hsp = observed.get("source_hsp_label")
+            if (
+                record.get("evidence_sampled_kpoint") != sampled
+                or record.get("evidence_valley") != evidence_valley
+                or record.get("evidence_source_hsp_label") != evidence_hsp
+            ):
+                return None
+        else:
+            # Self-mapped orbits attach no certificate; the record-level
+            # evidence fields are the trusted evidence scope.
+            sampled = record.get("evidence_sampled_kpoint")
+            evidence_valley = record.get("evidence_valley")
+            evidence_hsp = record.get("evidence_source_hsp_label")
+        if (
+            not isinstance(sampled, str)
+            or not sampled
+            or not isinstance(evidence_valley, str)
+            or not evidence_valley
+            or not isinstance(evidence_hsp, str)
+            or not evidence_hsp
+            or record.get("target_source_hsp_label") != hsp
+        ):
+            return None
+        return sampled, evidence_valley
+    return None
 
 
 def _completion_record_cprime_identity(

@@ -30,6 +30,10 @@ from valleyscope.io.spinor_source_basis import SpinorSourceBasisCertificate
 from valleyscope.analysis.scoped_representation_evidence import (
     build_scoped_representation_evidence,
 )
+from valleyscope.analysis.unitary_provenance import (
+    unitary_bundle_claims_time_reversal_completion,
+    unitary_bundle_claims_valley_sewing_completion,
+)
 from valleyscope.symmetry.double_space_group_lift import (
     build_double_space_group_lift_certificate,
     spin_lift_from_orthogonal,
@@ -57,11 +61,8 @@ def attach_cprime_fixture_contract(export_bundle: dict) -> dict:
         if not isinstance(records, dict):
             records = {}
         bundle["irrep_records_by_kpoint"] = records
-        construction = bundle.get("unitary_vector_construction")
-        tr_completed = (
-            isinstance(construction, dict)
-            and construction.get("kind")
-            == "time_reversal_completed_unitary_rows"
+        tr_completed = unitary_bundle_claims_time_reversal_completion(
+            bundle
         )
         joint_problem = (
             bundle.get("problem_kind") == "valley_orbit_reduced_ebr"
@@ -140,20 +141,22 @@ def attach_cprime_fixture_contract(export_bundle: dict) -> dict:
 def cprime_validation_context_for_export(
     export_bundle: dict,
 ) -> dict[str, object]:
-    """Build genuine, fully recomputable C-prime contexts for test bundles."""
+    """Build genuine, fully recomputable C-prime contexts for test bundles.
+
+    A validated evidence scope (sampled k-point, evidence valley) carries one
+    C-prime certificate; bundles referencing the same scope share it.
+    """
     entries: dict[object, object] = {}
     by_identity: dict[str, object] = {}
+    scope_entries: dict[tuple[str, str], dict[str, object]] = {}
     for bundle in export_bundle.get("bundles", []):
         if not isinstance(bundle, dict):
             continue
         irreps = bundle.get("irreps_by_kpoint", {})
         if not isinstance(irreps, dict):
             continue
-        construction = bundle.get("unitary_vector_construction")
-        tr_completed = (
-            isinstance(construction, dict)
-            and construction.get("kind")
-            == "time_reversal_completed_unitary_rows"
+        tr_completed = unitary_bundle_claims_time_reversal_completion(
+            bundle
         )
         completion_records = bundle.get(
             "unitary_irrep_completion_records_by_hsp", {}
@@ -170,39 +173,65 @@ def cprime_validation_context_for_export(
                     and isinstance(records[0], dict)
                     else None
                 )
-                if isinstance(first, dict):
+                declared_scope = bundle.get(
+                    "cprime_scope_metadata", {}
+                ).get(kpoint)
+                evidence_valley = None
+                evidence_sample = None
+                if isinstance(declared_scope, dict):
+                    evidence_valley = declared_scope.get(
+                        "evidence_valley"
+                    )
+                    evidence_sample = declared_scope.get(
+                        "sampled_kpoint"
+                    )
+                if (
+                    not isinstance(evidence_valley, str)
+                    or not evidence_valley
+                ) and isinstance(first, dict):
                     evidence_valley = first.get("evidence_valley")
+                if (
+                    not isinstance(evidence_sample, str)
+                    or not evidence_sample
+                ) and isinstance(first, dict):
                     evidence_sample = first.get(
                         "evidence_sampled_kpoint"
                     )
-                    if (
-                        isinstance(evidence_valley, str)
-                        and evidence_valley
-                        and isinstance(evidence_sample, str)
-                        and evidence_sample
-                    ):
-                        scope_bundle = {
-                            "valley": evidence_valley,
-                            "valley_orbit": [evidence_valley],
-                        }
-                        scope_kpoint = evidence_sample
-            record, raw_inputs = _cprime_fixture_scope(
-                bundle=scope_bundle,
-                kpoint=scope_kpoint,
-                source_table_sg_number=(
-                    _record_source_table_sg_number(first)
-                ),
+                if (
+                    isinstance(evidence_valley, str)
+                    and evidence_valley
+                    and isinstance(evidence_sample, str)
+                    and evidence_sample
+                ):
+                    scope_bundle = {
+                        "valley": evidence_valley,
+                        "valley_orbit": [evidence_valley],
+                    }
+                    scope_kpoint = evidence_sample
+            scope_key = (
+                str(scope_kpoint),
+                str(scope_bundle.get("valley", "")),
             )
-            entry = {"record": record, "raw_inputs": raw_inputs}
-            standard_certificate = _record_standard_setting_certificate(
-                first
-            )
-            if standard_certificate is not None:
-                entry["standard_setting_certificate"] = (
-                    standard_certificate
+            entry = scope_entries.get(scope_key)
+            if entry is None:
+                record, raw_inputs = _cprime_fixture_scope(
+                    bundle=scope_bundle,
+                    kpoint=scope_kpoint,
+                    source_table_sg_number=(
+                        _record_source_table_sg_number(first)
+                    ),
                 )
+                entry = {"record": record, "raw_inputs": raw_inputs}
+                standard_certificate = (
+                    _record_standard_setting_certificate(first)
+                )
+                if standard_certificate is not None:
+                    entry["standard_setting_certificate"] = (
+                        standard_certificate
+                    )
+                scope_entries[scope_key] = entry
             entries[(id(bundle), str(kpoint))] = entry
-            by_identity[str(record["evidence_identity"])] = entry
+            by_identity[str(entry["record"]["evidence_identity"])] = entry
     entries["_by_identity"] = by_identity
     return entries
 
@@ -393,16 +422,45 @@ def cprime_summary_for_export(
         "certificate_identity"
     ]
     matrix: list[dict[str, object]] = []
+    rows_by_scope: dict[tuple[str, str], dict[str, object]] = {}
     for bundle in export_bundle.get("bundles", []):
         if not isinstance(bundle, dict):
             continue
+        completed = (
+            unitary_bundle_claims_valley_sewing_completion(bundle)
+            or unitary_bundle_claims_time_reversal_completion(bundle)
+        )
+        scope_metadata = bundle.get("cprime_scope_metadata", {})
+        if completed and not isinstance(scope_metadata, dict):
+            raise ValueError(
+                "completed bundle lacks cprime_scope_metadata dict"
+            )
         valley = str(bundle.get("valley", ""))
         for kpoint, links in bundle.get(
             "cprime_identity_by_kpoint", {}
         ).items():
-            matrix.append({
-                "kpoint": str(kpoint),
-                "valley": valley,
+            sampled_kpoint = str(kpoint)
+            scope_valley = valley
+            if completed:
+                scope = scope_metadata.get(kpoint)
+                if not isinstance(scope, dict):
+                    raise ValueError(
+                        f"missing cprime scope metadata for {kpoint}"
+                    )
+                sampled_kpoint = scope.get("sampled_kpoint")
+                scope_valley = scope.get("evidence_valley")
+                if (
+                    not isinstance(sampled_kpoint, str)
+                    or not sampled_kpoint
+                    or not isinstance(scope_valley, str)
+                    or not scope_valley
+                ):
+                    raise ValueError(
+                        f"invalid cprime scope metadata for {kpoint}"
+                    )
+            row: dict[str, object] = {
+                "kpoint": sampled_kpoint,
+                "valley": scope_valley,
                 "double_space_group_lift_status": "passed",
                 "double_space_group_lift_identity": links[
                     "double_space_group_lift_certificate_identity"
@@ -411,7 +469,16 @@ def cprime_summary_for_export(
                 "scoped_representation_evidence_identity": links[
                     "scoped_representation_evidence_identity"
                 ],
-            })
+            }
+            scope_key = (sampled_kpoint, scope_valley)
+            previous = rows_by_scope.get(scope_key)
+            if previous is None:
+                rows_by_scope[scope_key] = row
+                matrix.append(row)
+            elif previous != row:
+                raise ValueError(
+                    f"conflicting C-prime rows for scope {scope_key}"
+                )
     return {
         "schema_version": "2.0.0",
         "target_kpoints": list(target_kpoints or []),

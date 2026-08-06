@@ -29,7 +29,10 @@ from valleyscope.irreps.time_reversal_source import (
     validate_reviewed_time_reversal_source_context as _validate_reviewed_time_reversal_source_context,
 )
 from tests.test_scoped_representation_evidence import _raw_inputs
-from tests.test_database_ingestion import _tr_completed_unitary_bundle
+from tests.test_database_ingestion import (
+    _cprime_export,
+    _tr_completed_unitary_bundle,
+)
 
 
 def _fixture_source_context_validator(context, **_kwargs):
@@ -820,3 +823,140 @@ def test_problem_builder_promotes_only_certified_unitary_components():
         "K": right_cprime,
         "KA": left_cprime,
     }
+
+
+def _validate_tr_completed_unitary_bundle_fixture(bundle):
+    """Fixture-path validator for synthetic reviewed TR source evidence."""
+
+    with patch.object(
+        _tr_source_module,
+        "validate_reviewed_time_reversal_source_context",
+        _fixture_source_context_validator,
+    ), patch.object(
+        _tr_completion_module,
+        "_source_context_matches_source_irrep",
+        lambda _context, _source_irrep: True,
+    ):
+        return validate_tr_completed_unitary_bundle(
+            bundle,
+            require_reviewed_table=False,
+        )
+
+
+def _tr_completed_bundle_with_certificates():
+    """TR fixture bundle with certificates attached via the fixture path."""
+    return _cprime_export(_tr_completed_unitary_bundle())["bundles"][0]
+
+
+def test_problem_builder_derives_tr_cprime_scope_metadata_from_evidence():
+    """Producer: TR instances carry scope metadata derived from evidence."""
+    report, context, left_cprime, right_cprime = _orbit_and_context()
+    completed = attach_tr_irrep_completion_certificates(
+        time_reversal_orbit_report=report,
+        cprime_validation_context=context,
+    )
+    problems = build_ebr_problem_instances(
+        ebr_input_candidates=_input_candidates(completed),
+        time_reversal_orbit_report=completed,
+    )
+    unitary = [
+        row
+        for row in problems["instances"]
+        if row["problem_kind"] == "unitary_valley_reduced_ebr"
+    ]
+    assert len(unitary) == 2
+    expected = {
+        "left": {"K": ("K_left", "left"), "KA": ("K_right", "right")},
+        "right": {"K": ("K_right", "right"), "KA": ("K_left", "left")},
+    }
+    by_valley = {row["valley"]: row for row in unitary}
+    for valley, scopes in expected.items():
+        instance = by_valley[valley]
+        metadata = instance["cprime_scope_metadata"]
+        assert isinstance(metadata, dict)
+        assert set(metadata) == set(instance["cprime_identity_by_kpoint"])
+        assert metadata == {
+            hsp: {
+                "sampled_kpoint": sampled,
+                "evidence_valley": evidence,
+            }
+            for hsp, (sampled, evidence) in scopes.items()
+        }
+        records = instance["unitary_irrep_completion_records_by_hsp"]
+        for hsp, (sampled, evidence) in scopes.items():
+            record = records[hsp][0]
+            assert metadata[hsp]["sampled_kpoint"] == (
+                record.get("sampled_kpoint")
+                or record.get("evidence_sampled_kpoint")
+            )
+            assert metadata[hsp]["evidence_valley"] == record.get(
+                "evidence_valley"
+            )
+
+
+def test_problem_builder_fails_closed_when_tr_scope_evidence_missing():
+    """Producer: a missing evidence field blocks the TR instance."""
+    report, context, _, _ = _orbit_and_context()
+    completed = attach_tr_irrep_completion_certificates(
+        time_reversal_orbit_report=report,
+        cprime_validation_context=context,
+    )
+    record = completed["valley_orbits"][0][
+        "unitary_valley_irrep_completion_records"
+    ]["left"]["KA"][0]
+    record.pop("evidence_sampled_kpoint")
+    problems = build_ebr_problem_instances(
+        ebr_input_candidates=_input_candidates(completed),
+        time_reversal_orbit_report=completed,
+    )
+    left = next(
+        row
+        for row in problems["instances"]
+        if row["problem_kind"] == "unitary_valley_reduced_ebr"
+        and row["valley"] == "left"
+    )
+    assert left["canonical_hsp_vector_ready"] is False
+    assert any(
+        blocker.startswith("tr_irrep_completion_scope_invalid:left:KA")
+        for blocker in left["blocked_by"]
+    )
+
+
+def test_tr_completed_unitary_bundle_accepts_valid_scope_metadata():
+    """Serialized validator: recomputed metadata equals the serialized one."""
+    bundle = _tr_completed_bundle_with_certificates()
+    assert bundle["cprime_scope_metadata"] == {
+        "GM": {"sampled_kpoint": "GammaM", "evidence_valley": "K"},
+        "K": {"sampled_kpoint": "KM_K", "evidence_valley": "K"},
+        "KA": {"sampled_kpoint": "KM_Kp", "evidence_valley": "Kp"},
+    }
+    assert _validate_tr_completed_unitary_bundle_fixture(bundle)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "wrong_sampled",
+        "wrong_evidence_valley",
+        "missing_key",
+        "missing_field",
+        "malformed_metadata",
+    ],
+)
+def test_tr_completed_unitary_bundle_rejects_tampered_scope_metadata(
+    mutation,
+):
+    """Serialized validator: serialized scope metadata cannot self-certify."""
+    bundle = _tr_completed_bundle_with_certificates()
+    metadata = bundle["cprime_scope_metadata"]
+    if mutation == "wrong_sampled":
+        metadata["KA"]["sampled_kpoint"] = "forged_sample"
+    elif mutation == "wrong_evidence_valley":
+        metadata["KA"]["evidence_valley"] = "K"
+    elif mutation == "missing_key":
+        del metadata["K"]
+    elif mutation == "missing_field":
+        del metadata["GM"]["sampled_kpoint"]
+    else:
+        bundle["cprime_scope_metadata"] = []
+    assert not _validate_tr_completed_unitary_bundle_fixture(bundle)

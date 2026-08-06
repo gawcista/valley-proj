@@ -601,6 +601,17 @@ def validate_tr_completed_unitary_bundle(
     )
     if not records_valid:
         return False
+    if not _tr_completed_cprime_identity_valid(
+        records_by_hsp=records_by_hsp,
+        expected_hsps=expected_hsps,
+        inventory=bundle.get("cprime_identity_by_kpoint"),
+    ) or not _tr_completion_scope_metadata_valid(
+        valley=valley,
+        records_by_hsp=records_by_hsp,
+        expected_hsps=expected_hsps,
+        declared=bundle.get("cprime_scope_metadata"),
+    ):
+        return False
     if time_reversal.get("mapping_type") != "self_mapped" or not sewing_kpoints:
         return True
     sewing_evidence = time_reversal.get("antiunitary_sewing_evidence")
@@ -961,6 +972,165 @@ def _completion_records_valid(
         and set(observed_source_to_sample) == observed_hsps,
         sewing_kpoints,
     )
+
+
+def _tr_completed_cprime_identity_valid(
+    *,
+    records_by_hsp: Mapping[str, object],
+    expected_hsps: list[str],
+    inventory: object,
+) -> bool:
+    """Require a complete C-prime inventory bound to every source HSP.
+
+    Every record under a source HSP must carry the exact inventory identity
+    for that HSP: observed records and self-mapped inferred records carry it
+    in the candidate provenance, exact inferred records in the validated
+    completion certificate.
+    """
+    if (
+        not isinstance(inventory, Mapping)
+        or set(inventory) != set(expected_hsps)
+    ):
+        return False
+    for hsp in expected_hsps:
+        identity = inventory.get(hsp)
+        if not _valid_cprime_identity(identity):
+            return False
+        records = records_by_hsp.get(hsp)
+        if not isinstance(records, list) or not records:
+            return False
+        for record in records:
+            if not isinstance(record, Mapping):
+                return False
+            if _tr_record_cprime(record) != identity:
+                return False
+    return True
+
+
+def _tr_record_cprime(record: Mapping[str, object]) -> object:
+    """The C-prime identity bound by one completion record."""
+    kind = record.get("completion_kind")
+    if kind == "inferred_by_time_reversal":
+        certificate = record.get("tr_irrep_completion_certificate")
+        observed = (
+            certificate.get("observed_source")
+            if isinstance(certificate, Mapping)
+            else None
+        )
+        if isinstance(observed, Mapping):
+            return observed.get("local_cprime_identity")
+    provenance = record.get("source_candidate_provenance")
+    source_irrep = (
+        provenance.get("irrep_source_provenance")
+        if isinstance(provenance, Mapping)
+        else None
+    )
+    return (
+        source_irrep.get("cprime")
+        if isinstance(source_irrep, Mapping)
+        else None
+    )
+
+
+def _valid_cprime_identity(value: object) -> bool:
+    required_keys = {
+        "spinor_source_basis_certificate_identity",
+        "double_space_group_lift_certificate_identity",
+        "scoped_representation_evidence_identity",
+    }
+    return (
+        isinstance(value, Mapping)
+        and set(value) == required_keys
+        and all(
+            valid_sha256_identity(value.get(key))
+            for key in required_keys
+        )
+    )
+
+
+def _tr_completion_scope_metadata_valid(
+    *,
+    valley: str,
+    records_by_hsp: Mapping[str, object],
+    expected_hsps: list[str],
+    declared: object,
+) -> bool:
+    """Recompute the expected C-prime scope metadata from the validated
+    records and require exact equality with the serialized metadata."""
+    if not isinstance(declared, Mapping):
+        return False
+    rebuilt: dict[str, dict[str, str]] = {}
+    for hsp in expected_hsps:
+        records = records_by_hsp.get(hsp)
+        if not isinstance(records, list) or not records:
+            return False
+        scopes: list[tuple[str, str]] = []
+        for record in records:
+            if not isinstance(record, Mapping):
+                return False
+            scope = _tr_completion_record_scope(record, valley, hsp)
+            if scope is None:
+                return False
+            scopes.append(scope)
+        if any(scope != scopes[0] for scope in scopes[1:]):
+            return False
+        sampled, evidence_valley = scopes[0]
+        rebuilt[hsp] = {
+            "sampled_kpoint": sampled,
+            "evidence_valley": evidence_valley,
+        }
+    return rebuilt == dict(declared)
+
+
+def _tr_completion_record_scope(
+    record: Mapping[str, object],
+    valley: str,
+    hsp: str,
+) -> tuple[str, str] | None:
+    """Exact evidence scope of one TR completion record, or None."""
+    kind = record.get("completion_kind")
+    if kind == "observed_at_sampled_kpoint":
+        sampled = record.get("sampled_kpoint")
+        if (
+            record.get("target_source_hsp_label") == hsp
+            and record.get("target_valley") == valley
+            and record.get("evidence_sampled_kpoint") == sampled
+            and record.get("evidence_valley") == valley
+            and isinstance(sampled, str)
+            and sampled
+        ):
+            return sampled, valley
+        return None
+    if kind == "inferred_by_time_reversal":
+        certificate = record.get("tr_irrep_completion_certificate")
+        observed = (
+            certificate.get("observed_source")
+            if isinstance(certificate, Mapping)
+            else None
+        )
+        if isinstance(observed, Mapping):
+            sampled = observed.get("sampled_kpoint")
+            evidence_valley = observed.get("valley")
+            if (
+                record.get("evidence_sampled_kpoint") != sampled
+                or record.get("evidence_valley") != evidence_valley
+            ):
+                return None
+        else:
+            # Self-mapped orbits attach no certificate; the record-level
+            # evidence fields are the trusted evidence scope.
+            sampled = record.get("evidence_sampled_kpoint")
+            evidence_valley = record.get("evidence_valley")
+        if (
+            record.get("target_source_hsp_label") == hsp
+            and isinstance(sampled, str)
+            and sampled
+            and isinstance(evidence_valley, str)
+            and evidence_valley
+        ):
+            return sampled, evidence_valley
+        return None
+    return None
 
 
 def _source_candidate_provenance_valid(

@@ -487,13 +487,15 @@ def _validate_bundle_cprime_against_summary(
     bundle_links = bundle.get("cprime_identity_by_kpoint")
     irreps = bundle.get("irreps_by_kpoint")
     expected_scopes = set(irreps) if isinstance(irreps, dict) else set()
-    scope_metadata = {}
-    if unitary_bundle_claims_valley_sewing_completion(bundle):
+    scope_metadata = None
+    if (
+        unitary_bundle_claims_valley_sewing_completion(bundle)
+        or unitary_bundle_claims_time_reversal_completion(bundle)
+    ):
         scope_metadata = bundle.get("cprime_scope_metadata", {})
-        expected_scopes = (
-            set(scope_metadata)
-            if isinstance(scope_metadata, dict) else set()
-        )
+        if not isinstance(scope_metadata, dict):
+            return "bundle C-prime scope metadata is malformed"
+        expected_scopes = set(scope_metadata)
     if (
         not isinstance(bundle_links, dict)
         or not isinstance(irreps, dict)
@@ -501,12 +503,33 @@ def _validate_bundle_cprime_against_summary(
     ):
         return "bundle C-prime identity inventory is incomplete"
     for scope_key, identity in bundle_links.items():
-        scope = scope_metadata.get(scope_key, {})
-        kpoint = scope.get("sampled_kpoint", scope_key)
-        scope_valley = scope.get("evidence_valley", valley)
+        if scope_metadata is None:
+            kpoint, scope_valley = scope_key, valley
+        else:
+            scope = scope_metadata.get(scope_key)
+            kpoint = (
+                scope.get("sampled_kpoint")
+                if isinstance(scope, dict) else None
+            )
+            scope_valley = (
+                scope.get("evidence_valley")
+                if isinstance(scope, dict) else None
+            )
+            if (
+                not isinstance(kpoint, str)
+                or not kpoint
+                or not isinstance(scope_valley, str)
+                or not scope_valley
+            ):
+                return (
+                    "summary C-prime scope missing for "
+                    f"{scope_key}/{scope_valley}"
+                )
         row = by_scope.get((str(kpoint), str(scope_valley)))
         if not isinstance(row, dict) or not isinstance(identity, dict):
-            return f"summary C-prime scope missing for {kpoint}/{scope_valley}"
+            return (
+                f"summary C-prime scope missing for {kpoint}/{scope_valley}"
+            )
         expected = {
             "spinor_source_basis_certificate_identity": source_identity,
             "double_space_group_lift_certificate_identity": row.get(
@@ -525,7 +548,9 @@ def _validate_bundle_cprime_against_summary(
                 for value in expected.values()
             )
         ):
-            return f"C-prime identity mismatch for {kpoint}/{valley}"
+            return (
+                f"C-prime identity mismatch for {kpoint}/{scope_valley}"
+            )
     return None
 
 

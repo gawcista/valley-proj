@@ -1686,10 +1686,22 @@ def _validate_cprime_bundle_identity(
             and set(by_kpoint) != set(irreps_by_kpoint)
         )
         or (
-            sewing_completed
+            (sewing_completed or tr_completed)
             and (
                 not isinstance(cprime_scope_metadata, dict)
                 or set(cprime_scope_metadata) != set(by_kpoint)
+                or any(
+                    not isinstance(scope, dict)
+                    or not isinstance(
+                        scope.get("sampled_kpoint"), str
+                    )
+                    or not scope.get("sampled_kpoint")
+                    or not isinstance(
+                        scope.get("evidence_valley"), str
+                    )
+                    or not scope.get("evidence_valley")
+                    for scope in cprime_scope_metadata.values()
+                )
             )
         )
         or (
@@ -1827,29 +1839,60 @@ def _validate_cprime_bundle_identity(
                     if isinstance(certificate, dict)
                     else None
                 )
-                cprime = (
-                    observed.get("local_cprime_identity")
-                    if isinstance(observed, dict)
+                scope = (
+                    cprime_scope_metadata.get(kpoint)
+                    if isinstance(cprime_scope_metadata, dict)
                     else None
                 )
-                certificate_valid = (
-                    validate_tr_irrep_completion_certificate(
-                        certificate,
-                        completion_record=record,
-                        valley_mapping=valley_mapping,
-                        hsp_mapping=hsp_mapping,
-                        irrep_pairing=irrep_pairing,
-                        reviewed_source_identity=(
-                            reviewed_source_identity
-                        ),
-                        reviewed_source_context=(
-                            reviewed_source_context
-                        ),
-                        cprime_validation_context=(
-                            cprime_validation_context
-                        ),
+                if isinstance(observed, dict):
+                    cprime = observed.get("local_cprime_identity")
+                    certificate_valid = (
+                        validate_tr_irrep_completion_certificate(
+                            certificate,
+                            completion_record=record,
+                            valley_mapping=valley_mapping,
+                            hsp_mapping=hsp_mapping,
+                            irrep_pairing=irrep_pairing,
+                            reviewed_source_identity=(
+                                reviewed_source_identity
+                            ),
+                            reviewed_source_context=(
+                                reviewed_source_context
+                            ),
+                            cprime_validation_context=(
+                                cprime_validation_context
+                            ),
+                        )
+                        and isinstance(scope, dict)
+                        and observed.get("sampled_kpoint")
+                        == scope.get("sampled_kpoint")
+                        and observed.get("valley")
+                        == scope.get("evidence_valley")
                     )
-                )
+                else:
+                    # Self-mapped orbits attach no certificate; the record
+                    # links its provenance C-prime directly and the record
+                    # evidence fields are the trusted scope.
+                    candidate_provenance = record.get(
+                        "source_candidate_provenance"
+                    )
+                    provenance = (
+                        candidate_provenance.get("irrep_source_provenance")
+                        if isinstance(candidate_provenance, dict)
+                        else None
+                    )
+                    cprime = (
+                        provenance.get("cprime")
+                        if isinstance(provenance, dict)
+                        else None
+                    )
+                    certificate_valid = (
+                        isinstance(scope, dict)
+                        and record.get("evidence_sampled_kpoint")
+                        == scope.get("sampled_kpoint")
+                        and record.get("evidence_valley")
+                        == scope.get("evidence_valley")
+                    )
             elif tr_completed and isinstance(record, dict):
                 candidate_provenance = record.get(
                     "source_candidate_provenance"
@@ -1864,9 +1907,20 @@ def _validate_cprime_bundle_identity(
                     if isinstance(provenance, dict)
                     else None
                 )
+                scope = (
+                    cprime_scope_metadata.get(kpoint)
+                    if isinstance(cprime_scope_metadata, dict)
+                    else None
+                )
                 certificate_valid = (
                     record.get("completion_kind")
                     == "observed_at_sampled_kpoint"
+                    and isinstance(scope, dict)
+                    and record.get("sampled_kpoint")
+                    == scope.get("sampled_kpoint")
+                    and record.get("evidence_valley")
+                    == scope.get("evidence_valley")
+                    and record.get("target_source_hsp_label") == kpoint
                 )
             elif sewing_completed and isinstance(record, dict):
                 source = _sewing_source_for_scope(
