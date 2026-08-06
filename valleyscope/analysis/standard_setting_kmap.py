@@ -2886,10 +2886,13 @@ def _reconstruct_subgroup_standard_cell(
 
     if vf.get("status") != "passed":
         result["status"] = "rejected"
+        verification_reason = vf.get(
+            "reason",
+            "transformed parent rotations do not match standard-setting rotations",
+        )
         result["reason"] = (
             "operation-basis verification failed: "
-            f"{vf.get('reason', 'transformed parent rotations do not '
-                       'match standard-setting rotations')}"
+            f"{verification_reason}"
         )
         return result
 
