@@ -83,7 +83,9 @@ def _completion_inputs():
     directed_record = build_directed_valley_sewing_evidence(
         **directed_raw
     ).to_record()
-    assert directed_record["status"] == "passed"
+    assert directed_record["status"] == "passed", directed_record[
+        "reason_codes"
+    ]
 
     certificate = real_primitive_certificate_dict(1, "P1", spinor=True)
     assert certificate is not None
@@ -1012,7 +1014,9 @@ def test_centered_setting_keeps_all_coset_transport_rows_and_bloch_phases():
 
     certificate = build_unitary_valley_sewing_certificate(**raw)
 
-    assert directed_record["status"] == "passed"
+    assert directed_record["status"] == "passed", directed_record[
+        "reason_codes"
+    ]
     assert certificate["status"] == "blocked_unknown"
     assert "target_irrep_matching_not_unique" in certificate["reason_codes"]
     transports = certificate["source_target_standard_setting_transport"]
