@@ -171,44 +171,6 @@ def build_hsp_star_derived_characters(
     }
 
 
-def collect_derived_characters_by_target(
-    derived_report: dict[str, object],
-) -> dict[str, dict[str, dict[object, dict[str, object]]]]:
-    """Collect derived characters indexed by (target_kpoint_key, target_valley, operation_id).
-
-    Returns {target_kpoint_key: {valley: {op_id: {character, eigenphases, trusted, status}}}}.
-    """
-    result: dict[str, dict[str, dict[object, dict[str, object]]]] = {}
-    for entry in derived_report.get("entries", []):
-        if not isinstance(entry, dict):
-            continue
-        if not entry.get("trusted_for_ebr_input", False):
-            continue
-        target_key = entry.get("target_kpoint_key")
-        if target_key is None:
-            target_key = entry.get("target_kpoint_label")
-        if target_key is None:
-            continue
-        target_key = str(target_key)
-        target_valley = str(entry.get("target_valley", ""))
-        target_op = entry.get("derived_target_operation_id")
-        if not target_key or not target_valley or target_op is None:
-            continue
-        char_val = entry.get("character")
-        phases = entry.get("eigenphases")
-        result.setdefault(target_key, {}).setdefault(target_valley, {})[target_op] = {
-            "character": char_val,
-            "eigenphases": list(phases) if phases else [],
-            "trusted_for_ebr_input": True,
-            "derivation_status": str(entry.get("status", "")),
-        }
-    return result
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
 def _find_source_character(
     char_data: dict[str, object],
     valley: str,

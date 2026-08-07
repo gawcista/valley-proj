@@ -30,9 +30,6 @@ def write_diagnostics_h5(
             sectors = group.create_group("sector_masks")
             for name, mask in projectors.sector_masks.items():
                 sectors[name] = mask.astype(np.uint8)
-            valleys = group.create_group("valley_masks")
-            for name, mask in projectors.sector_masks.items():
-                valleys[name] = mask.astype(np.uint8)
             centers = group.create_group("center_masks")
             for name, mask in projectors.center_masks.items():
                 centers[name] = mask.astype(np.uint8)

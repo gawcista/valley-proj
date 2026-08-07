@@ -205,193 +205,6 @@ def test_match_single_state_irrep_rejects_non_one_dimensional_irrep():
 
 
 # -----------------------------------------------------------------------
-# Source payload adapter for generic irrep matching
-# -----------------------------------------------------------------------
-
-from valleyscope.irreps.source_payload import build_source_payload_for_generic_matching
-from valleyscope.analysis.valley_irrep_matching import build_valley_irrep_matching_report
-
-
-def test_adapter_sg143_spinor_c3_like_payload():
-    """Adapter builds valid payload for SG143 spinor C3-like operations."""
-    table = load_standard_irrep_table(143, spinor=True)
-    detected = [
-        {"operation_id": 1, "rotation_frac": np.eye(3, dtype=int),
-         "translation_frac": np.zeros(3)},
-        {"operation_id": 2, "rotation_frac": np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]], dtype=int),
-         "translation_frac": np.zeros(3)},
-        {"operation_id": 3, "rotation_frac": np.array([[-1, 1, 0], [-1, 0, 0], [0, 0, 1]], dtype=int),
-         "translation_frac": np.zeros(3)},
-    ]
-    payload = build_source_payload_for_generic_matching(
-        table=table, source_hsp_label="K",
-        detected_operations=detected,
-        valley_preserving_operation_ids=[1, 2, 3],
-    )
-    assert payload["status"] == "ok"
-    assert payload["provenance"]["source_hsp_label"] == "K"
-    chars = payload["source_irrep_characters"]
-    assert "-K5" in chars
-    assert chars["-K5"][2] == pytest.approx(np.exp(-1j * np.pi / 3), abs=1e-4)
-
-
-def test_adapter_resolves_conjugate_c2_via_unique_isomorphism():
-    """Conjugate C2 resolved via unique group isomorphism, not blocked."""
-    table = load_standard_irrep_table(5, spinor=True)
-    detected = [
-        {"operation_id": 0, "rotation_frac": np.eye(3, dtype=int),
-         "translation_frac": np.zeros(3)},
-        {"operation_id": 4,
-         "rotation_frac": np.array([[-1, 1, 0], [0, 1, 0], [0, 0, -1]], dtype=int),
-         "translation_frac": np.zeros(3)},
-    ]
-
-    payload = build_source_payload_for_generic_matching(
-        table=table,
-        source_hsp_label="GM",
-        detected_operations=detected,
-        valley_preserving_operation_ids=[0, 4],
-    )
-
-    assert payload["status"] == "ok"
-    assert payload["provenance"]["operation_mapping_provenance"] == "unique_group_isomorphism"
-
-
-def test_adapter_blocked_missing_source_hsp():
-    """Adapter blocks when source HSP has no irreps."""
-    table = load_standard_irrep_table(143, spinor=True)
-    detected = [{"operation_id": 1, "rotation_frac": np.eye(3, dtype=int),
-                  "translation_frac": np.zeros(3)}]
-    payload = build_source_payload_for_generic_matching(
-        table=table, source_hsp_label="NONEXISTENT",
-        detected_operations=detected,
-        valley_preserving_operation_ids=[1],
-    )
-    assert payload["status"] == "blocked"
-    assert "no_source_irreps_for_hsp" in payload["blocker_reasons"][0]
-
-
-def test_adapter_blocked_incomplete_ops():
-    """Adapter blocks when VP op not in detected_operations."""
-    table = load_standard_irrep_table(143, spinor=True)
-    detected = [{"operation_id": 1, "rotation_frac": np.eye(3, dtype=int),
-                  "translation_frac": np.zeros(3)}]
-    payload = build_source_payload_for_generic_matching(
-        table=table, source_hsp_label="K",
-        detected_operations=detected,
-        valley_preserving_operation_ids=[1, 2],
-    )
-    assert payload["status"] == "blocked"
-
-
-def test_adapter_blocked_unmatched_valley_preserving_operation():
-    """Adapter blocks when a VP op has no source-table operation match."""
-    table = load_standard_irrep_table(5, spinor=True)
-    detected = [
-        {"operation_id": 0, "rotation_frac": np.eye(3, dtype=int),
-         "translation_frac": np.zeros(3)},
-        {"operation_id": 4,
-         "rotation_frac": np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]], dtype=int),
-         "translation_frac": np.zeros(3)},
-    ]
-    payload = build_source_payload_for_generic_matching(
-        table=table,
-        source_hsp_label="GM",
-        detected_operations=detected,
-        valley_preserving_operation_ids=[0, 4],
-    )
-    assert payload["status"] == "blocked"
-    assert "table_operation_matching_failed" in payload["blocker_reasons"][0]
-
-
-def test_adapter_blocks_ambiguous_identity_only_source_restriction():
-    """A source HSP with multiple irreps cannot be labeled from identity only."""
-    table = load_standard_irrep_table(143, spinor=True)
-    detected = [{"operation_id": 0, "rotation_frac": np.eye(3, dtype=int),
-                 "translation_frac": np.zeros(3)}]
-    payload = build_source_payload_for_generic_matching(
-        table=table,
-        source_hsp_label="K",
-        detected_operations=detected,
-        valley_preserving_operation_ids=[0],
-    )
-    assert payload["status"] == "blocked"
-    assert "ambiguous_restricted_source_irreps" in payload["blocker_reasons"][0]
-
-
-def test_adapter_payload_drives_generic_matching_report():
-    """Adapter output feeds build_valley_irrep_matching_report generic path."""
-    # Use SG 143 P3 spinor which has known exact operation matrices.
-    table = load_standard_irrep_table(143, spinor=True)
-    op2 = table.operation_by_index(2)
-    detected = [
-        {"operation_id": 0,
-         "rotation_frac": np.eye(3, dtype=int),
-         "translation_frac": np.zeros(3)},
-        {"operation_id": 1,
-         "rotation_frac": op2.rotation_frac,
-         "translation_frac": op2.translation_frac},
-    ]
-    payload = build_source_payload_for_generic_matching(
-        table=table,
-        source_hsp_label="K",
-        detected_operations=detected,
-        valley_preserving_operation_ids=[0, 1],
-    )
-    assert payload["status"] == "ok"
-
-    report = build_valley_irrep_matching_report(
-        irrep_workflow_decisions={
-            "by_kpoint": {
-                "GammaM": {
-                    "K_valley": {
-                        "readiness_level": "trusted",
-                        "workflow_path": "direct_qcut",
-                    },
-                },
-            },
-        },
-        symmetry_adapted_valley_report={
-            "by_kpoint": {
-                "GammaM": {
-                    "valley_preserving_subspaces": [{
-                        "reference_valley": "K_valley",
-                        "orbit": ["K_valley"],
-                        "hsp_preserving_operation_ids": [0, 1],
-                        "subspace_space_group": {
-                            "valley_preserving_operation_ids": [0, 1],
-                        },
-                        "valley_preserving_character_diagnostics": {
-                            "per_valley": {
-                                "K_valley": [
-                                    {"operation_id": 0, "eigenphases": [0.0, 0.0]},
-                                    {"operation_id": 1, "eigenphases": [0.166667]},
-                                ],
-                            },
-                        },
-                        "subspace_group": {
-                            "subspace_group_candidate": "P3",
-                            "operation_orders": {"0": 1, "1": 3},
-                        },
-                    }],
-                },
-            },
-        },
-        source_irrep_characters_flattened={
-            "GammaM": {"K_valley": payload["source_irrep_characters"]},
-        },
-        source_operation_maps={
-            "GammaM": {"K_valley": payload["source_operation_map"]},
-        },
-    )
-
-    match = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
-    assert match["matching_strategy"] == "bilbao_restricted_character"
-    assert match["matching_status"] in ("matched", "diagnostic")
-    assert len(match.get("irrep_multiplicities", {})) >= 0
-
-
-# -----------------------------------------------------------------------
 # Group-isomorphism operation mapping (Finding 4)
 # -----------------------------------------------------------------------
 
@@ -453,19 +266,26 @@ def test_group_isomorphism_ambiguous_mapping_blocked():
 
 def test_empty_gk_a_blocked_not_identity_only():
     """Empty G_k^(a) is blocked, not identity-only."""
-    from valleyscope.irreps.source_payload import build_source_payload_for_generic_matching
+    from valleyscope.irreps.source_payload import (
+        build_source_payload_for_projected_hsp_matching,
+    )
     table = load_standard_irrep_table(5, spinor=True)
     detected = [
         {"operation_id": 99, "rotation_frac": np.eye(3, dtype=int),
          "translation_frac": np.zeros(3)},
     ]
-    payload = build_source_payload_for_generic_matching(
-        table=table, source_hsp_label="GM",
+    payload = build_source_payload_for_projected_hsp_matching(
+        table=table,
+        projected_hsp_classification={
+            "classification": "representative",
+            "source_hsp_label": "GM",
+            "representation_transport_status": "validated",
+        },
         detected_operations=detected,
         valley_preserving_operation_ids=[],
     )
     assert payload["status"] == "blocked"
-    assert "empty_valley_preserving_operation_ids" in payload["blocker_reasons"][0]
+    assert "invalid_valley_preserving_operation_ids" in payload["blocker_reasons"][0]
 
 
 # ---------------------------------------------------------------------------

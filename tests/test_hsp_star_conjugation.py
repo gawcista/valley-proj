@@ -3,7 +3,6 @@ import numpy as np
 
 from valleyscope.analysis.hsp_star_conjugation import (
     build_hsp_star_conjugation_report,
-    compute_target_kpoint_key,
 )
 
 
@@ -292,22 +291,3 @@ def test_source_not_in_hsp_little_group_filtered():
         # Every matched non-identity source op must be in the HSP little group
         # at MM=[0.5,0,0].  For P312, only op=5 (C2_M3) is in the MM little group.
         assert src_op == 5, f"op={src_op} matched but not in MM little group"
-
-
-def test_compute_target_kpoint_key_explicit():
-    key = compute_target_kpoint_key(
-        source_frac=np.array([0.5, 0.0, 0.0]),
-        operation_rotation=np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]]),
-        kpoint_frac_by_name={"MM": [0.5, 0.0, 0.0], "MM3": [0.5, 0.5, 0.0]},
-    )
-    assert key == "MM3"
-
-
-def test_compute_target_kpoint_key_derived():
-    key = compute_target_kpoint_key(
-        source_frac=np.array([0.5, 0.0, 0.0]),
-        operation_rotation=np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]]),
-        kpoint_frac_by_name={"MM": [0.5, 0.0, 0.0]},
-    )
-    assert key.startswith("derived:[")
-    assert "0.5" in key

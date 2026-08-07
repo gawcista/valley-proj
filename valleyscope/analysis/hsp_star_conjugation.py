@@ -296,32 +296,6 @@ def _make_target_key(
     return f"derived:{frac_list}"
 
 
-def compute_target_kpoint_key(
-    *,
-    source_frac: np.ndarray,
-    operation_rotation: np.ndarray,
-    kpoint_frac_by_name: dict[str, list[float]],
-    tolerance: float = 1e-5,
-) -> str:
-    """Compute the target_kpoint_key for a source kpoint mapped by an operation.
-
-    This is the same key used in conjugation entries.  If the target matches
-    an explicit kpoint label, that label is used; otherwise a stable
-    ``derived:[...]`` key is generated.
-    """
-    kpoints = {
-        str(name): np.asarray(frac, dtype=float)
-        for name, frac in kpoint_frac_by_name.items()
-    }
-    source_arr = np.asarray(source_frac, dtype=float)
-    rot = np.asarray(operation_rotation, dtype=float)
-    target_frac = _canonical_frac(reciprocal_transform(rot, source_arr))
-    target_label = _match_kpoint(target_frac, kpoints, tolerance=tolerance)
-    return _make_target_key(
-        explicit_label=target_label,
-        canonical_frac=target_frac,
-    )
-
 
 def _match_kpoint(
     frac: np.ndarray,

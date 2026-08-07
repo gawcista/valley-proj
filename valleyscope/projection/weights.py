@@ -7,13 +7,6 @@ import numpy as np
 from valleyscope.projection.sector_projectors import SectorProjectors
 
 
-DEFAULT_THRESHOLDS = {
-    "W_val_min": 0.8,
-    "P_v_clean": 0.95,
-    "P_v_approx": 0.85,
-}
-
-
 @dataclass(frozen=True)
 class ValleyWeightResult:
     band_position: int
@@ -78,24 +71,3 @@ def compute_valley_weights(coefficients: np.ndarray, projectors: SectorProjector
             )
         )
     return results
-
-
-def classify_valley_weights(
-    *,
-    w_val: float,
-    purity: float,
-    thresholds: dict[str, float] | None,
-) -> dict[str, object]:
-    values = DEFAULT_THRESHOLDS.copy()
-    if thresholds:
-        values.update(thresholds)
-    if purity > values["P_v_clean"]:
-        clean = "clean"
-    elif purity > values["P_v_approx"]:
-        clean = "approximate"
-    else:
-        clean = "mixed"
-    return {
-        "valley_derived": bool(w_val > values["W_val_min"]),
-        "valley_clean": clean,
-    }

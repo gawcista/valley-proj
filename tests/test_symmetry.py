@@ -4,13 +4,12 @@ import pytest
 from valleyscope.geometry.lattice import cart_rotation_from_fractional, cart_translation_from_fractional
 from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector
 from valleyscope.symmetry.little_group import is_little_group_operation
-from valleyscope.symmetry.operation_classifier import classify_operation, operation_order, rotation_axis_angle
+from valleyscope.symmetry.operation_classifier import classify_operation, operation_order
 from valleyscope.symmetry.plane_wave_action import (
     apply_plane_wave_action,
     build_plane_wave_representation,
     build_reciprocal_grid_map,
     reciprocal_grid_identity,
-    spin_rotation_matrix,
     validate_reciprocal_grid_permutation,
 )
 from valleyscope.symmetry.spglib_finder import find_symmetry_operations
@@ -161,35 +160,6 @@ def test_c3_preserves_multicenter_k_valley_sector():
     assert mapping.preserved["K_sector"] is True
 
 
-def test_rotation_axis_angle_recovers_c2_and_c3_about_z():
-    axis, angle = rotation_axis_angle(np.diag([-1.0, -1.0, 1.0]))
-    np.testing.assert_allclose(np.abs(axis), [0.0, 0.0, 1.0], atol=1e-12)
-    assert angle == pytest.approx(np.pi)
-
-    c3_angle = 2.0 * np.pi / 3.0
-    c3z_cart = np.array(
-        [
-            [np.cos(c3_angle), -np.sin(c3_angle), 0.0],
-            [np.sin(c3_angle), np.cos(c3_angle), 0.0],
-            [0.0, 0.0, 1.0],
-        ]
-    )
-    axis, angle = rotation_axis_angle(c3z_cart)
-    np.testing.assert_allclose(axis, [0.0, 0.0, 1.0], atol=1e-12)
-    assert angle == pytest.approx(c3_angle)
-
-
-@pytest.mark.parametrize("angle, expected, check_unitary", [
-    pytest.param(np.pi, np.diag([-1.0j, 1.0j]), False, id="c2_matches_su2"),
-    pytest.param(2.0 * np.pi, -np.eye(2), False, id="two_pi_minus_identity"),
-    pytest.param(2.0 * np.pi / 3.0, None, True, id="c3_unitary"),
-])
-def test_spin_rotation_matrix(angle, expected, check_unitary):
-    rot = spin_rotation_matrix(axis=np.array([0.0, 0.0, 1.0]), angle=angle)
-    if check_unitary:
-        assert np.allclose(rot.conj().T @ rot, np.eye(2), atol=1e-12)
-    else:
-        np.testing.assert_allclose(rot, expected, atol=1e-12)
 
 
 def test_plane_wave_action_recovers_known_c2_eigenvalues():

@@ -147,6 +147,7 @@ from valleyscope.symmetry.operation_classifier import classify_operation
 from valleyscope.symmetry.double_space_group_lift import (
     build_double_space_group_lift_certificate,
 )
+from valleyscope.symmetry.little_group import is_little_group_operation
 from valleyscope.symmetry.spglib_finder import find_symmetry_operations
 from valleyscope.symmetry.valley_preservation import map_valley_sectors
 
@@ -533,7 +534,9 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             target_subspace_closure_report,
         )
 
-    if symmetry_payload["status"] == "ok":
+    # HSP-star coverage is debug-only detail; the physical readiness path
+    # never consumes it.  Standard profile must not construct it.
+    if config.output.profile == "debug" and symmetry_payload["status"] == "ok":
         symmetry_payload["hsp_star_report"] = build_hsp_star_report(
             kpoint_frac_by_name=symmetry_payload.get("kpoint_frac_by_name", {}),
             operations=symmetry_payload.get("detected_operations", []),
@@ -570,15 +573,17 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 symmetry_adapted_projectors_by_kpoint
             ),
         )
-        # Build HSP-star conjugation and derived characters
-        hsp_star_conjugation_report, hsp_star_derived_characters = (
-            _build_hsp_star_derived_character_layer(
-                symmetry_payload=symmetry_payload,
-                symmetry_adapted_valley_report=symmetry_adapted_valley_report,
-                target_subspace_closure_report=target_subspace_closure_report,
-                valley_names=valley_names,
+        # Build HSP-star conjugation and derived characters.  Debug-only
+        # detail payloads; standard profile must not construct them.
+        if config.output.profile == "debug":
+            hsp_star_conjugation_report, hsp_star_derived_characters = (
+                _build_hsp_star_derived_character_layer(
+                    symmetry_payload=symmetry_payload,
+                    symmetry_adapted_valley_report=symmetry_adapted_valley_report,
+                    target_subspace_closure_report=target_subspace_closure_report,
+                    valley_names=valley_names,
+                )
             )
-        )
 
     sector_names = list(projectors_by_kpoint[next(iter(projectors_by_kpoint))].sector_masks)
     symmetry_eigenvalue_summary = _build_symmetry_eigenvalue_summary(symmetry_payload, symmetry_rows)
@@ -3706,8 +3711,20 @@ def _valley_preserving_little_group_ids(operations, kpoint, valley):
         if isinstance(operation.get("operation_id"), int)
         and isinstance(operation.get("sector_mapping"), dict)
         and operation["sector_mapping"].get(valley) == valley
-        and _unitary_operation_maps_kpoint(operation, kpoint, kpoint)
+        and _little_group_member(operation, kpoint)
     ]
+
+
+def _little_group_member(operation, kpoint):
+    rotation = operation.get("rotation_frac")
+    if rotation is None:
+        return False
+    try:
+        return is_little_group_operation(
+            np.asarray(rotation, dtype=float), np.asarray(kpoint, dtype=float)
+        )
+    except (TypeError, ValueError, np.linalg.LinAlgError):
+        return False
 
 
 def _build_parent_double_group_lift_context(

@@ -3,7 +3,6 @@ import numpy as np
 
 from valleyscope.analysis.hsp_star_derived_characters import (
     build_hsp_star_derived_characters,
-    collect_derived_characters_by_target,
 )
 from valleyscope.analysis.target_subspace_closure import (
     build_target_subspace_closure_report,
@@ -210,19 +209,6 @@ def test_schema_json_serializable():
     assert "default=str" not in encoded
 
 
-def test_collect_derived_characters_by_target():
-    report = build_hsp_star_derived_characters(
-        conjugation_report=_make_conjugation_report(),
-        source_character_diagnostics=_make_source_char_diagnostics(),
-    )
-    by_target = collect_derived_characters_by_target(report)
-
-    assert "MM2" in by_target
-    assert "M1" in by_target["MM2"]
-    assert 7 in by_target["MM2"]["M1"]
-    assert "MM3" in by_target
-    assert "M3" in by_target["MM3"]
-    assert 9 in by_target["MM3"]["M3"]
 
 
 def test_closure_failed_blocks_derived():
@@ -474,11 +460,19 @@ def test_workflow_two_targets_only_one_unlocked():
 
     # Both targets should have trusted derived characters
     # (same source char used for both)
-    by_target = collect_derived_characters_by_target(report)
-    assert "MM2" in by_target
-    assert "MM3" in by_target
-    assert 7 in by_target["MM2"].get("M1", {})
-    assert 8 in by_target["MM3"].get("M3", {})
+    trusted_entries = [
+        entry for entry in report["entries"]
+        if entry.get("trusted_for_ebr_input")
+    ]
+    derived_ops: dict[tuple[str, str], set[object]] = {}
+    for entry in trusted_entries:
+        derived_ops.setdefault(
+            (str(entry.get("target_kpoint_key")),
+             str(entry.get("target_valley"))),
+            set(),
+        ).add(entry.get("derived_target_operation_id"))
+    assert 7 in derived_ops[("MM2", "M1")]
+    assert 8 in derived_ops[("MM3", "M3")]
 
-    assert 8 not in by_target["MM2"]["M1"]
-    assert "M1" not in by_target["MM3"]
+    assert 8 not in derived_ops[("MM2", "M1")]
+    assert ("MM3", "M1") not in derived_ops

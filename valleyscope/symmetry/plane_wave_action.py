@@ -40,18 +40,6 @@ class PlaneWaveActionResult:
     mapping_miss_count: int
 
 
-def spin_rotation_matrix(axis: np.ndarray, angle: float) -> np.ndarray:
-    vec = np.asarray(axis, dtype=float)
-    norm = np.linalg.norm(vec)
-    if norm == 0.0:
-        raise ValueError("rotation axis must be non-zero")
-    nx, ny, nz = vec / norm
-    sigma_x = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128)
-    sigma_y = np.array([[0.0, -1.0j], [1.0j, 0.0]], dtype=np.complex128)
-    sigma_z = np.array([[1.0, 0.0], [0.0, -1.0]], dtype=np.complex128)
-    sigma = nx * sigma_x + ny * sigma_y + nz * sigma_z
-    return np.cos(angle / 2.0) * np.eye(2) - 1.0j * np.sin(angle / 2.0) * sigma
-
 
 def unitarity_deviation(matrix: np.ndarray) -> float:
     mat = np.asarray(matrix, dtype=np.complex128)

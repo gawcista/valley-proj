@@ -5,9 +5,6 @@ from copy import deepcopy
 import numpy as np
 import pytest
 
-from valleyscope.analysis.representation_readiness import (
-    compose_representation_readiness,
-)
 from valleyscope.analysis.scoped_representation_evidence import (
     build_directed_valley_sewing_evidence,
     build_scoped_representation_evidence,
@@ -685,19 +682,3 @@ def test_scoped_evidence_rejects_serialized_tampering(path, value, reason):
 
     assert validation.status == "blocked"
     assert reason in validation.reason_codes
-
-
-def test_readiness_composer_revalidates_and_fails_closed_on_identity_tampering():
-    record, inputs = _build(
-        scope_kind="local_irrep",
-        required_operation_ids=(2,),
-    )
-    ready = compose_representation_readiness(record, **inputs)
-    tampered = deepcopy(record)
-    tampered["evidence_identity"] = "sha256:" + "0" * 64
-    blocked = compose_representation_readiness(tampered, **inputs)
-
-    assert ready["local_irrep_ready"] is True
-    assert "tr_completed_ready" not in ready
-    assert blocked["local_irrep_ready"] is False
-    assert "scoped_representation_evidence_invalid" in blocked["blockers"]

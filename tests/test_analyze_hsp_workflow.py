@@ -1880,12 +1880,12 @@ def test_missing_characters_block_match():
     assert "incomplete" in result["reason"]
 
 
-def test_unmock_generic_source_adapter_positive_full_pipeline():
-    """Unmock: real load_standard_irrep_table + build_source_payload
-    feed through matcher -> EBR -> reduced mapping -> database ingestion."""
-    from valleyscope.irreps.tables import load_standard_irrep_table
-    from valleyscope.irreps.source_payload import (
-        build_source_payload_for_generic_matching,
+def test_reviewed_table_source_payload_positive_full_pipeline():
+    """Real reviewed-table source payload drives the full generic chain:
+    matcher -> EBR -> reduced mapping -> database ingestion."""
+    from valleyscope.irreps.tables import (
+        load_standard_irrep_table,
+        match_table_operations,
     )
     from valleyscope.analysis.valley_irrep_matching import (
         build_valley_irrep_matching_report,
@@ -1916,16 +1916,41 @@ def test_unmock_generic_source_adapter_positive_full_pipeline():
          "translation_frac": table.operation_by_index(3).translation_frac},
     ]
 
-    # Real adapter: build source payload for K HSP, C3-little-group VP ops.
-    payload = build_source_payload_for_generic_matching(
+    # Real source payload built from the reviewed table via the live
+    # operation matcher (the superseded generic adapter is removed).
+    op_match = match_table_operations(
         table=table,
-        source_hsp_label="K",
         detected_operations=detected,
-        valley_preserving_operation_ids=[1, 2, 3],
+        tolerance=5e-5,
+        source_hsp_label="K",
     )
-    assert payload["status"] == "ok"
-    assert "source_irrep_characters" in payload
-    assert "source_operation_map" in payload
+    assert op_match.status == "complete"
+    source_operation_map = {
+        op_id: op_match.mapping_by_operation_id[op_id] for op_id in [1, 2, 3]
+    }
+    source_irrep_characters = {
+        irrep.label: dict(irrep.characters)
+        for irrep in table.irreps_by_kpoint("K")
+    }
+    payload = {
+        "status": "ok",
+        "source_irrep_characters": source_irrep_characters,
+        "source_operation_map": source_operation_map,
+        "provenance": {
+            "table_sg_number": table.number,
+            "table_name": table.name,
+            "table_spinor": table.spinor,
+            "source_hsp_label": "K",
+            "valley_preserving_operation_ids": [1, 2, 3],
+            "source_table_operation_indices": sorted(source_operation_map.values()),
+            "unused_table_operation_indices": op_match.unused_table_operation_indices,
+            "table_operations_mapped": len(source_operation_map),
+            "operation_mapping_provenance": getattr(
+                op_match, "provenance", "exact_spatial"
+            ),
+        },
+        "blocker_reasons": [],
+    }
     assert payload["source_operation_map"] == {1: 1, 2: 2, 3: 3}
     assert set(payload["source_irrep_characters"]) == {"-K4", "-K5", "-K6"}
     assert payload["provenance"]["source_hsp_label"] == "K"

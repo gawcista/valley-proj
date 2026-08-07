@@ -6,7 +6,7 @@ from valleyscope.projection.sector_projectors import (
     adjust_centers_for_parent_valley,
     build_sector_projectors,
 )
-from valleyscope.projection.weights import classify_valley_weights, compute_valley_weights
+from valleyscope.projection.weights import compute_valley_weights
 from valleyscope.projection.qcut_scan import scan_qcut
 from valleyscope.projection.folded_center import (
     build_folded_center_report,
@@ -127,12 +127,6 @@ def test_cross_sector_overlap_is_excluded_and_reported():
     assert projectors.overlap_mask.tolist() == [True]
     assert result.overlap_weight == pytest.approx(1.0)
     assert result.w_val == pytest.approx(0.0)
-
-
-def test_classification_thresholds_are_explicit():
-    result = classify_valley_weights(w_val=0.9, purity=0.9, thresholds=None)
-    assert result["valley_derived"] is True
-    assert result["valley_clean"] == "approximate"
 
 
 def test_qcut_scan_reports_plateau_for_stable_weights():
