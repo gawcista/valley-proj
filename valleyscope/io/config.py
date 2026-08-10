@@ -72,6 +72,7 @@ class SymmetryToleranceConfig:
     symprec: float = 1e-3
     angle_tolerance: float = -1.0
     symprec_scan: list[float] = field(default_factory=list)
+    hsp_little_group_k_residual: float = 5e-6
 
 
 @dataclass(frozen=True)
@@ -267,6 +268,9 @@ def _parse_symmetry_config(
             symprec=float(tolerance_raw.get("symprec", 1e-3)),
             angle_tolerance=float(tolerance_raw.get("angle_tolerance", -1.0)),
             symprec_scan=[float(v) for v in tolerance_raw.get("symprec_scan", [])],
+            hsp_little_group_k_residual=float(
+                tolerance_raw.get("hsp_little_group_k_residual", 5e-6)
+            ),
         )
     else:
         fields = dict(
@@ -276,6 +280,7 @@ def _parse_symmetry_config(
             symprec=float(symmetry_raw.get("symprec", 1e-3)),
             angle_tolerance=float(symmetry_raw.get("angle_tolerance", -1.0)),
             symprec_scan=[float(v) for v in symmetry_raw.get("symprec_scan", [])],
+            hsp_little_group_k_residual=5e-6,
         )
 
     if fields["mode"] != "auto":
@@ -293,6 +298,7 @@ def _parse_symmetry_config(
             symprec=fields["symprec"],
             angle_tolerance=fields["angle_tolerance"],
             symprec_scan=fields["symprec_scan"],
+            hsp_little_group_k_residual=fields["hsp_little_group_k_residual"],
         ),
         little_group_check=True,
         valley_preservation_check=True,

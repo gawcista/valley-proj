@@ -147,7 +147,10 @@ from valleyscope.symmetry.operation_classifier import classify_operation
 from valleyscope.symmetry.double_space_group_lift import (
     build_double_space_group_lift_certificate,
 )
-from valleyscope.symmetry.little_group import is_little_group_operation
+from valleyscope.symmetry.little_group import (
+    is_little_group_operation,
+    little_group_residual_max_abs,
+)
 from valleyscope.symmetry.spglib_finder import find_symmetry_operations
 from valleyscope.symmetry.valley_preservation import map_valley_sectors
 

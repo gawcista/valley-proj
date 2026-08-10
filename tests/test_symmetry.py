@@ -3,7 +3,12 @@ import pytest
 
 from valleyscope.geometry.lattice import cart_rotation_from_fractional, cart_translation_from_fractional
 from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector
-from valleyscope.symmetry.little_group import is_integer_vector, is_little_group_operation
+from valleyscope.symmetry.little_group import (
+    DEFAULT_HSP_LITTLE_GROUP_K_RESIDUAL_TOLERANCE,
+    is_integer_vector,
+    is_little_group_operation,
+    little_group_residual_max_abs,
+)
 from valleyscope.symmetry.operation_classifier import classify_operation, operation_order
 from valleyscope.symmetry.plane_wave_action import (
     apply_plane_wave_action,
@@ -47,28 +52,119 @@ def test_little_group_uses_inverse_transpose_on_reciprocal_fractional_k():
     assert not is_little_group_operation(c2z, np.array([1.0 / 3.0, 0.0, 0.0]))
 
 
+# --------------------------------------------------------------------
+# is_integer_vector — strict rtol=0 (pure integer-vector predicate)
+# --------------------------------------------------------------------
+
 def test_is_integer_vector_uses_strict_absolute_tolerance():
-    # Exact integer residue accepted.
     assert is_integer_vector(np.array([1.0, 0.0, 0.0]))
-    # Absolute residue below 1e-8 accepted.
     assert is_integer_vector(np.array([1.0 + 5e-9, 0.0, 0.0]))
-    # Residue near an integer component of magnitude one must be rejected:
-    # np.allclose(..., atol=1e-8) without rtol=0.0 accepts ~1e-5 relative
-    # error and would admit this counterexample.
+    # Codex counterexample: 5e-7 > 1e-8 → rejected
     assert not is_integer_vector(np.array([1.0 + 5e-7, 0.0, 0.0]))
 
 
-def test_little_group_membership_rejects_relative_scale_residue():
-    # k = 0.5 + 2.5e-7 under C2z maps to residue [-1 - 5e-7, 0, 0].  The
-    # residue lies 5e-7 from an integer of magnitude one: far above the
-    # absolute 1e-8 bound, but within default np.allclose relative
-    # tolerance.  Membership must fail so no operation outside the exact
-    # HSP little group enters G_k^(a).
+# --------------------------------------------------------------------
+# is_little_group_operation — absolute fractional-k HSP residual tol
+# --------------------------------------------------------------------
+
+def test_little_group_exact_hsp_passes():
     c2z = np.array([[-1, 0, 0], [0, -1, 0], [0, 0, 1]])
     assert is_little_group_operation(c2z, np.array([0.5, 0.0, 0.0]))
+
+def test_little_group_6digit_k_residual_passes_with_default_tol():
+    """KM stored as 0.333333 (not 1/3): max residual ~1e-6 < 5e-6."""
+    c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]])
+    assert is_little_group_operation(c3, np.float64([0.333333, 0.333333, 0.0]))
+
+def test_little_group_out_of_tolerance_fails_with_tight_tol():
+    """With tol=1e-8 the 6-digit k residual (~1e-6) fails."""
+    c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]])
     assert not is_little_group_operation(
-        c2z, np.array([0.5 + 2.5e-7, 0.0, 0.0])
+        c3, np.float64([0.333333, 0.333333, 0.0]), tolerance=1e-8,
     )
+
+def test_little_group_custom_tolerance():
+    c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]])
+    k = np.float64([0.333333, 0.333333, 0.0])
+    # Measured residual ≈ 1.0000000000287557e-06
+    assert is_little_group_operation(c3, k, tolerance=1.1e-6)
+    assert not is_little_group_operation(c3, k, tolerance=9e-7)
+
+def test_little_group_non_integer_rotation_rejected():
+    """A rotation with a non-integer entry must fail closed, not be
+    silently rounded."""
+    nonint = np.array([[0.5, -1.0, 0.0], [1.0, -1.0, 0.0], [0.0, 0.0, 1.0]])
+    assert not is_little_group_operation(nonint, np.array([0.0, 0.0, 0.0]))
+
+def test_little_group_non_3x3_rejected():
+    assert not is_little_group_operation(np.eye(2), np.zeros(3))
+    assert not is_little_group_operation(np.eye(4), np.zeros(3))
+
+def test_little_group_nan_rotation_rejected():
+    nan_rot = np.full((3, 3), np.nan)
+    assert not is_little_group_operation(nan_rot, np.array([0.0, 0.0, 0.0]))
+
+def test_little_group_singular_rotation_rejected():
+    assert not is_little_group_operation(np.zeros((3, 3)), np.array([0.0, 0.0, 0.0]))
+
+
+# --------------------------------------------------------------------
+# little_group_residual_max_abs
+# --------------------------------------------------------------------
+
+def test_residual_exact_hsp_vanishes():
+    c2z = np.array([[-1, 0, 0], [0, -1, 0], [0, 0, 1]])
+    assert little_group_residual_max_abs(c2z, np.array([0.5, 0.0, 0.0])) == 0.0
+
+def test_residual_6digit_k_is_approx_1e6():
+    c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]])
+    r = little_group_residual_max_abs(
+        c3, np.float64([0.333333, 0.333333, 0.0])
+    )
+    # Measured: 1.0000000000287557e-06
+    assert 9e-7 < r < 1.1e-6
+
+def test_residual_non_integer_rotation_returns_inf():
+    assert little_group_residual_max_abs(
+        np.array([[0.5, -1.0, 0.0], [1.0, -1.0, 0.0], [0.0, 0.0, 1.0]]),
+        np.zeros(3),
+    ) == float("inf")
+
+def test_default_tolerance_is_positive_finite():
+    assert DEFAULT_HSP_LITTLE_GROUP_K_RESIDUAL_TOLERANCE > 0
+    assert np.isfinite(DEFAULT_HSP_LITTLE_GROUP_K_RESIDUAL_TOLERANCE)
+
+
+def test_hdf5_reader_preserves_raw_k_frac():
+    """Direct byte-level check: the HDF5 reader does not mutate near-rational
+    k-point fractions through any snapping or rounding path."""
+    import h5py
+    from valleyscope.geometry.lattice import Lattice
+    from valleyscope.io.h5_reader import KPointData
+    # Verify KPointData stores exactly what was read (no snap_hsp_kpoint call).
+    raw_frac = np.array([0.333333, 0.333333, 0.0])
+    raw_cart = np.array([0.333333, 0.333333, 0.0])
+    kp = KPointData(
+        name="near_K",
+        frac=raw_frac,
+        cart=raw_cart,
+        g_vectors_frac=np.zeros((1, 3)),
+        g_vectors_cart=np.zeros((1, 3)),
+        coefficients=np.ones((1, 1, 1), dtype=np.complex128),
+        energies_eV=np.zeros(1),
+        band_indices_vasp=np.arange(1),
+    )
+    np.testing.assert_array_equal(kp.frac, raw_frac)
+    np.testing.assert_array_equal(kp.cart, raw_cart)
+
+
+def test_config_hsp_little_group_k_residual_default():
+    """The tolerance dataclass carries and validates the new field."""
+    from valleyscope.io.config import SymmetryToleranceConfig
+    default = SymmetryToleranceConfig()
+    assert default.hsp_little_group_k_residual == 5e-6
+    custom = SymmetryToleranceConfig(hsp_little_group_k_residual=3.5e-6)
+    assert custom.hsp_little_group_k_residual == 3.5e-6
 
 
 def test_fractional_operation_matches_cartesian_column_convention_for_nonorthogonal_lattice():

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import numpy as np
 
-# Common high-symmetry-point denominators for reciprocal-lattice fractional
-# coordinates (hexagonal: 2, 3, 6; cubic: 2, 4; general: 2, 3, 4, 6).
-_COMMON_HSP_DENOMINATORS = (2, 3, 4, 6)
-# Snap tolerance for k-point fractions that lost precision during HDF5
-# storage or moiré reciprocal-lattice computation.
-_K_FRAC_SNAP_TOLERANCE = 5e-4
+# Default absolute tolerance for HSP little-group k-point residual
+# (max componentwise deviation of (R^-T k - k) from an integer).
+# Chosen to admit the measured ~1e-6 reciprocal-lattice residual that
+# occurs when a HSP fractional coordinate is stored with six-decimal
+# precision in a HDF5 file, with a small explicit margin.
+DEFAULT_HSP_LITTLE_GROUP_K_RESIDUAL_TOLERANCE: float = 5e-6
 
 
 def reciprocal_transform(rotation: np.ndarray, k_frac: np.ndarray) -> np.ndarray:
@@ -24,39 +24,53 @@ def is_integer_vector(values: np.ndarray, tolerance: float = 1e-8) -> bool:
     return bool(np.allclose(arr, np.rint(arr), rtol=0.0, atol=tolerance))
 
 
-def snap_hsp_kpoint(k_frac: np.ndarray) -> np.ndarray:
-    """Return *k_frac* with each component snapped to the nearest rational
-    fraction n/d (d = 2, 3, 4, 6) when within ``_K_FRAC_SNAP_TOLERANCE``.
+def _validate_crystallographic_rotation(rotation: np.ndarray) -> np.ndarray | None:
+    """Return *rotation* cast to float64 if it is a finite, nonsingular 3x3
+    matrix whose entries satisfy the integer crystallographic operation
+    contract (every entry within 1e-12 of an integer).  Return ``None`` for
+    malformed, non-integer, non-3x3, singular, or non-finite input."""
+    rot = np.asarray(rotation, dtype=float)
+    if rot.shape != (3, 3):
+        return None
+    if not np.isfinite(rot).all():
+        return None
+    if abs(np.linalg.det(rot)) < 1e-12:
+        return None
+    # All entries must be indistinguishable from integers.
+    if not np.allclose(rot, np.rint(rot), rtol=0.0, atol=1e-12):
+        return None
+    return rot
 
-    This corrects the precision loss that occurs when high-symmetry-point
-    fractional coordinates are stored with truncated precision in HDF5 files
-    or computed through float-heavy moiré reciprocal-lattice transforms.
-    The snapping is deterministic and conservative: a component that is not
-    recognisably close to a common-HSP rational is left unchanged.
+
+def little_group_residual_max_abs(rotation: np.ndarray, k_frac: np.ndarray) -> float:
+    """Return ``max_i |(R^-T k - k - G)_i|`` for integer rotation *R*.
+
+    This is the raw reciprocal-lattice residual used for HSP little-group
+    membership decisions.  The rotation must pass
+    :func:`_validate_crystallographic_rotation`; otherwise ``inf`` is returned.
     """
+    rot = _validate_crystallographic_rotation(rotation)
+    if rot is None:
+        return float("inf")
     k = np.asarray(k_frac, dtype=float)
-    out = k.copy()
-    for i in range(k.shape[0]):
-        best = float(k[i])
-        best_dist = float("inf")
-        for denom in _COMMON_HSP_DENOMINATORS:
-            for num in range(denom + 1):
-                candidate = float(num) / float(denom)
-                dist = abs(float(k[i]) - candidate)
-                if dist < best_dist:
-                    best_dist = dist
-                    best = candidate
-        if best_dist < _K_FRAC_SNAP_TOLERANCE:
-            out[i] = best
-    return out
+    transformed = reciprocal_transform(rot, k)
+    residue = transformed - k
+    nearest_int = np.rint(residue)
+    return float(np.max(np.abs(residue - nearest_int)))
 
 
-def is_little_group_operation(rotation: np.ndarray, k_frac: np.ndarray, tolerance: float = 1e-8) -> bool:
-    # Round the fractional rotation matrix to the nearest integers before
-    # computing the inverse transpose.  Spglib symmetry operations are
-    # crystallographic rotations that are integer-valued in fractional
-    # coordinates, but floating-point detection and closure products may
-    # introduce small deviations.
-    rot_int = np.rint(np.asarray(rotation, dtype=float)).astype(np.int64)
-    transformed = reciprocal_transform(rot_int, k_frac)
-    return is_integer_vector(transformed - np.asarray(k_frac, dtype=float), tolerance=tolerance)
+def is_little_group_operation(
+    rotation: np.ndarray,
+    k_frac: np.ndarray,
+    tolerance: float = DEFAULT_HSP_LITTLE_GROUP_K_RESIDUAL_TOLERANCE,
+) -> bool:
+    """Return ``True`` when the integer rotation *R* leaves the k-point
+    invariant up to a reciprocal-lattice vector within the given absolute
+    fractional-k residual tolerance.
+
+    The tolerance is an absolute per-component threshold on
+    ``max_i |(R^-T k - k - G)_i|`` and is distinct from exact
+    reciprocal-grid permutation, projector covariance, representation
+    closure, and standard-setting matching tolerances.
+    """
+    return little_group_residual_max_abs(rotation, k_frac) <= float(tolerance)

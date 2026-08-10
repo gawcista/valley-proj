@@ -7,7 +7,6 @@ import h5py
 import numpy as np
 
 from valleyscope.geometry.lattice import Lattice
-from valleyscope.symmetry.little_group import snap_hsp_kpoint
 from valleyscope.io.wavefunction_convention import (
 
     COEFFICIENT_SHAPE_ORDER,
@@ -106,7 +105,7 @@ def read_wavefunction_h5(path: str | Path) -> WavefunctionData:
             kpoints.append(
                 KPointData(
                     name=_read_string(group["name"]),
-                    frac=snap_hsp_kpoint(group["frac"][()]),
+                    frac=group["frac"][()],
                     cart=group["cart"][()],
                     g_vectors_frac=group["g_vectors_frac"][()],
                     g_vectors_cart=g_vectors_cart,
