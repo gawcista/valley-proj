@@ -97,7 +97,9 @@ def build_hsp_star_conjugation_report(
                     # Valley-preserving operations that map the kpoint to
                     # another star member are not valid source operations for
                     # character derivation at this kpoint.
-                    if not is_little_group_operation(g_rot, source_frac):
+                    if not is_little_group_operation(
+                        g_rot, source_frac, tolerance=lg_tolerance,
+                    ):
                         entries.append(_conjugation_entry(
                             source_kpoint=source_label,
                             source_frac=source_frac,
@@ -233,6 +235,7 @@ def build_hsp_star_conjugation_report(
     return {
         "status": status,
         "tolerance": tolerance,
+        "lg_tolerance": lg_tolerance,
         "interpretation": (
             "For each HSP-star pair (k0 -> k1 = r k0), conjugate source "
             "valley-preserving operations g to target operations h = r g r^-1. "

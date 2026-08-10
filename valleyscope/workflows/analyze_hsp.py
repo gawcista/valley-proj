@@ -3472,6 +3472,10 @@ def _build_unitary_valley_sewing_attempts(
         row for row in symmetry_payload.get("detected_operations", [])
         if isinstance(row, dict)
     ]
+    lg_tolerance = float(symmetry_payload.get(
+        "hsp_little_group_k_residual_tolerance",
+        DEFAULT_HSP_LITTLE_GROUP_K_RESIDUAL_TOLERANCE,
+    ))
     missing_targets = []
     coverage_by_valley = projected_hsp_coverage.get("by_valley", {})
     for target_valley, coverage in coverage_by_valley.items():
@@ -3488,7 +3492,7 @@ def _build_unitary_valley_sewing_attempts(
             target_k = missing.get("inverse_parent_k_frac")
             target_hsp = missing.get("source_hsp_label")
             target_ids = _valley_preserving_little_group_ids(
-                operations, target_k, target_valley
+                operations, target_k, target_valley, tolerance=lg_tolerance,
             )
             classification = classify_projected_subspace_kpoint(
                 parent_k_frac=target_k,
