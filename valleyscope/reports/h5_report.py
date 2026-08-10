@@ -27,9 +27,12 @@ def write_diagnostics_h5(
             group = projectors_group.create_group(kpoint_name)
             group.attrs["qcut"] = projectors.qcut
             group["overlap_mask"] = projectors.overlap_mask.astype(np.uint8)
-            sectors = group.create_group("sector_masks")
+            valley_masks = group.create_group("valley_masks")
             for name, mask in projectors.sector_masks.items():
-                sectors[name] = mask.astype(np.uint8)
+                valley_masks[name] = mask.astype(np.uint8)
+            # Compatibility alias: hard link to the canonical valley_masks
+            # group, no data copy.
+            group["sector_masks"] = group["valley_masks"]
             centers = group.create_group("center_masks")
             for name, mask in projectors.center_masks.items():
                 centers[name] = mask.astype(np.uint8)

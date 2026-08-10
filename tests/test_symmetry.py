@@ -3,7 +3,7 @@ import pytest
 
 from valleyscope.geometry.lattice import cart_rotation_from_fractional, cart_translation_from_fractional
 from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector
-from valleyscope.symmetry.little_group import is_little_group_operation
+from valleyscope.symmetry.little_group import is_integer_vector, is_little_group_operation
 from valleyscope.symmetry.operation_classifier import classify_operation, operation_order
 from valleyscope.symmetry.plane_wave_action import (
     apply_plane_wave_action,
@@ -45,6 +45,30 @@ def test_little_group_uses_inverse_transpose_on_reciprocal_fractional_k():
     assert is_little_group_operation(c2z, np.array([0.0, 0.0, 0.0]))
     assert is_little_group_operation(c2z, np.array([0.5, 0.0, 0.0]))
     assert not is_little_group_operation(c2z, np.array([1.0 / 3.0, 0.0, 0.0]))
+
+
+def test_is_integer_vector_uses_strict_absolute_tolerance():
+    # Exact integer residue accepted.
+    assert is_integer_vector(np.array([1.0, 0.0, 0.0]))
+    # Absolute residue below 1e-8 accepted.
+    assert is_integer_vector(np.array([1.0 + 5e-9, 0.0, 0.0]))
+    # Residue near an integer component of magnitude one must be rejected:
+    # np.allclose(..., atol=1e-8) without rtol=0.0 accepts ~1e-5 relative
+    # error and would admit this counterexample.
+    assert not is_integer_vector(np.array([1.0 + 5e-7, 0.0, 0.0]))
+
+
+def test_little_group_membership_rejects_relative_scale_residue():
+    # k = 0.5 + 2.5e-7 under C2z maps to residue [-1 - 5e-7, 0, 0].  The
+    # residue lies 5e-7 from an integer of magnitude one: far above the
+    # absolute 1e-8 bound, but within default np.allclose relative
+    # tolerance.  Membership must fail so no operation outside the exact
+    # HSP little group enters G_k^(a).
+    c2z = np.array([[-1, 0, 0], [0, -1, 0], [0, 0, 1]])
+    assert is_little_group_operation(c2z, np.array([0.5, 0.0, 0.0]))
+    assert not is_little_group_operation(
+        c2z, np.array([0.5 + 2.5e-7, 0.0, 0.0])
+    )
 
 
 def test_fractional_operation_matches_cartesian_column_convention_for_nonorthogonal_lattice():
