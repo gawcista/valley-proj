@@ -148,8 +148,9 @@ from valleyscope.symmetry.double_space_group_lift import (
     build_double_space_group_lift_certificate,
 )
 from valleyscope.symmetry.little_group import (
+    DEFAULT_HSP_LITTLE_GROUP_K_RESIDUAL_TOLERANCE,
+    hsp_little_group_evidence,
     is_little_group_operation,
-    little_group_residual_max_abs,
 )
 from valleyscope.symmetry.spglib_finder import find_symmetry_operations
 from valleyscope.symmetry.valley_preservation import map_valley_sectors
@@ -2075,6 +2076,7 @@ def _prepare_symmetry_payload(config: AppConfig, monolayer_recip: np.ndarray) ->
         "symmetry_eigenvalue_enabled": False,
         "little_group_check": {"required": True, "status": "not_run"},
         "valley_preservation_check": {"required": True, "status": "not_run"},
+        "hsp_little_group_k_residual_tolerance": symmetry.tolerance.hsp_little_group_k_residual,
     }
     if structure_file is None:
         return {
@@ -2700,6 +2702,10 @@ def _build_hsp_star_derived_character_layer(
         kpoint_frac_by_name=kpoint_frac_by_name,
         operations=operations,
         valley_names=valley_names,
+        lg_tolerance=float(symmetry_payload.get(
+            "hsp_little_group_k_residual_tolerance",
+            DEFAULT_HSP_LITTLE_GROUP_K_RESIDUAL_TOLERANCE,
+        )),
     )
 
     # Merge ALL singleton subspace character diagnostics for each kpoint,
@@ -3707,24 +3713,28 @@ def _build_unitary_valley_sewing_attempts(
     return attempts
 
 
-def _valley_preserving_little_group_ids(operations, kpoint, valley):
+def _valley_preserving_little_group_ids(operations, kpoint, valley, tolerance=None):
     return [
         operation["operation_id"]
         for operation in operations
         if isinstance(operation.get("operation_id"), int)
         and isinstance(operation.get("sector_mapping"), dict)
         and operation["sector_mapping"].get(valley) == valley
-        and _little_group_member(operation, kpoint)
+        and _little_group_member(operation, kpoint, tolerance=tolerance)
     ]
 
 
-def _little_group_member(operation, kpoint):
+def _little_group_member(operation, kpoint, tolerance=None):
     rotation = operation.get("rotation_frac")
     if rotation is None:
         return False
     try:
+        kwargs = {}
+        if tolerance is not None:
+            kwargs["tolerance"] = float(tolerance)
         return is_little_group_operation(
-            np.asarray(rotation, dtype=float), np.asarray(kpoint, dtype=float)
+            np.asarray(rotation, dtype=float), np.asarray(kpoint, dtype=float),
+            **kwargs,
         )
     except (TypeError, ValueError, np.linalg.LinAlgError):
         return False

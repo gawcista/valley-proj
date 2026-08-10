@@ -24,39 +24,102 @@ def is_integer_vector(values: np.ndarray, tolerance: float = 1e-8) -> bool:
     return bool(np.allclose(arr, np.rint(arr), rtol=0.0, atol=tolerance))
 
 
-def _validate_crystallographic_rotation(rotation: np.ndarray) -> np.ndarray | None:
-    """Return *rotation* cast to float64 if it is a finite, nonsingular 3x3
-    matrix whose entries satisfy the integer crystallographic operation
-    contract (every entry within 1e-12 of an integer).  Return ``None`` for
-    malformed, non-integer, non-3x3, singular, or non-finite input."""
+def _validate_gl3z_rotation(rotation: np.ndarray) -> np.ndarray | None:
+    """Return *rotation* cast to float64 if it is a valid GL(3,Z) fractional
+    rotation matrix, or ``None``.
+
+    A crystallographic fractional rotation must be:
+    - exactly (3, 3) shape;
+    - finite in every entry;
+    - integer-valued in every entry (exact equality, not within a
+      tolerance — the producer representation *is* integer);
+    - unimodular (det = ±1, within float64 precision).
+    """
     rot = np.asarray(rotation, dtype=float)
     if rot.shape != (3, 3):
         return None
     if not np.isfinite(rot).all():
         return None
-    if abs(np.linalg.det(rot)) < 1e-12:
+    # Every entry must equal its integer rounding exactly.
+    rot_int = np.rint(rot)
+    if not np.array_equal(rot, rot_int):
         return None
-    # All entries must be indistinguishable from integers.
-    if not np.allclose(rot, np.rint(rot), rtol=0.0, atol=1e-12):
+    det = float(np.linalg.det(rot))
+    if not np.isclose(abs(det), 1.0, rtol=0.0, atol=1e-12):
         return None
     return rot
 
 
-def little_group_residual_max_abs(rotation: np.ndarray, k_frac: np.ndarray) -> float:
-    """Return ``max_i |(R^-T k - k - G)_i|`` for integer rotation *R*.
-
-    This is the raw reciprocal-lattice residual used for HSP little-group
-    membership decisions.  The rotation must pass
-    :func:`_validate_crystallographic_rotation`; otherwise ``inf`` is returned.
-    """
-    rot = _validate_crystallographic_rotation(rotation)
-    if rot is None:
-        return float("inf")
+def _validate_k_frac(k_frac: np.ndarray) -> np.ndarray | None:
+    """Return *k_frac* as a finite float64 3-vector, or ``None``."""
     k = np.asarray(k_frac, dtype=float)
+    if k.shape != (3,):
+        return None
+    if not np.isfinite(k).all():
+        return None
+    return k
+
+
+def _validate_tolerance(tolerance: float, label: str) -> float:
+    """Return *tolerance* as float, or raise ``ValueError``."""
+    t = float(tolerance)
+    if not np.isfinite(t) or t < 0:
+        raise ValueError(f"{label} must be finite and nonnegative, got {t!r}")
+    return t
+
+
+def hsp_little_group_evidence(
+    rotation: np.ndarray,
+    k_frac: np.ndarray,
+    tolerance: float = DEFAULT_HSP_LITTLE_GROUP_K_RESIDUAL_TOLERANCE,
+) -> dict[str, object]:
+    """Return a per-operation evidence dict with keys *passed*,
+    *residual_max_abs*, *tolerance*, and *reason*.
+
+    Validates the rotation as GL(3,Z), validates k and tolerance, and
+    computes ``max_i |R^-T k - k - G|`` against the absolute fractional-k
+    tolerance.  The raw k-coordinate is never mutated.
+
+    This is the single trust-boundary helper for HSP little-group
+    membership evidence; all production inventory builders should use it.
+    """
+    tol = _validate_tolerance(tolerance, "hsp_little_group_k_residual_tolerance")
+    rot = _validate_gl3z_rotation(rotation)
+    if rot is None:
+        return {
+            "passed": False,
+            "residual_max_abs": float("inf"),
+            "tolerance": tol,
+            "reason": "rotation_not_gl3z",
+        }
+    k = _validate_k_frac(k_frac)
+    if k is None:
+        return {
+            "passed": False,
+            "residual_max_abs": float("inf"),
+            "tolerance": tol,
+            "reason": "k_frac_malformed",
+        }
     transformed = reciprocal_transform(rot, k)
     residue = transformed - k
     nearest_int = np.rint(residue)
-    return float(np.max(np.abs(residue - nearest_int)))
+    residual = float(np.max(np.abs(residue - nearest_int)))
+    return {
+        "passed": residual <= tol,
+        "residual_max_abs": residual,
+        "tolerance": tol,
+        "reason": "",
+    }
+
+
+def little_group_residual_max_abs(rotation: np.ndarray, k_frac: np.ndarray) -> float:
+    """Return ``max_i |(R^-T k - k - G)_i|`` for a valid GL(3,Z) rotation,
+    or ``inf`` when the rotation or k-point are invalid."""
+    try:
+        ev = hsp_little_group_evidence(rotation, k_frac, tolerance=1.0)
+        return float(ev["residual_max_abs"])
+    except ValueError:
+        return float("inf")
 
 
 def is_little_group_operation(
@@ -64,13 +127,10 @@ def is_little_group_operation(
     k_frac: np.ndarray,
     tolerance: float = DEFAULT_HSP_LITTLE_GROUP_K_RESIDUAL_TOLERANCE,
 ) -> bool:
-    """Return ``True`` when the integer rotation *R* leaves the k-point
+    """Return ``True`` when the GL(3,Z) rotation *R* leaves the k-point
     invariant up to a reciprocal-lattice vector within the given absolute
     fractional-k residual tolerance.
 
-    The tolerance is an absolute per-component threshold on
-    ``max_i |(R^-T k - k - G)_i|`` and is distinct from exact
-    reciprocal-grid permutation, projector covariance, representation
-    closure, and standard-setting matching tolerances.
+    Thin wrapper around :func:`hsp_little_group_evidence`.
     """
-    return little_group_residual_max_abs(rotation, k_frac) <= float(tolerance)
+    return bool(hsp_little_group_evidence(rotation, k_frac, tolerance)["passed"])

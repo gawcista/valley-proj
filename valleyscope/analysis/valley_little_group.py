@@ -4,7 +4,11 @@ from typing import Any
 import numpy as np
 import spglib
 
-from valleyscope.symmetry.little_group import is_little_group_operation
+from valleyscope.symmetry.little_group import (
+    DEFAULT_HSP_LITTLE_GROUP_K_RESIDUAL_TOLERANCE,
+    hsp_little_group_evidence,
+    is_little_group_operation,
+)
 
 
 def update_valley_preserving_operation_inventory(
@@ -18,12 +22,20 @@ def update_valley_preserving_operation_inventory(
     if valley_names is None:
         valley_names = _infer_valley_names(symmetry_payload)
 
+    tolerance = float(
+        symmetry_payload.get(
+            "hsp_little_group_k_residual_tolerance",
+            DEFAULT_HSP_LITTLE_GROUP_K_RESIDUAL_TOLERANCE,
+        )
+    )
+
     per_valley: dict[str, list[dict[str, Any]]] = {}
     flat_inventory: list[dict[str, Any]] = []
 
     for operation in symmetry_payload.get("detected_operations", []):
         rotation = np.asarray(operation.get("rotation_frac", np.eye(3)), dtype=float)
-        little_group_passed = bool(is_little_group_operation(rotation, k_frac))
+        evidence = hsp_little_group_evidence(rotation, k_frac, tolerance=tolerance)
+        little_group_passed = bool(evidence["passed"])
         sector_mapping = operation.get("sector_mapping", {})
 
         # Per-valley classification within the HSP little group.
@@ -49,6 +61,8 @@ def update_valley_preserving_operation_inventory(
                 "valley_preserving": valley_preserving,
                 "allowed_for_valley_preserving_representation": allowed,
                 "reason": reason,
+                "hsp_little_group_k_residual_max_abs": evidence["residual_max_abs"],
+                "hsp_little_group_k_residual_tolerance": evidence["tolerance"],
             }
             per_valley.setdefault(valley_name, []).append(row)
 
@@ -70,6 +84,8 @@ def update_valley_preserving_operation_inventory(
             "valley_exchanging": old_exchanging,
             "allowed_for_valley_preserving_representation": old_allowed,
             "reason": old_reason,
+            "hsp_little_group_k_residual_max_abs": evidence["residual_max_abs"],
+            "hsp_little_group_k_residual_tolerance": evidence["tolerance"],
         }
         flat_inventory.append(flat_row)
 

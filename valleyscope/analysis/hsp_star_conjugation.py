@@ -19,6 +19,7 @@ import numpy as np
 
 from valleyscope.analysis.hsp_star import _canonical_frac
 from valleyscope.symmetry.little_group import (
+    DEFAULT_HSP_LITTLE_GROUP_K_RESIDUAL_TOLERANCE,
     reciprocal_transform,
     is_little_group_operation,
 )
@@ -30,6 +31,7 @@ def build_hsp_star_conjugation_report(
     operations: list[dict[str, object]],
     valley_names: list[str],
     tolerance: float = 1e-5,
+    lg_tolerance: float = DEFAULT_HSP_LITTLE_GROUP_K_RESIDUAL_TOLERANCE,
 ) -> dict[str, object]:
     """Build the HSP-star conjugation graph.
 

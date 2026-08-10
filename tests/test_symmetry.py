@@ -5,6 +5,7 @@ from valleyscope.geometry.lattice import cart_rotation_from_fractional, cart_tra
 from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector
 from valleyscope.symmetry.little_group import (
     DEFAULT_HSP_LITTLE_GROUP_K_RESIDUAL_TOLERANCE,
+    hsp_little_group_evidence,
     is_integer_vector,
     is_little_group_operation,
     little_group_residual_max_abs,
@@ -107,10 +108,58 @@ def test_little_group_nan_rotation_rejected():
 def test_little_group_singular_rotation_rejected():
     assert not is_little_group_operation(np.zeros((3, 3)), np.array([0.0, 0.0, 0.0]))
 
+def test_little_group_det2_rejected():
+    """diag(2,1,1) has integer entries but det=2 ≠ ±1 — must be rejected."""
+    det2 = np.array([[2, 0, 0], [0, 1, 0], [0, 0, 1]])
+    assert not is_little_group_operation(det2, np.array([0.0, 0.0, 0.0]))
 
-# --------------------------------------------------------------------
-# little_group_residual_max_abs
-# --------------------------------------------------------------------
+def test_little_group_near_integer_rejected():
+    """Entry 1+5e-13 is near-integer but not exact — must fail closed."""
+    near = np.eye(3, dtype=float)
+    near[0, 0] = 1.0 + 5e-13
+    assert not is_little_group_operation(near, np.array([0.0, 0.0, 0.0]))
+
+def test_little_group_malformed_k_rejected():
+    c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]])
+    assert not is_little_group_operation(c3, np.zeros(4))
+    assert not is_little_group_operation(c3, np.array([np.nan, 0.0, 0.0]))
+
+def test_evidence_nonfinite_tolerance_raises():
+    c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]])
+    with pytest.raises(ValueError, match="finite and nonnegative"):
+        hsp_little_group_evidence(c3, np.zeros(3), tolerance=-1.0)
+    with pytest.raises(ValueError, match="finite and nonnegative"):
+        hsp_little_group_evidence(c3, np.zeros(3), tolerance=float("nan"))
+    with pytest.raises(ValueError, match="finite and nonnegative"):
+        hsp_little_group_evidence(c3, np.zeros(3), tolerance=float("inf"))
+
+def test_evidence_gl3z_rejection():
+    det2 = np.array([[2, 0, 0], [0, 1, 0], [0, 0, 1]])
+    ev = hsp_little_group_evidence(det2, np.zeros(3))
+    assert ev["passed"] is False
+    assert ev["reason"] == "rotation_not_gl3z"
+    assert ev["residual_max_abs"] == float("inf")
+
+def test_evidence_serialized_agrees_with_boolean():
+    c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]])
+    k = np.float64([0.333333, 0.333333, 0.0])
+    ev = hsp_little_group_evidence(c3, k)
+    assert ev["passed"] is True
+    assert ev["tolerance"] == DEFAULT_HSP_LITTLE_GROUP_K_RESIDUAL_TOLERANCE
+    assert 9e-7 < ev["residual_max_abs"] < 1.1e-6
+    assert (ev["residual_max_abs"] <= ev["tolerance"]) == ev["passed"]
+
+def test_custom_9e7_tolerance_rejects_6digit_k_everywhere():
+    """With tolerance=9e-7, the ~1e-6 residual is rejected by both the
+    direct predicate and the evidence helper — the same result everywhere."""
+    c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]])
+    k = np.float64([0.333333, 0.333333, 0.0])
+    assert not is_little_group_operation(c3, k, tolerance=9e-7)
+    ev = hsp_little_group_evidence(c3, k, tolerance=9e-7)
+    assert ev["passed"] is False
+    assert ev["tolerance"] == 9e-7
+    # Default still accepts
+    assert is_little_group_operation(c3, k)
 
 def test_residual_exact_hsp_vanishes():
     c2z = np.array([[-1, 0, 0], [0, -1, 0], [0, 0, 1]])
@@ -135,27 +184,37 @@ def test_default_tolerance_is_positive_finite():
     assert np.isfinite(DEFAULT_HSP_LITTLE_GROUP_K_RESIDUAL_TOLERANCE)
 
 
-def test_hdf5_reader_preserves_raw_k_frac():
-    """Direct byte-level check: the HDF5 reader does not mutate near-rational
-    k-point fractions through any snapping or rounding path."""
+def test_hdf5_reader_preserves_raw_k_frac(tmp_path):
+    """A real minimal HDF5 → read_wavefunction_h5() must preserve raw
+    near-rational k-point coordinates without snapping or mutation."""
     import h5py
-    from valleyscope.geometry.lattice import Lattice
-    from valleyscope.io.h5_reader import KPointData
-    # Verify KPointData stores exactly what was read (no snap_hsp_kpoint call).
+    from valleyscope.io.h5_reader import read_wavefunction_h5
+    h5_path = tmp_path / "test.h5"
     raw_frac = np.array([0.333333, 0.333333, 0.0])
     raw_cart = np.array([0.333333, 0.333333, 0.0])
-    kp = KPointData(
-        name="near_K",
-        frac=raw_frac,
-        cart=raw_cart,
-        g_vectors_frac=np.zeros((1, 3)),
-        g_vectors_cart=np.zeros((1, 3)),
-        coefficients=np.ones((1, 1, 1), dtype=np.complex128),
-        energies_eV=np.zeros(1),
-        band_indices_vasp=np.arange(1),
-    )
-    np.testing.assert_array_equal(kp.frac, raw_frac)
-    np.testing.assert_array_equal(kp.cart, raw_cart)
+    raw_g = np.eye(2, 3)[:, :] * 1.0  # two G-vectors
+    raw_g_frac = np.ones((2, 3))
+    with h5py.File(h5_path, "w") as h5:
+        h5.create_dataset("metadata/spinor", data=0)
+        h5.create_dataset("metadata/source", data="test-fixture")
+        h5.create_dataset("metadata/vasp_band_index_base", data=0)
+        h5.create_dataset("metadata/extractor_identity", data="test-fixture")
+        lat = h5.create_group("metadata/lattice")
+        lat["direct_cart"] = np.eye(3)
+        lat["reciprocal_cart"] = np.eye(3)
+        kp = h5.create_group("kpoints/0")
+        kp["name"] = "near_K"
+        kp["frac"] = raw_frac
+        kp["cart"] = raw_cart
+        kp["g_vectors_frac"] = raw_g_frac
+        kp["g_vectors_cart"] = raw_g
+        kp["coefficients"] = np.ones((1, 1, 2), dtype=np.complex128)
+        kp["energies_eV"] = np.zeros(1)
+        kp["band_indices_vasp"] = np.array([1])
+    wf = read_wavefunction_h5(h5_path)
+    kpt = wf.find_kpoint("near_K")
+    np.testing.assert_array_equal(kpt.frac, raw_frac)
+    np.testing.assert_array_equal(kpt.cart, raw_cart)
 
 
 def test_config_hsp_little_group_k_residual_default():

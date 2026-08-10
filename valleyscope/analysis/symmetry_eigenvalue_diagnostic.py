@@ -4,7 +4,11 @@ from urllib.parse import quote
 
 import numpy as np
 
-from valleyscope.symmetry.little_group import is_little_group_operation
+from valleyscope.symmetry.little_group import (
+    DEFAULT_HSP_LITTLE_GROUP_K_RESIDUAL_TOLERANCE,
+    hsp_little_group_evidence,
+    is_little_group_operation,
+)
 from valleyscope.symmetry.double_space_group_lift import (
     spin_lift_from_orthogonal,
 )
@@ -40,8 +44,14 @@ def symmetry_eigenvalue_diagnostics_for_kpoint(
     if valley_names is None:
         valley_names = _infer_valley_names(symmetry_payload)
 
+    lg_tol = float(symmetry_payload.get(
+        "hsp_little_group_k_residual_tolerance",
+        DEFAULT_HSP_LITTLE_GROUP_K_RESIDUAL_TOLERANCE,
+    ))
     for operation in symmetry_payload["detected_operations"]:
-        little = is_little_group_operation(np.asarray(operation["rotation_frac"]), k_frac)
+        little = is_little_group_operation(
+            np.asarray(operation["rotation_frac"]), k_frac, tolerance=lg_tol,
+        )
         sector_mapping = operation.get("sector_mapping", {})
         preserved = operation.get("preserved", {})
 
@@ -353,6 +363,10 @@ def build_raw_representations_for_kpoint(
                          "sector_mapping": dict, "little_group_passed": bool}]
     """
     result: dict[object, dict[str, object]] = {}
+    lg_tol = float(symmetry_payload.get(
+        "hsp_little_group_k_residual_tolerance",
+        DEFAULT_HSP_LITTLE_GROUP_K_RESIDUAL_TOLERANCE,
+    ))
 
     for operation in symmetry_payload.get("detected_operations", []):
         if not isinstance(operation, dict):
@@ -364,7 +378,7 @@ def build_raw_representations_for_kpoint(
             sector_mapping = {}
 
         little = is_little_group_operation(
-            np.asarray(operation["rotation_frac"]), k_frac
+            np.asarray(operation["rotation_frac"]), k_frac, tolerance=lg_tol,
         )
         if not little:
             result[operation_id] = _raw_representation_skip_payload(

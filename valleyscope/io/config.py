@@ -198,6 +198,17 @@ def _section(raw: dict[str, Any], key: str) -> dict[str, Any]:
     return section
 
 
+def _validate_hsp_lg_tolerance(value: object) -> float:
+    """Validate and return the HSP little-group residual tolerance."""
+    t = float(value)
+    if not np.isfinite(t) or t < 0:
+        raise ValueError(
+            f"symmetry.tolerance.hsp_little_group_k_residual must be finite "
+            f"and >= 0, got {value!r}"
+        )
+    return t
+
+
 def _parse_symmetry_config(
     base: Path,
     input_raw: dict[str, Any],
@@ -268,7 +279,7 @@ def _parse_symmetry_config(
             symprec=float(tolerance_raw.get("symprec", 1e-3)),
             angle_tolerance=float(tolerance_raw.get("angle_tolerance", -1.0)),
             symprec_scan=[float(v) for v in tolerance_raw.get("symprec_scan", [])],
-            hsp_little_group_k_residual=float(
+            hsp_little_group_k_residual=_validate_hsp_lg_tolerance(
                 tolerance_raw.get("hsp_little_group_k_residual", 5e-6)
             ),
         )
