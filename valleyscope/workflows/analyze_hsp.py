@@ -1177,6 +1177,14 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             "source_payload_provenance": src_provenance,
         }
 
+    from valleyscope.analysis.valley_little_group import detect_identity_operation
+    identity_evidence = detect_identity_operation(
+        operations=symmetry_payload.get("detected_operations", []),
+    )
+    match_identity_id = (
+        identity_evidence["operation_id"] if identity_evidence["found"] else None
+    )
+
     valley_irrep_matching = build_valley_irrep_matching_report(
         irrep_workflow_decisions=irrep_workflow_decisions,
         symmetry_adapted_valley_report=symmetry_adapted_valley_report,
@@ -1192,6 +1200,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             generic_source_payloads.get("source_payload_provenance", {})
             if generic_source_payloads else None
         ),
+        detected_identity_id=match_identity_id,
         source_payload_blocked_rows=generic_source_blocked_rows,
         source_payload_classification_rows=generic_source_classification_rows,
         resolved_subspace_groups=(
@@ -2508,6 +2517,14 @@ def _build_symmetry_adapted_valley_report(
             )
             orbit_reports.append(summarize_symmetry_adapted_valley_report(report))
 
+        from valleyscope.analysis.valley_little_group import detect_identity_operation
+        sub_identity_evidence = detect_identity_operation(
+            operations=symmetry_payload.get("detected_operations", []),
+        )
+        sub_identity_id = (
+            sub_identity_evidence["operation_id"]
+            if sub_identity_evidence["found"] else None
+        )
         valley_preserving_subspaces = _build_valley_preserving_subspace_reports(
             kpoint_name=kpoint_name,
             valley_matrices=valley_matrices,
@@ -2523,6 +2540,7 @@ def _build_symmetry_adapted_valley_report(
             seed_overlap_warn_tol=float(config.symmetry_adapted_valley.seed_overlap_warn_tol),
             seed_overlap_fail_tol=float(config.symmetry_adapted_valley.seed_overlap_fail_tol),
             projector_symmetry_warn_tol=float(config.symmetry_adapted_valley.projector_symmetry_warn_tol),
+            detected_identity_id=sub_identity_id,
             projector_symmetry_fail_tol=float(config.symmetry_adapted_valley.projector_symmetry_fail_tol),
             ebr_seed_overlap_min=float(config.symmetry_adapted_valley.ebr_seed_overlap_min),
             ebr_unitarity_max=float(config.symmetry_adapted_valley.ebr_unitarity_max),
@@ -2571,6 +2589,7 @@ def _build_valley_preserving_subspace_reports(
     target_subspace_closure_report: dict[str, object] | None = None,
     per_valley_standard_matches: dict[str, Any] | None = None,
     runtime_projectors: dict[str, np.ndarray] | None = None,
+    detected_identity_id: object = None,
 ) -> list[dict[str, object]]:
     """Build singleton reports for per-valley preserving-subgroup analysis.
 
@@ -2676,6 +2695,7 @@ def _build_valley_preserving_subspace_reports(
                 local_gka_operation_ids=summary.get(
                     "hsp_preserving_operation_ids", []
                 ),
+                detected_identity_id=detected_identity_id,
             )
             _apply_target_subspace_closure_gate(
                 ebr_mapping=ebr_mapping,

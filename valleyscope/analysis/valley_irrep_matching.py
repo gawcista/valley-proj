@@ -45,6 +45,7 @@ def build_valley_irrep_matching_report(
     resolved_subspace_groups: (
         Mapping[str, Mapping[str, Mapping[str, object]]] | None
     ) = None,
+    detected_identity_id: object = None,
 ) -> dict[str, object]:
     """Build per-(kpoint, valley) irrep matching results.
 
@@ -226,6 +227,7 @@ def build_valley_irrep_matching_report(
                     valley_preserving_operation_ids=vp_ids_fl,
                     source_operation_map=dict(op_map),
                     hsp_little_group_operation_ids=hsp_ids_fl,
+                    detected_identity_id=detected_identity_id,
                 )
                 generic_matches.setdefault(kp_name, {})[v_name] = {
                     "matching_status": g_result["matching_status"],

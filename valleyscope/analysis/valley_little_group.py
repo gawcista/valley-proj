@@ -603,27 +603,53 @@ def detect_identity_operation(
 
     Identity means exactly rotation = I and translation lattice-equivalent
     to zero (within *tolerance*).  Centering-coset translations are not the
-    identity.  Returns ``{found: True, operation_id: <id>}`` on success, or
-    ``{found: False, reason: ...}`` on failure.  Does not fabricate a
-    synthetic operation ID.
+    identity.  Returns ``{found: True, operation_id: <id>}`` only when
+    exactly one operation satisfies the content test.  Zero candidates and
+    multiple candidates produce ``{found: False, reason: ...}``.  Does not
+    fabricate a synthetic operation ID.
 
-    This is the canonical identity resolver for the production trust chain.
-    Consumers must use it instead of inspecting operation-ID values.
+    Missing/absent rotation or translation fields are NOT defaulted — they
+    are treated as non-identity evidence.  This is the canonical identity
+    resolver for the production trust chain.
     """
+    if not np.isfinite(tolerance) or tolerance < 0:
+        raise ValueError(f"tolerance must be finite and nonnegative, got {tolerance!r}")
+
+    candidates: list[object] = []
     for operation in operations:
         if not isinstance(operation, dict):
             continue
-        rotation = np.asarray(operation.get("rotation_frac", np.eye(3)), dtype=float)
+        rotation_raw = operation.get("rotation_frac")
+        if rotation_raw is None:
+            continue
+        rotation = np.asarray(rotation_raw, dtype=float)
+        if rotation.shape != (3, 3) or not np.isfinite(rotation).all():
+            continue
         if not _rotation_matches(rotation, np.eye(3), tolerance):
             continue
-        translation = np.asarray(operation.get("translation_frac", np.zeros(3)), dtype=float)
+        translation_raw = operation.get("translation_frac")
+        translation = (
+            np.asarray(translation_raw, dtype=float)
+            if translation_raw is not None
+            else np.zeros(3)
+        )
+        if translation.shape != (3,) or not np.isfinite(translation).all():
+            continue
+        # Translation must be lattice-equivalent to zero; a centering-coset
+        # translation (e.g. [0.5, 0.5, 0]) is not the identity.
         if not _translation_matches(translation, np.zeros(3), tolerance):
             continue
         op_id = operation.get("operation_id")
         if op_id is None:
             continue
-        return {"found": True, "operation_id": op_id}
-    return {"found": False, "reason": "identity_operation_not_detected_by_content"}
+        candidates.append(op_id)
+
+    if len(candidates) == 0:
+        return {"found": False, "reason": "identity_operation_not_detected_by_content"}
+    if len(candidates) > 1:
+        return {"found": False, "reason": "identity_operation_ambiguous",
+                "candidate_ids": sorted(candidates, key=str)}
+    return {"found": True, "operation_id": candidates[0]}
 
 
 def _find_identity_operation_id(

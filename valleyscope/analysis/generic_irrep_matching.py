@@ -25,6 +25,7 @@ def match_restricted_characters(
     source_operation_map: Mapping[int, int],
     hsp_little_group_operation_ids: list[int] | None = None,
     tol: float = 5e-5,
+    detected_identity_id: object = None,
 ) -> dict[str, Any]:
     """Match ValleyScope computed characters against restricted source irreps.
 
@@ -209,6 +210,7 @@ def match_restricted_characters(
     #    chi_sub(e) = sum_i n_i * dim(rho_i)
     identity_vs_id = _find_identity_vs_id(
         vp_ids, computed_characters, source_operation_map=omap,
+        detected_identity_id=detected_identity_id,
     )
     if identity_vs_id is not None:
         total_dim = _round_int(
@@ -357,13 +359,7 @@ def _find_identity_vs_id(
     source_operation_map: Mapping[int, int] | None = None,
     detected_identity_id: object = None,
 ) -> int | None:
-    """Find the ValleyScope identity operation ID in the VP set.
-
-    Primary: the content-detected identity ID provided by the caller.
-    Fallback: source_operation_map maps the identity to source op 1
-    (irreptables convention).  Last resort: the computed character
-    is the subspace dimension (real > 1).
-    """
+    """Find the ValleyScope identity operation ID in the VP set."""
     # Primary: content-derived identity from the operation inventory.
     if detected_identity_id is not None and detected_identity_id in vp_ids:
         return int(detected_identity_id)
@@ -373,9 +369,7 @@ def _find_identity_vs_id(
             if source_operation_map.get(op) == 1 and op in computed_characters:
                 return op
 
-    # Fallback heuristic: lowest op with real character > 1 (the subspace
-    # dimension).  Identity's character is the trace of its representation,
-    # which equals the irrep dimension.
+    # Last resort: identity's character is the irrep dimension (real > 1).
     for op in sorted(vp_ids):
         if op in computed_characters:
             c = computed_characters[op]

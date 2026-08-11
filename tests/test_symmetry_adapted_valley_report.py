@@ -806,6 +806,8 @@ def test_add_identity_representation_if_missing_uses_detected_identity():
             "detected_operations": [
                 {
                     "operation_id": 0,
+                    "rotation_frac": np.eye(3, dtype=int),
+                    "translation_frac": np.zeros(3),
                     "order": 1,
                     "sector_mapping": {"K": "K", "Kp": "Kp"},
                 }
