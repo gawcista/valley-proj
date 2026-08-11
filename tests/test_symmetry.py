@@ -274,27 +274,58 @@ def test_inventory_rows_carry_residual_and_tolerance_under_custom_tol():
     assert per_valley2["K_valley"][0]["little_group_passed"] is True
 
 
-def test_hsp_star_conjugation_serializes_lg_tolerance():
-    """build_hsp_star_conjugation_report accepts lg_tolerance and serializes
-    it in the output dict, keeping it distinct from the target-matching
-    tolerance."""
+def test_hsp_star_conjugation_lg_tolerance_changes_c3_classification():
+    """C3 at K [1/3, 1/3] mapped by C2 to star partner [2/3, 0].
+    With lg_tolerance=9e-7 the C3 source operation is rejected as
+    source_not_in_hsp_little_group; with 5e-6 it is accepted and
+    conjugation proceeds.  Both tolerances are serialized separately."""
     from valleyscope.analysis.hsp_star_conjugation import (
         build_hsp_star_conjugation_report,
     )
-    id3 = np.eye(3, dtype=int)
+    c2 = np.array([[-1, -1, 0], [0, 1, 0], [0, 0, -1]], dtype=int)
+    c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]], dtype=int)
     ops = [
-        {"operation_id": 0, "rotation_frac": id3, "sector_mapping": {"K_valley": "K_valley"}},
+        {"operation_id": 0, "rotation_frac": np.eye(3, dtype=int),
+         "sector_mapping": {"K_valley": "K_valley"}, "det": 1},
+        {"operation_id": 1, "rotation_frac": c3,
+         "sector_mapping": {"K_valley": "K_valley"}, "det": 1},
+        {"operation_id": 2, "rotation_frac": c2,
+         "sector_mapping": {"K_valley": "K_valley"}, "det": 1},
     ]
-    report = build_hsp_star_conjugation_report(
-        kpoint_frac_by_name={"GammaM": [0.0, 0.0, 0.0]},
+    k_k = [0.333333, 0.333333, 0.0]
+
+    report_strict = build_hsp_star_conjugation_report(
+        kpoint_frac_by_name={"KM": k_k},
         operations=ops,
         valley_names=["K_valley"],
-        lg_tolerance=3.5e-6,
+        lg_tolerance=9e-7,
     )
-    assert report["lg_tolerance"] == 3.5e-6
-    # target-matching tolerance is separate
-    assert "tolerance" in report
-    assert report["tolerance"] != report["lg_tolerance"]
+    assert report_strict["lg_tolerance"] == 9e-7
+    assert report_strict["tolerance"] != report_strict["lg_tolerance"]
+    entries = report_strict.get("by_source_kpoint", {}).get("KM", [])
+    not_lg = [e for e in entries
+              if e.get("conjugation_status") == "source_not_in_hsp_little_group"
+              and e.get("source_preserving_operation_id") == 1]
+    assert len(not_lg) == 1, (
+        f"C3 should be source_not_in_hsp_little_group at 9e-7, "
+        f"got {[(e.get('source_preserving_operation_id'), e.get('conjugation_status')) for e in entries]}"
+    )
+
+    report_loose = build_hsp_star_conjugation_report(
+        kpoint_frac_by_name={"KM": k_k},
+        operations=ops,
+        valley_names=["K_valley"],
+        lg_tolerance=5e-6,
+    )
+    assert report_loose["lg_tolerance"] == 5e-6
+    entries2 = report_loose.get("by_source_kpoint", {}).get("KM", [])
+    not_lg2 = [e for e in entries2
+               if e.get("conjugation_status") == "source_not_in_hsp_little_group"
+               and e.get("source_preserving_operation_id") == 1]
+    assert len(not_lg2) == 0, (
+        f"C3 should NOT be rejected at 5e-6, "
+        f"got {[(e.get('source_preserving_operation_id'), e.get('conjugation_status')) for e in entries2]}"
+    )
 
 
 def test_config_parser_rejects_invalid_tolerance(tmp_path):
@@ -324,24 +355,63 @@ symmetry:
             pass
 
 
-def test_valley_preserving_little_group_ids_passes_tolerance():
-    """The unitary-sewing helper _valley_preserving_little_group_ids
-    passes tolerance through _little_group_member."""
-    from valleyscope.workflows.analyze_hsp import (
-        _valley_preserving_little_group_ids,
-    )
-    c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]], dtype=int)
-    ops = [
-        {"operation_id": 0, "rotation_frac": np.eye(3, dtype=int), "sector_mapping": {"K_valley": "K_valley"}},
-        {"operation_id": 1, "rotation_frac": c3, "sector_mapping": {"K_valley": "K_valley"}},
-    ]
-    k = np.float64([0.333333, 0.333333, 0.0])
-    # With tolerance=9e-7 the C3 operation is rejected
-    ids_strict = _valley_preserving_little_group_ids(ops, k, "K_valley", tolerance=9e-7)
-    assert ids_strict == [0], f"Expected only identity, got {ids_strict}"
-    # Default accepts both
-    ids_default = _valley_preserving_little_group_ids(ops, k, "K_valley")
-    assert ids_default == [0, 1], f"Expected both ops, got {ids_default}"
+def test_unitary_valley_sewing_attempts_honours_config_tolerance():
+    """_build_unitary_valley_sewing_attempts reads the configured tolerance
+    from symmetry_payload and passes it to _valley_preserving_little_group_ids.
+    The patched helper records the actual tolerance, proving the production
+    caller does not fall back to a module default."""
+    from valleyscope.workflows import analyze_hsp
+    recorded_tolerances = []
+
+    def _recording_lg_ids(operations, kpoint, valley, tolerance=None):
+        recorded_tolerances.append(tolerance)
+        return [0]
+
+    original = analyze_hsp._valley_preserving_little_group_ids
+    analyze_hsp._valley_preserving_little_group_ids = _recording_lg_ids
+    try:
+        payload = {
+            "status": "ok",
+            "detected_operations": [
+                {"operation_id": 0, "rotation_frac": np.eye(3, dtype=int),
+                 "sector_mapping": {"K_valley": "K_valley"}, "det": 1},
+            ],
+            "hsp_little_group_k_residual_tolerance": 3.5e-6,
+            "kpoint_frac_by_name": {},
+        }
+        coverage = {
+            "by_valley": {
+                "K_valley": {
+                    "missing_source_hsp_representatives": [
+                        {"inverse_parent_k_frac": np.zeros(3), "source_hsp_label": "Gamma"},
+                    ],
+                },
+            },
+        }
+        try:
+            analyze_hsp._build_unitary_valley_sewing_attempts(
+                ebr_input_candidates={"candidates": []},
+                projected_hsp_coverage=coverage,
+                source_hsp_basis_by_valley={"K_valley": {}},
+                symmetry_payload=payload,
+                kpoint_frac_by_name={}, q_cart_by_kpoint={},
+                coefficients_by_kpoint={},
+                seed_projectors_by_kpoint={},
+                symmetry_adapted_projectors_by_kpoint={},
+                workflow_decisions={},
+                source_tables={"K_valley": {}},
+                source_certificates={"K_valley": {}},
+                cprime_validation_context={},
+                source_basis_record={},
+                wavecar_rtag="",
+            )
+        except AttributeError:
+            pass  # downstream requires real Table; already tested the tolerance pass-through
+        assert recorded_tolerances == [3.5e-6], (
+            f"Expected tolerance 3.5e-6, got {recorded_tolerances}"
+        )
+    finally:
+        analyze_hsp._valley_preserving_little_group_ids = original
 
 
 def test_fractional_operation_matches_cartesian_column_convention_for_nonorthogonal_lattice():
