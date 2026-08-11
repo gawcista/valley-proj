@@ -212,11 +212,17 @@ def match_restricted_characters(
         vp_ids, computed_characters, source_operation_map=omap,
         detected_identity_id=detected_identity_id,
     )
-    if identity_vs_id is not None:
-        total_dim = _round_int(
-            computed_characters[identity_vs_id].real, tol,
+    if identity_vs_id is None:
+        return _diagnostic(
+            "blocked", "identity operation not found in valley-preserving set",
+            multiplicities=aggregate,
+            per_irrep_results=results if results else None,
         )
-        if total_dim is not None:
+
+    total_dim = _round_int(
+        computed_characters[identity_vs_id].real, tol,
+    )
+    if total_dim is not None:
             source_dim_sum = 0
             for irr_label, mult in aggregate.items():
                 src_chars = source_irrep_characters.get(irr_label, {})
@@ -367,13 +373,6 @@ def _find_identity_vs_id(
     if source_operation_map is not None:
         for op in vp_ids:
             if source_operation_map.get(op) == 1 and op in computed_characters:
-                return op
-
-    # Last resort: identity's character is the irrep dimension (real > 1).
-    for op in sorted(vp_ids):
-        if op in computed_characters:
-            c = computed_characters[op]
-            if abs(c.imag) < 1e-12 and c.real > 1.0:
                 return op
     return None
 

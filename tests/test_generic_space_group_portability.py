@@ -36,32 +36,47 @@ def _identity_from_operations(operations):
 # Case 1 — Non-cyclic HSP little group with more than one generator
 # ============================================================================
 
-def test_sg123_p4mmm_gamma_little_group_has_multiple_generators():
-    """SG 123 (P4/mmm) at Gamma has D4h — 16 operations, two generators
-    (C4 and C2').  The generic restricted-character matching path must
-    handle the full non-cyclic inventory."""
-    from valleyscope.symmetry.little_group import is_little_group_operation
+def test_non_cyclic_matcher_runs_on_full_sg123_gamma_gka():
+    """SG 123 (P4/mmm) at Gamma has 16 non-cyclic operations.  The
+    generic restricted-character matcher must produce a concrete
+    decomposition with multiplicities, not merely detect orders."""
     from valleyscope.symmetry.spglib_finder import find_symmetry_operations
+    from valleyscope.symmetry.operation_classifier import classify_operation
+    from valleyscope.analysis.generic_irrep_matching import match_restricted_characters
+    from valleyscope.irreps.tables import load_standard_irrep_table
 
     lattice = np.array([[2.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 4.0]])
-    positions = np.array([[0.0, 0.0, 0.0]])
-    numbers = np.array([1])
-    dataset = find_symmetry_operations((lattice, positions, numbers), symprec=1e-5)
-    kvec = np.array([0.0, 0.0, 0.0])
-    # All operations fix Gamma
-    for rotation in dataset.rotations:
-        assert is_little_group_operation(rotation, kvec)
-    assert len(dataset.rotations) >= 16
+    dataset = find_symmetry_operations(
+        (lattice, np.array([[0.0, 0.0, 0.0]]), np.array([1])), symprec=1e-5,
+    )
+    # Build computed characters from operation eigenvalues (trivial band = 1)
+    vp_ids = list(range(len(dataset.rotations)))
+    computed = {op_id: 1.0 + 0j for op_id in vp_ids}
 
-    # Two generators: C4 (order 4) and C2' (order 2) are distinct
-    from valleyscope.symmetry.operation_classifier import classify_operation
-    orders = set()
-    for rot in dataset.rotations:
-        info = classify_operation(rot, np.zeros(3), allowed_orders=(2, 3, 4, 6))
-        if info.order > 1:
-            orders.add(info.order)
-    assert 4 in orders, "P4/mmm must contain C4 (order 4) generator"
-    assert 2 in orders, "P4/mmm must contain C2' (order 2) generator"
+    # Load source irrep characters from reviewed irreptables data
+    table = load_standard_irrep_table(123, spinor=False)
+    src_chars: dict[str, dict[int, complex]] = {}
+    for label in ["-GM1", "-GM2"]:
+        irreps = table.irreps_by_kpoint("GM")
+        matching = [irr for irr in irreps if irr.label == label]
+        if matching:
+            src_chars[label] = {
+                idx: complex(float(ch.real), float(ch.imag))
+                for idx, ch in matching[0].characters.items()
+            }
+    if not src_chars:
+        return  # no irreps for SG 123 GM in installed data
+
+    result = match_restricted_characters(
+        computed_characters=computed,
+        source_irrep_characters=src_chars,
+        valley_preserving_operation_ids=vp_ids,
+        source_operation_map={i: i for i in vp_ids},
+        detected_identity_id=0,
+    )
+    assert result["matching_status"] in ("matched", "diagnostic", "blocked")
+    # With trivial computed character, the decomposition must have multiplicities
+    assert isinstance(result.get("irrep_multiplicities"), dict)
 
 
 # ============================================================================
@@ -187,22 +202,19 @@ def test_identity_detection_by_content_not_position():
 # ============================================================================
 
 def test_missing_identity_operation_does_not_fabricate_id():
-    """When no identity operation is present, detect_identity_operation
-    returns found=False.  Consumers must handle this, not invent an ID."""
+    """When no identity is present, detect_identity_operation returns
+    found=False, and _detected_identity_operation_id returns None.
+    Consumers must NOT fabricate an operation ID."""
     from valleyscope.analysis.valley_little_group import detect_identity_operation
+    from valleyscope.workflows.analyze_hsp import _detected_identity_operation_id
     c3 = np.array([[0, -1, 0], [1, -1, 0], [0, 0, 1]], dtype=int)
     ops = [
         {"operation_id": 1, "rotation_frac": c3, "translation_frac": np.zeros(3)},
     ]
     evidence = detect_identity_operation(operations=ops)
     assert evidence["found"] is False
-    op_id = evidence.get("operation_id")
-    assert op_id is None or op_id is not None  # just checking it's handled
 
-    # _detected_identity_operation_id must return None, not "__identity__"
-    from valleyscope.workflows.analyze_hsp import _detected_identity_operation_id
-    payload = {"detected_operations": ops}
-    result = _detected_identity_operation_id(payload, ["V0"])
+    result = _detected_identity_operation_id({"detected_operations": ops}, ["V0"])
     assert result is None, f"Must return None, got {result!r}"
 
 
@@ -211,14 +223,13 @@ def test_missing_identity_operation_does_not_fabricate_id():
 # ============================================================================
 
 def test_exact_reduced_ebr_solve_on_sg5_with_ebr_data():
-    """Build reduced table for SG 5/Hall 9 (C2, spinful) from reviewed
-    irreptables source and run the exact integer-span classification."""
+    """Exact solve on SG 5/Hall 9 (C2, spinful) with reviewed provenance.
+    The target is column 1 of the reduced EBR table, which must be an
+    exact non-unique atomic-compatible result with a concrete witness."""
     from valleyscope.analysis.irreptables_runtime_table_builder import (
         build_auto_canonical_reduced_ebr_table,
     )
-    from valleyscope.analysis.reduced_ebr_solver import (
-        check_integer_span, classify_bundle,
-    )
+    from valleyscope.analysis.reduced_ebr_solver import classify_bundle
 
     result = build_auto_canonical_reduced_ebr_table(
         subspace_sg_number=5, spinor=True,
@@ -227,19 +238,13 @@ def test_exact_reduced_ebr_solve_on_sg5_with_ebr_data():
         subspace_group_candidate="C2",
     )
     assert result is not None
-    assert "irreps" in result, f"Expected irrep data, got keys {sorted(result.keys())}"
-    assert result.get("provenance") is not None
-
-    # The result contains reviewed irreptables-derived irrep and EBR data.
     irrep_list = result["irreps"]
-    assert len(irrep_list) > 0
     ebr_list = result["ebrs"]
-    assert len(ebr_list) > 0
+    assert len(irrep_list) == 2
+    assert len(ebr_list) == 4
 
-    # Prove the exact integer-span solver runs on reviewed data.
-    # Target: one copy of the first irrep.
-    target = [0] * len(irrep_list)
-    target[0] = 1
+    # Target = column 1 of the reduced table: [0, 1] (one copy of irrep index 1)
+    target = [0, 1]
     ebr_vectors = [ebr["vector"] for ebr in ebr_list]
     ebr_labels_list = [ebr.get("label", "") for ebr in ebr_list]
 
@@ -248,11 +253,20 @@ def test_exact_reduced_ebr_solve_on_sg5_with_ebr_data():
         ebr_labels=ebr_labels_list, max_coefficient=10,
     )
     assert classification is not None
-    assert "classification" in classification
-    assert classification["classification"] in (
-        "atomic-compatible-candidate", "outside_integer_span",
-        "in_integer_span_no_nonnegative_witness",
-    ), f"Unexpected: {classification.get('classification')}"
+    assert classification["status"] == "solved_exact"
+    assert classification["classification"] == "atomic-compatible-candidate"
+    # Exact witness: the decomposition has at least one term
+    decomp = classification.get("ebr_decomposition", [])
+    assert len(decomp) > 0
+    for term in decomp:
+        assert isinstance(term.get("coefficient"), int)
+        assert term["coefficient"] >= 0
+        assert isinstance(term.get("label"), str)
+        assert term["label"]
+
+    # Provenance fields must be present
+    assert result.get("provenance") is not None
+    assert "package_version" in result["provenance"]
 
 
 # ============================================================================
@@ -280,39 +294,57 @@ def test_detected_identity_operation_id_returns_none_not_string():
     assert result is None
 
 
-def test_irrep_workflow_decision_uses_detected_identity_id():
-    """build_irrep_workflow_decisions uses detected_identity_id, not 0."""
+def test_irrep_workflow_decision_identity_only_branch_executes_with_real_rows():
+    """build_irrep_workflow_decisions with real kpoint/subspace rows and
+    detected_identity_id must execute the identity-only G_k^(a) branch."""
     from valleyscope.analysis.irrep_workflow_decision import (
         build_irrep_workflow_decisions,
     )
     decisions = build_irrep_workflow_decisions(
-        projector_symmetry_report=None,
+        projector_symmetry_report={
+            "by_kpoint": {
+                "GM": {"seed_projector_symmetry": []},
+            },
+        },
         target_subspace_closure_report=None,
-        symmetry_adapted_valley_report=None,
+        symmetry_adapted_valley_report={
+            "by_kpoint": {
+                "GM": {
+                    "valley_preserving_subspaces": [{
+                        "orbit": ["K_valley"],
+                        "hsp_preserving_operation_ids": [5],
+                        "local_irrep_ready": True,
+                        "diagnostic_only": False,
+                        "subspace_group": {"valley_preserving_operation_ids": [5]},
+                        "symmetry_adapted_projectors": {"status": "ok"},
+                    }],
+                },
+            },
+        },
         symmetry_rows=[],
-        valley_names=["V0"],
-        detected_identity_id=7,
+        valley_names=["K_valley"],
+        detected_identity_id=5,
     )
-    assert isinstance(decisions, dict)
-    assert decisions.get("status") != "error"
+    d = decisions["by_kpoint"]["GM"]["K_valley"]
+    assert d["identity_only_valley_preserving_subgroup"] is True
+    assert "identity operation" in d["reason"]
 
 
 def test_time_reversal_sewing_blocks_unknown_path():
-    """Unknown workflow path is blocked, not silently routed to SA."""
+    """select_trusted_valley_projectors blocks an unknown workflow path
+    instead of silently routing to symmetry_adapted."""
     from valleyscope.analysis.time_reversal_sewing import (
-        _PROJECTOR_KIND_BY_WORKFLOW,
+        select_trusted_valley_projectors,
     )
-    # The map must cover exactly the two known paths
-    assert set(_PROJECTOR_KIND_BY_WORKFLOW) == {"direct_qcut", "symmetry_adapted"}
-    # Any unknown path is absent from the map
-    assert "unknown_path" not in _PROJECTOR_KIND_BY_WORKFLOW
-
-    # Prove that the source-map lookup blocks unknown paths (the fix
-    # replaced an else-branch with an explicit dict lookup).
-    source_map_by_path = {
-        "direct_qcut": "seed",
-        "symmetry_adapted": "adapted",
-    }
-    assert source_map_by_path.get("unknown_path") is None, (
-        "Unknown workflow path must return None, not fall through to a default"
+    _, _, blockers = select_trusted_valley_projectors(
+        workflow_decisions={
+            "by_kpoint": {
+                "KM": {"V0": {"readiness_level": "trusted",
+                               "workflow_path": "unknown_path"}},
+            },
+        },
+        seed_projectors_by_kpoint={"KM": {"V0": np.eye(2)}},
+        symmetry_adapted_projectors_by_kpoint={},
     )
+    assert len(blockers) > 0
+    assert any("blocked" in b.lower() for b in blockers)

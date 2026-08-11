@@ -8,6 +8,7 @@ from copy import deepcopy
 import numpy as np
 
 from valleyscope.analysis.generic_irrep_matching import match_restricted_characters
+from valleyscope.analysis.valley_little_group import detect_identity_operation
 from valleyscope.analysis.scoped_representation_evidence import (
     ScopedEvidenceValidation,
     validate_directed_valley_sewing_evidence_record,
@@ -77,6 +78,15 @@ def build_unitary_valley_sewing_certificate(**raw: object) -> dict[str, object]:
             reasons.append("directed_intertwining_row_not_passed")
     if set(characters) != set(target_ids):
         reasons.append("target_character_vector_incomplete")
+    identity_evidence = detect_identity_operation(
+        operations=[
+            dict(row) for row in raw.get("detected_operations", [])
+            if isinstance(row, Mapping)
+        ],
+    )
+    sew_identity_id = (
+        identity_evidence["operation_id"] if identity_evidence["found"] else None
+    )
     try:
         matching = match_restricted_characters(
             computed_characters=characters,
@@ -84,6 +94,7 @@ def build_unitary_valley_sewing_certificate(**raw: object) -> dict[str, object]:
             valley_preserving_operation_ids=target_ids,
             source_operation_map=target.get("source_operation_map", {}),
             hsp_little_group_operation_ids=target_ids,
+            detected_identity_id=sew_identity_id,
         )
     except (TypeError, ValueError):
         matching = {"matching_status": "blocked", "irrep_multiplicities": {}}
