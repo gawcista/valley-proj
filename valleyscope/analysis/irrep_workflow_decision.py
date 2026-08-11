@@ -195,6 +195,7 @@ def build_irrep_workflow_decisions(
     symmetry_adapted_valley_report: dict[str, object] | None,
     symmetry_rows: list[dict[str, object]],
     valley_names: list[str],
+    detected_identity_id: object = None,
 ) -> dict[str, object]:
     """Build per-(kpoint, valley) workflow decision records.
 
@@ -313,8 +314,12 @@ def build_irrep_workflow_decisions(
             # The absence of non-identity rows is a physical property of
             # the (kpoint, valley) pair, not a workflow blocker.
             vp_ops = vp_ops_by_kp_valley.get(kp_name, {}).get(v, set())
+            # Content-derived identity ID, not hardcoded 0.
+            identity_id = detected_identity_id
             is_identity_only_vp = bool(
-                vp_ops and len(vp_ops) == 1 and 0 in vp_ops
+                vp_ops and len(vp_ops) == 1
+                and identity_id is not None
+                and identity_id in vp_ops
             )
             # Identity-only is a little-group property, not a workflow path.
             # It removes only the non-identity eigenphase requirement.  Seed

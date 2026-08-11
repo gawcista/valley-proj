@@ -594,6 +594,38 @@ def _compose_fractional_operations(
     return rotation, translation
 
 
+def detect_identity_operation(
+    *,
+    operations: list[dict[str, Any]],
+    tolerance: float = 1e-8,
+) -> dict[str, object]:
+    """Return evidence dict for the identity operation detected by content.
+
+    Identity means exactly rotation = I and translation lattice-equivalent
+    to zero (within *tolerance*).  Centering-coset translations are not the
+    identity.  Returns ``{found: True, operation_id: <id>}`` on success, or
+    ``{found: False, reason: ...}`` on failure.  Does not fabricate a
+    synthetic operation ID.
+
+    This is the canonical identity resolver for the production trust chain.
+    Consumers must use it instead of inspecting operation-ID values.
+    """
+    for operation in operations:
+        if not isinstance(operation, dict):
+            continue
+        rotation = np.asarray(operation.get("rotation_frac", np.eye(3)), dtype=float)
+        if not _rotation_matches(rotation, np.eye(3), tolerance):
+            continue
+        translation = np.asarray(operation.get("translation_frac", np.zeros(3)), dtype=float)
+        if not _translation_matches(translation, np.zeros(3), tolerance):
+            continue
+        op_id = operation.get("operation_id")
+        if op_id is None:
+            continue
+        return {"found": True, "operation_id": op_id}
+    return {"found": False, "reason": "identity_operation_not_detected_by_content"}
+
+
 def _find_identity_operation_id(
     *,
     allowed_ids: list[Any],

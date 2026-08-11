@@ -2392,6 +2392,7 @@ def test_refine_ebr_mapping_marks_identity_only_gka_as_missing_local_character()
         ebr_mapping=ebr_mapping,
         subspace_space_group={"candidate_space_group_symbol": "C2"},
         local_gka_operation_ids=[0],
+        detected_identity_id=0,
     )
 
     assert ebr_mapping["blocked_by"] == ["hsp_local_preserving_character_missing"]

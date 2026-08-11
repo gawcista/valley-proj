@@ -602,12 +602,20 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
     projected_hsp_coverage: dict[str, object] | None = None
     time_reversal_orbit_report: dict[str, object] | None = None
     if config.symmetry_adapted_valley.enabled:
+        from valleyscope.analysis.valley_little_group import detect_identity_operation
+        identity_evidence = detect_identity_operation(
+            operations=symmetry_payload.get("detected_operations", []),
+        )
+        detected_identity_id = (
+            identity_evidence["operation_id"] if identity_evidence["found"] else None
+        )
         irrep_workflow_decisions = build_irrep_workflow_decisions(
             projector_symmetry_report=projector_symmetry_report,
             target_subspace_closure_report=target_subspace_closure_report,
             symmetry_adapted_valley_report=symmetry_adapted_valley_report,
             symmetry_rows=symmetry_rows,
             valley_names=valley_names,
+            detected_identity_id=detected_identity_id,
         )
     # --- Canonical per-valley irrep matching preflight ---
     # Builds one source-payload context per (kpoint, valley) from the
@@ -3055,6 +3063,7 @@ def _refine_ebr_mapping_with_subspace_space_group(
     ebr_mapping: dict[str, object],
     subspace_space_group: dict[str, object],
     local_gka_operation_ids: list[object] | None = None,
+    detected_identity_id: object = None,
 ) -> None:
     """Attach subspace SG identity without inventing local character blockers."""
     candidate = subspace_space_group.get("candidate_space_group_symbol")
@@ -3072,9 +3081,9 @@ def _refine_ebr_mapping_with_subspace_space_group(
             or []
         )
     )
+    identity_op = detected_identity_id
     has_nonidentity_local_op = any(
-        op not in (0, "0", "__identity__")
-        for op in local_ops
+        op != identity_op for op in local_ops
     )
     refined_blockers = []
     for blocker in blockers:
@@ -3292,8 +3301,12 @@ def _add_identity_representation_if_missing(
                 return False
 
     op_id = _detected_identity_operation_id(symmetry_payload, valley_names)
-    if op_id in d_g_dict:
+    if op_id is None or op_id in d_g_dict:
         return False
+    # It is valid to insert algebraic D_e = I for the exact detected identity
+    # operation when a diagnostic matrix producer intentionally omits order-one
+    # rows.  We do not invent an operation ID when the detected affine inventory
+    # does not identify the group identity.
     d_g_dict[op_id] = np.eye(fallback_dim, dtype=np.complex128)
     valley_mappings_dict[op_id] = identity_mapping
     return True
@@ -3303,21 +3316,16 @@ def _detected_identity_operation_id(
     symmetry_payload: dict[str, object],
     valley_names: list[str],
 ) -> object:
-    identity_mapping = {str(valley): str(valley) for valley in valley_names}
-    for operation in symmetry_payload.get("detected_operations", []):
-        if not isinstance(operation, dict):
-            continue
-        try:
-            order = int(operation.get("order", -1))
-        except (TypeError, ValueError):
-            continue
-        mapping = {
-            str(k): str(v)
-            for k, v in dict(operation.get("sector_mapping", {})).items()
-        }
-        if order == 1 and all(mapping.get(valley) == target for valley, target in identity_mapping.items()):
-            return operation.get("operation_id", "__identity__")
-    return "__identity__"
+    """Return the identity operation ID detected by affine content
+    (rotation=I, translation=0).  Falls back to ``None`` when no
+    identity operation is present in the detected inventory."""
+    from valleyscope.analysis.valley_little_group import detect_identity_operation
+    evidence = detect_identity_operation(
+        operations=symmetry_payload.get("detected_operations", []),
+    )
+    if evidence["found"]:
+        return evidence["operation_id"]
+    return None
 
 
 def _build_sampled_k_coverage(

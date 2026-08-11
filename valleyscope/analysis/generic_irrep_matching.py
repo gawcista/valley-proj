@@ -355,22 +355,27 @@ def _find_identity_vs_id(
     computed_characters: Mapping[int, complex],
     *,
     source_operation_map: Mapping[int, int] | None = None,
+    detected_identity_id: object = None,
 ) -> int | None:
     """Find the ValleyScope identity operation ID in the VP set.
 
-    Uses the fact that identity has character equal to the subspace
-    dimension (real positive integer) and is always present as op 0
-    or mapped from source op 1.
+    Primary: the content-detected identity ID provided by the caller.
+    Fallback: source_operation_map maps the identity to source op 1
+    (irreptables convention).  Last resort: the computed character
+    is the subspace dimension (real > 1).
     """
+    # Primary: content-derived identity from the operation inventory.
+    if detected_identity_id is not None and detected_identity_id in vp_ids:
+        return int(detected_identity_id)
+
     if source_operation_map is not None:
         for op in vp_ids:
             if source_operation_map.get(op) == 1 and op in computed_characters:
                 return op
 
-    # Fallback heuristic: identity is op 0 or the lowest op with real character > 1.
-    for op in vp_ids:
-        if op == 0 and op in computed_characters:
-            return 0
+    # Fallback heuristic: lowest op with real character > 1 (the subspace
+    # dimension).  Identity's character is the trace of its representation,
+    # which equals the irrep dimension.
     for op in sorted(vp_ids):
         if op in computed_characters:
             c = computed_characters[op]

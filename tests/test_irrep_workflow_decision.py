@@ -377,6 +377,7 @@ def test_identity_only_uses_algebraic_seed_and_closure_not_out_of_group_rows():
         },
         symmetry_rows=[],
         valley_names=["M1"],
+        detected_identity_id=0,
     )
     d = result["by_kpoint"]["MM"]["M1"]
     assert d["workflow_path"] == PATH_DIRECT_QCUT
@@ -440,6 +441,7 @@ def test_identity_only_seed_path_stays_direct_qcut_without_nonidentity_phase():
         },
         symmetry_rows=[],
         valley_names=["K"],
+        detected_identity_id=0,
     )
 
     decision = result["by_kpoint"]["MM"]["K"]
