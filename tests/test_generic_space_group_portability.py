@@ -10,73 +10,85 @@ Production regressions for content-based identity detection are included.
 import numpy as np
 import pytest
 
-import spglib
-
-
-# ============================================================================
-# Shared helpers
-# ============================================================================
-
-def _identity_from_operations(operations):
-    """Content-based identity detection for test assertions."""
-    for op in operations:
-        if not isinstance(op, dict):
-            continue
-        rot = np.asarray(op.get("rotation_frac", np.eye(3)), dtype=float)
-        if not np.allclose(rot, np.eye(3), rtol=0.0, atol=1e-10):
-            continue
-        trans = np.asarray(op.get("translation_frac", np.zeros(3)), dtype=float)
-        if not np.allclose(trans % 1.0, 0.0, rtol=0.0, atol=1e-10):
-            continue
-        return op.get("operation_id")
-    return None
-
 
 # ============================================================================
 # Case 1 — Non-cyclic HSP little group with more than one generator
 # ============================================================================
 
 def test_non_cyclic_matcher_runs_on_full_sg123_gamma_gka():
-    """SG 123 (P4/mmm) at Gamma has 16 non-cyclic operations.  The
-    generic restricted-character matcher must produce a concrete
-    decomposition with multiplicities, not merely detect orders."""
-    from valleyscope.symmetry.spglib_finder import find_symmetry_operations
-    from valleyscope.symmetry.operation_classifier import classify_operation
+    """SG 123 (P4/mmm) at Gamma has 16 non-cyclic operations.  The generic
+    restricted-character matcher must decompose the trivial computed
+    character into exactly one copy of the reviewed GM1+ irrep.
+
+    All source table indices are remapped to shuffled opaque ValleyScope
+    IDs with the identity NOT first; no early return is allowed.
+    """
     from valleyscope.analysis.generic_irrep_matching import match_restricted_characters
     from valleyscope.irreps.tables import load_standard_irrep_table
 
-    lattice = np.array([[2.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 4.0]])
-    dataset = find_symmetry_operations(
-        (lattice, np.array([[0.0, 0.0, 0.0]]), np.array([1])), symprec=1e-5,
-    )
-    # Build computed characters from operation eigenvalues (trivial band = 1)
-    vp_ids = list(range(len(dataset.rotations)))
-    computed = {op_id: 1.0 + 0j for op_id in vp_ids}
-
-    # Load source irrep characters from reviewed irreptables data
     table = load_standard_irrep_table(123, spinor=False)
+    op_indices = table.operation_indices_for_kpoint("GM")
+    assert len(op_indices) == 16
+
+    # Reviewed operation inventory: rotations must form a NON-cyclic set.
+    # Proof: two distinct reviewed rotations do not commute.
+    rotations: dict[int, np.ndarray] = {}
+    for idx in op_indices:
+        op = table.operation_by_index(idx)
+        rotations[idx] = np.asarray(op.rotation_frac, dtype=int)
+    noncommuting = False
+    for i, left in enumerate(op_indices):
+        for right in op_indices[i + 1:]:
+            if not np.array_equal(
+                rotations[left] @ rotations[right],
+                rotations[right] @ rotations[left],
+            ):
+                noncommuting = True
+                break
+        if noncommuting:
+            break
+    assert noncommuting, "SG 123 Gamma little group must be non-cyclic"
+
+    # Identity detected by content (rotation=I, translation=0), not by index.
+    identity_idx = next(
+        idx for idx in op_indices
+        if np.array_equal(rotations[idx], np.eye(3, dtype=int))
+        and not np.any(
+            np.asarray(
+                table.operation_by_index(idx).translation_frac, dtype=float
+            ) % 1.0
+        )
+    )
+
+    # Shuffled opaque ValleyScope IDs; the identity is NOT the first/minimum.
+    vs_id: dict[int, int] = {idx: 31 + (3 * idx) % 16 for idx in op_indices}
+    assert len(set(vs_id.values())) == 16
+    assert vs_id[identity_idx] != min(vs_id.values())
+
+    vp_ids = [vs_id[idx] for idx in op_indices]
+    # All Gamma irreps of the reviewed SG 123 table, keyed by SOURCE
+    # table index (the explicit operation map translates VS IDs).
     src_chars: dict[str, dict[int, complex]] = {}
-    for label in ["-GM1", "-GM2"]:
-        irreps = table.irreps_by_kpoint("GM")
-        matching = [irr for irr in irreps if irr.label == label]
-        if matching:
-            src_chars[label] = {
-                idx: complex(float(ch.real), float(ch.imag))
-                for idx, ch in matching[0].characters.items()
-            }
-    if not src_chars:
-        return  # no irreps for SG 123 GM in installed data
+    for irr in table.irreps_by_kpoint("GM"):
+        src_chars[irr.label] = {
+            idx: complex(float(ch.real), float(ch.imag))
+            for idx, ch in irr.characters.items()
+        }
+    assert len(src_chars) == 10
+
+    # Computed characters equal the reviewed trivial irrep GM1+.
+    computed = {vs: 1.0 + 0j for vs in vp_ids}
 
     result = match_restricted_characters(
         computed_characters=computed,
         source_irrep_characters=src_chars,
         valley_preserving_operation_ids=vp_ids,
-        source_operation_map={i: i for i in vp_ids},
-        detected_identity_id=0,
+        source_operation_map={vs_id[idx]: idx for idx in op_indices},
+        detected_identity_id=vs_id[identity_idx],
     )
-    assert result["matching_status"] in ("matched", "diagnostic", "blocked")
-    # With trivial computed character, the decomposition must have multiplicities
-    assert isinstance(result.get("irrep_multiplicities"), dict)
+    assert result["matching_status"] == "matched"
+    assert result["irrep_multiplicities"] == {"GM1+": 1}
+    assert result["diagnostic_only"] is False
 
 
 # ============================================================================
@@ -224,8 +236,9 @@ def test_missing_identity_operation_does_not_fabricate_id():
 
 def test_exact_reduced_ebr_solve_on_sg5_with_ebr_data():
     """Exact solve on SG 5/Hall 9 (C2, spinful) with reviewed provenance.
-    The target is column 1 of the reduced EBR table, which must be an
-    exact non-unique atomic-compatible result with a concrete witness."""
+    The target is a reviewed reduced-EBR table column; the solve must be
+    exactly the reviewed non-unique atomic-compatible result with the two
+    exact witnesses and full setting provenance."""
     from valleyscope.analysis.irreptables_runtime_table_builder import (
         build_auto_canonical_reduced_ebr_table,
     )
@@ -240,11 +253,16 @@ def test_exact_reduced_ebr_solve_on_sg5_with_ebr_data():
     assert result is not None
     irrep_list = result["irreps"]
     ebr_list = result["ebrs"]
-    assert len(irrep_list) == 2
+    assert irrep_list == ["GM:-GM3", "GM:-GM4"]
     assert len(ebr_list) == 4
 
-    # Target = column 1 of the reduced table: [0, 1] (one copy of irrep index 1)
-    target = [0, 1]
+    # Bind the target to an actual reviewed table column, not a handwritten
+    # vector: column 1 is shared by the 2a and 2b -1E↑G(1) EBRs.
+    witness_2b = [e for e in ebr_list if e["label"] == "-1E↑G(1) @ 2b(2,2)"]
+    witness_2a = [e for e in ebr_list if e["label"] == "-1E↑G(1) @ 2a(2,2)"]
+    assert len(witness_2b) == 1 and len(witness_2a) == 1
+    target = list(witness_2b[0]["vector"])
+    assert target == list(witness_2a[0]["vector"]) == [0, 1]
     ebr_vectors = [ebr["vector"] for ebr in ebr_list]
     ebr_labels_list = [ebr.get("label", "") for ebr in ebr_list]
 
@@ -255,18 +273,41 @@ def test_exact_reduced_ebr_solve_on_sg5_with_ebr_data():
     assert classification is not None
     assert classification["status"] == "solved_exact"
     assert classification["classification"] == "atomic-compatible-candidate"
-    # Exact witness: the decomposition has at least one term
-    decomp = classification.get("ebr_decomposition", [])
-    assert len(decomp) > 0
-    for term in decomp:
-        assert isinstance(term.get("coefficient"), int)
-        assert term["coefficient"] >= 0
-        assert isinstance(term.get("label"), str)
-        assert term["label"]
+    assert classification["decomposition_uniqueness"] == "non_unique"
+    # Exact witnesses: primary 2b, second 2a, each with coefficient 1.
+    decomp = classification["ebr_decomposition"]
+    assert decomp == [{"label": "-1E↑G(1) @ 2b(2,2)", "coefficient": 1}]
+    witnesses = classification["decomposition_witnesses"]
+    assert witnesses == [
+        [{"label": "-1E↑G(1) @ 2b(2,2)", "coefficient": 1}],
+        [{"label": "-1E↑G(1) @ 2a(2,2)", "coefficient": 1}],
+    ]
 
-    # Provenance fields must be present
-    assert result.get("provenance") is not None
-    assert "package_version" in result["provenance"]
+    # Convention provenance: reviewed irreptables source, SG 5, spinful,
+    # Hall 9 with Hall symbol, C centering, two centering cosets,
+    # primitive/conventional index 2, validated standard-operation closure,
+    # sampled HSP basis, and reduced irrep basis.
+    provenance = result["provenance"]
+    assert provenance is not None
+    assert provenance["package"] == "irreptables"
+    assert provenance["data_source"] == "irreptables"
+    assert provenance["space_group_number"] == 5
+    assert provenance["spinful"] is True
+    assert provenance["sampled_bilbao_hsps"] == ["GM"]
+    assert provenance["valleyscope_reduction"] == "sampled_hsp_valley_preserving"
+    assert provenance["reduction_basis_count"] == 2
+    setting = provenance["standard_setting_identity"]
+    assert setting["status"] == "unique_match"
+    assert setting["hall_number"] == 9
+    assert setting["hall_symbol"] == "C 2y"
+    assert setting["space_group_number"] == 5
+    assert setting["space_group_symbol"] == "C2"
+    assert setting["centering_type"] == "C"
+    assert len(setting["centering_cosets"]) == 2
+    assert setting["primitive_conventional_index"] == 2
+    assert setting["standard_setting_operation_count"] == 4
+    assert setting["standard_operation_closure_validated"] is True
+    assert "irreptables.StandardIrrepTable" in setting["source"]
 
 
 # ============================================================================
@@ -283,6 +324,98 @@ def test_detect_identity_operation_handles_nonzero_identity():
     ev = detect_identity_operation(operations=ops)
     assert ev["found"] is True
     assert ev["operation_id"] == 7
+
+
+def test_detect_identity_missing_translation_is_not_identity():
+    """Missing translation_frac is unknown evidence, NOT zero translation."""
+    from valleyscope.analysis.valley_little_group import detect_identity_operation
+    ev = detect_identity_operation(operations=[
+        {"operation_id": 7, "rotation_frac": np.eye(3, dtype=int)},
+    ])
+    assert ev["found"] is False
+    assert "not_detected" in ev["reason"]
+
+
+def test_detect_identity_missing_rotation_is_not_identity():
+    """Missing rotation_frac is unknown evidence, NOT identity."""
+    from valleyscope.analysis.valley_little_group import detect_identity_operation
+    ev = detect_identity_operation(operations=[
+        {"operation_id": 7, "translation_frac": np.zeros(3)},
+    ])
+    assert ev["found"] is False
+    assert "not_detected" in ev["reason"]
+
+
+def test_detect_identity_malformed_shapes_are_not_identity():
+    """Malformed rotation/translation shapes are non-identity evidence."""
+    from valleyscope.analysis.valley_little_group import detect_identity_operation
+    for op in (
+        {"operation_id": 1, "rotation_frac": np.eye(2),
+         "translation_frac": np.zeros(3)},
+        {"operation_id": 2, "rotation_frac": np.eye(3),
+         "translation_frac": np.zeros(2)},
+        {"operation_id": 3, "rotation_frac": [[1, 0], [0, 1], [0, 0]],
+         "translation_frac": np.zeros(3)},
+    ):
+        ev = detect_identity_operation(operations=[op])
+        assert ev["found"] is False
+        assert "not_detected" in ev["reason"]
+
+
+def test_detect_identity_nonfinite_values_are_not_identity():
+    """NaN/Inf rotation or translation entries are non-identity evidence."""
+    from valleyscope.analysis.valley_little_group import detect_identity_operation
+    nan_rot = np.eye(3)
+    nan_rot[0, 0] = np.nan
+    inf_trans = np.array([np.inf, 0.0, 0.0])
+    ev_rot = detect_identity_operation(operations=[
+        {"operation_id": 1, "rotation_frac": nan_rot,
+         "translation_frac": np.zeros(3)},
+    ])
+    ev_trans = detect_identity_operation(operations=[
+        {"operation_id": 2, "rotation_frac": np.eye(3),
+         "translation_frac": inf_trans},
+    ])
+    assert ev_rot["found"] is False
+    assert ev_trans["found"] is False
+
+
+def test_detect_identity_centering_coset_translation_is_not_identity():
+    """A centering-coset translation (0.5, 0.5, 0) with rotation I is not
+    the identity."""
+    from valleyscope.analysis.valley_little_group import detect_identity_operation
+    ev = detect_identity_operation(operations=[
+        {"operation_id": 9, "rotation_frac": np.eye(3, dtype=int),
+         "translation_frac": np.array([0.5, 0.5, 0.0])},
+    ])
+    assert ev["found"] is False
+    assert "not_detected" in ev["reason"]
+
+
+def test_detect_identity_duplicate_affine_identities_ambiguous():
+    """Two operations with the same affine identity content are ambiguous."""
+    from valleyscope.analysis.valley_little_group import detect_identity_operation
+    ev = detect_identity_operation(operations=[
+        {"operation_id": 3, "rotation_frac": np.eye(3, dtype=int),
+         "translation_frac": np.zeros(3)},
+        {"operation_id": 8, "rotation_frac": np.eye(3, dtype=int),
+         "translation_frac": np.zeros(3)},
+    ])
+    assert ev["found"] is False
+    assert ev["reason"] == "identity_operation_ambiguous"
+    assert sorted(ev["candidate_ids"], key=str) == [3, 8]
+
+
+def test_detect_identity_invalid_tolerance_raises():
+    """Nonfinite or negative tolerance raises ValueError."""
+    from valleyscope.analysis.valley_little_group import detect_identity_operation
+    ops = [
+        {"operation_id": 1, "rotation_frac": np.eye(3, dtype=int),
+         "translation_frac": np.zeros(3)},
+    ]
+    for bad_tol in (np.nan, np.inf, -1.0):
+        with pytest.raises(ValueError, match="tolerance"):
+            detect_identity_operation(operations=ops, tolerance=bad_tol)
 
 
 def test_detected_identity_operation_id_returns_none_not_string():
@@ -331,8 +464,10 @@ def test_irrep_workflow_decision_identity_only_branch_executes_with_real_rows():
 
 
 def test_time_reversal_sewing_blocks_unknown_path():
-    """select_trusted_valley_projectors blocks an unknown workflow path
-    instead of silently routing to symmetry_adapted."""
+    """Coverage of an existing invariant: select_trusted_valley_projectors
+    fails closed on a workflow path outside the trusted projector registry
+    (unknown_path) instead of silently routing to a source map.  This is
+    not a regression for the (removed) inner unreachable branch."""
     from valleyscope.analysis.time_reversal_sewing import (
         select_trusted_valley_projectors,
     )

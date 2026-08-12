@@ -51,6 +51,12 @@ def match_restricted_characters(
         and valley-changing).  For provenance only — does not affect matching.
     tol : float
         Tolerance for integer multiplicity checks.
+    detected_identity_id : int or None
+        Content-derived ValleyScope identity operation ID (exact integer).
+        Must be present in ``valley_preserving_operation_ids`` and in
+        ``computed_characters``.  None, non-integers, and out-of-scope IDs
+        are unknown evidence and block the match.  Source operation-map
+        values are opaque table indices and are never identity evidence.
 
     Returns
     -------
@@ -208,13 +214,15 @@ def match_restricted_characters(
 
     # 2. Identity/dimension consistency:
     #    chi_sub(e) = sum_i n_i * dim(rho_i)
+    # Identity evidence is content-derived only; source table indices are
+    # not identity evidence.  Missing/malformed/out-of-scope evidence fails
+    # closed.
     identity_vs_id = _find_identity_vs_id(
-        vp_ids, computed_characters, source_operation_map=omap,
-        detected_identity_id=detected_identity_id,
+        vp_ids, computed_characters, detected_identity_id=detected_identity_id,
     )
     if identity_vs_id is None:
-        return _diagnostic(
-            "blocked", "identity operation not found in valley-preserving set",
+        return _blocked(
+            *_identity_evidence_blocker(detected_identity_id, vp_ids),
             multiplicities=aggregate,
             per_irrep_results=results if results else None,
         )
@@ -222,24 +230,41 @@ def match_restricted_characters(
     total_dim = _round_int(
         computed_characters[identity_vs_id].real, tol,
     )
-    if total_dim is not None:
-            source_dim_sum = 0
-            for irr_label, mult in aggregate.items():
-                src_chars = source_irrep_characters.get(irr_label, {})
-                src_id = omap.get(identity_vs_id)
-                if src_id is not None and src_id in src_chars:
-                    dim_i = _round_int(src_chars[src_id].real, tol)
-                    if dim_i is not None:
-                        source_dim_sum += mult * dim_i
-            if source_dim_sum != total_dim:
-                return _diagnostic(
-                    "dimension_mismatch",
-                    f"aggregate multiplicity dimension {source_dim_sum} "
-                    f"≠ subspace dimension {total_dim} "
-                    f"(chi_sub(e) = {total_dim})",
-                    multiplicities=aggregate,
-                    per_irrep_results=results if results else None,
-                )
+    if total_dim is None:
+        return _blocked(
+            "non_integer_identity_character",
+            f"identity operation {identity_vs_id} character "
+            f"{_fmt_char(computed_characters[identity_vs_id])} is not an "
+            f"integer within tol {tol}",
+            multiplicities=aggregate,
+            per_irrep_results=results if results else None,
+        )
+    if total_dim <= 0:
+        return _blocked(
+            "nonpositive_identity_character",
+            f"identity operation {identity_vs_id} character "
+            f"{_fmt_char(computed_characters[identity_vs_id])} gives "
+            f"subspace dimension {total_dim} <= 0",
+            multiplicities=aggregate,
+            per_irrep_results=results if results else None,
+        )
+    source_dim_sum = 0
+    for irr_label, mult in aggregate.items():
+        src_chars = source_irrep_characters.get(irr_label, {})
+        src_id = omap.get(identity_vs_id)
+        if src_id is not None and src_id in src_chars:
+            dim_i = _round_int(src_chars[src_id].real, tol)
+            if dim_i is not None:
+                source_dim_sum += mult * dim_i
+    if source_dim_sum != total_dim:
+        return _diagnostic(
+            "dimension_mismatch",
+            f"aggregate multiplicity dimension {source_dim_sum} "
+            f"≠ subspace dimension {total_dim} "
+            f"(chi_sub(e) = {total_dim})",
+            multiplicities=aggregate,
+            per_irrep_results=results if results else None,
+        )
 
     # 3. Character reconstruction check:
     #    chi_sub(g) = sum_i n_i * chi_i(g) for all g in G_k^(a)
@@ -329,15 +354,22 @@ def _conj(c: complex) -> complex:
     return c.real - 1j * c.imag
 
 
-def _blocked(reason_key: str, reason: str) -> dict[str, Any]:
-    return {
+def _blocked(
+    reason_key: str, reason: str,
+    multiplicities: dict[str, int] | None = None,
+    per_irrep_results: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
         "matching_status": "blocked",
         "matching_strategy": "bilbao_restricted_character",
-        "irrep_multiplicities": {},
+        "irrep_multiplicities": multiplicities or {},
         "source_operation_map": {},
         "diagnostic_only": True,
         "reason": f"{reason_key}: {reason}",
     }
+    if per_irrep_results is not None:
+        result["per_irrep_results"] = per_irrep_results
+    return result
 
 
 def _diagnostic(
@@ -362,19 +394,58 @@ def _find_identity_vs_id(
     vp_ids: list[int],
     computed_characters: Mapping[int, complex],
     *,
-    source_operation_map: Mapping[int, int] | None = None,
     detected_identity_id: object = None,
 ) -> int | None:
-    """Find the ValleyScope identity operation ID in the VP set."""
-    # Primary: content-derived identity from the operation inventory.
-    if detected_identity_id is not None and detected_identity_id in vp_ids:
-        return int(detected_identity_id)
+    """Resolve the ValleyScope identity operation ID from explicit
+    content-derived evidence only.
 
-    if source_operation_map is not None:
-        for op in vp_ids:
-            if source_operation_map.get(op) == 1 and op in computed_characters:
-                return op
-    return None
+    Source operation-map values are opaque irreptables table indices, never
+    identity evidence.  The identity ID must be an exact integer, present in
+    the valley-preserving set and in the computed characters; anything else
+    fails closed with None.
+    """
+    if detected_identity_id is None:
+        return None
+    if not isinstance(detected_identity_id, int) or isinstance(
+        detected_identity_id, bool
+    ):
+        return None
+    if detected_identity_id not in vp_ids:
+        return None
+    if detected_identity_id not in computed_characters:
+        return None
+    return detected_identity_id
+
+
+def _identity_evidence_blocker(
+    detected_identity_id: object,
+    vp_ids: list[int],
+) -> tuple[str, str]:
+    """(reason_key, detail) for unresolvable identity evidence."""
+    if detected_identity_id is None:
+        return (
+            "missing_detected_identity_operation",
+            "no content-derived identity operation evidence was provided; "
+            "source table indices are not identity evidence",
+        )
+    if not isinstance(detected_identity_id, int) or isinstance(
+        detected_identity_id, bool
+    ):
+        return (
+            "malformed_detected_identity_operation",
+            f"detected identity {detected_identity_id!r} is not an exact "
+            f"integer operation ID",
+        )
+    if detected_identity_id not in vp_ids:
+        return (
+            "identity_operation_out_of_scope",
+            f"detected identity {detected_identity_id} is not in the "
+            f"valley-preserving operation set {vp_ids}",
+        )
+    return (
+        "identity_character_missing",
+        f"detected identity {detected_identity_id} has no computed character",
+    )
 
 
 def _round_int(value: float, tol: float) -> int | None:

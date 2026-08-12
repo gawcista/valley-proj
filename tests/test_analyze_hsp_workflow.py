@@ -1737,6 +1737,7 @@ def test_identity_only_gka_table_driven_unique_match():
             "candidate_space_group_symbol": "P3",
             "valley_preserving_operation_ids": [0, 5],
         }}},
+        detected_identity_id=0,
     )
     gm = report.get("generic_matches_by_kpoint", {}).get("MM", {}).get("K_valley", {})
     # Identity-only: valid local representation, table-driven matching.
@@ -2012,6 +2013,7 @@ def test_reviewed_table_source_payload_positive_full_pipeline():
             "candidate_space_group_symbol": "P3",
             "valley_preserving_operation_ids": [1, 2, 3],
         }}},
+        detected_identity_id=1,
     )
     gm = matching["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
     assert gm["matching_status"] == "matched"
@@ -2369,6 +2371,7 @@ def test_refine_ebr_mapping_does_not_invent_missing_local_character_for_nonident
         ebr_mapping=ebr_mapping,
         subspace_space_group={"candidate_space_group_symbol": "C2"},
         local_gka_operation_ids=[0, 4],
+        detected_identity_id=0,
     )
 
     assert ebr_mapping["subspace_space_group_candidate"] == "C2"
@@ -2397,6 +2400,103 @@ def test_refine_ebr_mapping_marks_identity_only_gka_as_missing_local_character()
 
     assert ebr_mapping["blocked_by"] == ["hsp_local_preserving_character_missing"]
     assert "does not contain a non-identity" in ebr_mapping["notes"]
+
+
+def _refinement_subspace_reports(
+    *, d_g_dict, valley_mappings_dict, operation_orders_by_id,
+    detected_identity_id, identity_evidence_reason=None,
+):
+    """Production-level refinement fixture through
+    _build_valley_preserving_subspace_reports with a resolved C2 candidate."""
+    from valleyscope.workflows.analyze_hsp import (
+        _build_valley_preserving_subspace_reports,
+    )
+    seed = np.eye(2, dtype=np.complex128)
+    reports = _build_valley_preserving_subspace_reports(
+        kpoint_name="G",
+        valley_matrices={"v": seed},
+        d_g_dict=d_g_dict,
+        valley_mappings_dict=valley_mappings_dict,
+        valley_names=["v"],
+        unitarity_tol=1e-3,
+        modulus_tol=1e-3,
+        spinor_wavefunction=False,
+        operation_orders_by_id=operation_orders_by_id,
+        per_valley_standard_matches={
+            "v": {
+                "standard_group_match_status": "matched",
+                "standard_group_match": {
+                    "number": 5,
+                    "international_short": "C2",
+                },
+            },
+        },
+        detected_identity_id=detected_identity_id,
+        identity_evidence_reason=identity_evidence_reason,
+    )
+    return reports[0]["ebr_mapping_input"]
+
+
+def test_refinement_opaque_identity_with_one_nonidentity_op_promotes():
+    """Opaque identity ID 99 plus one nonidentity operation: the local
+    G_k^(a) has a nonidentity valley-preserving op, so the missing-candidate
+    blocker is removed and no identity-evidence blocker is added."""
+    ebr = _refinement_subspace_reports(
+        d_g_dict={99: np.eye(2, dtype=np.complex128),
+                  5: np.diag([1.0, -1.0]).astype(np.complex128)},
+        valley_mappings_dict={99: {"v": "v"}, 5: {"v": "v"}},
+        operation_orders_by_id={99: 1, 5: 2},
+        detected_identity_id=99,
+    )
+    assert ebr["subspace_space_group_candidate"] == "C2"
+    assert "subspace_group_candidate_missing" not in ebr["blocked_by"]
+    assert "hsp_local_preserving_character_missing" not in ebr["blocked_by"]
+    assert not any(
+        str(b).startswith("identity_operation_evidence")
+        for b in ebr["blocked_by"]
+    )
+
+
+def test_refinement_identity_only_gka_marks_missing_local_character():
+    """Identity-only local G_k^(a) with opaque identity ID 99."""
+    ebr = _refinement_subspace_reports(
+        d_g_dict={99: np.eye(2, dtype=np.complex128)},
+        valley_mappings_dict={99: {"v": "v"}},
+        operation_orders_by_id={99: 1},
+        detected_identity_id=99,
+    )
+    assert ebr["subspace_space_group_candidate"] == "C2"
+    assert "hsp_local_preserving_character_missing" in ebr["blocked_by"]
+    assert "subspace_group_candidate_missing" not in ebr["blocked_by"]
+
+
+def test_refinement_missing_identity_evidence_preserves_blocker():
+    """Missing identity evidence: the original blocker is preserved and an
+    explicit identity-evidence blocker is added (fail closed)."""
+    ebr = _refinement_subspace_reports(
+        d_g_dict={99: np.eye(2, dtype=np.complex128),
+                  5: np.diag([1.0, -1.0]).astype(np.complex128)},
+        valley_mappings_dict={99: {"v": "v"}, 5: {"v": "v"}},
+        operation_orders_by_id={99: 1, 5: 2},
+        detected_identity_id=None,
+    )
+    assert "subspace_group_candidate_missing" in ebr["blocked_by"]
+    assert "identity_operation_evidence_missing" in ebr["blocked_by"]
+
+
+def test_refinement_ambiguous_identity_evidence_preserves_blocker():
+    """Ambiguous identity evidence: the original blocker is preserved and an
+    explicit ambiguity blocker is added (fail closed)."""
+    ebr = _refinement_subspace_reports(
+        d_g_dict={99: np.eye(2, dtype=np.complex128),
+                  5: np.diag([1.0, -1.0]).astype(np.complex128)},
+        valley_mappings_dict={99: {"v": "v"}, 5: {"v": "v"}},
+        operation_orders_by_id={99: 1, 5: 2},
+        detected_identity_id=None,
+        identity_evidence_reason="identity_operation_ambiguous",
+    )
+    assert "subspace_group_candidate_missing" in ebr["blocked_by"]
+    assert "identity_operation_evidence_ambiguous" in ebr["blocked_by"]
 
 
 def test_local_symmetry_adapted_projector_is_preserved_for_runtime_sewing(

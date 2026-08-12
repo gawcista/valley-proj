@@ -78,15 +78,25 @@ def build_unitary_valley_sewing_certificate(**raw: object) -> dict[str, object]:
             reasons.append("directed_intertwining_row_not_passed")
     if set(characters) != set(target_ids):
         reasons.append("target_character_vector_incomplete")
-    identity_evidence = detect_identity_operation(
-        operations=[
-            dict(row) for row in raw.get("detected_operations", [])
-            if isinstance(row, Mapping)
-        ],
-    )
-    sew_identity_id = (
-        identity_evidence["operation_id"] if identity_evidence["found"] else None
-    )
+    try:
+        identity_evidence = detect_identity_operation(
+            operations=[
+                dict(row) for row in raw.get("detected_operations", [])
+                if isinstance(row, Mapping)
+            ],
+        )
+    except (TypeError, ValueError):
+        identity_evidence = {
+            "found": False,
+            "reason": "identity_operation_not_detected_by_content",
+        }
+    sew_identity_id = None
+    if identity_evidence["found"]:
+        sew_identity_id = identity_evidence["operation_id"]
+    elif identity_evidence.get("reason") == "identity_operation_ambiguous":
+        reasons.append("directed_affine_identity_ambiguous")
+    else:
+        reasons.append("directed_affine_identity_missing")
     try:
         matching = match_restricted_characters(
             computed_characters=characters,

@@ -1463,6 +1463,7 @@ def test_plumbing_derived_transform_provenance_reaches_ebr_candidate():
         source_payload_provenance={"GM": {"K_valley": {
             "standard_setting_hsp_mapping": kmap_prov,
         }}},
+        detected_identity_id=0,
     )
     candidates = build_ebr_input_candidates(
         irrep_workflow_decisions=workflow,

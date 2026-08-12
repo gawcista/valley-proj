@@ -19,6 +19,7 @@ def test_c3_toy_cyclic_matches_irrep_multiplicities():
         source_irrep_characters=source,
         valley_preserving_operation_ids=vp_ids,
         source_operation_map={1: 1, 2: 2, 3: 3},
+        detected_identity_id=1,
     )
     assert result["matching_status"] == "matched"
     assert result["irrep_multiplicities"] == {"-GM5": 1}
@@ -34,6 +35,7 @@ def test_c3_toy_multiplicity_two():
         source_irrep_characters=source,
         valley_preserving_operation_ids=[1, 2, 3],
         source_operation_map={1: 1, 2: 2, 3: 3},
+        detected_identity_id=1,
     )
     assert result["matching_status"] == "matched"
     assert result["irrep_multiplicities"] == {"-GM5": 2}
@@ -59,6 +61,7 @@ def test_c3_toy_reducible_matches_two_irreps():
         source_irrep_characters=source,
         valley_preserving_operation_ids=[1, 2, 3],
         source_operation_map={1: 1, 2: 2, 3: 3},
+        detected_identity_id=1,
     )
     assert result["matching_status"] == "matched"
     mult = result["irrep_multiplicities"]
@@ -80,6 +83,7 @@ def test_c4_toy_cyclic_matches():
         source_irrep_characters=source,
         valley_preserving_operation_ids=[1, 2, 3, 4],
         source_operation_map={1: 1, 2: 2, 3: 3, 4: 4},
+        detected_identity_id=1,
     )
     assert result["matching_status"] == "matched"
     assert result["irrep_multiplicities"] == {"-GM_plus_1over4": 1}
@@ -99,6 +103,7 @@ def test_z2xz2_abelian_toy_matches():
         source_irrep_characters=source,
         valley_preserving_operation_ids=[1, 4, 5],
         source_operation_map={1: 1, 4: 4, 5: 5},
+        detected_identity_id=1,
     )
     assert result["matching_status"] == "matched"
     assert result["irrep_multiplicities"] == {"-M3": 1}
@@ -117,6 +122,7 @@ def test_explicit_map_vs_identity_0_to_source_1():
         source_irrep_characters=source,
         valley_preserving_operation_ids=[0, 4],
         source_operation_map={0: 1, 4: 2},
+        detected_identity_id=0,
     )
     assert result["matching_status"] == "matched"
     assert result["source_operation_map"] == {0: 1, 4: 2}
@@ -213,6 +219,7 @@ def test_standard_setting_certificate_in_source_payload_provenance():
         source_payload_provenance={"GammaM": {"K_valley": {
             "standard_setting_hsp_mapping": kmap_prov,
         }}},
+        detected_identity_id=0,
     )
     gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
     assert gm["matching_status"] == "matched"
@@ -333,6 +340,7 @@ def test_generic_matching_via_build_report():
         symmetry_adapted_valley_report=sa_report,
         source_irrep_characters_flattened={"GammaM": {"K_valley": source_chars}},
         source_operation_maps=op_maps,
+        detected_identity_id=1,
     )
     assert report["matching_mode"] == "generic"
     gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
@@ -457,6 +465,7 @@ def test_generic_wiring_includes_identity_zero_for_reducible_character():
         symmetry_adapted_valley_report=sa_report,
         source_irrep_characters_flattened={"GammaM": {"K_valley": source_chars}},
         source_operation_maps=op_maps,
+        detected_identity_id=0,
     )
     gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
     assert gm["matching_status"] == "matched"
@@ -1105,6 +1114,7 @@ def test_unique_source_irrep_remains_matched():
         source_irrep_characters=source,
         valley_preserving_operation_ids=[0, 4],
         source_operation_map={0: 1, 4: 2},
+        detected_identity_id=0,
     )
     assert result["matching_status"] == "matched"
     assert result["irrep_multiplicities"] == {"-GM_B": 1}
@@ -1124,6 +1134,7 @@ def test_nonunique_restricted_decomposition_blocked():
         source_irrep_characters=source,
         valley_preserving_operation_ids=[0, 4, 5],
         source_operation_map={0: 1, 4: 2, 5: 3},
+        detected_identity_id=0,
     )
     assert result["matching_status"] == "diagnostic"
     assert "nonunique_restricted_irrep_decomposition" in result["reason"]
@@ -1138,6 +1149,7 @@ def test_identity_only_unique_irrep_matched():
         source_irrep_characters=source,
         valley_preserving_operation_ids=[0],
         source_operation_map={0: 1},
+        detected_identity_id=0,
     )
     assert result["matching_status"] == "matched"
     assert result["irrep_multiplicities"] == {"-M2": 1}
@@ -1168,6 +1180,7 @@ def test_identity_only_nonunique_blocked():
         source_irrep_characters=source,
         valley_preserving_operation_ids=[0],
         source_operation_map={0: 1},
+        detected_identity_id=0,
     )
     assert result["matching_status"] == "diagnostic"
     # Dimension mismatch catches this (4 ≠ 2). Nonunique check is downstream.
@@ -1189,6 +1202,7 @@ def test_dimension_mismatch_blocked():
         source_irrep_characters=source,
         valley_preserving_operation_ids=[0, 4],
         source_operation_map={0: 1, 4: 2},
+        detected_identity_id=0,
     )
     assert result["matching_status"] == "diagnostic"
     assert "dimension" in result["reason"].lower()
@@ -1214,5 +1228,137 @@ def test_character_reconstruction_mismatch_blocked():
         source_irrep_characters=source,
         valley_preserving_operation_ids=[0, 4],
         source_operation_map={0: 1, 4: 2},
+        detected_identity_id=0,
     )
     assert result["matching_status"] == "diagnostic"
+
+
+# -----------------------------------------------------------------------
+# Identity evidence fail-closed regressions (no source-index fallback)
+# -----------------------------------------------------------------------
+
+def test_missing_identity_with_source_table_index_one_blocks():
+    """A source map value of 1 is an opaque irreptables table index, not
+    identity evidence.  Without detected_identity_id the match must block."""
+    result = match_restricted_characters(
+        computed_characters={7: 1.0 + 0j},
+        source_irrep_characters={"A": {1: 1.0 + 0j}},
+        valley_preserving_operation_ids=[7],
+        source_operation_map={7: 1},
+    )
+    assert result["matching_status"] == "blocked"
+    assert "missing_detected_identity_operation" in result["reason"]
+    # The inner product was computed ({'A': 1}) but must not be trusted:
+    # blocked rows carry it only as evidence, never as a matched result.
+    assert result["irrep_multiplicities"] == {"A": 1}
+    assert result["diagnostic_only"] is True
+
+
+def test_build_report_missing_identity_blocks_with_table_index_one_map():
+    """build_valley_irrep_matching_report with missing identity evidence but
+    a source map containing table index 1 must produce a blocked row."""
+    from valleyscope.analysis.valley_irrep_matching import (
+        build_valley_irrep_matching_report,
+    )
+    decisions = {
+        "by_kpoint": {
+            "GammaM": {
+                "K_valley": {
+                    "readiness_level": "trusted",
+                    "workflow_path": "direct_qcut",
+                },
+            },
+        },
+    }
+    sa_report = {
+        "by_kpoint": {
+            "GammaM": {
+                "valley_preserving_subspaces": [{
+                    "orbit": ["K_valley"],
+                    "hsp_preserving_operation_ids": [7],
+                    "subspace_space_group": {
+                        "valley_preserving_operation_ids": [7],
+                        "candidate_space_group_symbol": "P1",
+                    },
+                    "valley_preserving_character_diagnostics": {
+                        "per_valley": {
+                            "K_valley": [
+                                {"operation_id": 7, "eigenphases": [0.0]},
+                            ],
+                        },
+                    },
+                }],
+            },
+        },
+    }
+    report = build_valley_irrep_matching_report(
+        irrep_workflow_decisions=decisions,
+        symmetry_adapted_valley_report=sa_report,
+        source_irrep_characters_flattened={
+            "GammaM": {"K_valley": {"A": {1: 1.0 + 0j}}},
+        },
+        source_operation_maps={"GammaM": {"K_valley": {7: 1}}},
+    )
+    gm = report["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
+    assert gm["matching_status"] == "blocked"
+    assert "missing_detected_identity_operation" in gm["reason"]
+    # The inner product was computed ({'A': 1}) but must not be trusted.
+    assert gm["irrep_multiplicities"] == {"A": 1}
+    assert gm["diagnostic_only"] is True
+
+
+def test_non_integer_identity_character_blocks():
+    """A non-integer identity character must block, not skip the dimension
+    check.  inner(A) = (1*1.5 + 1*0.5)/2 = 1 (matched), then
+    chi_sub(e) = 1.5 is not an integer within tol."""
+    result = match_restricted_characters(
+        computed_characters={0: 1.5 + 0j, 4: 0.5 + 0j},
+        source_irrep_characters={"A": {1: 1.0 + 0j, 2: 1.0 + 0j}},
+        valley_preserving_operation_ids=[0, 4],
+        source_operation_map={0: 1, 4: 2},
+        detected_identity_id=0,
+    )
+    assert result["matching_status"] == "blocked"
+    assert "non_integer_identity_character" in result["reason"]
+
+
+def test_nonpositive_identity_character_blocks():
+    """A nonpositive identity character must block, not skip the dimension
+    check.  inner(A) = (1*0 + 1*2)/2 = 1 (matched), then
+    chi_sub(e) = 0 is not a positive subspace dimension."""
+    result = match_restricted_characters(
+        computed_characters={0: 0.0 + 0j, 4: 2.0 + 0j},
+        source_irrep_characters={"A": {1: 1.0 + 0j, 2: 1.0 + 0j}},
+        valley_preserving_operation_ids=[0, 4],
+        source_operation_map={0: 1, 4: 2},
+        detected_identity_id=0,
+    )
+    assert result["matching_status"] == "blocked"
+    assert "nonpositive_identity_character" in result["reason"]
+
+
+def test_malformed_detected_identity_blocks():
+    """Boolean/float detected identity IDs are unknown evidence and block."""
+    for bad in (True, 1.0, "1"):
+        result = match_restricted_characters(
+            computed_characters={0: 1.0 + 0j, 4: -1.0 + 0j},
+            source_irrep_characters={"A": {1: 1.0 + 0j, 2: -1.0 + 0j}},
+            valley_preserving_operation_ids=[0, 4],
+            source_operation_map={0: 1, 4: 2},
+            detected_identity_id=bad,
+        )
+        assert result["matching_status"] == "blocked"
+        assert "malformed_detected_identity_operation" in result["reason"]
+
+
+def test_out_of_scope_detected_identity_blocks():
+    """A detected identity outside the VP set must block."""
+    result = match_restricted_characters(
+        computed_characters={0: 1.0 + 0j, 4: -1.0 + 0j},
+        source_irrep_characters={"A": {1: 1.0 + 0j, 2: -1.0 + 0j}},
+        valley_preserving_operation_ids=[0, 4],
+        source_operation_map={0: 1, 4: 2},
+        detected_identity_id=99,
+    )
+    assert result["matching_status"] == "blocked"
+    assert "identity_operation_out_of_scope" in result["reason"]

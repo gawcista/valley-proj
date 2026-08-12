@@ -2525,6 +2525,11 @@ def _build_symmetry_adapted_valley_report(
             sub_identity_evidence["operation_id"]
             if sub_identity_evidence["found"] else None
         )
+        sub_identity_reason = (
+            None
+            if sub_identity_evidence["found"]
+            else sub_identity_evidence.get("reason")
+        )
         valley_preserving_subspaces = _build_valley_preserving_subspace_reports(
             kpoint_name=kpoint_name,
             valley_matrices=valley_matrices,
@@ -2541,6 +2546,7 @@ def _build_symmetry_adapted_valley_report(
             seed_overlap_fail_tol=float(config.symmetry_adapted_valley.seed_overlap_fail_tol),
             projector_symmetry_warn_tol=float(config.symmetry_adapted_valley.projector_symmetry_warn_tol),
             detected_identity_id=sub_identity_id,
+            identity_evidence_reason=sub_identity_reason,
             projector_symmetry_fail_tol=float(config.symmetry_adapted_valley.projector_symmetry_fail_tol),
             ebr_seed_overlap_min=float(config.symmetry_adapted_valley.ebr_seed_overlap_min),
             ebr_unitarity_max=float(config.symmetry_adapted_valley.ebr_unitarity_max),
@@ -2590,6 +2596,7 @@ def _build_valley_preserving_subspace_reports(
     per_valley_standard_matches: dict[str, Any] | None = None,
     runtime_projectors: dict[str, np.ndarray] | None = None,
     detected_identity_id: object = None,
+    identity_evidence_reason: str | None = None,
 ) -> list[dict[str, object]]:
     """Build singleton reports for per-valley preserving-subgroup analysis.
 
@@ -2696,6 +2703,7 @@ def _build_valley_preserving_subspace_reports(
                     "hsp_preserving_operation_ids", []
                 ),
                 detected_identity_id=detected_identity_id,
+                identity_evidence_reason=identity_evidence_reason,
             )
             _apply_target_subspace_closure_gate(
                 ebr_mapping=ebr_mapping,
@@ -3084,8 +3092,15 @@ def _refine_ebr_mapping_with_subspace_space_group(
     subspace_space_group: dict[str, object],
     local_gka_operation_ids: list[object] | None = None,
     detected_identity_id: object = None,
+    identity_evidence_reason: str | None = None,
 ) -> None:
-    """Attach subspace SG identity without inventing local character blockers."""
+    """Attach subspace SG identity without inventing local character blockers.
+
+    Identity-only versus nonidentity local content may only be decided from
+    explicit content-derived identity evidence.  When that evidence is
+    missing or ambiguous, the existing blockers are preserved and an explicit
+    identity-evidence blocker is added (fail closed).
+    """
     candidate = subspace_space_group.get("candidate_space_group_symbol")
     ebr_mapping["subspace_space_group_candidate"] = candidate
     blockers = ebr_mapping.get("blocked_by")
@@ -3102,6 +3117,18 @@ def _refine_ebr_mapping_with_subspace_space_group(
         )
     )
     identity_op = detected_identity_id
+    if identity_op is None:
+        refined_blockers = [
+            blocker for blocker in blockers
+            if isinstance(blocker, str) and blocker
+        ]
+        refined_blockers.append(
+            "identity_operation_evidence_ambiguous"
+            if identity_evidence_reason == "identity_operation_ambiguous"
+            else "identity_operation_evidence_missing"
+        )
+        ebr_mapping["blocked_by"] = refined_blockers
+        return
     has_nonidentity_local_op = any(
         op != identity_op for op in local_ops
     )

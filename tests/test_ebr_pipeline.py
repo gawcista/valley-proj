@@ -849,6 +849,7 @@ def test_generic_ebr_builder_e2e_p4_group_agnostic(tmp_path):
             "GammaM": {"K_valley": source_chars},
         },
         source_operation_maps=operation_maps,
+        detected_identity_id=0,
     )
     assert matching["matching_mode"] == "generic"
     gm = matching["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
@@ -1012,6 +1013,7 @@ def test_irreptables_loader_e2e_p4_group_agnostic(tmp_path):
             "GammaM": {"K_valley": source_chars},
         },
         source_operation_maps=operation_maps,
+        detected_identity_id=0,
     )
     assert matching["matching_mode"] == "generic"
     gm = matching["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
@@ -1172,6 +1174,7 @@ def test_standard_outputs_no_cn_like_guardrail(tmp_path):
             "GammaM": {"K_valley": source_chars},
         },
         source_operation_maps={"GammaM": {"K_valley": {0: 1, 1: 2}}},
+        detected_identity_id=0,
     )
     candidates = build_ebr_input_candidates(
         irrep_workflow_decisions=workflow,
@@ -1610,6 +1613,7 @@ def test_public_e2e_record_chain_with_certificate_provenance():
         source_payload_provenance={"GammaM": {"K_valley": {
             "standard_setting_hsp_mapping": kmap_prov,
         }}},
+        detected_identity_id=0,
     )
     gm = matching["generic_matches_by_kpoint"]["GammaM"]["K_valley"]
     assert gm["matching_status"] == "matched"

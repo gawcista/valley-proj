@@ -266,6 +266,55 @@ def test_certificate_fails_closed_on_reviewed_table_and_setting_tamper():
         assert certificate["status"] == "blocked_unknown"
 
 
+def test_missing_affine_identity_blocks_with_specific_reason():
+    """Missing affine identity evidence blocks the certificate with a
+    specific reason code; source table indices are not identity evidence."""
+    raw = _completion_inputs()
+    raw["detected_operations"] = [
+        op for op in raw["detected_operations"]
+        if not (
+            np.array_equal(
+                np.asarray(op.get("rotation_frac"), dtype=int),
+                np.eye(3, dtype=int),
+            )
+            and not np.any(
+                np.asarray(op.get("translation_frac"), dtype=float) % 1.0
+            )
+        )
+    ]
+
+    certificate = build_unitary_valley_sewing_certificate(**raw)
+
+    assert certificate["status"] == "blocked_unknown"
+    assert "directed_affine_identity_missing" in certificate["reason_codes"]
+
+
+def test_ambiguous_affine_identity_blocks_with_specific_reason():
+    """Two affine identity operations block the certificate with a specific
+    ambiguity reason code."""
+    raw = _completion_inputs()
+    identity_op = next(
+        op for op in raw["detected_operations"]
+        if np.array_equal(
+            np.asarray(op.get("rotation_frac"), dtype=int),
+            np.eye(3, dtype=int),
+        )
+        and not np.any(
+            np.asarray(op.get("translation_frac"), dtype=float) % 1.0
+        )
+    )
+    duplicate = dict(identity_op)
+    duplicate["operation_id"] = 111
+    raw["detected_operations"] = [
+        *raw["detected_operations"], duplicate,
+    ]
+
+    certificate = build_unitary_valley_sewing_certificate(**raw)
+
+    assert certificate["status"] == "blocked_unknown"
+    assert "directed_affine_identity_ambiguous" in certificate["reason_codes"]
+
+
 def test_optional_grey_blocker_does_not_block_unitary_completion():
     raw = _completion_inputs()
     raw["target_context"]["joint_grey_source_status"] = "blocked"

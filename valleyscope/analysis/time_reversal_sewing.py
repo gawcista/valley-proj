@@ -87,12 +87,7 @@ def select_trusted_valley_projectors(
                 "direct_qcut": seed_projectors_by_kpoint,
                 "symmetry_adapted": symmetry_adapted_projectors_by_kpoint,
             }
-            source_map = source_map_by_path.get(workflow_path)
-            if source_map is None:
-                blockers.append(
-                    f"trusted_projector_unknown_workflow_path:{kpoint}:{valley}:{workflow_path}"
-                )
-                continue
+            source_map = source_map_by_path[workflow_path]
             projectors_at_kpoint = source_map.get(kpoint, {})
             raw_projector = (
                 projectors_at_kpoint.get(valley)

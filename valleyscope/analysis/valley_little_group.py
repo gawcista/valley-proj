@@ -628,11 +628,9 @@ def detect_identity_operation(
         if not _rotation_matches(rotation, np.eye(3), tolerance):
             continue
         translation_raw = operation.get("translation_frac")
-        translation = (
-            np.asarray(translation_raw, dtype=float)
-            if translation_raw is not None
-            else np.zeros(3)
-        )
+        if translation_raw is None:
+            continue
+        translation = np.asarray(translation_raw, dtype=float)
         if translation.shape != (3,) or not np.isfinite(translation).all():
             continue
         # Translation must be lattice-equivalent to zero; a centering-coset
