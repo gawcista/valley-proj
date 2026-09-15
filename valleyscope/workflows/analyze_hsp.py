@@ -397,8 +397,16 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 for idx, result in enumerate(weights)
             ],
         }
-        max_w_overlap = max((w.overlap_weight for w in weights), default=0.0)
-        max_w_res = max((w.residual_weight for w in weights), default=0.0)
+        # Readiness overlap/residual come from the seed projectors, never from
+        # the mode-dependent reporting weights, so the fixed-center readiness
+        # decision is identical in both projector modes.
+        seed_weights = (
+            weights
+            if seed_projectors is reporting_projectors
+            else compute_valley_weights(source_coefficients, seed_projectors)
+        )
+        max_w_overlap = max((w.overlap_weight for w in seed_weights), default=0.0)
+        max_w_res = max((w.residual_weight for w in seed_weights), default=0.0)
         seed_matrices = _add_valley_subspace_diagnostic(
             kpoint_subspace,
             basis_transforms,

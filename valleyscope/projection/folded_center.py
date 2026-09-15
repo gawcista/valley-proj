@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from valleyscope.geometry.reciprocal import minimum_periodic_distance
 from valleyscope.geometry.valley_centers import ValleyCenter
 
 
@@ -121,6 +122,16 @@ def build_folded_center_report(
     kpoint_distances: dict[str, list[float]] = {}
 
     basis = np.asarray(moire_reciprocal_cart, dtype=float)
+    kpoint_names = list(sampled_k_frac)
+    k_frac_all = np.asarray(
+        [np.asarray(sampled_k_frac[name], dtype=float) for name in kpoint_names],
+        dtype=float,
+    ).reshape(len(kpoint_names), 3)
+    k_cart_all = np.zeros((len(kpoint_names), 3), dtype=float)
+    if use_2d:
+        k_cart_all[:, :2] = k_frac_all[:, :2] @ basis[:2, :2]
+    else:
+        k_cart_all = k_frac_all @ basis
 
     for center in centers:
         folded_frac, g_int, folded_cart = fold_center_into_moire_bz(
@@ -137,22 +148,18 @@ def build_folded_center_report(
             )
         )
 
-        # Distance from folded center to each sampled k-point.
-        distances: list[float] = []
-        for k_name, k_frac in sampled_k_frac.items():
-            kf = np.asarray(k_frac, dtype=float)
-            if use_2d:
-                basis_2d = basis[:2, :2]
-                delta_frac = kf[:2] - folded_frac[:2]
-                delta_frac -= np.rint(delta_frac)
-                delta_cart = delta_frac @ basis_2d
-                dist = float(np.linalg.norm(delta_cart))
-            else:
-                delta_frac = kf - folded_frac
-                delta_frac -= np.rint(delta_frac)
-                delta_cart = delta_frac @ basis
-                dist = float(np.linalg.norm(delta_cart))
-            distances.append(dist)
+        # Minimum periodic distance from the folded center to each sampled
+        # k-point; the folded frac/g_int fields above stay the fundamental-cell
+        # representative convention and are not re-wrapped here.
+        distances = [
+            float(value)
+            for value in minimum_periodic_distance(
+                k_cart_all,
+                folded_cart,
+                basis,
+                use_2d=use_2d,
+            )
+        ]
         kpoint_distances[center.name] = distances
 
     return FoldedCenterReport(
