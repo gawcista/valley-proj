@@ -50,6 +50,11 @@ def derive_projected_subspace_source_hsp_basis(
     transform = _certificate_transform(standard_setting_certificate)
     if certificate_blocker or transform is None:
         return _blocked_basis(certificate_blocker or "missing reciprocal transform")
+    lattice_blocker = _standard_translation_lattice_blocker(
+        standard_setting_certificate, transform
+    )
+    if lattice_blocker:
+        return _blocked_basis(lattice_blocker)
     if not use_2d_momentum_only:
         return _blocked_basis(
             "projected_subspace_plane_undefined: "
@@ -260,6 +265,11 @@ def classify_projected_subspace_kpoint(
 
     transform = _certificate_transform(standard_setting_certificate)
     certificate_blocker = _certificate_blocker(standard_setting_certificate)
+    lattice_blocker = ""
+    if transform is not None and not certificate_blocker:
+        lattice_blocker = _standard_translation_lattice_blocker(
+            standard_setting_certificate, transform
+        )
     basis_identity = source_hsp_basis.get(
         "projected_subspace_space_group"
     )
@@ -267,7 +277,7 @@ def classify_projected_subspace_kpoint(
         identity_blocker = (
             "source_basis_certificate_identity_mismatch"
         )
-    if transform is None or certificate_blocker or identity_blocker:
+    if transform is None or certificate_blocker or identity_blocker or lattice_blocker:
         return {
             **base,
             "parent_k_frac": _vector(parent_k_frac),
@@ -282,6 +292,7 @@ def classify_projected_subspace_kpoint(
             "blocker": (
                 identity_blocker
                 or certificate_blocker
+                or lattice_blocker
                 or "missing reciprocal transform"
             ),
         }
@@ -683,6 +694,83 @@ def _certificate_transform(
     if abs(float(np.linalg.det(transform))) <= 1e-12:
         return None
     return transform
+
+
+def _standard_translation_lattice_blocker(
+    certificate: Mapping[str, object],
+    transform: np.ndarray,
+) -> str:
+    """Fail-closed gate: T must generate the standard-setting lattice.
+
+    A nonsingular ``T`` only fixes the volume of the rebase.  The transform
+    must map the primitive parent lattice onto
+    ``L_standard = Z^3 + sum_i Z c_i``, and the cosets ``c_i`` are taken from
+    the Hall database for the certificate's own Hall number -- independent
+    reviewed evidence, never the certificate being checked.  The serialized
+    centering vectors are compared against that same reviewed set because they
+    are what downstream reciprocal-shift filtering actually uses: a certificate
+    that is internally consistent about the wrong centering must not be trusted.
+    """
+    centering_vectors = _certificate_centering_vectors(certificate)
+    if centering_vectors is None:
+        return (
+            "standard_setting_centering_vectors_missing"
+        )
+    hall_number = certificate.get("hall_number")
+    try:
+        from valleyscope.analysis.standard_setting_kmap import (
+            _centering_cosets_from_hall_database,
+            _validate_translation_lattice_equivalence,
+        )
+    except Exception as exc:  # pragma: no cover - import failure is a blocker
+        return f"translation_lattice_validator_unavailable: {exc}"
+
+    reviewed = _centering_cosets_from_hall_database(hall_number)
+    if reviewed.get("status") != "passed":
+        return (
+            "standard_translation_lattice_unresolved: "
+            f"{reviewed.get('reason', reviewed.get('status'))}"
+        )
+    cosets = reviewed.get("centering_cosets")
+    if not _same_centering_lattice(centering_vectors, cosets):
+        return (
+            "standard_setting_centering_vectors_conflict_with_hall_database: "
+            f"serialized={[list(v) for v in centering_vectors]}, "
+            f"hall={cosets}"
+        )
+    lattice = _validate_translation_lattice_equivalence(transform, cosets)
+    if lattice.get("status") != "passed":
+        return (
+            "translation_lattice_equivalence_"
+            f"{lattice.get('missing_ingredient', lattice.get('status'))}: "
+            f"{lattice.get('reason', '')}"
+        )
+    return ""
+
+
+def _same_centering_lattice(
+    serialized: Sequence[np.ndarray],
+    reviewed: object,
+) -> bool:
+    """Exact mod-1 set equality between two centering coset collections."""
+    if not isinstance(reviewed, list) or len(reviewed) != len(serialized):
+        return False
+    try:
+        left = {_centering_key(vector) for vector in serialized}
+        right = {_centering_key(vector) for vector in reviewed}
+    except (TypeError, ValueError):
+        return False
+    return left == right
+
+
+def _centering_key(vector: object) -> tuple[Fraction, Fraction, Fraction]:
+    array = np.asarray(vector, dtype=float)
+    if array.shape != (3,) or not np.all(np.isfinite(array)):
+        raise ValueError("malformed centering vector")
+    return tuple(
+        Fraction(float(value)).limit_denominator(_MAX_RATIONAL_DENOMINATOR) % 1
+        for value in array.tolist()
+    )
 
 
 def _projected_space_group_identity(

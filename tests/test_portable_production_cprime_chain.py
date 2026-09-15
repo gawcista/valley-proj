@@ -417,6 +417,13 @@ def test_portable_completion_cross_binds_raw_affine_setting_to_local_irrep(
             "normalized_direct_transform",
             [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0]],
         ),
+        # Non-lattice rebase for the primitive standard setting: unit volume,
+        # integral conjugations, wrong translation lattice.
+        (
+            "parent_to_standard_direct_transform",
+            "normalized_direct_transform",
+            np.diag([2.0, 2.0, 0.25]).tolist(),
+        ),
         (
             "origin_shift_fractional",
             "normalized_origin_shift",
@@ -509,6 +516,121 @@ def test_portable_unitary_validator_rejects_coordinated_affine_substitution(
 
     assert forged["certificate_identity"][bundle_field] == forged_value
     assert not validate_tr_completed_unitary_bundle(forged)
+
+
+def _forged_non_lattice_tr_context(inputs, forged_transform, centering_edit):
+    """Producer TR context with only T (and optionally centering) replaced.
+
+    The forged context stays internally consistent: the parent affine
+    operations are reconjugated by the forged transform and the serialized
+    ``context_identity`` is recomputed, so a consumer can only separate it from
+    the real context by the physical translation-lattice equivalence.
+    """
+    context = deepcopy(inputs["tr_source"]["reviewed_source_context"])
+    transform = np.asarray(forged_transform, dtype=float)
+    inverse = np.linalg.inv(transform)
+    setting = context["standard_setting_certificate"]
+    setting["parent_to_standard_direct_transform"] = np.asarray(
+        forged_transform, dtype=float
+    ).tolist()
+    if centering_edit == "missing":
+        assert "centering_vectors" in setting
+        setting.pop("centering_vectors")
+    for operation in context["parent_affine_operations"]:
+        rotation = np.asarray(operation["rotation_frac"], dtype=float)
+        translation = np.asarray(operation["translation_frac"], dtype=float)
+        operation["rotation_frac"] = np.rint(
+            inverse @ rotation @ transform
+        ).astype(int).tolist()
+        operation["translation_frac"] = (inverse @ translation).tolist()
+    context["context_identity"] = canonical_identity({
+        key: deepcopy(value)
+        for key, value in context.items()
+        if key not in {"status", "context_identity", "blockers"}
+    })
+    # The forged context is self-consistent: its own hash matches.
+    assert context["context_identity"] == canonical_identity({
+        key: deepcopy(value)
+        for key, value in context.items()
+        if key not in {"status", "context_identity", "blockers"}
+    })
+    return context
+
+
+@pytest.mark.parametrize(
+    "forged_transform",
+    [
+        # Right volume and integral conjugations, wrong translation lattice.
+        np.diag([2.0, 2.0, 0.25]).tolist(),
+        np.diag([2.0, 0.5, 1.0]).tolist(),
+    ],
+)
+@pytest.mark.parametrize("centering_edit", [None, "missing"])
+def test_portable_time_reversal_source_rejects_non_lattice_transform(
+    tmp_path, forged_transform, centering_edit,
+):
+    """Consumer regression: a non-lattice T blocks TR source completion.
+
+    Dropping the serialized centering evidence must not repair the rejection:
+    this consumer reads the reviewed cosets from the certificate Hall number,
+    never from the certificate's own centering field.
+    """
+    from valleyscope.analysis.standard_setting_kmap import (
+        _validate_affine_operation_equivalence,
+    )
+
+    inputs = _portable_orbit_inputs(tmp_path)
+    context = _forged_non_lattice_tr_context(
+        inputs, forged_transform, centering_edit,
+    )
+    transform = np.asarray(forged_transform, dtype=float)
+    setting = context["standard_setting_certificate"]
+
+    affine = _validate_affine_operation_equivalence(
+        vp_operations=context["parent_affine_operations"],
+        vp_operation_ids=setting["parent_basis_operation_ids"],
+        standard_match={
+            "number": context["source_table_identity"]["space_group_number"],
+            "international_short": (
+                context["source_table_identity"]["space_group_symbol"]
+            ),
+            "hall_number": setting["hall_number"],
+            "hall_symbol": setting["hall_symbol"],
+        },
+        parent_to_standard_direct_transform=transform,
+        origin_shift_fractional=np.asarray(
+            setting.get("origin_shift_fractional", [0.0, 0.0, 0.0]),
+            dtype=float,
+        ),
+    )
+    assert affine["status"] != "passed"
+    assert "non_lattice_direct_transform" in affine["missing_ingredients"]
+
+    rederived = validate_reviewed_time_reversal_source_context(context)
+
+    assert rederived["status"] == "blocked"
+    assert (
+        "time_reversal_standard_setting_affine_context_mismatch"
+        in rederived["blockers"]
+    )
+
+    # No trusted downstream result may emerge from the rejected context: the
+    # orbit never completes unitarily and no exported bundle passes the
+    # TR-completed unitary validator.
+    blocked_report = _build_portable_orbit_report(
+        inputs, sources={"left": rederived, "right": rederived},
+    )
+    completed, _, export = _complete_and_export_portable_orbit(
+        inputs, blocked_report,
+    )
+    assert all(
+        orbit["unitary_completion_status"] != "validated"
+        for orbit in completed["valley_orbits"]
+    ), completed["valley_orbits"]
+    assert all(
+        not validate_tr_completed_unitary_bundle(bundle)
+        for bundle in export["bundles"]
+    ), export["bundles"]
 
 
 def test_portable_problem_export_rederive_raw_source_pairing(

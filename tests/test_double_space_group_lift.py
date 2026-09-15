@@ -21,6 +21,8 @@ from valleyscope.symmetry.double_space_group_lift import (
 )
 from valleyscope.symmetry.plane_wave_action import apply_plane_wave_action
 
+from tests.standard_setting_fixtures import standard_setting_identity
+
 
 def _source_record() -> dict[str, object]:
     return SpinorSourceBasisCertificate(
@@ -104,15 +106,13 @@ def _identities(
             for table_index, operation in enumerate(ordered)
         ],
     }
-    standard_setting = {
-        "schema_version": "1.0.0",
-        "parent_to_standard_direct_transform": np.eye(3).tolist(),
-        "origin_shift_fractional": [0.0, 0.0, 0.0],
-        "parent_to_standard_operation_map": {
-            str(operation["operation_id"]): table_index
+    standard_setting = standard_setting_identity(
+        1,
+        operation_map={
+            operation["operation_id"]: table_index
             for table_index, operation in enumerate(ordered)
         },
-    }
+    )
     return source_table, standard_setting
 
 
@@ -471,6 +471,48 @@ def test_positive_validation_statuses_are_not_accepted_as_input_evidence():
     assert record["standard_setting_identity"]["status"] == "blocked"
     assert "source_table_convention_not_validated" in record["reason_codes"]
     assert "standard_setting_not_validated" in record["reason_codes"]
+
+
+def test_standard_setting_evidence_schema_contract():
+    """The setting schema version and its required fields are executable.
+
+    Version 1.1.0 adds the reviewed Hall identity and centering cosets, so a
+    legacy 1.0.0 setting -- which carries neither -- must block, and a
+    current-version setting missing either field must block as well.
+    """
+    operations = [_op(0, np.eye(3, dtype=int))]
+    source_table, setting = _identities(operations)
+
+    def _record(edit):
+        candidate = deepcopy(setting)
+        edit(candidate)
+        return build_double_space_group_lift_certificate(
+            _source_record(),
+            operations,
+            source_table_identity=source_table,
+            standard_setting_identity=candidate,
+            direct_lattice_cart=np.eye(3),
+        ).to_record()
+
+    def _legacy(candidate):
+        candidate["schema_version"] = "1.0.0"
+
+    def _drop_hall(candidate):
+        candidate.pop("hall_number")
+
+    def _drop_centering(candidate):
+        candidate.pop("normalized_centering_vectors")
+
+    assert _record(lambda candidate: None)["status"] == "passed"
+    for edit, code in (
+        (_legacy, "standard_setting_schema_mismatch"),
+        (_drop_hall, "standard_setting_hall_number_malformed"),
+        (_drop_centering, "standard_setting_centering_vectors_malformed"),
+    ):
+        record = _record(edit)
+        assert record["status"] == "blocked"
+        assert "standard_setting_not_validated" in record["reason_codes"]
+        assert code in record["standard_setting_identity"]["reason_codes"]
 
 
 def test_incomplete_operation_inventory_fails_closed():

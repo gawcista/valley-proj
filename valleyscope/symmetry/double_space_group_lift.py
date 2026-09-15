@@ -8,6 +8,11 @@ from typing import Any
 
 import numpy as np
 
+from valleyscope.analysis.standard_setting_kmap import (
+    _centering_cosets_from_hall_database,
+    _validate_hall_sg_consistency,
+    _validate_translation_lattice_equivalence,
+)
 from valleyscope.io.spinor_source_basis import (
     validate_spinor_source_basis_record,
 )
@@ -22,6 +27,10 @@ from valleyscope.geometry.lattice import (
 
 
 DOUBLE_SPACE_GROUP_LIFT_SCHEMA_VERSION = "1.0.0"
+# 1.1.0 requires the reviewed Hall identity and centering cosets, so the
+# parent-to-standard transform can be checked against the standard-setting
+# translation lattice instead of its determinant alone.
+STANDARD_SETTING_EVIDENCE_SCHEMA_VERSION = "1.1.0"
 _TOLERANCE = 1.0e-8
 _SOURCE_SPIN_TOLERANCE = 5.0e-5
 
@@ -651,14 +660,30 @@ def _derive_source_and_setting_identities(
             continue
         source_operations[table_index] = normalized
 
-    if setting_raw.get("schema_version") != "1.0.0":
+    if (
+        setting_raw.get("schema_version")
+        != STANDARD_SETTING_EVIDENCE_SCHEMA_VERSION
+    ):
         setting_reasons.append("standard_setting_schema_mismatch")
     transform = _matrix3(
         setting_raw.get("parent_to_standard_direct_transform")
     )
-    if transform is None or abs(float(np.linalg.det(transform))) <= _TOLERANCE:
+    transform_usable = bool(
+        transform is not None
+        and abs(float(np.linalg.det(transform))) > _TOLERANCE
+    )
+    if not transform_usable:
         setting_reasons.append("standard_setting_transform_malformed")
         transform = np.eye(3)
+    hall_number = setting_raw.get("hall_number")
+    if not _exact_int(hall_number) or hall_number <= 0:
+        setting_reasons.append("standard_setting_hall_number_malformed")
+        hall_number = None
+    serialized_cosets = _centering_coset_records(
+        setting_raw.get("normalized_centering_vectors")
+    )
+    if serialized_cosets is None:
+        setting_reasons.append("standard_setting_centering_vectors_malformed")
     origin = _vector3(setting_raw.get("origin_shift_fractional"))
     if origin is None:
         setting_reasons.append("standard_setting_origin_malformed")
@@ -684,6 +709,57 @@ def _derive_source_and_setting_identities(
         setting_reasons.append("standard_setting_operation_map_not_bijective")
     if set(operation_map.values()) != set(source_operations):
         setting_reasons.append("source_operation_coverage_incomplete")
+
+    # The transform is trusted only when it maps the primitive parent lattice
+    # onto the standard-setting translation lattice.  The cosets come from the
+    # reviewed Hall database derived from the declared Hall number, never from
+    # the setting being checked.
+    reviewed_cosets: list[list[float]] | None = None
+    lattice_evidence: dict[str, object] = {
+        "status": "unresolved",
+        "reason": "standard_setting_centering_evidence_unresolved",
+    }
+    if hall_number is not None:
+        centering_evidence = _centering_cosets_from_hall_database(hall_number)
+        if centering_evidence.get("status") != "passed":
+            setting_reasons.append(
+                "standard_setting_centering_evidence_unresolved"
+            )
+        else:
+            reviewed_cosets = [
+                [float(value) for value in vector]
+                for vector in centering_evidence["centering_cosets"]
+            ]
+            hall_consistent, _hall_blocker = _validate_hall_sg_consistency(
+                hall_number=hall_number,
+                sg_number=(
+                    int(space_group_number)
+                    if _exact_int(space_group_number)
+                    and space_group_number > 0 else None
+                ),
+            )
+            if not hall_consistent:
+                setting_reasons.append(
+                    "standard_setting_hall_space_group_mismatch"
+                )
+            if serialized_cosets is not None and {
+                _coset_key(np.asarray(vector, dtype=float))
+                for vector in serialized_cosets
+            } != {
+                _coset_key(np.asarray(vector, dtype=float))
+                for vector in reviewed_cosets
+            }:
+                setting_reasons.append(
+                    "standard_setting_centering_vectors_conflict_with_hall_database"
+                )
+            if transform_usable:
+                lattice_evidence = _validate_translation_lattice_equivalence(
+                    transform, reviewed_cosets,
+                )
+                if lattice_evidence.get("status") != "passed":
+                    setting_reasons.append(
+                        "standard_setting_translation_lattice_equivalence_failed"
+                    )
 
     transform_inverse = np.linalg.inv(transform)
     common_spin_basis = _derive_common_spin_basis_transform(
@@ -815,7 +891,7 @@ def _derive_source_and_setting_identities(
     source_content["identity"] = canonical_identity(source_content)
 
     setting_content: dict[str, object] = {
-        "schema_version": "1.0.0",
+        "schema_version": STANDARD_SETTING_EVIDENCE_SCHEMA_VERSION,
         "parent_to_standard_direct_transform": _real_matrix_record(transform),
         "origin_shift_fractional": _normalized_float_vector(origin),
         "parent_to_standard_operation_map": {
@@ -823,6 +899,9 @@ def _derive_source_and_setting_identities(
             for parent_id in sorted(operation_map)
         },
         "required_parent_operation_ids": operation_ids,
+        "hall_number": hall_number,
+        "normalized_centering_vectors": reviewed_cosets,
+        "translation_lattice_equivalence": lattice_evidence,
         "spatial_mapping_rows": spatial_mapping_rows,
         "status": "passed" if not setting_reasons else "blocked",
         "reason_codes": setting_reasons,
@@ -1101,6 +1180,30 @@ def _vector3(value: object) -> np.ndarray | None:
     if vector.shape != (3,) or not np.all(np.isfinite(vector)):
         return None
     return vector
+
+
+def _centering_coset_records(value: object) -> list[list[float]] | None:
+    """Validate a serialized conventional-centering coset list."""
+    if not isinstance(value, list) or not value:
+        return None
+    records: list[list[float]] = []
+    for vector in value:
+        array = _vector3(vector)
+        if array is None:
+            return None
+        records.append([float(item) for item in array])
+    if len({_coset_key(np.asarray(item, dtype=float)) for item in records}) \
+            != len(records):
+        return None
+    return records
+
+
+def _coset_key(vector: np.ndarray) -> tuple[int, int, int]:
+    reduced = vector - np.floor(vector + _TOLERANCE)
+    reduced[np.abs(reduced - 1.0) <= _TOLERANCE] = 0.0
+    return tuple(
+        int(np.rint(item / _TOLERANCE)) for item in reduced.tolist()
+    )
 
 
 def _identity_operation_present(

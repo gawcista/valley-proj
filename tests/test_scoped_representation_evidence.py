@@ -26,6 +26,8 @@ from valleyscope.symmetry.plane_wave_action import (
     reciprocal_grid_identity,
 )
 
+from tests.standard_setting_fixtures import standard_setting_identity
+
 
 def _source_record() -> dict[str, object]:
     return SpinorSourceBasisCertificate(
@@ -80,12 +82,7 @@ def _lift_inputs() -> dict[str, object]:
             for index, operation in enumerate(operations)
         ],
     }
-    setting = {
-        "schema_version": "1.0.0",
-        "parent_to_standard_direct_transform": np.eye(3).tolist(),
-        "origin_shift_fractional": [0.0, 0.0, 0.0],
-        "parent_to_standard_operation_map": {"2": 0, "5": 1},
-    }
+    setting = standard_setting_identity(1, operation_map={"2": 0, "5": 1})
     return {
         "expected_operations": operations,
         "source_table_identity": source_table,
@@ -213,12 +210,9 @@ def _directed_sewing_inputs() -> dict[str, object]:
             for index, operation in enumerate(operations)
         ],
     }
-    setting = {
-        "schema_version": "1.0.0",
-        "parent_to_standard_direct_transform": np.eye(3).tolist(),
-        "origin_shift_fractional": [0.0, 0.0, 0.0],
-        "parent_to_standard_operation_map": {"11": 0, "47": 1},
-    }
+    setting = standard_setting_identity(
+        2, operation_map={"11": 0, "47": 1}
+    )
     lift_inputs = {
         "expected_operations": operations,
         "source_table_identity": source_table,

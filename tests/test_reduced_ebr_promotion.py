@@ -674,6 +674,73 @@ def test_malformed_or_incomplete_centered_affine_evidence_blocks(field, value):
 
 
 @pytest.mark.parametrize(
+    "transform",
+    [
+        # Right volume for the index-2 I cell, wrong translation lattice: the
+        # determinant check passes and only the lattice gate can reject it.
+        np.diag([0.5, 1.0, 1.0]).tolist(),
+        np.diag([2.0, 2.0, 0.25]).tolist(),
+        np.eye(3).tolist(),
+    ],
+)
+def test_centered_promotion_rejects_non_lattice_direct_transform(transform):
+    """Consumer regression: valid producer identity with an illegal T blocks.
+
+    The identity is solver-ready before the single transform field is
+    replaced, so promotion must fail on the lattice evidence alone.
+    """
+    cert = _real_centered_identity()
+    cert["normalized_direct_transform"] = transform
+
+    result = _promote(
+        _bundle(sg_number=79, symbol="I4", cert=cert),
+        _table(sg_number=79, symbol="I4"),
+    )
+
+    assert result["promoted"] is False
+    assert "centered_affine_evidence_invalid" in _codes(result)
+    detail = " ".join(
+        str(item["detail"]) for item in result["blocker_reasons"]
+    )
+    assert "translation_lattice_equivalence" in detail
+    assert result["validation_report"]["affine_setting_check"] == "failed"
+
+
+@pytest.mark.parametrize(
+    "coset_edit",
+    ["deleted", "primitive_lattice", "wrong_half_translation"],
+)
+def test_centered_promotion_lattice_rejection_survives_coset_edits(coset_edit):
+    """Consumer regression: editing the centering evidence cannot repair T.
+
+    The lattice statement is checked against the independently reviewed table
+    setting, so substituting the bundle's own cosets -- the "repair" a
+    certificate could try on itself -- leaves the rejection intact.
+    """
+    cert = _real_centered_identity()
+    cert["normalized_direct_transform"] = np.diag([0.5, 1.0, 1.0]).tolist()
+    if coset_edit == "deleted":
+        cert.pop("normalized_centering_vectors")
+        cert.pop("centering_coset_count")
+    elif coset_edit == "primitive_lattice":
+        cert["normalized_centering_vectors"] = [[0.0, 0.0, 0.0]]
+        cert["centering_coset_count"] = 1
+    else:
+        cert["normalized_centering_vectors"] = [
+            [0.0, 0.0, 0.0], [0.5, 0.0, 0.0],
+        ]
+
+    result = _promote(
+        _bundle(sg_number=79, symbol="I4", cert=cert),
+        _table(sg_number=79, symbol="I4"),
+    )
+
+    assert result["promoted"] is False
+    assert "centered_affine_evidence_invalid" in _codes(result)
+    assert result["validation_report"]["affine_setting_check"] == "failed"
+
+
+@pytest.mark.parametrize(
     "mutation",
     [
         "missing_coset",

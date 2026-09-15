@@ -48,27 +48,58 @@ def _irrep(
     )
 
 
+# Parent-cell-to-standard-setting direct transforms that generate the reviewed
+# standard translation lattice from a primitive parent cell.  Primitive: the
+# identity.  C-centered: the conventional cell carries the extra translation
+# (1/2, 1/2, 0), so the transform must generate Z^3 + Z(1/2, 1/2, 0) -- an
+# identity or a unimodular rebase cannot reach that lattice.
+_CENTERING_FIXTURES: dict[str, dict[str, object]] = {
+    "P": {
+        "centering_vectors": [[0.0, 0.0, 0.0]],
+        "transform": np.eye(3).tolist(),
+    },
+    "C": {
+        "centering_vectors": [[0.0, 0.0, 0.0], [0.5, 0.5, 0.0]],
+        "transform": [
+            [1.0, 0.5, 0.0],
+            [0.0, 0.5, 0.0],
+            [0.0, 0.0, 1.0],
+        ],
+    },
+}
+
+
 def _certificate(
     transform: list[list[float]] | None = None,
     *,
+    centering: str = "C",
     centering_vectors: list[list[float]] | None = None,
     sg_number: int = 5,
     sg_symbol: str = "C2",
     hall_number: int = 9,
     hall_symbol: str = "C 2y",
 ) -> dict[str, object]:
+    """Hand-written certificate fixture in the requested centering.
+
+    The default fixture is the C-centered setting of SG 5 (Hall 9).  Its cosets
+    and its transform are supplied together because they are one physical
+    statement: the primitive parent cell reaches the conventional C cell only
+    through a transform that generates the centered lattice.
+    """
+    fixture = _CENTERING_FIXTURES[centering]
+    if transform is None:
+        transform = fixture["transform"]
+    if centering_vectors is None:
+        centering_vectors = fixture["centering_vectors"]
     return {
         "validation_status": "validated",
         "subspace_sg_number": sg_number,
         "subspace_sg_symbol": sg_symbol,
         "hall_number": hall_number,
         "hall_symbol": hall_symbol,
-        "parent_to_standard_direct_transform": transform or np.eye(3).tolist(),
-        "normalized_centering_vectors": centering_vectors
-        or [[0.0, 0.0, 0.0]],
-        "centering_coset_count": len(
-            centering_vectors or [[0.0, 0.0, 0.0]]
-        ),
+        "parent_to_standard_direct_transform": transform,
+        "normalized_centering_vectors": centering_vectors,
+        "centering_coset_count": len(centering_vectors),
         "standard_operation_closure_validated": True,
     }
 
@@ -123,7 +154,7 @@ def test_primitive_representative_and_centered_star_arm_are_distinct():
     }
 
     star = classify_projected_subspace_kpoint(
-        parent_k_frac=[0.5, -0.5, 0.0],
+        parent_k_frac=[0.5, 0.0, 0.0],
         table=table,
         source_hsp_basis=basis,
         standard_setting_certificate=certificate,
@@ -136,7 +167,13 @@ def test_primitive_representative_and_centered_star_arm_are_distinct():
     assert star["representation_transport_status"] == "validated"
 
 
-def test_real_centered_certificate_drives_projected_source_adapter():
+def _resolved_centered_producer_fixture():
+    """Real producer evidence for the C-centered SG 5 setting (Hall 9).
+
+    The certificate comes out of the production resolver driven by conjugated
+    operations, so consumer regressions can mutate exactly one field of an
+    otherwise trusted object.
+    """
     table = load_standard_irrep_table(5, spinor=False)
     source = load_ebr_source_data(5, False)
     transform = np.asarray([
@@ -175,7 +212,80 @@ def test_real_centered_certificate_drives_projected_source_adapter():
     )
     assert label == "GM"
     assert blocker is None
-    certificate = provenance["standard_setting_certificate"]
+    return table, source, detected, parent_ids, (
+        provenance["standard_setting_certificate"]
+    )
+
+
+@pytest.mark.parametrize(
+    "transform",
+    [
+        np.eye(3).tolist(),
+        np.diag([0.5, 1.0, 1.0]).tolist(),
+        np.diag([2.0, 2.0, 0.25]).tolist(),
+    ],
+)
+def test_non_lattice_transform_blocks_basis_and_classification(transform):
+    """Consumer regression: a trusted certificate with an illegal T blocks.
+
+    All three transforms carry the index-2 volume of the C-centered setting,
+    so only the translation-lattice equality separates them from the real
+    producer transform.
+    """
+    table, source, _, _, certificate = _resolved_centered_producer_fixture()
+    mutated = {**certificate, "parent_to_standard_direct_transform": transform}
+
+    basis = derive_projected_subspace_source_hsp_basis(
+        table=table,
+        ebr_source_basis_labels=source["source_basis_labels"],
+        standard_setting_certificate=mutated,
+        use_2d_momentum_only=True,
+    )
+    assert basis["status"] == "blocked"
+    assert "translation_lattice" in basis["blocker"]
+
+    trusted_basis = derive_projected_subspace_source_hsp_basis(
+        table=table,
+        ebr_source_basis_labels=source["source_basis_labels"],
+        standard_setting_certificate=certificate,
+        use_2d_momentum_only=True,
+    )
+    assert trusted_basis["status"] == "validated"
+    classification = classify_projected_subspace_kpoint(
+        parent_k_frac=np.zeros(3),
+        table=table,
+        source_hsp_basis=trusted_basis,
+        standard_setting_certificate=mutated,
+    )
+    assert classification["classification"] == "unresolved"
+    assert classification["validation_status"] == "blocked"
+    assert "translation_lattice" in classification["blocker"]
+
+
+def test_substituted_centering_cosets_do_not_repair_the_lattice_gate():
+    """Primitive cosets on a C-centered certificate are a substitution."""
+    table, source, _, _, certificate = _resolved_centered_producer_fixture()
+    mutated = {
+        **certificate,
+        "normalized_centering_vectors": [[0.0, 0.0, 0.0]],
+        "centering_coset_count": 1,
+    }
+
+    basis = derive_projected_subspace_source_hsp_basis(
+        table=table,
+        ebr_source_basis_labels=source["source_basis_labels"],
+        standard_setting_certificate=mutated,
+        use_2d_momentum_only=True,
+    )
+
+    assert basis["status"] == "blocked"
+    assert "conflict_with_hall_database" in basis["blocker"]
+
+
+def test_real_centered_certificate_drives_projected_source_adapter():
+    table, source, detected, parent_ids, certificate = (
+        _resolved_centered_producer_fixture()
+    )
     basis = derive_projected_subspace_source_hsp_basis(
         table=table,
         ebr_source_basis_labels=source["source_basis_labels"],
@@ -240,7 +350,7 @@ def test_star_geometry_rejects_little_group_content_mismatch():
     )
 
     result = classify_projected_subspace_kpoint(
-        parent_k_frac=[0.5, -0.5, 0.0],
+        parent_k_frac=[0.5, 0.0, 0.0],
         table=table,
         source_hsp_basis=basis,
         standard_setting_certificate=certificate,
@@ -366,13 +476,24 @@ def test_source_basis_rejects_table_certificate_space_group_mismatch():
 
 
 def test_unresolved_rational_plane_membership_blocks_source_basis():
-    transform = np.eye(3)
-    transform[0, 2] = 1.0 / 97.0
+    # k = (1/97, 0, 0) has no certified rational representation within the
+    # module's denominator limit, so exact plane membership is unknown and the
+    # basis must block instead of rounding the coordinate to 0.
+    table = StandardIrrepTable(
+        number=5,
+        name="C2",
+        spinor=True,
+        operations=_centered_c2_table().operations,
+        irreps=(
+            _irrep("-GM3", "GM", [0.0, 0.0, 0.0], [1, 2]),
+            _irrep("-Q1", "Q", [1.0 / 97.0, 0.0, 0.0], [1]),
+        ),
+    )
 
     basis = derive_projected_subspace_source_hsp_basis(
-        table=_centered_c2_table(),
-        ebr_source_basis_labels=["-GM3", "-V2", "-Y3"],
-        standard_setting_certificate=_certificate(transform.tolist()),
+        table=table,
+        ebr_source_basis_labels=["-GM3", "-Q1"],
+        standard_setting_certificate=_certificate(),
         use_2d_momentum_only=True,
     )
 
@@ -401,6 +522,7 @@ def test_source_plane_uses_reciprocal_transform_not_standard_kz_zero():
         ebr_source_basis_labels=["Q1", "R1"],
         standard_setting_certificate=_certificate(
             transform,
+            centering="P",
             sg_number=75,
             sg_symbol="P4",
             hall_number=349,
@@ -475,7 +597,7 @@ def test_per_valley_coverage_never_combines_complementary_rows():
 def test_missing_hsp_guidance_has_deterministic_inverse_parent_coordinate():
     table = _centered_c2_table()
     certificate = _certificate(
-        transform=[[1.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        transform=[[0.5, -0.5, 0.0], [0.5, 0.5, 0.0], [0.0, 0.0, 1.0]],
         centering_vectors=[[0.0, 0.0, 0.0], [0.5, 0.5, 0.0]],
     )
     basis = derive_projected_subspace_source_hsp_basis(
@@ -535,6 +657,7 @@ def test_compatible_auxiliary_source_rows_share_reviewed_in_plane_model():
         table=table,
         ebr_source_basis_labels=source["source_basis_labels"],
         standard_setting_certificate=_certificate(
+            centering="P",
             sg_number=143,
             sg_symbol="P3",
             hall_number=430,
@@ -601,6 +724,7 @@ def test_projected_source_payload_blocks_incomplete_reviewed_irrep_model():
         table=table,
         ebr_source_basis_labels=source["source_basis_labels"],
         standard_setting_certificate=_certificate(
+            centering="P",
             sg_number=143,
             sg_symbol="P3",
             hall_number=430,
@@ -670,6 +794,7 @@ def test_non_material_synthetic_star_transports_full_little_group_characters():
         ),
     )
     certificate = _certificate(
+        centering="P",
         sg_number=25,
         sg_symbol="Pmm2",
         hall_number=125,
@@ -755,6 +880,7 @@ def test_spinful_star_transport_applies_double_group_lift_factor():
         ),),
     )
     certificate = _certificate(
+        centering="P",
         sg_number=16,
         sg_symbol="P222",
         hall_number=108,
@@ -839,6 +965,7 @@ def test_star_classification_validates_nonzero_bloch_lattice_phase():
         irreps=(),
     )
     certificate = _certificate(
+        centering="P",
         sg_number=25,
         sg_symbol="Pmm2",
         hall_number=125,

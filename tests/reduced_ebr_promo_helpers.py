@@ -25,6 +25,10 @@ from valleyscope.analysis.ebr_problem_instances import _certificate_identity
 from valleyscope.analysis.reduced_ebr_mapping import (
     _derive_table_standard_setting,
 )
+from valleyscope.geometry.lattice import (
+    cart_rotation_from_fractional,
+    cart_translation_from_fractional,
+)
 from valleyscope.io.wavefunction_convention import canonical_identity
 from valleyscope.io.spinor_source_basis import SpinorSourceBasisCertificate
 from valleyscope.analysis.scoped_representation_evidence import (
@@ -41,6 +45,11 @@ from valleyscope.symmetry.double_space_group_lift import (
 from valleyscope.symmetry.plane_wave_action import (
     RECIPROCAL_GRID_ACTION_CONVENTION,
     reciprocal_grid_identity,
+)
+
+from tests.standard_setting_fixtures import (
+    primitive_transform,
+    standard_setting_identity,
 )
 
 
@@ -254,20 +263,6 @@ def _cprime_fixture_source_record() -> dict[str, object]:
     ).to_record()
 
 
-def _cprime_fixture_operation(
-    operation_id: int,
-    rotation: np.ndarray,
-) -> dict[str, object]:
-    matrix = np.asarray(rotation, dtype=int)
-    return {
-        "operation_id": operation_id,
-        "rotation_frac": matrix,
-        "translation_frac": np.zeros(3),
-        "rotation_cart": matrix.astype(float),
-        "translation_cart": np.zeros(3),
-    }
-
-
 def _complex_matrix_record(matrix: np.ndarray) -> list:
     return [
         [[float(value.real), float(value.imag)] for value in row]
@@ -278,40 +273,77 @@ def _complex_matrix_record(matrix: np.ndarray) -> list:
 def _cprime_fixture_lift_inputs(
     source_table_sg_number: int | None = None,
 ) -> dict[str, object]:
-    operations = [
-        _cprime_fixture_operation(2, np.eye(3, dtype=int)),
-        _cprime_fixture_operation(5, np.diag([1, -1, -1])),
-    ]
+    """Lattice-consistent lift inputs for a declared space group.
+
+    The declared space group fixes the Hall number and the centering cosets
+    read from the spglib Hall database, and the pinned parent cell is a
+    primitive cell of that standard setting (``T`` is the primitive basis of
+    the standard-setting translation lattice).  The closed two-operation
+    inventory ``{E, diag(1, -1, -1)}`` is carried in the parent frame and the
+    source table is its image under ``x_std = T x_parent``, so the transform,
+    the parent operations and the source table describe one affine relation.
+    """
+    space_group_number = int(source_table_sg_number or 1)
+    transform = primitive_transform(space_group_number)
+    direct_lattice = np.eye(3)
+    identity = np.eye(3, dtype=int)
+    operations = []
+    table_operations = []
+    for operation_id, parent_rotation in (
+        (2, identity),
+        (5, np.diag([1, -1, -1])),
+    ):
+        parent_translation = np.zeros(3)
+        standard_rotation_float = transform @ parent_rotation @ np.linalg.inv(
+            transform
+        )
+        standard_rotation = np.rint(standard_rotation_float).astype(int)
+        assert float(np.max(np.abs(
+            standard_rotation_float - standard_rotation
+        ))) < 1.0e-9, (
+            f"operation {operation_id} is not a lattice symmetry of the "
+            f"standard setting of space group {space_group_number}"
+        )
+        rotation_cart = cart_rotation_from_fractional(
+            parent_rotation, direct_lattice
+        )
+        operations.append({
+            "operation_id": operation_id,
+            "rotation_frac": parent_rotation,
+            "translation_frac": parent_translation,
+            "rotation_cart": rotation_cart,
+            "translation_cart": cart_translation_from_fractional(
+                parent_translation, direct_lattice
+            ),
+        })
+        table_operations.append({
+            "table_index": len(table_operations),
+            "rotation_frac": standard_rotation.tolist(),
+            "translation_frac": [
+                float(value)
+                for value in transform @ parent_translation
+            ],
+            "spin_rotation": _complex_matrix_record(
+                spin_lift_from_orthogonal(rotation_cart)
+            ),
+        })
     source_table = {
         "schema_version": "1.0.0",
         "provider": "irreptables",
         "data_source": "irreptables.StandardIrrepTable",
-        "space_group_number": source_table_sg_number or 1,
+        "space_group_number": space_group_number,
         "spinor": True,
-        "operations": [
-            {
-                "table_index": index,
-                "rotation_frac": operation["rotation_frac"].tolist(),
-                "translation_frac": [0.0, 0.0, 0.0],
-                "spin_rotation": _complex_matrix_record(
-                    spin_lift_from_orthogonal(
-                        operation["rotation_cart"]
-                    )
-                ),
-            }
-            for index, operation in enumerate(operations)
-        ],
+        "operations": table_operations,
     }
     return {
         "expected_operations": operations,
         "source_table_identity": source_table,
-        "standard_setting_identity": {
-            "schema_version": "1.0.0",
-            "parent_to_standard_direct_transform": np.eye(3).tolist(),
-            "origin_shift_fractional": [0.0, 0.0, 0.0],
-            "parent_to_standard_operation_map": {"2": 0, "5": 1},
-        },
-        "direct_lattice_cart": np.eye(3),
+        "standard_setting_identity": standard_setting_identity(
+            space_group_number,
+            transform=transform,
+            operation_map={"2": 0, "5": 1},
+        ),
+        "direct_lattice_cart": direct_lattice,
     }
 
 
@@ -363,8 +395,10 @@ def _cprime_fixture_scope(
         [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=float
     )
     rotations = {
-        2: np.eye(3, dtype=float),
-        5: np.diag([1.0, -1.0, -1.0]),
+        int(operation["operation_id"]): np.asarray(
+            operation["rotation_cart"], dtype=float
+        )
+        for operation in lift_inputs["expected_operations"]
     }
     raw_inputs: dict[str, object] = {
         "source_basis_record": source,

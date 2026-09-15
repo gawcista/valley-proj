@@ -2102,6 +2102,28 @@ def test_primitive_transport_view_preserves_opaque_operation_ids():
                 0, cert["parent_to_standard_direct_transform"][0][0] + 0.25
             ),
         ),
+        # Lattice-breaking transforms that keep the centered index: the volume
+        # of the rebase is right, its translation lattice is not.
+        (
+            "parent_to_standard_direct_transform",
+            lambda cert: cert.__setitem__(
+                "parent_to_standard_direct_transform",
+                np.diag([0.5, 1.0, 1.0]).tolist(),
+            ),
+        ),
+        (
+            "parent_to_standard_direct_transform",
+            lambda cert: cert.__setitem__(
+                "parent_to_standard_direct_transform",
+                np.diag([2.0, 2.0, 0.25]).tolist(),
+            ),
+        ),
+        (
+            "parent_to_standard_direct_transform",
+            lambda cert: cert.__setitem__(
+                "parent_to_standard_direct_transform", np.eye(3).tolist()
+            ),
+        ),
         (
             "origin_shift_fractional",
             lambda cert: cert.__setitem__(
@@ -2155,6 +2177,36 @@ def test_centered_transport_view_rejects_tampered_producer_evidence(
 
     assert view["status"] == "blocked", field
     assert view["blocker"].startswith("standard_setting_transport_")
+
+
+@pytest.mark.parametrize(
+    "transform,ingredient",
+    [
+        # Same centered index, different lattice: only the lattice gate fires.
+        (np.diag([0.5, 1.0, 1.0]), "non_lattice_direct_transform"),
+        (np.diag([2.0, 2.0, 0.25]), "primitive_conventional_transform_index"),
+        (np.eye(3), "primitive_conventional_transform_index"),
+    ],
+)
+def test_centered_transport_view_names_the_lattice_failure(transform, ingredient):
+    """The revalidation blocker must name the lattice, not just fail closed."""
+    table, detected, certificate, _ = _resolved_centered_certificate_fixture(
+        5, 9, "C 2y", "C", [7, 19],
+    )
+    tampered = deepcopy(certificate)
+    tampered["parent_to_standard_direct_transform"] = transform.tolist()
+
+    view = build_standard_setting_transport_view(
+        table=table,
+        standard_setting_certificate=tampered,
+        detected_operations=detected,
+    )
+
+    assert view["status"] == "blocked"
+    assert view["blocker"] == (
+        "standard_setting_transport_affine_revalidation_failed"
+    )
+    assert ingredient in view["details"]
 
 
 def test_centered_transport_view_rejects_source_operation_multiplicity():

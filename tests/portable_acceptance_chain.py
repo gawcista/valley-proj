@@ -69,6 +69,7 @@ from valleyscope.symmetry.plane_wave_action import (
 from tests.reduced_ebr_promo_helpers import (
     real_primitive_certificate_dict,
 )
+from tests.standard_setting_fixtures import standard_setting_identity
 
 SOURCE_SPACE_GROUP = 143
 SOURCE_TABLE_NAME = "P3"
@@ -140,14 +141,12 @@ def _producer_contexts(tmp_path: Path):
             operation.translation_frac, direct_lattice
         ),
     } for operation in table.operations]
-    setting = {
-        "schema_version": "1.0.0",
-        "parent_to_standard_direct_transform": np.eye(3).tolist(),
-        "origin_shift_fractional": [0.0, 0.0, 0.0],
-        "parent_to_standard_operation_map": {
+    setting = standard_setting_identity(
+        SOURCE_SPACE_GROUP,
+        operation_map={
             str(index): index for index in operation_indices
         },
-    }
+    )
     lift_inputs = {
         "expected_operations": operations,
         "source_table_identity": source_table,

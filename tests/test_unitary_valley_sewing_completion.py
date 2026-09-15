@@ -9,6 +9,7 @@ from tests.reduced_ebr_promo_helpers import (
 from tests.test_reduced_ebr_promotion import (
     _real_centered_certificate_dict,
 )
+from tests.standard_setting_fixtures import standard_setting_identity
 from tests.test_scoped_representation_evidence import (
     _directed_sewing_inputs,
 )
@@ -915,17 +916,16 @@ def test_centered_setting_keeps_all_coset_transport_rows_and_bloch_phases():
     )
     lift_inputs = {
         "source_table_identity": source_table,
-        "standard_setting_identity": {
-            "schema_version": "1.0.0",
-            "parent_to_standard_direct_transform": transform.tolist(),
-            "origin_shift_fractional": [0.0, 0.0, 0.0],
-            "parent_to_standard_operation_map": {
-                str(operation_id): standard.table_index
+        "standard_setting_identity": standard_setting_identity(
+            79,
+            transform=transform,
+            operation_map={
+                operation_id: standard.table_index
                 for operation_id, standard in zip(
                     operation_ids, table.operations
                 )
             },
-        },
+        ),
         "direct_lattice_cart": direct_lattice,
         "expected_operations": operations,
     }

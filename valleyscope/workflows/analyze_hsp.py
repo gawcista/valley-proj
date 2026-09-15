@@ -145,6 +145,7 @@ from valleyscope.subspace.valley_basis import (
 )
 from valleyscope.symmetry.operation_classifier import classify_operation
 from valleyscope.symmetry.double_space_group_lift import (
+    STANDARD_SETTING_EVIDENCE_SCHEMA_VERSION,
     build_double_space_group_lift_certificate,
 )
 from valleyscope.symmetry.little_group import (
@@ -1727,7 +1728,7 @@ def _build_local_cprime_records(
         "origin_shift_fractional", [0.0, 0.0, 0.0]
     )
     standard_setting_evidence = {
-        "schema_version": "1.0.0",
+        "schema_version": STANDARD_SETTING_EVIDENCE_SCHEMA_VERSION,
         "parent_to_standard_direct_transform": transform,
         "origin_shift_fractional": origin,
         "parent_to_standard_operation_map": {
@@ -1735,6 +1736,11 @@ def _build_local_cprime_records(
             for operation_id in lift_operation_ids
             if operation_id in lift_operation_map
         },
+        "hall_number": standard_setting_certificate.get("hall_number"),
+        "normalized_centering_vectors": standard_setting_certificate.get(
+            "normalized_centering_vectors",
+            standard_setting_certificate.get("centering_vectors"),
+        ),
     }
     direct_lattice = np.asarray(
         symmetry_payload.get("lattice_direct_cart", np.eye(3)), dtype=float
@@ -3867,7 +3873,7 @@ def _build_parent_double_group_lift_context(
             required_operation_indices=list(operation_map.values()),
         )
         setting_evidence = {
-            "schema_version": "1.0.0",
+            "schema_version": STANDARD_SETTING_EVIDENCE_SCHEMA_VERSION,
             "parent_to_standard_direct_transform": certificate[
                 "parent_to_standard_direct_transform"
             ],
@@ -3877,6 +3883,11 @@ def _build_parent_double_group_lift_context(
             "parent_to_standard_operation_map": {
                 str(key): value for key, value in operation_map.items()
             },
+            "hall_number": certificate.get("hall_number"),
+            "normalized_centering_vectors": certificate.get(
+                "normalized_centering_vectors",
+                certificate.get("centering_vectors"),
+            ),
         }
         record = build_double_space_group_lift_certificate(
             source_basis,

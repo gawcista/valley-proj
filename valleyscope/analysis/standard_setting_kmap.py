@@ -548,6 +548,29 @@ def _validate_affine_operation_equivalence(
             "primitive_conventional_transform_index"
         )
         return result
+
+    # The index match above is necessary but not sufficient: rescalings such
+    # as diag(2, 2, 1/4) or diag(1/2, 1, 1) carry the right determinant while
+    # mapping the parent lattice onto a different lattice, which no affine
+    # operation map can repair.  The translation lattice must be preserved
+    # before any finite operation matching is attempted.
+    lattice_evidence = _validate_translation_lattice_equivalence(
+        T, centering_vectors, tolerance=tolerance,
+    )
+    result["translation_lattice_equivalence"] = lattice_evidence
+    result["translation_lattice_status"] = lattice_evidence.get("status")
+    if lattice_evidence.get("status") != "passed":
+        result["status"] = (
+            "unresolved" if lattice_evidence.get("status") == "unresolved"
+            else "failed"
+        )
+        result["missing_ingredients"].append(
+            str(lattice_evidence.get("missing_ingredient")
+                or "standard_translation_lattice_basis")
+        )
+        result["mismatched_translation_count"] = 0
+        return result
+
     if centering_index > 1 and origin_shift_fractional is None:
         result["status"] = "unresolved"
         result["missing_ingredients"].append("origin_shift_fractional")
@@ -932,6 +955,14 @@ def _affine_failure_blocker(
         return (
             "standard_setting_hsp_mapping_unresolved: "
             f"{source} rejected because {hall_blocker}."
+        )
+    lattice = affine_result.get("translation_lattice_equivalence")
+    if isinstance(lattice, dict) and lattice.get("status") != "passed":
+        return (
+            "standard_setting_hsp_mapping_unresolved: "
+            f"{source} rejected because the parent-to-standard direct "
+            "transform is not a translation-lattice rebase of the standard "
+            f"setting: {lattice.get('reason', 'lattice evidence unavailable')}."
         )
     count = affine_result.get("mismatched_translation_count", "?")
     return (
@@ -2047,6 +2078,182 @@ def _centering_cosets_from_hall_database(
     if result["standard_operation_closure_validated"] is not True:
         result["status"] = "failed"
         result["reason"] = "standard_hall_operation_set_not_closed"
+    return result
+
+
+def _standard_translation_lattice_basis(
+    centering_cosets: object,
+    *,
+    tolerance: float = 1e-8,
+) -> dict[str, object]:
+    """Exact primitive basis of the standard-setting translation lattice.
+
+    ``L_standard = Z^3 + sum_i Z c_i`` for the validated conventional
+    centering cosets ``c_i``.  The basis ``C`` is the integer column Hermite
+    normal form of ``V = [m I | m c_1 | ...]`` scaled by ``1/m``; its columns
+    generate ``L_standard`` by construction and ``|det C| = 1/m`` holds
+    exactly.  The centering conditions (identity, uniqueness) and the integer
+    condition ``m c_i in Z^3`` are re-checked here with explicit residuals, so
+    the cosets are trusted only as validated evidence.
+    """
+    result: dict[str, object] = {"status": "unresolved"}
+    if not isinstance(centering_cosets, (list, tuple)) or not centering_cosets:
+        result["reason"] = "centering_cosets_missing"
+        return result
+    index = len(centering_cosets)
+    if index not in _CENTERING_INDICES.values():
+        result["status"] = "failed"
+        result["reason"] = (
+            f"centering_coset_count_mismatch: {index} cosets are not a "
+            "crystallographic primitive/conventional index"
+        )
+        return result
+    cosets = np.asarray(centering_cosets, dtype=float)
+    if cosets.shape != (index, 3) or not np.all(np.isfinite(cosets)):
+        result["status"] = "failed"
+        result["reason"] = "malformed_centering_cosets"
+        return result
+    keys = {_translation_key(row, tolerance) for row in cosets}
+    if len(keys) != index or _translation_key(np.zeros(3), tolerance) not in keys:
+        result["status"] = "failed"
+        result["reason"] = "centering_cosets_not_distinct_with_identity"
+        return result
+
+    scaled = cosets * float(index)
+    integral = np.rint(scaled)
+    integer_residual = float(np.max(np.abs(scaled - integral)))
+    result["centering_index"] = int(index)
+    result["coset_integer_residual"] = integer_residual
+    if integer_residual > tolerance:
+        result["status"] = "failed"
+        result["reason"] = (
+            "centering_cosets_not_integral_multiple: "
+            f"max|m c_i - rint(m c_i)| = {integer_residual}"
+        )
+        return result
+
+    from sympy import Matrix, Rational
+    from sympy.matrices.normalforms import hermite_normal_form
+
+    generators = [index * np.eye(3, dtype=np.int64)[:, axis] for axis in range(3)]
+    generators += [row.astype(np.int64) for row in integral]
+    hnf = hermite_normal_form(
+        Matrix([[int(vector[axis]) for vector in generators] for axis in range(3)])
+    )
+    basis = hnf.applyfunc(lambda entry: Rational(int(entry), index))
+    determinant = basis.det()
+    expected = Rational(1, index)
+    if abs(determinant) != expected:
+        result["status"] = "failed"
+        result["reason"] = (
+            f"standard_lattice_basis_not_primitive: |det C| = {determinant}, "
+            f"expected {expected}"
+        )
+        return result
+
+    result.update({
+        "status": "passed",
+        "basis": np.array(basis.tolist(), dtype=float).tolist(),
+        "basis_determinant": float(determinant),
+        "basis_determinant_abs": abs(float(determinant)),
+        "expected_basis_determinant_abs": 1.0 / float(index),
+        "generator_determinant": int(hnf.det()),
+        "source": "integer_column_hnf_of_scaled_centering_generators",
+    })
+    return result
+
+
+def _integer_matrix_determinant(matrix: list[list[int]]) -> int:
+    """Exact determinant of a 3x3 integer matrix (no float rounding)."""
+    (a, b, c), (d, e, f), (g, h, i) = matrix
+    return a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
+
+
+def _validate_translation_lattice_equivalence(
+    direct_transform: object,
+    centering_cosets: object,
+    *,
+    tolerance: float = 1e-6,
+) -> dict[str, object]:
+    """Prove that the direct transform preserves the translation lattice.
+
+    With ``x_std = T x_parent + o`` and a primitive parent cell, the parent
+    cell contributes the translation lattice ``T Z^3`` in standard fractional
+    coordinates; a trusted conventional description requires
+    ``T Z^3 = L_standard``.  ``|det T| = 1/m`` is necessary but not
+    sufficient: it also holds for lattice-incompatible rescalings.  With ``C``
+    a primitive basis of ``L_standard`` (column convention), the equality
+    holds iff ``U = C^-1 T`` is integral with ``|det U| = 1``: integrality
+    puts every parent translation inside ``L_standard`` and unit index makes
+    that sublattice the whole lattice.  The origin shift cancels in this
+    equality and is never used here.
+    """
+    result: dict[str, object] = {
+        "status": "unresolved",
+        "missing_ingredient": "standard_translation_lattice_basis",
+    }
+    basis_evidence = _standard_translation_lattice_basis(
+        centering_cosets, tolerance=tolerance,
+    )
+    result["lattice_basis"] = basis_evidence
+    if basis_evidence.get("status") != "passed":
+        result["status"] = basis_evidence.get("status", "unresolved")
+        result["reason"] = basis_evidence.get("reason")
+        return result
+
+    try:
+        transform = np.asarray(direct_transform, dtype=float)
+    except (TypeError, ValueError):
+        return result
+    if transform.shape != (3, 3) or not np.all(np.isfinite(transform)):
+        result["reason"] = "malformed_direct_transform"
+        return result
+
+    basis = np.asarray(basis_evidence["basis"], dtype=float)
+    determinant = float(np.linalg.det(transform))
+    result.update({
+        "transform_determinant": determinant,
+        "expected_transform_abs_determinant": float(
+            basis_evidence["expected_basis_determinant_abs"]
+        ),
+        "centering_index": basis_evidence["centering_index"],
+        "basis_determinant_abs": basis_evidence["basis_determinant_abs"],
+        "coset_integer_residual": basis_evidence["coset_integer_residual"],
+        "basis": basis_evidence["basis"],
+    })
+    cofactors = np.linalg.solve(basis, transform)
+    integers = np.rint(cofactors)
+    integer_residual = float(np.max(np.abs(cofactors - integers)))
+    rebase_residual = float(np.max(np.abs(transform - basis @ integers)))
+    index = abs(_integer_matrix_determinant(
+        [[int(value) for value in row] for row in integers.tolist()]
+    ))
+    result.update({
+        "integer_residual": integer_residual,
+        "rebase_residual": rebase_residual,
+        "lattice_index": index,
+    })
+    if integer_residual > tolerance or rebase_residual > tolerance:
+        result["status"] = "failed"
+        result["missing_ingredient"] = "non_lattice_direct_transform"
+        result["reason"] = (
+            "direct_transform_not_a_lattice_rebase: max|U - rint(U)| = "
+            f"{integer_residual}, max|T - C U| = {rebase_residual} against the "
+            f"standard translation lattice of index {basis_evidence['centering_index']}"
+        )
+        return result
+    if index != 1:
+        result["status"] = "failed"
+        result["missing_ingredient"] = "non_lattice_direct_transform"
+        result["reason"] = (
+            f"direct_transform_lattice_index_mismatch: |det U| = {index}, the "
+            "parent lattice would map onto a proper sublattice of the standard "
+            "translation lattice"
+        )
+        return result
+
+    result["status"] = "passed"
+    result["missing_ingredient"] = None
     return result
 
 

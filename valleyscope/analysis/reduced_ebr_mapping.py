@@ -2261,6 +2261,23 @@ def _fractional_vector_sequence(
     return tuple(normalized)
 
 
+def _translation_lattice_equivalence(
+    transform: object, centering_cosets: object,
+) -> dict:
+    """Exact lattice equivalence via the shared owner module.
+
+    ``T Z^3 == Z^3 + sum Z c_i``.  Missing or malformed cosets stay unresolved;
+    they are never normalized into a primitive convention.
+    """
+    try:
+        from valleyscope.analysis.standard_setting_kmap import (
+            _validate_translation_lattice_equivalence,
+        )
+    except Exception as exc:  # pragma: no cover - import failure is a blocker
+        return {"status": "unresolved", "reason": f"lattice_validator_import_failed: {exc}"}
+    return _validate_translation_lattice_equivalence(transform, centering_cosets)
+
+
 def _validate_centered_affine_setting(
     cert_id, table_setting, validation_status, relation, blockers, report,
 ):
@@ -2300,7 +2317,8 @@ def _validate_centered_affine_setting(
     transform = cert_id.get("normalized_direct_transform")
     index = _exact_int(cert_id.get("primitive_conventional_index"))
     coset_count = _exact_int(cert_id.get("centering_coset_count"))
-    if not _finite_nonsingular_3x3(transform):
+    transform_usable = _finite_nonsingular_3x3(transform)
+    if not transform_usable:
         reasons.append("direct_transform_missing_or_singular")
     elif index is None or index <= 1:
         reasons.append(f"primitive_conventional_index={index!r}")
@@ -2344,6 +2362,19 @@ def _validate_centered_affine_setting(
         actual_vectors = _fractional_vector_sequence(vectors)
         if expected_vectors is None or actual_vectors != expected_vectors:
             reasons.append("centering_vectors_table_mismatch")
+        # The index match above is necessary but not sufficient: a transform
+        # with the right volume can still map onto a different lattice.  Lattice
+        # equivalence is proven against the independently reviewed table
+        # cosets, never against the certificate's own centering evidence.
+        if transform_usable:
+            lattice = _translation_lattice_equivalence(
+                transform, table_setting.get("centering_cosets"),
+            )
+            if lattice.get("status") != "passed":
+                reasons.append(
+                    "translation_lattice_equivalence("
+                    f"{lattice.get('status')}:{lattice.get('reason')})"
+                )
 
     required_ids = cert_id.get("affine_required_operation_ids")
     req_count = _exact_int(cert_id.get("affine_required_op_count"))
