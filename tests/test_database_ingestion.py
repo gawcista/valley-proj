@@ -37,8 +37,13 @@ from valleyscope.irreps.time_reversal_source import (
 from tests.helpers_io_workflow import write_fixture, write_config
 from tests.reduced_ebr_promo_helpers import (
     attach_cprime_fixture_contract,
+    attach_cprime_fixture_to_candidates,
     cprime_validation_context_for_export,
     cprime_summary_for_export,
+)
+from tests.test_reduced_ebr_promotion import (
+    _complete_coverage,
+    _real_centered_certificate_dict,
 )
 
 
@@ -1308,6 +1313,172 @@ def test_ingestion_record_from_public_outputs_with_reduced_ebr_mapping(tmp_path)
         "mapping solution b_001: missing passed promotion provenance",
         "mapping solution b_002: missing passed promotion provenance",
     ]
+
+
+def _centered_sg79_chain(raw_certificate):
+    """Run the real centered producer chain for SG 79 I4 up to the mapping.
+
+    The certificate comes from the resolver on the reviewed irreptables table,
+    so every stage below is the production path; only the affine transform
+    field is under test.
+    """
+    from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
+    from valleyscope.analysis.ebr_problem_instances import (
+        build_ebr_problem_instances,
+    )
+    from valleyscope.analysis.irreptables_runtime_table_builder import (
+        build_auto_canonical_reduced_ebr_table,
+    )
+    from valleyscope.analysis.reduced_ebr_mapping import (
+        build_reduced_ebr_mapping,
+    )
+    from valleyscope.irreps.tables import load_standard_irrep_table
+
+    gamma_labels = [
+        irrep.label
+        for irrep in load_standard_irrep_table(79, spinor=False).irreps
+        if irrep.kpoint_label == "GM"
+    ]
+    subspace_group = {
+        "candidate_space_group_number": 79,
+        "candidate_space_group_symbol": "I4",
+        "status": "resolved",
+    }
+    table = build_auto_canonical_reduced_ebr_table(
+        subspace_sg_number=79,
+        spinor=False,
+        bundle_irreps_by_kpoint={"GammaM": [gamma_labels[0]]},
+        expected_hsps=["GammaM"],
+        subspace_group_candidate="I4",
+        subspace_space_group=subspace_group,
+    )
+    selected_ebr = next(ebr for ebr in table["ebrs"] if any(ebr["vector"]))
+    target_rows = [
+        (key.split(":", 1)[0], key.split(":", 1)[1], multiplicity)
+        for key, multiplicity in zip(table["irreps"], selected_ebr["vector"])
+        if multiplicity
+    ]
+
+    def _provenance():
+        return {
+            "standard_setting_hsp_mapping": {
+                "standard_setting_certificate": deepcopy(raw_certificate),
+            },
+            "source_table_spinor": False,
+            "source_table_sg_number": 79,
+            "source_table_name": "I4",
+            "source_hsp_label": "GM",
+        }
+
+    candidates = {
+        "candidates": [
+            {
+                "ready_for_ebr_input": True,
+                "valley": "K_valley",
+                "kpoint": kpoint,
+                "matched_irrep": irrep,
+                "irrep_multiplicity": multiplicity,
+                "operation_id": operation_id,
+                "workflow_path": "direct_qcut",
+                "readiness_level": "trusted",
+                "source": f"fixture/K_valley/{kpoint}/{irrep}",
+                "subspace_group_candidate": "I4",
+                "subspace_space_group": dict(subspace_group),
+                "irrep_source_provenance": _provenance(),
+            }
+            for operation_id, (kpoint, irrep, multiplicity)
+            in enumerate(target_rows)
+        ]
+    }
+    attach_cprime_fixture_to_candidates(candidates)
+    instances = build_ebr_problem_instances(
+        ebr_input_candidates=candidates,
+        projected_hsp_coverage=_complete_coverage({"GM": "GammaM"}),
+    )
+    export = build_ebr_export_bundle(ebr_problem_instances=instances)
+    attach_cprime_fixture_contract(export)
+    mapping = build_reduced_ebr_mapping(
+        ebr_export_bundle=export,
+        table=table,
+        cprime_validation_context=cprime_validation_context_for_export(
+            export
+        )["_by_identity"],
+    )
+    return export, mapping
+
+
+def _centered_ingestion_record(export, mapping):
+    return build_database_ingestion_record(
+        valley_summary=cprime_summary_for_export(
+            export, target_kpoints=["GammaM"], iband=[101, 102],
+        ),
+        valley_ebr_export_bundle=export,
+        valley_reduced_ebr_mapping=mapping,
+    )
+
+
+def test_centered_ingestion_records_the_promoted_final_result():
+    """Positive control: the unmodified producer chain reaches the database."""
+    export, mapping = _centered_sg79_chain(_real_centered_certificate_dict())
+
+    assert mapping["status"] == "solved_exact"
+    record = _centered_ingestion_record(export, mapping)
+
+    assert record["record_status"] == "has_final_reduced_ebr_results"
+    assert record["final_reduced_ebr_result_count"] == 1
+    assert record["final_mapping_excluded_bundle_count"] == 0
+    assert record["reduced_ebr_records"][0]["status"] == "solved_exact"
+    assert record["validation_errors"] == []
+
+
+@pytest.mark.parametrize(
+    "transform",
+    [
+        # Right |det| for the index-2 I cell, wrong translation lattice: only
+        # the lattice gate can reject this transform.
+        np.diag([0.5, 1.0, 1.0]).tolist(),
+        np.diag([2.0, 2.0, 0.25]).tolist(),
+        np.eye(3).tolist(),
+    ],
+)
+@pytest.mark.parametrize("coset_edit", [None, "deleted", "substituted"])
+def test_centered_ingestion_has_no_final_result_for_non_lattice_transform(
+    transform, coset_edit
+):
+    """Consumer regression: a rejected T yields no trusted database result.
+
+    The producer evidence is solver-ready before ``T`` is replaced, and the
+    export bundle still reaches ingestion as a validation candidate, so the
+    absent final result is the lattice rejection rather than an early input
+    failure.  Rewriting the bundle's own centering cosets cannot repair ``T``:
+    the lattice statement is checked against the independently reviewed table
+    setting.
+    """
+    certificate = _real_centered_certificate_dict()
+    certificate["parent_to_standard_direct_transform"] = transform
+    if coset_edit == "deleted":
+        certificate.pop("centering_vectors")
+        certificate.pop("centering_coset_count")
+    elif coset_edit == "substituted":
+        certificate["centering_vectors"] = [
+            [0.0, 0.0, 0.0], [0.5, 0.0, 0.0],
+        ]
+        certificate["centering_coset_count"] = 2
+
+    export, mapping = _centered_sg79_chain(certificate)
+    record = _centered_ingestion_record(export, mapping)
+
+    assert record["reduced_table_validation_candidate_bundle_count"] == 1
+    assert record["final_reduced_ebr_result_count"] == 0
+    assert record["reduced_ebr_records"] == []
+    assert record["record_status"] == "has_reduced_table_validation_candidates"
+    assert record["final_mapping_excluded_bundle_count"] == 1
+    exclusion = record["final_mapping_excluded_records"][0]
+    assert "translation_lattice_equivalence" in exclusion["reason"]
+    assert [blocker["code"] for blocker in exclusion["blocker_reasons"]] == [
+        "centered_affine_evidence_invalid"
+    ]
+    assert exclusion["validation_report"]["affine_setting_check"] == "failed"
 
 
 def _make_ingestion_record(
