@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
@@ -602,6 +603,40 @@ def _direct_lattice(value: np.ndarray) -> np.ndarray:
     return direct
 
 
+@functools.lru_cache(maxsize=None)
+def _reviewed_canonical_hall_setting(
+    sg_number: int,
+) -> tuple[int, tuple[tuple[float, ...], ...]] | None:
+    """Canonical reviewed Hall setting of a declared spinful source table.
+
+    The Hall identity is rederived from the actual irreptables table of the
+    declared space group, never copied from the setting evidence being
+    checked, so a self-declared Hall -- including a same-space-group
+    substitution carrying its own true cosets and lattice transform --
+    cannot source its own centering.
+    """
+    try:
+        from valleyscope.analysis.standard_setting_kmap import (
+            derive_irreptables_standard_setting_identity,
+        )
+        from valleyscope.irreps.tables import load_standard_irrep_table
+        table = load_standard_irrep_table(sg_number, spinor=True)
+        derived = derive_irreptables_standard_setting_identity(
+            table, sg_number
+        )
+    except Exception:
+        return None
+    if derived.get("status") != "unique_match":
+        return None
+    return (
+        int(derived["hall_number"]),
+        tuple(
+            tuple(float(value) for value in vector)
+            for vector in derived["centering_cosets"]
+        ),
+    )
+
+
 def _derive_source_and_setting_identities(
     *,
     source_table_evidence: Mapping[str, object],
@@ -742,6 +777,35 @@ def _derive_source_and_setting_identities(
                 setting_reasons.append(
                     "standard_setting_hall_space_group_mismatch"
                 )
+            # Bind the declared Hall to the canonical setting rederived from
+            # the actual reviewed table of the declared space group.  A Hall
+            # consistent with the space group number alone can still be a
+            # different setting of the same group.
+            canonical = (
+                _reviewed_canonical_hall_setting(int(space_group_number))
+                if _exact_int(space_group_number)
+                and space_group_number > 0
+                else None
+            )
+            if canonical is None:
+                setting_reasons.append(
+                    "reviewed_source_setting_unresolved"
+                )
+            else:
+                canonical_hall, canonical_cosets = canonical
+                if hall_number != canonical_hall or (
+                    serialized_cosets is not None
+                    and {
+                        _coset_key(np.asarray(vector, dtype=float))
+                        for vector in serialized_cosets
+                    } != {
+                        _coset_key(np.asarray(vector, dtype=float))
+                        for vector in canonical_cosets
+                    }
+                ):
+                    setting_reasons.append(
+                        "reviewed_source_setting_hall_mismatch"
+                    )
             if serialized_cosets is not None and {
                 _coset_key(np.asarray(vector, dtype=float))
                 for vector in serialized_cosets

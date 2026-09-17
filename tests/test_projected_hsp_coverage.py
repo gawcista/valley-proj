@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 import numpy as np
 import pytest
+import spglib
 
 from valleyscope.analysis.projected_hsp_coverage import (
     build_projected_hsp_coverage_report,
@@ -9,6 +12,8 @@ from valleyscope.analysis.projected_hsp_coverage import (
     derive_projected_subspace_source_hsp_basis,
 )
 from valleyscope.analysis.standard_setting_kmap import (
+    _centering_cosets_from_hall_database,
+    _standard_translation_lattice_basis,
     resolve_standard_setting_hsp_label,
 )
 from valleyscope.irreps.ebr_data_adapter import load_ebr_source_data
@@ -282,6 +287,162 @@ def test_substituted_centering_cosets_do_not_repair_the_lattice_gate():
     assert "conflict_with_hall_database" in basis["blocker"]
 
 
+def _hall_substituted_certificate(
+    certificate: dict[str, object],
+    hall_number: int,
+) -> dict[str, object]:
+    """Paired Hall substitution: true cosets, true count, true lattice T.
+
+    Only the setting itself changes; the reviewed source table is untouched.
+    Mutable serialized identity fields are refreshed so a stale canonical
+    list cannot hide the substitution behind a hash mismatch.
+    """
+    evidence = _centering_cosets_from_hall_database(hall_number)
+    assert evidence["status"] == "passed", evidence
+    cosets = [list(vector) for vector in evidence["centering_cosets"]]
+    substituted = deepcopy(certificate)
+    substituted.update(
+        hall_number=hall_number,
+        hall_symbol=str(
+            spglib.get_spacegroup_type(hall_number).hall_symbol
+        ),
+        normalized_centering_vectors=cosets,
+        centering_vectors=cosets,
+        centering_coset_count=len(cosets),
+        parent_to_standard_direct_transform=(
+            _standard_translation_lattice_basis(cosets)["basis"]
+        ),
+        canonical_hall_numbers=[hall_number],
+    )
+    return substituted
+
+
+def test_same_sg_hall_substitution_with_true_cosets_is_blocked():
+    """A same-SG Hall 10 (A 2y) paired substitution must not validate.
+
+    The substituted certificate carries Hall 10's true cosets, count, and
+    primitive HNF transform, so the lattice and coset gates are internally
+    consistent -- only the binding to the actual reviewed SG 5 table (whose
+    canonical setting is Hall 9, C 2y) separates it from a trusted
+    certificate.
+    """
+    table, source, _, _, certificate = _resolved_centered_producer_fixture()
+    substituted = _hall_substituted_certificate(certificate, 10)
+
+    basis = derive_projected_subspace_source_hsp_basis(
+        table=table,
+        ebr_source_basis_labels=source["source_basis_labels"],
+        standard_setting_certificate=substituted,
+        use_2d_momentum_only=True,
+    )
+    assert basis["status"] == "blocked"
+    assert "reviewed_source_setting_hall_mismatch" in basis["blocker"]
+
+    genuine = derive_projected_subspace_source_hsp_basis(
+        table=table,
+        ebr_source_basis_labels=source["source_basis_labels"],
+        standard_setting_certificate=certificate,
+        use_2d_momentum_only=True,
+    )
+    assert genuine["status"] == "validated"
+    assert genuine["required_source_hsp_labels"] == ["GM", "V", "Y"]
+
+
+def test_cross_sg_hall_substitution_with_primitive_cosets_is_blocked():
+    """A cross-SG Hall 3 (P 2y) primitive substitution must not validate."""
+    table, source, _, _, certificate = _resolved_centered_producer_fixture()
+    substituted = _hall_substituted_certificate(certificate, 3)
+
+    basis = derive_projected_subspace_source_hsp_basis(
+        table=table,
+        ebr_source_basis_labels=source["source_basis_labels"],
+        standard_setting_certificate=substituted,
+        use_2d_momentum_only=True,
+    )
+    assert basis["status"] == "blocked"
+    assert "reviewed_source_setting_hall_mismatch" in basis["blocker"]
+
+
+def test_classifier_binds_certificate_hall_to_the_reviewed_table():
+    """The classifier must reject a substituted Hall against a genuine basis.
+
+    classify_projected_subspace_kpoint revalidates the certificate identity
+    itself; a validated basis produced under the genuine certificate must not
+    launder a Hall-substituted certificate through the classification path.
+    """
+    table, source, _, _, certificate = _resolved_centered_producer_fixture()
+    genuine_basis = derive_projected_subspace_source_hsp_basis(
+        table=table,
+        ebr_source_basis_labels=source["source_basis_labels"],
+        standard_setting_certificate=certificate,
+        use_2d_momentum_only=True,
+    )
+    assert genuine_basis["status"] == "validated"
+    substituted = _hall_substituted_certificate(certificate, 10)
+
+    classification = classify_projected_subspace_kpoint(
+        parent_k_frac=[0.0, 0.0, 0.0],
+        table=table,
+        source_hsp_basis=genuine_basis,
+        standard_setting_certificate=substituted,
+    )
+    assert classification["classification"] == "unresolved"
+    assert classification["validation_status"] == "blocked"
+    assert "reviewed_source_setting_hall_mismatch" in classification["blocker"]
+
+
+def test_hall_symbol_conflicting_with_reviewed_table_is_blocked():
+    """A certificate Hall number consistent with a wrong symbol conflicts."""
+    table, source, _, _, certificate = _resolved_centered_producer_fixture()
+    mutated = {**certificate, "hall_symbol": "A 2y"}
+
+    basis = derive_projected_subspace_source_hsp_basis(
+        table=table,
+        ebr_source_basis_labels=source["source_basis_labels"],
+        standard_setting_certificate=mutated,
+        use_2d_momentum_only=True,
+    )
+    assert basis["status"] == "blocked"
+    assert "reviewed_source_setting_hall_mismatch" in basis["blocker"]
+
+
+def test_unresolvable_reviewed_source_setting_blocks_basis():
+    """A table whose operations match no unique Hall setting stays blocked."""
+    table, source, _, _, certificate = _resolved_centered_producer_fixture()
+    ambiguous = StandardIrrepTable(
+        number=table.number,
+        name=table.name,
+        spinor=table.spinor,
+        operations=(),
+        irreps=table.irreps,
+    )
+
+    basis = derive_projected_subspace_source_hsp_basis(
+        table=ambiguous,
+        ebr_source_basis_labels=source["source_basis_labels"],
+        standard_setting_certificate=certificate,
+        use_2d_momentum_only=True,
+    )
+    assert basis["status"] == "blocked"
+    assert "reviewed_source_setting_unresolved" in basis["blocker"]
+
+
+def test_missing_hall_identity_still_blocks():
+    """A certificate without a Hall identity never reaches setting trust."""
+    table, source, _, _, certificate = _resolved_centered_producer_fixture()
+    mutated = {k: v for k, v in certificate.items()
+               if k not in {"hall_number", "hall_symbol"}}
+
+    basis = derive_projected_subspace_source_hsp_basis(
+        table=table,
+        ebr_source_basis_labels=source["source_basis_labels"],
+        standard_setting_certificate=mutated,
+        use_2d_momentum_only=True,
+    )
+    assert basis["status"] == "blocked"
+    assert basis["blocker"] == "standard_setting_hall_identity_missing"
+
+
 def test_real_centered_certificate_drives_projected_source_adapter():
     table, source, detected, parent_ids, certificate = (
         _resolved_centered_producer_fixture()
@@ -506,11 +667,19 @@ def test_unresolved_rational_plane_membership_blocks_source_basis():
 def test_source_plane_uses_reciprocal_transform_not_standard_kz_zero():
     # Swapping parent y/z maps the parent 2D plane to standard ky=0.
     transform = [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]]
+    c4 = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]], dtype=int)
+    # The complete standard P4 operation set of Hall 349 keeps the synthetic
+    # table consistent with the reviewed source setting.
     table = StandardIrrepTable(
         number=75,
         name="P4",
         spinor=False,
-        operations=(_operation(1, np.eye(3, dtype=int).tolist()),),
+        operations=(
+            _operation(1, np.eye(3, dtype=int).tolist()),
+            _operation(2, c4.tolist()),
+            _operation(3, (c4 @ c4).tolist()),
+            _operation(4, (c4 @ c4 @ c4).tolist()),
+        ),
         irreps=(
             _irrep("Q1", "Q", [0.5, 0.0, 0.5], [1]),
             _irrep("R1", "R", [0.0, 0.5, 0.0], [1]),
@@ -936,8 +1105,17 @@ def test_spinful_star_transport_applies_double_group_lift_factor():
 
 def test_star_classification_validates_nonzero_bloch_lattice_phase():
     identity = _operation(1, np.eye(3, dtype=int).tolist())
-    mirror_x = _operation(
-        2, [[-1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    # Genuine standard Pma2 setting (Hall 137 'P 2 -2a'): both mirrors
+    # carry the (1/2, 0, 0) glide translation, so the star-arm Bloch phase
+    # is nonzero for the classified k point below.
+    mirror_x = StandardTableOperation(
+        table_index=2,
+        rotation_frac=np.asarray(
+            [[-1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=int
+        ),
+        translation_frac=np.asarray([0.5, 0.0, 0.0]),
+        spin_rotation=np.eye(2, dtype=complex),
+        time_reversal=False,
     )
     mirror_y = StandardTableOperation(
         table_index=3,
@@ -948,36 +1126,36 @@ def test_star_classification_validates_nonzero_bloch_lattice_phase():
         spin_rotation=np.eye(2, dtype=complex),
         time_reversal=False,
     )
-    mirror_xy = StandardTableOperation(
+    two_fold = StandardTableOperation(
         table_index=4,
         rotation_frac=np.asarray(
             [[-1, 0, 0], [0, -1, 0], [0, 0, 1]], dtype=int
         ),
-        translation_frac=np.asarray([0.5, 0.0, 0.0]),
+        translation_frac=np.asarray([0.0, 0.0, 0.0]),
         spin_rotation=np.eye(2, dtype=complex),
         time_reversal=False,
     )
     table = StandardIrrepTable(
-        number=25,
-        name="Pmm2",
+        number=28,
+        name="Pma2",
         spinor=False,
-        operations=(identity, mirror_x, mirror_y, mirror_xy),
+        operations=(identity, mirror_x, mirror_y, two_fold),
         irreps=(),
     )
     certificate = _certificate(
         centering="P",
-        sg_number=25,
-        sg_symbol="Pmm2",
-        hall_number=125,
-        hall_symbol="P 2 -2",
+        sg_number=28,
+        sg_symbol="Pma2",
+        hall_number=137,
+        hall_symbol="P 2 -2a",
     )
     basis = {
         "status": "validated",
         "projected_subspace_space_group": {
-            "number": 25,
-            "symbol": "Pmm2",
-            "hall_number": 125,
-            "hall_symbol": "P 2 -2",
+            "number": 28,
+            "symbol": "Pma2",
+            "hall_number": 137,
+            "hall_symbol": "P 2 -2a",
         },
         "source_hsps": [{
             "source_hsp_label": "Q",

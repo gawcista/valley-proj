@@ -51,7 +51,7 @@ def derive_projected_subspace_source_hsp_basis(
     if certificate_blocker or transform is None:
         return _blocked_basis(certificate_blocker or "missing reciprocal transform")
     lattice_blocker = _standard_translation_lattice_blocker(
-        standard_setting_certificate, transform
+        standard_setting_certificate, transform, table
     )
     if lattice_blocker:
         return _blocked_basis(lattice_blocker)
@@ -268,12 +268,12 @@ def classify_projected_subspace_kpoint(
     lattice_blocker = ""
     if transform is not None and not certificate_blocker:
         lattice_blocker = _standard_translation_lattice_blocker(
-            standard_setting_certificate, transform
+            standard_setting_certificate, transform, table
         )
     basis_identity = source_hsp_basis.get(
         "projected_subspace_space_group"
     )
-    if basis_identity != space_group_identity:
+    if basis_identity != space_group_identity and not identity_blocker:
         identity_blocker = (
             "source_basis_certificate_identity_mismatch"
         )
@@ -696,20 +696,50 @@ def _certificate_transform(
     return transform
 
 
+def _reviewed_source_setting(table: StandardIrrepTable) -> dict[str, object] | None:
+    """Independently derive the reviewed source Hall setting from the table.
+
+    The canonical Hall/centering/operation context is recomputed from the
+    actual reviewed ``StandardIrrepTable`` operations instead of trusting any
+    Hall number declared by the certificate being checked.
+    """
+    try:
+        from valleyscope.analysis.standard_setting_kmap import (
+            derive_irreptables_standard_setting_identity,
+        )
+    except Exception as exc:  # pragma: no cover - import failure is a blocker
+        raise RuntimeError(
+            f"reviewed_source_setting_derivation_unavailable: {exc}"
+        ) from exc
+    derived = derive_irreptables_standard_setting_identity(
+        table, table.number
+    )
+    if derived.get("status") != "unique_match":
+        raise RuntimeError(
+            "reviewed_source_setting_unresolved: "
+            f"{derived.get('reason', derived.get('status'))}"
+        )
+    return derived
+
+
 def _standard_translation_lattice_blocker(
     certificate: Mapping[str, object],
     transform: np.ndarray,
+    table: StandardIrrepTable | None = None,
 ) -> str:
     """Fail-closed gate: T must generate the standard-setting lattice.
 
     A nonsingular ``T`` only fixes the volume of the rebase.  The transform
     must map the primitive parent lattice onto
     ``L_standard = Z^3 + sum_i Z c_i``, and the cosets ``c_i`` are taken from
-    the Hall database for the certificate's own Hall number -- independent
-    reviewed evidence, never the certificate being checked.  The serialized
-    centering vectors are compared against that same reviewed set because they
-    are what downstream reciprocal-shift filtering actually uses: a certificate
-    that is internally consistent about the wrong centering must not be trusted.
+    the Hall database -- independent reviewed evidence, never the certificate
+    being checked.  When the reviewed table is supplied, the Hall number is
+    the canonical setting derived from that table, so a certificate that
+    declares a different same-space-group Hall cannot source its own cosets.
+    The serialized centering vectors are compared against that same reviewed
+    set because they are what downstream reciprocal-shift filtering actually
+    uses: a certificate that is internally consistent about the wrong
+    centering must not be trusted.
     """
     centering_vectors = _certificate_centering_vectors(certificate)
     if centering_vectors is None:
@@ -724,6 +754,13 @@ def _standard_translation_lattice_blocker(
         )
     except Exception as exc:  # pragma: no cover - import failure is a blocker
         return f"translation_lattice_validator_unavailable: {exc}"
+
+    if table is not None:
+        try:
+            derived = _reviewed_source_setting(table)
+        except RuntimeError as exc:
+            return str(exc)
+        hall_number = int(derived["hall_number"])
 
     reviewed = _centering_cosets_from_hall_database(hall_number)
     if reviewed.get("status") != "passed":
@@ -800,6 +837,25 @@ def _projected_space_group_identity(
         or not hall_symbol
     ):
         return identity, "standard_setting_hall_identity_missing"
+    # Bind the declared Hall to the canonical setting derived from the
+    # actual reviewed table operations.  A Hall-to-SG check alone would miss
+    # a same-SG substitution (for example Hall 9 'C 2y' -> Hall 10 'A 2y'
+    # inside SG 5) that carries its own true cosets and lattice transform.
+    try:
+        derived = _reviewed_source_setting(table)
+    except RuntimeError as exc:
+        return identity, str(exc)
+    derived_symbol = "".join(str(derived["hall_symbol"]).split())
+    certificate_symbol = "".join(str(hall_symbol).split())
+    if (
+        hall_number != derived["hall_number"]
+        or certificate_symbol != derived_symbol
+    ):
+        return identity, (
+            "reviewed_source_setting_hall_mismatch: "
+            f"table_hall={derived['hall_number']} '{derived_symbol}', "
+            f"certificate_hall={hall_number} '{certificate_symbol}'"
+        )
     return identity, ""
 
 

@@ -446,6 +446,143 @@ def test_failed_source_table_or_standard_setting_evidence_blocks_lift():
     assert "standard_setting_not_validated" in record["reason_codes"]
 
 
+def _centered_sg5_lift_inputs() -> dict[str, object]:
+    """Centered SG 5 spinful lift evidence bound to the real reviewed table.
+
+    The parent cell is a primitive cell of the C-centered standard setting;
+    the source table evidence is serialized from the actual irreptables
+    SG 5 spinor table, and the setting declares its canonical Hall 9.
+    """
+    from valleyscope.analysis.standard_setting_kmap import (
+        _centering_cosets_from_hall_database,
+        _standard_translation_lattice_basis,
+    )
+    from valleyscope.irreps.tables import (
+        build_spinful_source_table_evidence,
+        load_standard_irrep_table,
+    )
+    from tests.standard_setting_fixtures import primitive_transform
+
+    table = load_standard_irrep_table(5, spinor=True)
+    transform = primitive_transform(5)
+    transform_inverse = np.linalg.inv(transform)
+    # Basis vectors as rows: conjugation by transform.T maps the parent
+    # fractional rotation back to the orthogonal standard-frame matrix.
+    direct_lattice = transform.T
+    parent_ids = [7, 19]
+    operations = []
+    for parent_id, operation in zip(parent_ids, table.operations):
+        parent_rotation = np.rint(
+            transform_inverse @ operation.rotation_frac @ transform
+        ).astype(int)
+        parent_translation = transform_inverse @ operation.translation_frac
+        operations.append(_op(
+            parent_id, parent_rotation, parent_translation,
+            direct_lattice=direct_lattice,
+        ))
+    source_table = build_spinful_source_table_evidence(
+        table,
+        required_operation_indices=[
+            operation.table_index for operation in table.operations
+        ],
+    )
+    setting = standard_setting_identity(
+        5,
+        transform=transform,
+        operation_map={
+            str(parent_id): operation.table_index
+            for parent_id, operation in zip(parent_ids, table.operations)
+        },
+    )
+    return {
+        "table": table,
+        "transform": transform,
+        "operations": operations,
+        "source_table_identity": source_table,
+        "standard_setting_identity": setting,
+        "direct_lattice_cart": direct_lattice,
+        "_centering_helpers": (
+            _centering_cosets_from_hall_database,
+            _standard_translation_lattice_basis,
+        ),
+    }
+
+
+def test_centered_sg5_spinful_lift_control_passes_overall():
+    inputs = _centered_sg5_lift_inputs()
+    record = build_double_space_group_lift_certificate(
+        _source_record(),
+        inputs["operations"],
+        source_table_identity=inputs["source_table_identity"],
+        standard_setting_identity=inputs["standard_setting_identity"],
+        direct_lattice_cart=inputs["direct_lattice_cart"],
+    ).to_record()
+
+    assert record["status"] == "passed"
+    assert record["source_table_identity"]["status"] == "passed"
+    assert record["standard_setting_identity"]["status"] == "passed"
+    assert record["standard_setting_identity"]["hall_number"] == 9
+
+
+def test_same_sg_hall_substitution_blocks_lift_at_source_setting_binding():
+    """A paired Hall 10 substitution must fail at setting-to-table binding.
+
+    The substituted setting carries Hall 10's true cosets and primitive
+    transform, and the parent operations are conjugated by that transform so
+    affine mapping and spin matching still succeed.  The only legitimate
+    blocker is the binding of the declared Hall to the actual reviewed SG 5
+    table (canonical Hall 9), not an unrelated spin mismatch.
+    """
+    inputs = _centered_sg5_lift_inputs()
+    (
+        centering_evidence, lattice_basis,
+    ) = inputs["_centering_helpers"]
+
+    hall = 10
+    evidence = centering_evidence(hall)
+    assert evidence["status"] == "passed", evidence
+    cosets = [list(vector) for vector in evidence["centering_cosets"]]
+    transform = np.asarray(
+        lattice_basis(cosets)["basis"], dtype=float,
+    )
+    transform_inverse = np.linalg.inv(transform)
+    direct_lattice = transform.T
+    table = inputs["table"]
+    operations = []
+    for parent_id, operation in zip([7, 19], table.operations):
+        parent_rotation = np.rint(
+            transform_inverse @ operation.rotation_frac @ transform
+        ).astype(int)
+        parent_translation = transform_inverse @ operation.translation_frac
+        operations.append(_op(
+            parent_id, parent_rotation, parent_translation,
+            direct_lattice=direct_lattice,
+        ))
+    substituted_setting = {
+        **inputs["standard_setting_identity"],
+        "hall_number": hall,
+        "normalized_centering_vectors": cosets,
+        "parent_to_standard_direct_transform": transform.tolist(),
+    }
+
+    record = build_double_space_group_lift_certificate(
+        _source_record(),
+        operations,
+        source_table_identity=inputs["source_table_identity"],
+        standard_setting_identity=substituted_setting,
+        direct_lattice_cart=direct_lattice,
+    ).to_record()
+
+    assert record["status"] == "blocked"
+    assert "reviewed_source_setting_hall_mismatch" in (
+        record["standard_setting_identity"]["reason_codes"]
+    )
+    # The failure is source-setting binding, not an unrelated spin problem.
+    assert "source_spin_common_basis_failed" not in (
+        record["source_table_identity"]["reason_codes"]
+    )
+
+
 def test_positive_validation_statuses_are_not_accepted_as_input_evidence():
     operations = [_op(0, np.eye(3, dtype=int))]
     source_table, setting = _identities(operations)
