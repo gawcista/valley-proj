@@ -12,6 +12,13 @@ _HASH_LINE_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 _PLACEHOLDER_RE = re.compile(r"#\s*\[targeted counts\]|#\s*\[exact output\]|#\s*<placeholder")
+_BRANCH_LINE_RE = re.compile(
+    r"^Branch\s*:\s*(?:`)?([A-Za-z0-9][A-Za-z0-9/._-]*)(?:`)?\s*$",
+    re.MULTILINE,
+)
+
+_ALLOWED_AUTHORS = ("Codex", "cc", "GLM")
+_LOCAL_IMPLEMENTATION_BRANCH_FAMILIES = ("cc/", "glm/")
 
 
 def _head_hash() -> str:
@@ -63,13 +70,40 @@ def check_handoff_text(
         )
     if "remote feature branch: no" not in lower:
         errors.append("handoff must state 'remote feature branch: No'")
-    updater_lines = re.findall(
-        r"^Updated by:\s*(Codex|cc)\s*$", text, re.MULTILINE
-    )
+    # Count every author line first, so duplicates that include unrecognized
+    # names are still caught before validating the single allowed value.
+    updater_lines = re.findall(r"^Updated by:\s*(.*?)\s*$", text, re.MULTILINE)
+    author = None
     if not updater_lines:
-        errors.append("handoff must state 'Updated by: Codex' or 'Updated by: cc'")
+        errors.append(
+            "handoff must state 'Updated by: Codex', 'Updated by: cc', "
+            "or 'Updated by: GLM'"
+        )
     elif len(updater_lines) != 1:
         errors.append("handoff must contain exactly one 'Updated by' author line")
+    elif updater_lines[0] not in _ALLOWED_AUTHORS:
+        errors.append(
+            f"unknown handoff author {updater_lines[0]!r}; allowed authors are "
+            f"{', '.join(_ALLOWED_AUTHORS)}"
+        )
+    else:
+        author = updater_lines[0]
+    if author is not None:
+        branch_lines = _BRANCH_LINE_RE.findall(text)
+        if author == "GLM" and not (
+            branch_lines and all(b.startswith("glm/") for b in branch_lines)
+        ):
+            errors.append(
+                "GLM-authored handoff must name a local 'glm/*' branch; "
+                f"found branch line(s): {branch_lines}"
+            )
+        elif author == "cc" and not (
+            branch_lines and all(b.startswith("cc/") for b in branch_lines)
+        ):
+            errors.append(
+                "cc-authored handoff must name a local 'cc/*' branch; "
+                f"found branch line(s): {branch_lines}"
+            )
     if "pytest -q" not in text:
         errors.append("handoff must include pytest command(s)")
     if not re.search(r"# .*?(passed|failed|skipped)", text):
@@ -85,17 +119,25 @@ def check_handoff_text(
 
 
 def check_branch_policy(branch: str, upstream: str) -> list[str]:
-    if branch.startswith("cc/") and upstream:
-        return [f"cc branch '{branch}' must not track remote upstream '{upstream}'"]
-    return []
+    errors = []
+    for family in _LOCAL_IMPLEMENTATION_BRANCH_FAMILIES:
+        if branch.startswith(family) and upstream:
+            name = family.rstrip("/")
+            errors.append(
+                f"{name} branch '{branch}' must not track remote upstream "
+                f"'{upstream}'"
+            )
+    return errors
 
 
 def check_remote_branches(remote_branches: list[str]) -> list[str]:
-    return [
-        f"remote cc branch exists: {branch}"
-        for branch in remote_branches
-        if branch.startswith("origin/cc/")
-    ]
+    errors = []
+    for branch in remote_branches:
+        for family in _LOCAL_IMPLEMENTATION_BRANCH_FAMILIES:
+            remote = f"origin/{family}"
+            if branch.startswith(remote):
+                errors.append(f"remote {family.rstrip('/')} branch exists: {branch}")
+    return errors
 
 
 _TRACKED_MD_ALLOWED = {"README.md", "README.zh.md"}
@@ -166,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--handoff",
         default=".codex_cc_handoff.md",
-        help="Path to the Codex/cc handoff file.",
+        help="Path to the Codex/cc/GLM shared handoff file.",
     )
     args = parser.parse_args(argv)
 

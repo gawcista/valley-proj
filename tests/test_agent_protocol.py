@@ -1,3 +1,7 @@
+import subprocess
+import sys
+from pathlib import Path
+
 from scripts.check_agent_protocol import (
     check_branch_policy,
     check_handoff_text,
@@ -7,6 +11,21 @@ from scripts.check_agent_protocol import (
 
 
 _EXPECTED_HEAD = "705a7a2f0f751abcc4f0d1f49d7c62e984f60345"
+
+_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "check_agent_protocol.py"
+
+
+def _handoff_text(author: str, branch: str, commit: str) -> str:
+    return f"""
+Updated by: {author}
+Branch: {branch}
+Commit: {commit}
+Remote feature branch: No
+pytest -q
+# 100 passed in 1.00s
+git diff --check HEAD
+# clean
+"""
 
 
 def test_handoff_requires_commit_tests_and_remote_branch_statement():
@@ -218,7 +237,8 @@ git diff --check HEAD
 """
     errors = check_handoff_text(text)
     assert errors == [
-        "handoff must state 'Updated by: Codex' or 'Updated by: cc'"
+        "handoff must state 'Updated by: Codex', 'Updated by: cc', "
+        "or 'Updated by: GLM'"
     ]
 
 
@@ -238,3 +258,233 @@ git diff --check HEAD
     assert errors == [
         "handoff must contain exactly one 'Updated by' author line"
     ]
+
+
+def test_glm_is_a_valid_author():
+    text = _handoff_text("GLM", "glm/example", _EXPECTED_HEAD)
+    assert check_handoff_text(text, expected_head=_EXPECTED_HEAD) == []
+
+
+def test_glm_author_line_with_cc_branch_is_rejected():
+    text = _handoff_text("GLM", "cc/example", _EXPECTED_HEAD)
+    errors = check_handoff_text(text, expected_head=_EXPECTED_HEAD)
+    assert errors == [
+        "GLM-authored handoff must name a local 'glm/*' branch; "
+        "found branch line(s): ['cc/example']"
+    ]
+
+
+def test_glm_author_without_branch_line_is_rejected():
+    text = """
+Updated by: GLM
+Commit: deadbeef
+Remote feature branch: No
+pytest -q
+# 100 passed in 1.00s
+git diff --check HEAD
+# clean
+"""
+    errors = check_handoff_text(text)
+    assert errors == [
+        "GLM-authored handoff must name a local 'glm/*' branch; "
+        "found branch line(s): []"
+    ]
+
+
+def test_cc_author_with_glm_branch_is_rejected():
+    text = _handoff_text("cc", "glm/example", _EXPECTED_HEAD)
+    errors = check_handoff_text(text, expected_head=_EXPECTED_HEAD)
+    assert errors == [
+        "cc-authored handoff must name a local 'cc/*' branch; "
+        "found branch line(s): ['glm/example']"
+    ]
+
+
+def test_codex_review_on_cc_and_glm_branches_is_legal():
+    for branch in ("cc/example", "glm/example"):
+        text = _handoff_text("Codex", branch, _EXPECTED_HEAD)
+        assert check_handoff_text(text, expected_head=_EXPECTED_HEAD) == []
+
+
+def test_repeated_identical_glm_author_lines_are_rejected():
+    text = """
+Updated by: GLM
+Updated by: GLM
+Branch: glm/example
+Commit: deadbeef
+Remote feature branch: No
+pytest -q
+# 100 passed in 1.00s
+git diff --check HEAD
+# clean
+"""
+    errors = check_handoff_text(text)
+    assert errors == [
+        "handoff must contain exactly one 'Updated by' author line"
+    ]
+
+
+def test_glm_and_cc_author_lines_are_rejected():
+    text = """
+Updated by: GLM
+Updated by: cc
+Branch: glm/example
+Commit: deadbeef
+Remote feature branch: No
+pytest -q
+# 100 passed in 1.00s
+git diff --check HEAD
+# clean
+"""
+    errors = check_handoff_text(text)
+    assert errors == [
+        "handoff must contain exactly one 'Updated by' author line"
+    ]
+
+
+def test_glm_and_unknown_author_lines_are_rejected():
+    text = """
+Updated by: GLM
+Updated by: someone-else
+Branch: glm/example
+Commit: deadbeef
+Remote feature branch: No
+pytest -q
+# 100 passed in 1.00s
+git diff --check HEAD
+# clean
+"""
+    errors = check_handoff_text(text)
+    assert errors == [
+        "handoff must contain exactly one 'Updated by' author line"
+    ]
+
+
+def test_unknown_single_author_is_rejected():
+    text = _handoff_text("someone-else", "glm/example", "deadbeef")
+    errors = check_handoff_text(text)
+    assert errors == [
+        "unknown handoff author 'someone-else'; allowed authors are "
+        "Codex, cc, GLM"
+    ]
+
+
+def test_existing_codex_and_cc_authors_remain_supported():
+    for author, branch in (("Codex", "cc/example"), ("cc", "cc/example")):
+        text = _handoff_text(author, branch, _EXPECTED_HEAD)
+        assert check_handoff_text(text, expected_head=_EXPECTED_HEAD) == []
+
+
+def test_glm_branch_must_not_track_remote_upstream():
+    assert check_branch_policy("glm/example", "") == []
+    errors = check_branch_policy("glm/example", "origin/glm/example")
+    assert errors == [
+        "glm branch 'glm/example' must not track remote upstream "
+        "'origin/glm/example'"
+    ]
+
+
+def test_remote_glm_branches_are_rejected():
+    errors = check_remote_branches(["origin/main", "origin/glm/example"])
+    assert errors == ["remote glm branch exists: origin/glm/example"]
+
+
+def _make_controlled_repo(tmp_path: Path, handoff_text: str) -> Path:
+    """Create a throwaway git repository with a GLM branch and handoff."""
+
+    repo = tmp_path / "protocol-repo"
+    repo.mkdir()
+
+    def git(*args: str) -> None:
+        subprocess.run(
+            ["git", *args], cwd=repo, check=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+
+    git("init")
+    git("config", "user.email", "protocol-test@example.com")
+    git("config", "user.name", "protocol-test")
+    (repo / "README.md").write_text("# protocol test\n", encoding="utf-8")
+    git("add", "README.md")
+    git("commit", "-m", "init")
+    git("checkout", "-b", "glm/example")
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, text=True,
+        stdout=subprocess.PIPE, check=True,
+    ).stdout.strip()
+    (repo / ".codex_cc_handoff.md").write_text(
+        handoff_text.replace("{head}", head), encoding="utf-8",
+    )
+    return repo
+
+
+def _run_checker(repo: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(_SCRIPT), "--handoff", ".codex_cc_handoff.md"],
+        cwd=repo, text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+
+
+def test_cli_accepts_glm_handoff_in_controlled_repository(tmp_path):
+    repo = _make_controlled_repo(
+        tmp_path,
+        """
+Updated by: GLM
+Executor: GLM
+Client: ZCODE
+Branch: glm/example
+Commit: {head}
+Remote feature branch: No
+pytest -q
+# 100 passed in 1.00s
+git diff --check HEAD
+# clean
+""",
+    )
+    result = _run_checker(repo)
+    assert result.returncode == 0, result.stderr
+    assert "agent protocol check passed" in result.stdout
+
+
+def test_cli_rejects_repeated_identical_glm_author(tmp_path):
+    repo = _make_controlled_repo(
+        tmp_path,
+        """
+Updated by: GLM
+Updated by: GLM
+Executor: GLM
+Client: ZCODE
+Branch: glm/example
+Commit: {head}
+Remote feature branch: No
+pytest -q
+# 100 passed in 1.00s
+git diff --check HEAD
+# clean
+""",
+    )
+    result = _run_checker(repo)
+    assert result.returncode == 1
+    assert "exactly one 'Updated by' author line" in result.stderr
+
+
+def test_cli_rejects_glm_handoff_naming_cc_branch(tmp_path):
+    repo = _make_controlled_repo(
+        tmp_path,
+        """
+Updated by: GLM
+Executor: GLM
+Client: ZCODE
+Branch: cc/example
+Commit: {head}
+Remote feature branch: No
+pytest -q
+# 100 passed in 1.00s
+git diff --check HEAD
+# clean
+""",
+    )
+    result = _run_checker(repo)
+    assert result.returncode == 1
+    assert "GLM-authored handoff must name a local 'glm/*' branch" in result.stderr
