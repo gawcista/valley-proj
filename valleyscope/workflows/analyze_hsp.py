@@ -113,6 +113,7 @@ from valleyscope.geometry.lattice import (
     cart_translation_from_fractional,
     read_poscar_cell,
 )
+from valleyscope.geometry.reciprocal import RunLocalPeriodicDistanceCache
 from valleyscope.io.config import AppConfig, load_config
 from valleyscope.io.h5_reader import read_wavefunction_h5
 from valleyscope.io.spinor_source_basis import (
@@ -332,6 +333,12 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
         q_cart = kpoint.cart.reshape(1, 3) + kpoint.g_vectors_cart
         q_cart_by_kpoint[kpoint_name] = np.asarray(q_cart, dtype=float)
         # --- Reporting projectors (may use k-dependent centers) ---
+        # One run-local distance cache per k lifetime: it binds the actual
+        # numeric geometry (q rows, center, reciprocal basis, dimensional
+        # mode), so reporting, fixed-center seed and qcut-scan contexts share
+        # distances only when that geometry is identical.  Strict masks and
+        # thresholds are always recomputed per call.
+        k_distance_cache = RunLocalPeriodicDistanceCache()
         reporting_centers = config.valley_centers
         if config.projection.projector_mode == "k_resolved_parent_valley":
             reporting_centers = adjust_centers_for_parent_valley(
@@ -349,6 +356,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             use_2d=config.projection.use_2d_momentum_only,
             overlap_policy=config.projection.overlap_policy,
             emit_warnings=False,
+            distance_cache=k_distance_cache,
         )
         projectors_by_kpoint[kpoint_name] = reporting_projectors
         weights = compute_valley_weights(
@@ -372,6 +380,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 use_2d=config.projection.use_2d_momentum_only,
                 overlap_policy=config.projection.overlap_policy,
                 emit_warnings=False,
+                distance_cache=k_distance_cache,
             )
         sector_names = reporting_projectors.sector_names
         for local_pos, result in enumerate(weights):
@@ -445,6 +454,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 use_2d=config.projection.use_2d_momentum_only,
                 overlap_policy=config.projection.overlap_policy,
                 emit_warnings=False,
+                distance_cache=k_distance_cache,
             )
             qcut_scan_payload[kpoint_name] = {
                 "has_plateau": scan.has_plateau,

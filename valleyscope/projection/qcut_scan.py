@@ -4,7 +4,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from valleyscope.geometry.reciprocal import minimum_periodic_distance
+from valleyscope.geometry.reciprocal import (
+    RunLocalPeriodicDistanceCache,
+    minimum_periodic_distance,
+)
 from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector, centers_by_name
 from valleyscope.projection.sector_projectors import build_sector_projectors
 from valleyscope.projection.weights import ValleyWeightResult, compute_valley_weights
@@ -35,7 +38,11 @@ def scan_qcut(
     overlap_policy: str = "warn_exclude",
     emit_warnings: bool = True,
     plateau_tol: float = 1e-2,
+    distance_cache: RunLocalPeriodicDistanceCache | None = None,
 ) -> QcutScanResult:
+    # Every cutoff applies its own strict mask, overlap policy, weights and
+    # plateau decision; only the shared distance geometry is reused through
+    # the optional run-local cache.
     entries: list[QcutScanEntry] = []
     for qcut in qcuts:
         projectors = build_sector_projectors(
@@ -47,6 +54,7 @@ def scan_qcut(
             use_2d=use_2d,
             overlap_policy=overlap_policy,
             emit_warnings=emit_warnings,
+            distance_cache=distance_cache,
         )
         entries.append(
             QcutScanEntry(

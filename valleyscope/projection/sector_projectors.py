@@ -5,7 +5,10 @@ import warnings
 
 import numpy as np
 
-from valleyscope.geometry.reciprocal import minimum_periodic_distance
+from valleyscope.geometry.reciprocal import (
+    RunLocalPeriodicDistanceCache,
+    minimum_periodic_distance,
+)
 from valleyscope.geometry.valley_centers import ValleyCenter, ValleySector, centers_by_name
 from valleyscope.projection.folded_center import fold_center_into_moire_bz
 
@@ -34,6 +37,7 @@ def build_sector_projectors(
     g_search_shell: int = 3,
     overlap_policy: str = "warn_exclude",
     emit_warnings: bool = True,
+    distance_cache: RunLocalPeriodicDistanceCache | None = None,
 ) -> SectorProjectors:
     q = np.asarray(q_cart, dtype=float)
     if q.ndim != 2 or q.shape[1] != 3:
@@ -48,13 +52,23 @@ def build_sector_projectors(
         center_reciprocal = center.reciprocal_cart
         if center_reciprocal is None:
             center_reciprocal = monolayer_reciprocal_cart
-        distances = minimum_periodic_distance(
-            q,
-            center.cart,
-            center_reciprocal,
-            shell=g_search_shell,
-            use_2d=use_2d,
-        )
+        if distance_cache is not None:
+            distances = distance_cache.distances(
+                q,
+                center.cart,
+                center_reciprocal,
+                use_2d=use_2d,
+            )
+        else:
+            distances = minimum_periodic_distance(
+                q,
+                center.cart,
+                center_reciprocal,
+                shell=g_search_shell,
+                use_2d=use_2d,
+            )
+        # The strict mask is recomputed per call; only the qcut-independent
+        # distance geometry may be reused.
         center_masks[center.name] = distances < qcut
 
     for sector in sectors:

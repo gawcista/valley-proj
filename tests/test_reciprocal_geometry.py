@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from valleyscope.geometry.reciprocal import (
+    RunLocalPeriodicDistanceCache,
     equivalent_mod_reciprocal,
     minimum_periodic_distance,
 )
@@ -347,3 +348,136 @@ def test_folded_center_distances_use_periodic_minimum_on_non_orthogonal_cell():
     assert component_wrapped == pytest.approx(0.6519969325081215, abs=1e-12)
     assert distance == pytest.approx(np.sqrt(0.1951), abs=1e-14)
     assert distance < component_wrapped
+
+
+# --- Exact coordinate compression and run-local distance reuse ---
+
+
+class _RowCountingSearch:
+    """Count rows and batches reaching the complete nearest-image search."""
+
+    def __init__(self, monkeypatch):
+        import valleyscope.geometry.reciprocal as reciprocal_module
+
+        self.rows = 0
+        self.batches = 0
+        self._original = reciprocal_module._nearest_lattice_distances
+        monkeypatch.setattr(
+            reciprocal_module, "_nearest_lattice_distances", self
+        )
+
+    def __call__(self, deltas, lattice):
+        self.rows += int(deltas.shape[0])
+        self.batches += 1
+        return self._original(deltas, lattice)
+
+
+def _random_cart_rows(count: int, seed: int = 7) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    out = np.zeros((count, 3))
+    out[:, :2] = rng.normal(size=(count, 2)) @ HEX_BASIS[:2, :2]
+    return out
+
+
+def test_exact_duplicate_rows_share_one_search_and_match_oracle(monkeypatch):
+    counter = _RowCountingSearch(monkeypatch)
+    base = _random_cart_rows(37)
+    q = np.vstack([base, base[::-1]])
+    q[:, 2] = 0.0
+
+    distances = minimum_periodic_distance(
+        q, np.zeros(3), HEX_BASIS, use_2d=True
+    )
+
+    assert counter.batches == 1
+    assert counter.rows == 37
+    assert np.array_equal(distances[:37], distances[37:][::-1])
+    oracle = brute_force_minimum(q[:, :2], HEX_BASIS[:2, :2])
+    assert np.array_equal(distances, oracle)
+
+
+def test_lattice_shifted_rows_keep_equal_distances_without_merge(monkeypatch):
+    # Rows separated by an exact lattice translate are physically equivalent.
+    # Exact-bit deduplication groups only bit-equal coordinates, so such rows
+    # may or may not share one search node -- but their distances are equal.
+    counter = _RowCountingSearch(monkeypatch)
+    base = _random_cart_rows(11, seed=13)
+    shifted = base.copy()
+    shifted[:, :2] = base[:, :2] + np.array([3.0, -2.0]) @ HEX_BASIS[:2, :2]
+    q = np.vstack([base, shifted])
+    q[:, 2] = 0.0
+
+    distances = minimum_periodic_distance(
+        q, np.zeros(3), HEX_BASIS, use_2d=True
+    )
+
+    assert 11 <= counter.rows <= 22
+    assert np.allclose(distances[:11], distances[11:], rtol=0.0, atol=1e-12)
+
+
+def test_use_2d_false_keeps_distinct_z_rows(monkeypatch):
+    counter = _RowCountingSearch(monkeypatch)
+    rows = _random_cart_rows(9, seed=21)
+    q = np.vstack([rows, rows.copy()])
+    q[:9, 2] = 0.0
+    q[9:, 2] = 0.7
+
+    distances = minimum_periodic_distance(
+        q, np.zeros(3), HEX_BASIS, use_2d=False
+    )
+
+    assert counter.rows == 18
+    assert not np.array_equal(distances[:9], distances[9:])
+
+
+def test_dedup_preserves_empty_and_invalid_input_behavior():
+    with pytest.raises(ValueError):
+        minimum_periodic_distance(
+            np.array([[0.0, np.nan, 0.0]]), np.zeros(3), HEX_BASIS
+        )
+    empty = minimum_periodic_distance(
+        np.zeros((0, 3)), np.zeros(3), HEX_BASIS
+    )
+    assert empty.shape == (0,)
+
+
+def test_cache_hits_only_on_identical_numeric_geometry(monkeypatch):
+    counter = _RowCountingSearch(monkeypatch)
+    cache = RunLocalPeriodicDistanceCache()
+    q = _random_cart_rows(15)
+
+    first = cache.distances(q, np.zeros(3), HEX_BASIS, use_2d=True)
+    second = cache.distances(
+        q.copy(), np.zeros(3), HEX_BASIS.copy(), use_2d=True
+    )
+    assert counter.batches == 1
+    assert np.array_equal(first, second)
+
+    misses = [
+        (q + np.array([1e-12, 0.0, 0.0]), np.zeros(3), HEX_BASIS, True),
+        (q, np.array([1e-12, 0.0, 0.0]), HEX_BASIS, True),
+        (q, np.zeros(3), HEX_BASIS * (1.0 + 1e-12), True),
+        (q, np.zeros(3), HEX_BASIS, False),
+    ]
+    for miss_q, center, basis, use_2d in misses:
+        cache.distances(miss_q, center, basis, use_2d=use_2d)
+    assert counter.batches == 1 + len(misses)
+
+
+def test_cache_is_bounded_and_evicts_oldest_entries():
+    cache = RunLocalPeriodicDistanceCache(max_entries=2)
+    for seed in (1, 2, 3):
+        cache.distances(
+            _random_cart_rows(3, seed=seed), np.zeros(3), HEX_BASIS,
+            use_2d=True,
+        )
+    assert len(cache) == 2
+
+
+def test_cached_distances_are_read_only():
+    cache = RunLocalPeriodicDistanceCache()
+    distances = cache.distances(
+        _random_cart_rows(4), np.zeros(3), HEX_BASIS, use_2d=True
+    )
+    with pytest.raises(ValueError):
+        distances[0] = 0.0

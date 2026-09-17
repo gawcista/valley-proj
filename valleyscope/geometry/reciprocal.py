@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+from collections import OrderedDict
 from itertools import product
 
 import numpy as np
@@ -142,18 +144,100 @@ def minimum_periodic_distance(
     basis are used.  ``shell`` is retained for call-site compatibility and
     does not affect the result: the search is a complete nearest-image
     enumeration, not a fixed-shell approximation.
+
+    Exact duplicate rows are compressed before the search and expanded
+    afterwards, so repeated plane-wave momenta share one complete
+    nearest-image proof without any rounding, snapping, or coefficient/grid
+    compression.  Row order is preserved.
     """
     q, center, basis = _validate_inputs(q_cart, center_cart, reciprocal_cart)
     del shell
     dim = 2 if use_2d else 3
     lattice = _in_plane_basis(basis, use_2d)
     deltas = q[:, :dim] - center[:dim]
+    # Compress exact duplicate rows before the search; np.unique groups by
+    # bit-equal coordinates only, and the inverse expansion restores the
+    # original row order.  No rounding or snapping is involved.
+    unique_deltas, inverse = np.unique(deltas, axis=0, return_inverse=True)
+    inverse = np.asarray(inverse).reshape(-1)
     # Recenter by a nearby lattice translate to limit cancellation for large
     # integer reciprocal shifts; the lattice is invariant under that shift.
-    fractional = np.linalg.solve(lattice.T, deltas.T).T
+    fractional = np.linalg.solve(lattice.T, unique_deltas.T).T
     shift = np.rint(fractional)
-    deltas = deltas - shift @ lattice
-    return _nearest_lattice_distances(deltas, lattice)
+    unique_reduced = unique_deltas - shift @ lattice
+    unique_distances = _nearest_lattice_distances(unique_reduced, lattice)
+    return unique_distances[inverse]
+
+
+class RunLocalPeriodicDistanceCache:
+    """Bounded, input-bound reuse of exact nearest-image distances.
+
+    A hit requires exact float equality of the complete q batch, center,
+    reciprocal basis, and dimensional mode -- the numeric geometry itself,
+    never labels, object identities, or cutoff values.  Strict threshold
+    decisions stay with the caller; only the qcut-independent distance
+    arrays are reused, and they are exposed read-only.
+    """
+
+    def __init__(self, max_entries: int = 64) -> None:
+        if max_entries <= 0:
+            raise ValueError("max_entries must be positive")
+        self._max_entries = int(max_entries)
+        self._entries: OrderedDict[bytes, tuple] = OrderedDict()
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    @staticmethod
+    def _key(
+        q: np.ndarray,
+        center: np.ndarray,
+        basis: np.ndarray,
+        use_2d: bool,
+    ) -> bytes:
+        digest = hashlib.sha256()
+        digest.update(str(int(use_2d)).encode("ascii"))
+        for array in (q, center, basis):
+            digest.update(str(array.shape).encode("ascii"))
+            digest.update(np.ascontiguousarray(array, dtype=float).tobytes())
+        return digest.digest()
+
+    def distances(
+        self,
+        q_cart: np.ndarray,
+        center_cart: np.ndarray,
+        reciprocal_cart: np.ndarray,
+        *,
+        use_2d: bool = True,
+    ) -> np.ndarray:
+        q, center, basis = _validate_inputs(
+            q_cart, center_cart, reciprocal_cart
+        )
+        key = self._key(q, center, basis, use_2d)
+        entry = self._entries.get(key)
+        if entry is not None:
+            cached_q, cached_center, cached_basis, cached_use_2d, distances = (
+                entry
+            )
+            if (
+                cached_use_2d == use_2d
+                and cached_q.shape == q.shape
+                and cached_center.shape == center.shape
+                and cached_basis.shape == basis.shape
+                and np.array_equal(cached_q, q)
+                and np.array_equal(cached_center, center)
+                and np.array_equal(cached_basis, basis)
+            ):
+                self._entries.move_to_end(key)
+                return distances
+        distances = minimum_periodic_distance(
+            q, center, basis, use_2d=use_2d
+        )
+        distances.setflags(write=False)
+        self._entries[key] = (q, center, basis, use_2d, distances)
+        while len(self._entries) > self._max_entries:
+            self._entries.popitem(last=False)
+        return distances
 
 
 def equivalent_mod_reciprocal(

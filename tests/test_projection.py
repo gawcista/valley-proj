@@ -409,3 +409,141 @@ def test_only_affected_low_weight_row_is_reclassified():
     # Band 3 at k2: W_val=0, center V0p is near k2 (0.3 > 0.1)? Wait V0p→k2=0.3 > 0.1, V0→k2=0.4 > 0.1
     # BOTH centers are >0.1 from k2 AND both center_weights are 0 → reclassified
     assert subspace_payload["kpoints"]["k2"]["weights"][0]["valley_status"] == "fixed_center_not_captured"
+
+
+# --- Run-local distance reuse across cutoffs and projector contexts ---
+
+
+class _BatchCounter:
+    """Count complete nearest-image searches at their single choke point."""
+
+    def __init__(self, monkeypatch):
+        import valleyscope.geometry.reciprocal as reciprocal_module
+
+        self.batches = 0
+        self._original = reciprocal_module._nearest_lattice_distances
+        monkeypatch.setattr(
+            reciprocal_module, "_nearest_lattice_distances", self
+        )
+
+    def __call__(self, deltas, lattice, **kwargs):
+        self.batches += 1
+        return self._original(deltas, lattice, **kwargs)
+
+
+def test_scan_qcut_reuses_distances_across_all_cutoffs(monkeypatch):
+    from valleyscope.geometry.reciprocal import RunLocalPeriodicDistanceCache
+
+    counter = _BatchCounter(monkeypatch)
+    centers, sectors = two_sector_setup()
+    rng = np.random.default_rng(3)
+    q_cart = np.zeros((40, 3))
+    q_cart[:, :2] = rng.uniform(-6.0, 6.0, size=(40, 2))
+    q_cart = np.vstack([q_cart, q_cart[:20]])  # exact duplicate rows
+    coefficients = np.zeros((1, 1, q_cart.shape[0]), dtype=complex)
+    coefficients[0, 0, 0] = 1.0
+    qcuts = [0.3, 0.6, 0.9, 1.2]
+
+    cache = RunLocalPeriodicDistanceCache()
+    scan_cached = scan_qcut(
+        q_cart, coefficients, centers, sectors, RECIP, qcuts,
+        distance_cache=cache,
+    )
+    assert counter.batches == len(centers)
+
+    counter.batches = 0
+    scan_uncached = scan_qcut(
+        q_cart, coefficients, centers, sectors, RECIP, qcuts
+    )
+    assert counter.batches == len(centers) * len(qcuts)
+    for cached, uncached in zip(scan_cached.entries, scan_uncached.entries):
+        assert cached.qcut == uncached.qcut
+        assert cached.overlap_count == uncached.overlap_count
+        for cached_weight, uncached_weight in zip(
+            cached.weights, uncached.weights
+        ):
+            assert cached_weight.w_val == uncached_weight.w_val
+            assert cached_weight.purity == uncached_weight.purity
+
+
+def test_main_and_scan_share_one_distance_batch_per_center(monkeypatch):
+    from valleyscope.geometry.reciprocal import RunLocalPeriodicDistanceCache
+
+    counter = _BatchCounter(monkeypatch)
+    centers, sectors = two_sector_setup()
+    rng = np.random.default_rng(5)
+    q_cart = np.zeros((30, 3))
+    q_cart[:, :2] = rng.uniform(-6.0, 6.0, size=(30, 2))
+    coefficients = np.zeros((1, 1, q_cart.shape[0]), dtype=complex)
+    coefficients[0, 0, 0] = 1.0
+
+    cache = RunLocalPeriodicDistanceCache()
+    main = build_sector_projectors(
+        q_cart, centers, sectors, RECIP, qcut=0.5, distance_cache=cache
+    )
+    scan = scan_qcut(
+        q_cart, coefficients, centers, sectors, RECIP,
+        [0.4, 0.6, 0.8], distance_cache=cache,
+    )
+    assert counter.batches == len(centers)
+    main_uncached = build_sector_projectors(
+        q_cart, centers, sectors, RECIP, qcut=0.5
+    )
+    for name in main.center_masks:
+        assert np.array_equal(
+            main.center_masks[name], main_uncached.center_masks[name]
+        )
+
+
+def test_reused_distances_keep_strict_cutoff_masks(monkeypatch):
+    from valleyscope.geometry.reciprocal import RunLocalPeriodicDistanceCache
+
+    centers = [ValleyCenter("K", np.zeros(3))]
+    sectors = [ValleySector("K_sector", ["K"])]
+    # q at exactly half a reciprocal vector from the center: its periodic
+    # distance is |b1| / 2 exactly.
+    distance = float(np.linalg.norm(RECIP[0])) / 2.0
+    q_cart = np.array([[distance, 0.0, 0.0], [0.0, 0.0, 0.0]])
+
+    cache = RunLocalPeriodicDistanceCache()
+    at_cutoff = build_sector_projectors(
+        q_cart, centers, sectors, RECIP, qcut=distance,
+        distance_cache=cache,
+    )
+    below = build_sector_projectors(
+        q_cart, centers, sectors, RECIP,
+        qcut=float(np.nextafter(distance, -np.inf)),
+        distance_cache=cache,
+    )
+    above = build_sector_projectors(
+        q_cart, centers, sectors, RECIP,
+        qcut=float(np.nextafter(distance, np.inf)),
+        distance_cache=cache,
+    )
+
+    # Strict semantics: equal-to-qcut and one float below it are excluded;
+    # only a cutoff strictly greater than the distance includes the row.
+    assert at_cutoff.center_masks["K"].tolist() == [False, True]
+    assert below.center_masks["K"].tolist() == [False, True]
+    assert above.center_masks["K"].tolist() == [True, True]
+
+
+def test_dynamic_centers_do_not_reuse_fixed_center_distances(monkeypatch):
+    from valleyscope.geometry.reciprocal import RunLocalPeriodicDistanceCache
+
+    counter = _BatchCounter(monkeypatch)
+    centers, sectors = two_sector_setup()
+    q_cart = np.array([[0.1, 0.0, 0.0], [4.9, 0.0, 0.0]])
+    moire_recip = RECIP / 10.0
+    dynamic = adjust_centers_for_parent_valley(
+        centers, np.array([0.3, 0.0, 0.0]), moire_recip, use_2d=True
+    )
+
+    cache = RunLocalPeriodicDistanceCache()
+    build_sector_projectors(
+        q_cart, centers, sectors, RECIP, qcut=0.5, distance_cache=cache
+    )
+    build_sector_projectors(
+        q_cart, dynamic, sectors, RECIP, qcut=0.5, distance_cache=cache
+    )
+    assert counter.batches == 2 * len(centers)
