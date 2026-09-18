@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -14,6 +15,7 @@ from valleyscope.analysis.projected_hsp_coverage import (
 from valleyscope.analysis.standard_setting_kmap import (
     _centering_cosets_from_hall_database,
     _standard_translation_lattice_basis,
+    derive_irreptables_standard_setting_identity,
     resolve_standard_setting_hsp_label,
 )
 from valleyscope.irreps.ebr_data_adapter import load_ebr_source_data
@@ -413,7 +415,7 @@ def test_unresolvable_reviewed_source_setting_blocks_basis():
         number=table.number,
         name=table.name,
         spinor=table.spinor,
-        operations=(),
+        operations=table.operations[:1],
         irreps=table.irreps,
     )
 
@@ -425,6 +427,117 @@ def test_unresolvable_reviewed_source_setting_blocks_basis():
     )
     assert basis["status"] == "blocked"
     assert "reviewed_source_setting_unresolved" in basis["blocker"]
+
+
+def _single_hall_source_fixture():
+    """Real single-Hall SG 149 spinful source with a consistent certificate.
+
+    SG 149 has exactly one Hall database entry, so an operation-less table
+    would otherwise reach the helper's sole-Hall fallback instead of
+    independent reviewed affine evidence.
+    """
+    table = load_standard_irrep_table(149, spinor=True)
+    identity = derive_irreptables_standard_setting_identity(table, 149)
+    assert identity["status"] == "unique_match"
+    assert identity["candidate_hall_numbers"] == [identity["hall_number"]]
+    certificate = _certificate(
+        centering="P",
+        sg_number=149,
+        sg_symbol=table.name,
+        hall_number=identity["hall_number"],
+        hall_symbol=identity["hall_symbol"],
+    )
+    labels = [row.label for row in table.irreps if row.kpoint_label == "GM"]
+    return table, certificate, labels
+
+
+def test_single_hall_genuine_operation_inventory_stays_valid():
+    table, certificate, labels = _single_hall_source_fixture()
+
+    basis = derive_projected_subspace_source_hsp_basis(
+        table=table,
+        ebr_source_basis_labels=labels,
+        standard_setting_certificate=certificate,
+        use_2d_momentum_only=True,
+    )
+    assert basis["status"] == "validated"
+
+    row = classify_projected_subspace_kpoint(
+        parent_k_frac=[0.0, 0.0, 0.0],
+        table=table,
+        source_hsp_basis=basis,
+        standard_setting_certificate=certificate,
+    )
+    assert row["classification"] == "representative"
+    assert row["validation_status"] == "validated"
+
+
+def test_single_hall_partial_operation_inventory_stays_blocked():
+    table, certificate, labels = _single_hall_source_fixture()
+    partial = replace(table, operations=table.operations[:1])
+
+    basis = derive_projected_subspace_source_hsp_basis(
+        table=partial,
+        ebr_source_basis_labels=labels,
+        standard_setting_certificate=certificate,
+        use_2d_momentum_only=True,
+    )
+    assert basis["status"] == "blocked"
+    assert "reviewed_source_setting_unresolved" in basis["blocker"]
+
+    row = classify_projected_subspace_kpoint(
+        parent_k_frac=[0.0, 0.0, 0.0],
+        table=partial,
+        source_hsp_basis=basis,
+        standard_setting_certificate=certificate,
+    )
+    assert row["classification"] == "unresolved"
+    assert row["validation_status"] == "blocked"
+
+
+def test_single_hall_empty_operation_inventory_blocks_every_entry():
+    """An empty reviewed operation inventory is missing evidence, not a
+    sole-Hall fallback match."""
+    table, certificate, labels = _single_hall_source_fixture()
+    empty = replace(table, operations=())
+
+    basis = derive_projected_subspace_source_hsp_basis(
+        table=empty,
+        ebr_source_basis_labels=labels,
+        standard_setting_certificate=certificate,
+        use_2d_momentum_only=True,
+    )
+    assert basis["status"] == "blocked"
+    assert basis["blocker"] == "reviewed_source_operations_missing"
+
+    row = classify_projected_subspace_kpoint(
+        parent_k_frac=[0.0, 0.0, 0.0],
+        table=empty,
+        source_hsp_basis=basis,
+        standard_setting_certificate=certificate,
+    )
+    assert row["classification"] == "unresolved"
+    assert row["validation_status"] == "blocked"
+    assert row["blocker"] == "reviewed_source_operations_missing"
+
+    # A genuine precomputed basis must not launder the empty inventory
+    # through the direct classifier entry.
+    genuine_basis = derive_projected_subspace_source_hsp_basis(
+        table=table,
+        ebr_source_basis_labels=labels,
+        standard_setting_certificate=certificate,
+        use_2d_momentum_only=True,
+    )
+    assert genuine_basis["status"] == "validated"
+    laundered = classify_projected_subspace_kpoint(
+        parent_k_frac=[0.0, 0.0, 0.0],
+        table=empty,
+        source_hsp_basis=genuine_basis,
+        standard_setting_certificate=certificate,
+    )
+    assert laundered["classification"] == "unresolved"
+    assert laundered["validation_status"] == "blocked"
+    assert laundered["blocker"] == "reviewed_source_operations_missing"
 
 
 def test_missing_hall_identity_still_blocks():

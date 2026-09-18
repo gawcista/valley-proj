@@ -701,8 +701,13 @@ def _reviewed_source_setting(table: StandardIrrepTable) -> dict[str, object] | N
 
     The canonical Hall/centering/operation context is recomputed from the
     actual reviewed ``StandardIrrepTable`` operations instead of trusting any
-    Hall number declared by the certificate being checked.
+    Hall number declared by the certificate being checked.  An empty
+    operation inventory is missing evidence: a unique database candidate is
+    not affine proof that absent source operations were validated.
     """
+    operations = getattr(table, "operations", None)
+    if not isinstance(operations, (list, tuple)) or not operations:
+        raise RuntimeError("reviewed_source_operations_missing")
     try:
         from valleyscope.analysis.standard_setting_kmap import (
             derive_irreptables_standard_setting_identity,
