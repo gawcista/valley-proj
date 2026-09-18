@@ -1,11 +1,13 @@
-"""Shared portable producer-chain construction for tracked tests and the
-installed-artifact release gate.
+"""Shared algebraic completion fixture for tests and the release gate.
 
 The source suite (`tests/test_portable_production_cprime_chain.py`) and the
 installed-wheel acceptance (`scripts/release_gate_installed_check.py`) exercise
-the same minimal genuine producer path, so the gate never duplicates fixture
-construction.  Imports stay limited to the installed `valleyscope` package
-plus this tests package; nothing here may reference the repository root.
+the same construction. This fixture uses identity-only numerical scope and
+assembled irrep candidates: it tests algebraic completion/promotion contracts,
+not numerical wavefunction-to-irrep matching. The complementary nonidentity
+numerical workflow lives in `tests/portable_numerical_chain.py`.
+Imports use installed `valleyscope` plus this tests package; nothing here may
+reference the repository root.
 """
 
 from __future__ import annotations
@@ -445,7 +447,7 @@ def _cprime_acceptance_matrix(export):
 def run_installed_portable_acceptance(
     workdir: Path | None = None,
 ) -> dict[str, object]:
-    """Run the full portable production chain and return its evidence.
+    """Run the portable algebraic completion chain and return its evidence.
 
     Raises AssertionError with details when any physical step fails.  The
     returned summary is JSON-serializable for the release gate report.  A

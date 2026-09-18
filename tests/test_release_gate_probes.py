@@ -28,9 +28,32 @@ from scripts.release_gate import (
     _snapshot_matches_head,
 )
 from scripts.release_gate_installed_check import (
+    _check_installed_acceptance,
     _check_import_provenance,
     _module_in_venv,
 )
+
+
+def test_installed_acceptance_requires_numerical_spinful_workflow():
+    """An algebraic candidate fixture alone must not satisfy the gate."""
+    report = {}
+    assert _check_installed_acceptance(report)
+    numerical = report["portable_numerical_acceptance"]
+    assert numerical["required_operations_by_hsp"] == {"GM": 3, "K": 3, "KA": 3, "M": 1}
+    assert numerical["observed_hsps"] == ["GM", "K", "KA", "M"]
+    assert numerical["final_reduced_ebr_result_count"] == 2
+    assert numerical["broken_coefficients_final_result_count"] == 0
+
+
+@pytest.mark.parametrize("optimization", ["-O", "-OO"])
+def test_installed_gate_rejects_disabled_acceptance_assertions(optimization):
+    checker = Path(__file__).resolve().parents[1] / "scripts/release_gate_installed_check.py"
+    result = subprocess.run(
+        [sys.executable, optimization, str(checker), "--help"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 1
+    assert "Python optimization disables acceptance assertions" in result.stderr
 
 NEEDS_GIT = pytest.mark.skipif(
     shutil.which("git") is None, reason="git is required for snapshot probes"

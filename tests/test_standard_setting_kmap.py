@@ -83,6 +83,81 @@ def _table_c2():
 
 # --- Direct match tests ---
 
+def _reviewed_p3_resolver_inputs():
+    from valleyscope.irreps.tables import load_standard_irrep_table
+
+    return {
+        "table": load_standard_irrep_table(143, spinor=True),
+        "standard_match": {
+            "number": 143, "international_short": "P3",
+            "hall_number": 430, "hall_symbol": "P 3", "operation_ids": [0, 1, 2],
+        },
+        "lattice_direct_cart": np.array([
+            [1, 0, 0], [-0.5, np.sqrt(3)/2, 0], [0, 0, 8],
+        ]),
+        "detected_operations": _p3_ops_from_spglib(),
+    }
+
+
+@pytest.mark.parametrize("k_frac", [[-1/3, -1/3, 0], [0.123, 0.234, 0]])
+def test_primitive_setting_certificate_does_not_depend_on_hsp_label(k_frac):
+    """Missing canonical-table labels must not split one physical setting."""
+    inputs = _reviewed_p3_resolver_inputs()
+    _, _, gamma = resolve_standard_setting_hsp_label(k_frac=np.zeros(3), **inputs)
+    label, blocker, other = resolve_standard_setting_hsp_label(
+        k_frac=np.array(k_frac), **inputs,
+    )
+    assert label is None
+    assert "standard_setting_hsp_label_unavailable" in blocker
+    assert other["direct_match_succeeded"] is False
+    certificates = []
+    for provenance in (gamma, other):
+        certificate = dict(provenance["standard_setting_certificate"])
+        assert certificate["validation_status"] == "validated"
+        for key in ("parent_k_frac", "resolved_hsp_label"):
+            certificate.pop(key, None)
+        certificates.append(certificate)
+    assert certificates[0] == certificates[1]
+
+
+@pytest.mark.parametrize("defect", ["missing", "partial", "translation", "canonical_conflict"])
+def test_missing_hsp_label_does_not_bypass_affine_validation(defect):
+    inputs = _reviewed_p3_resolver_inputs()
+    if defect == "missing":
+        inputs["detected_operations"] = []
+    elif defect == "partial":
+        inputs["detected_operations"] = inputs["detected_operations"][:1]
+    elif defect == "translation":
+        inputs["detected_operations"][1]["translation_frac"] = [0, 0, 0.2]
+    else:
+        inputs["standard_match"]["hall_number"] = 9
+    label, blocker, provenance = resolve_standard_setting_hsp_label(
+        k_frac=np.array([-1/3, -1/3, 0]), **inputs,
+    )
+    assert label is None
+    assert blocker
+    assert provenance["standard_setting_certificate"]["validation_status"] != "validated"
+
+
+def test_missing_hsp_label_retains_nonidentity_affine_reconstruction():
+    inputs = _reviewed_p3_resolver_inputs()
+    transform = np.array([[1, 1, 0], [0, 1, 0], [0, 0, 1]])
+    inputs["lattice_direct_cart"] = transform.T @ inputs["lattice_direct_cart"]
+    for operation in inputs["detected_operations"]:
+        operation["rotation_frac"] = (
+            np.linalg.inv(transform) @ operation["rotation_frac"] @ transform
+        ).tolist()
+    label, blocker, provenance = resolve_standard_setting_hsp_label(
+        k_frac=transform.T @ np.array([-1/3, -1/3, 0]), **inputs,
+    )
+    assert label is None
+    assert "standard_setting_hsp_label_unavailable" in blocker
+    certificate = provenance["standard_setting_certificate"]
+    assert certificate["validation_status"] == "validated"
+    assert certificate["primitive_conventional_relation"] == "operation_basis_reconstruction"
+    np.testing.assert_allclose(certificate["parent_to_standard_direct_transform"], transform)
+
+
 def test_direct_coordinate_match_succeeds():
     label, blocker, prov = resolve_standard_setting_hsp_label(
         k_frac=np.array([0.0, 0.0, 0.0]),

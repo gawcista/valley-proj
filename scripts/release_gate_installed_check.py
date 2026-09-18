@@ -139,6 +139,7 @@ def _check_cli_provenance(report: dict[str, object], cwd: Path) -> bool:
 
 
 def _check_installed_acceptance(report: dict[str, object]) -> bool:
+    from tests.portable_numerical_chain import run_installed_numerical_acceptance
     from tests.portable_acceptance_chain import (
         run_installed_portable_acceptance,
     )
@@ -149,7 +150,10 @@ def _check_installed_acceptance(report: dict[str, object]) -> bool:
         "portable production-chain acceptance: "
         + json.dumps(summary, sort_keys=True)
     )
-    return summary["validation_errors"] == []
+    numerical = run_installed_numerical_acceptance()
+    report["portable_numerical_acceptance"] = numerical
+    print("portable numerical acceptance: " + json.dumps(numerical, sort_keys=True))
+    return summary["validation_errors"] == numerical["validation_errors"] == []
 
 
 def _check_environment(report: dict[str, object]) -> bool:
@@ -217,6 +221,9 @@ def _check_forbidden_imports(report: dict[str, object]) -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if sys.flags.optimize:
+        print("FAIL: Python optimization disables acceptance assertions", file=sys.stderr)
+        return 1
     parser = argparse.ArgumentParser(
         description=(
             "Prove installed-wheel provenance and run the portable "

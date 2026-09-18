@@ -1297,13 +1297,35 @@ def resolve_standard_setting_hsp_label(
         not isinstance(standard_match, dict)
         or direct_match_is_primitive
     )
+    # A setting belongs to the affine group, not to the canonical table's
+    # HSP inventory. Auxiliary HSPs and generic k points must use the same
+    # proven primitive identity setting as directly labelled rows.
+    direct_identity_affine = None
     if (
-        direct_label is not None
+        direct_label is None
+        and parent_to_standard_direct_transform is None
+        and direct_match_is_primitive
+        and not derive_affine_certificate_only
+    ):
+        direct_identity_affine = _validate_affine_operation_equivalence(
+            vp_operations=list(detected_operations) if detected_operations else None,
+            vp_operation_ids=_operation_ids_list(standard_match),
+            standard_match=standard_match,
+            parent_to_standard_direct_transform=np.eye(3),
+            origin_shift_fractional=origin_shift_fractional,
+        )
+        # Failure is not a rejection of another setting: retain the generic
+        # affine reconstruction path below when identity is not established.
+    if (
+        (direct_label is not None or (
+            direct_identity_affine is not None
+            and direct_identity_affine.get("status") == "passed"
+        ))
         and parent_to_standard_direct_transform is None
         and direct_match_trusted
         and not derive_affine_certificate_only
     ):
-        prov["direct_match_succeeded"] = True
+        prov["direct_match_succeeded"] = direct_label is not None
         is_primitive_group = (
             isinstance(standard_match, dict) and direct_match_is_primitive
         )
@@ -1332,7 +1354,7 @@ def resolve_standard_setting_hsp_label(
         # direct-coordinate setting only when generic affine {R|tau} operation
         # equivalence passes under the identity direct transform.
         vp_ids = _operation_ids_list(standard_match)
-        aff = _validate_affine_operation_equivalence(
+        aff = direct_identity_affine or _validate_affine_operation_equivalence(
             vp_operations=(
                 list(detected_operations) if detected_operations else None
             ),
@@ -1359,6 +1381,12 @@ def resolve_standard_setting_hsp_label(
             cert.standard_setting_source = "spglib.per_valley_standard_matches"
             _apply_affine_validation_to_certificate(cert, aff)
             prov["standard_setting_certificate"] = cert.to_dict()
+            if direct_label is None:
+                return None, (
+                    "standard_setting_hsp_label_unavailable: validated primitive "
+                    "identity setting, but no canonical source HSP label matches "
+                    f"k-point {k_frac.tolist()}"
+                ), prov
             return direct_label, None, prov
 
         # Affine equivalence did not pass: coordinate match is diagnostic only.
