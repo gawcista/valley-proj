@@ -17,7 +17,6 @@ from valleyscope.io.wavefunction_convention import (
 )
 from valleyscope.analysis.target_frame import (
     build_target_frame,
-    validate_target_frame_record,
 )
 from valleyscope.symmetry.double_space_group_lift import (
     spin_lift_from_orthogonal,
@@ -166,13 +165,9 @@ def build_scoped_representation_evidence(
     ):
         reasons.append("target_frame_dimension_mismatch")
     if target_frame_record is not None:
-        frame_validation = validate_target_frame_record(
-            dict(target_frame_record),
-            frame_source,
-            wavecar_rtag=wavecar_rtag,
-        )
-        if frame_validation.status == "blocked":
-            reasons.extend(frame_validation.reason_codes)
+        # This frame was just rebuilt from raw inputs at this trust boundary.
+        if dict(target_frame_record) != target_frame.record:
+            reasons.append("target_frame_recomputation_mismatch")
     try:
         supplied_target = np.asarray(
             target_coefficients,
@@ -1053,6 +1048,8 @@ def _plane_wave_rows(
 ) -> tuple[list[dict[str, object]], dict[int, list[int]]]:
     rows: list[dict[str, object]] = []
     maps: dict[int, list[int]] = {}
+    verified_grid_key = None
+    expected_grid_identity = None
     for operation_id in operation_ids:
         raw = evidence.get(operation_id)
         if not isinstance(raw, Mapping):
@@ -1122,7 +1119,11 @@ def _plane_wave_rows(
                 tolerance=effective_map_tolerance,
             )
             recomputed_map = recomputed.mapping.tolist()
-            expected_grid_identity = reciprocal_grid_identity(q)
+            # Reuse only within this fresh validation, including signed zeros.
+            grid_key = (q.shape, q.tobytes())
+            if grid_key != verified_grid_key:
+                expected_grid_identity = reciprocal_grid_identity(q)
+                verified_grid_key = grid_key
         except ValueError:
             reasons.append("plane_wave_mapping_evidence_malformed")
             continue

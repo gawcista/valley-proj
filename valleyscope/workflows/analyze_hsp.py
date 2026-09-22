@@ -20,6 +20,7 @@ from valleyscope.analysis.scoped_representation_evidence import (
     build_scoped_representation_evidence,
 )
 from valleyscope.analysis.target_frame import build_target_frame
+from valleyscope.symmetry.plane_wave_action import RunLocalPlaneWaveRepresentationCache
 from valleyscope.analysis.irrep_workflow_decision import (
     build_irrep_workflow_decisions,
 )
@@ -492,6 +493,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 valley_names=valley_names,
             )
         if symmetry_payload["status"] == "ok" and symmetry_payload.get("symmetry_eigenvalue_enabled", True):
+            numerical_cache = RunLocalPlaneWaveRepresentationCache()
             # Build D_raw for all proper little-group operations before the
             # per-valley gate so valley-changing operations remain included
             # in the projector symmetry-consistency diagnostic.
@@ -503,6 +505,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                         q_cart=q_cart,
                         coefficients=coefficients,
                         symmetry_payload=symmetry_payload,
+                        numerical_cache=numerical_cache,
                     )
                 )
             symmetry_rows.extend(
@@ -515,8 +518,10 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                     basis_payload=basis_transforms.get(kpoint_name),
                     representation_payload=symmetry_representation_payload,
                     valley_names=valley_names,
+                    numerical_cache=numerical_cache,
                 )
             )
+            del numerical_cache
         kpoint_subspace["symmetry_status"] = _resolve_symmetry_status(
             symmetry_payload, symmetry_rows, kpoint_name,
         )

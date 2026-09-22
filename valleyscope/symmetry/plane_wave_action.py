@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections import OrderedDict
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -39,6 +40,88 @@ class PlaneWaveActionResult:
     mapping: np.ndarray
     mapping_miss_count: int
 
+
+
+class RunLocalPlaneWaveRepresentationCache:
+    """Bounded numerical reuse for one current source coefficient/q scope.
+
+    No trust verdicts, cross-grid actions or supplied results are accepted.
+    Actual input changes invalidate reuse, including in-place mutations.
+    """
+
+    def __init__(self, max_entries: int = 16) -> None:
+        if not isinstance(max_entries, int) or isinstance(max_entries, bool) or max_entries < 1:
+            raise ValueError("max_entries must be a positive integer")
+        self._max_entries = max_entries
+        self._coefficients_key: tuple | None = None
+        self._grid_key: tuple | None = None
+        self._grid_identity: str | None = None
+        self._entries: OrderedDict[tuple, PlaneWaveRepresentationResult] = OrderedDict()
+
+    def _bind_grid(self, q: np.ndarray) -> None:
+        key = _array_key(q)
+        if key != self._grid_key:
+            self._entries.clear()
+            self._grid_identity = None
+            self._grid_key = key
+
+    def grid_identity(self, q_cart: np.ndarray) -> str:
+        q = np.asarray(q_cart, dtype=float)
+        self._bind_grid(q)
+        if self._grid_identity is None:
+            self._grid_identity = reciprocal_grid_identity(q)
+        return self._grid_identity
+
+    def build(
+        self,
+        coefficients: np.ndarray,
+        q_cart: np.ndarray,
+        rotation_cart: np.ndarray,
+        translation_cart: np.ndarray,
+        *,
+        spin_rotation: np.ndarray | None = None,
+        tolerance: float = DEFAULT_RECIPROCAL_GRID_MAPPING_TOLERANCE,
+    ) -> PlaneWaveRepresentationResult:
+        coeffs = np.asarray(coefficients, dtype=np.complex128)
+        q = np.asarray(q_cart, dtype=float)
+        self._bind_grid(q)
+        coefficients_key = _array_key(coeffs)
+        if coefficients_key != self._coefficients_key:
+            self._entries.clear()
+            self._grid_identity = None
+            self._coefficients_key = coefficients_key
+        rotation = np.asarray(rotation_cart, dtype=float)
+        translation = np.asarray(translation_cart, dtype=float)
+        spin = None if spin_rotation is None else np.asarray(spin_rotation, dtype=np.complex128)
+        key = (
+            _array_key(rotation), _array_key(translation),
+            None if spin is None else _array_key(spin),
+            type(tolerance), float(tolerance),
+        )
+        if key in self._entries:
+            self._entries.move_to_end(key)
+            return self._entries[key]
+        result = build_plane_wave_representation(
+            coeffs, q, rotation, translation,
+            spin_rotation=spin, tolerance=tolerance,
+        )
+        result = replace(
+            result, matrix=_immutable_array(result.matrix),
+            mapping=_immutable_array(result.mapping),
+        )
+        self._entries[key] = result
+        if len(self._entries) > self._max_entries:
+            self._entries.popitem(last=False)
+        return result
+
+
+def _immutable_array(array: np.ndarray) -> np.ndarray:
+    # Bytes backing also prevents a caller from re-enabling array writes.
+    return np.frombuffer(array.tobytes(), dtype=array.dtype).reshape(array.shape)
+
+
+def _array_key(array: np.ndarray) -> tuple:
+    return array.shape, array.dtype.str, array.tobytes()
 
 
 def unitarity_deviation(matrix: np.ndarray) -> float:
@@ -199,12 +282,15 @@ def build_reciprocal_grid_map(
     base_source = np.rint(rot_q / tolerance).astype(np.int64)
     base_target = np.rint(target_q / tolerance).astype(np.int64)
     lookup = _q_vector_lookup(base_target)
-    q_flat = target_q.tolist()
     tol_sq = tolerance * tolerance
-    mapping = np.full(len(q), -1, dtype=int)
-    for source_idx, ((bx, by, bz), (qx, qy, qz)) in enumerate(
-        zip(base_source.tolist(), rot_q.tolist())
-    ):
+    mapping, certified = _certified_same_cell_candidates(
+        rot_q, target_q, base_source, base_target, lookup, tol_sq,
+    )
+    unresolved = np.flatnonzero(~certified)
+    q_flat = target_q.tolist() if len(unresolved) else []
+    for source_idx in unresolved:
+        bx, by, bz = base_source[source_idx].tolist()
+        qx, qy, qz = rot_q[source_idx].tolist()
         mapping[source_idx] = _lookup_q_vector(
             bx, by, bz, qx, qy, qz, lookup, q_flat, tol_sq,
         )
@@ -212,6 +298,70 @@ def build_reciprocal_grid_map(
         mapping=mapping,
         mapping_miss_count=int(np.count_nonzero(mapping < 0)),
     )
+
+
+def _certified_same_cell_candidates(
+    rotated: np.ndarray,
+    target: np.ndarray,
+    source_cells: np.ndarray,
+    target_cells: np.ndarray,
+    lookup: dict[tuple[int, int, int], list[int]],
+    tolerance_sq: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Prune only when every neighboring cell is provably farther away.
+
+    Each other cell in the 27-cell search lies in at least one of six
+    neighboring axis slabs. Bounds use the actual target coordinates in
+    those slabs, not idealized rounding-cell boundaries. Strict distance
+    comparison preserves the original kernel's equal-distance tie order.
+    """
+    mapping = np.full(len(rotated), -1, dtype=int)
+    certified = np.zeros(len(rotated), dtype=bool)
+    if not len(rotated) or not len(target):
+        return mapping, certified
+    candidates = np.fromiter(
+        (cell[0] if len(cell := lookup.get(tuple(key), ())) == 1 else -1
+         for key in source_cells.tolist()),
+        dtype=int, count=len(rotated),
+    )
+    positions = np.flatnonzero(candidates >= 0)
+    if not len(positions):
+        return mapping, certified
+    points = rotated[positions]
+    cells = source_cells[positions]
+    delta = target[candidates[positions]] - points
+    with np.errstate(over="ignore", invalid="ignore"):
+        distance_sq = delta[:, 0] ** 2 + delta[:, 1] ** 2 + delta[:, 2] ** 2
+        lower_bound_sq = np.full(len(positions), np.inf)
+        for axis in range(3):
+            labels, inverse = np.unique(target_cells[:, axis], return_inverse=True)
+            minimum = np.full(len(labels), np.inf)
+            maximum = np.full(len(labels), -np.inf)
+            np.minimum.at(minimum, inverse, target[:, axis])
+            np.maximum.at(maximum, inverse, target[:, axis])
+            for offset in (-1, 1):
+                adjacent = cells[:, axis] + offset
+                indices = np.searchsorted(labels, adjacent)
+                indices = np.minimum(indices, len(labels) - 1)
+                present = labels[indices] == adjacent
+                separation = np.maximum(
+                    np.maximum(minimum[indices] - points[:, axis],
+                               points[:, axis] - maximum[indices]),
+                    0.0,
+                )
+                lower_bound_sq[present] = np.minimum(
+                    lower_bound_sq[present], separation[present] ** 2,
+                )
+    # Avoid wrapped int64 neighbor arithmetic; the reference uses Python ints.
+    limits = np.iinfo(np.int64)
+    safe_cells = np.all((cells > limits.min) & (cells < limits.max), axis=1)
+    accepted = (
+        safe_cells & np.isfinite(distance_sq)
+        & (distance_sq <= tolerance_sq) & (distance_sq < lower_bound_sq)
+    )
+    certified[positions[accepted]] = True
+    mapping[positions[accepted]] = candidates[positions[accepted]]
+    return mapping, certified
 
 
 def validate_reciprocal_grid_permutation(

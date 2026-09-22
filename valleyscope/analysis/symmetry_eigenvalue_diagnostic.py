@@ -15,8 +15,7 @@ from valleyscope.symmetry.double_space_group_lift import (
 from valleyscope.symmetry.plane_wave_action import (
     DEFAULT_RECIPROCAL_GRID_MAPPING_TOLERANCE,
     RECIPROCAL_GRID_ACTION_CONVENTION,
-    build_plane_wave_representation,
-    reciprocal_grid_identity,
+    RunLocalPlaneWaveRepresentationCache,
     unitarity_deviation,
 )
 
@@ -31,6 +30,7 @@ def symmetry_eigenvalue_diagnostics_for_kpoint(
     basis_payload: dict[str, np.ndarray] | None,
     representation_payload: dict[str, object],
     valley_names: list[str] | None = None,
+    numerical_cache: RunLocalPlaneWaveRepresentationCache | None = None,
 ) -> list[dict[str, object]]:
     """Compute diagnostic eigenvalues for valley-preserving little-group operations.
 
@@ -40,6 +40,8 @@ def symmetry_eigenvalue_diagnostics_for_kpoint(
     Each row is keyed by (kpoint, operation, state_index, target_valley).
     """
     rows: list[dict[str, object]] = []
+    if numerical_cache is None:
+        numerical_cache = RunLocalPlaneWaveRepresentationCache()
 
     if valley_names is None:
         valley_names = _infer_valley_names(symmetry_payload)
@@ -92,6 +94,7 @@ def symmetry_eigenvalue_diagnostics_for_kpoint(
                 little_group_passed=little,
                 target_valley=target_valley,
                 valley_preserving=valley_preserves,
+                numerical_cache=numerical_cache,
             )
 
     return rows
@@ -110,6 +113,7 @@ def _append_operation_rows(
     little_group_passed: bool,
     target_valley: str,
     valley_preserving: bool,
+    numerical_cache: RunLocalPlaneWaveRepresentationCache,
 ) -> None:
     """Append eigenvalue rows for a single (operation, target_valley) pair."""
 
@@ -135,7 +139,7 @@ def _append_operation_rows(
         }
         return
 
-    representation = build_plane_wave_representation(
+    representation = numerical_cache.build(
         coefficients,
         q_cart,
         np.asarray(operation["rotation_cart"]),
@@ -193,7 +197,7 @@ def _append_operation_rows(
         "eigenvalues": eigenvalues,
         "plane_wave_mapping": representation.mapping,
         "plane_wave_action_convention": RECIPROCAL_GRID_ACTION_CONVENTION,
-        "reciprocal_grid_identity": reciprocal_grid_identity(q_cart),
+        "reciprocal_grid_identity": numerical_cache.grid_identity(q_cart),
         "reciprocal_grid_dimension": int(len(q_cart)),
         "plane_wave_mapping_tolerance": (
             DEFAULT_RECIPROCAL_GRID_MAPPING_TOLERANCE
@@ -350,6 +354,7 @@ def build_raw_representations_for_kpoint(
     q_cart: np.ndarray,
     coefficients: np.ndarray,
     symmetry_payload: dict[str, object],
+    numerical_cache: RunLocalPlaneWaveRepresentationCache | None = None,
 ) -> dict[object, dict[str, object]]:
     """Build or explain D_raw once per (kpoint, operation_id).
 
@@ -363,6 +368,8 @@ def build_raw_representations_for_kpoint(
                          "sector_mapping": dict, "little_group_passed": bool}]
     """
     result: dict[object, dict[str, object]] = {}
+    if numerical_cache is None:
+        numerical_cache = RunLocalPlaneWaveRepresentationCache()
     lg_tol = float(symmetry_payload.get(
         "hsp_little_group_k_residual_tolerance",
         DEFAULT_HSP_LITTLE_GROUP_K_RESIDUAL_TOLERANCE,
@@ -421,7 +428,7 @@ def build_raw_representations_for_kpoint(
             )
             continue
 
-        representation = build_plane_wave_representation(
+        representation = numerical_cache.build(
             coefficients,
             q_cart,
             np.asarray(operation["rotation_cart"]),
@@ -448,7 +455,7 @@ def build_raw_representations_for_kpoint(
             "plane_wave_action_convention": (
                 RECIPROCAL_GRID_ACTION_CONVENTION
             ),
-            "reciprocal_grid_identity": reciprocal_grid_identity(q_cart),
+            "reciprocal_grid_identity": numerical_cache.grid_identity(q_cart),
             "reciprocal_grid_dimension": int(len(q_cart)),
             "plane_wave_mapping_tolerance": (
                 DEFAULT_RECIPROCAL_GRID_MAPPING_TOLERANCE

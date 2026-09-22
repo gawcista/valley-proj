@@ -63,6 +63,98 @@ def _cubic_grid(radius):
     )
 
 
+def _reference_cell_map(q, rotation, tolerance, target):
+    """Old 27-cell iteration, including its exact equal-distance tie order."""
+    rotated = q @ rotation.T
+    source_bins = np.rint(rotated / tolerance).astype(np.int64)
+    target_bins = np.rint(target / tolerance).astype(np.int64)
+    result = []
+    for point, cell in zip(rotated.tolist(), source_bins.tolist()):
+        best, best_sq = -1, float("inf")
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for dz in (-1, 0, 1):
+                    neighbor = [cell[0] + dx, cell[1] + dy, cell[2] + dz]
+                    for index, (candidate, candidate_cell) in enumerate(zip(target.tolist(), target_bins.tolist())):
+                        if candidate_cell != neighbor:
+                            continue
+                        x, y, z = [a - b for a, b in zip(candidate, point)]
+                        distance = x * x + y * y + z * z
+                        if distance <= tolerance * tolerance and distance < best_sq:
+                            best, best_sq = index, distance
+        result.append(best)
+    return result
+
+
+def test_isolated_same_cell_candidates_do_not_need_neighbor_search(monkeypatch):
+    from valleyscope.symmetry import plane_wave_action as action
+
+    calls = []
+    original = action._lookup_q_vector
+
+    def counted(*args):
+        calls.append(1)
+        return original(*args)
+
+    monkeypatch.setattr(action, "_lookup_q_vector", counted)
+    q = _cubic_grid(1)
+    target = (q @ _ROT_Z_90.T)[::-1].copy()
+    # Nonzero displacements ensure this isn't merely a zero-distance shortcut.
+    target[:, 0] += 1e-9
+    result = build_reciprocal_grid_map(q, _ROT_Z_90, target_q_cart=target)
+    assert result.mapping.tolist() == list(range(len(q) - 1, -1, -1))
+    assert result.mapping_miss_count == 0
+    assert calls == []
+
+
+@pytest.mark.parametrize("source_x,target_x,expected", [
+    ([0.49], [0.1, 0.51], [1]),  # Neighbor beats the same-cell candidate.
+    ([0.], [0.75, -0.75], [1]),  # Cell order, not target index, breaks ties.
+    ([0.], [0., 0.], [0]),  # Duplicate targets keep insertion order.
+    ([0.], [0.3, 0.1], [1]),  # Multiple candidates inside the same cell.
+    ([0.5], [0., 1.], [0]),
+    ([np.nextafter(0.5, 1.)], [0., 1.], [1]),
+    ([0.], [1.], [0]),  # Inclusive mapping tolerance, unlike the qcut mask.
+    ([0.], [np.nextafter(1., 2.)], [-1]),
+    ([0.], [0.9], [0]),  # Missing same-cell candidate is not a mapping miss.
+    ([0., 1.], [], [-1, -1]),
+    ([], [0.], []),
+])
+def test_nearest_candidate_search_preserves_boundary_and_tie_semantics(source_x, target_x, expected):
+    source = np.zeros((len(source_x), 3))
+    target = np.zeros((len(target_x), 3))
+    source[:, 0], target[:, 0] = source_x, target_x
+    result = build_reciprocal_grid_map(source, np.eye(3), tolerance=1., target_q_cart=target)
+    assert result.mapping.tolist() == expected
+
+
+@pytest.mark.parametrize("scale", [1e-200, 1e-155, 1e-6, 1., 1e150, 1e200])
+def test_same_cell_pruning_matches_original_search_on_dense_irregular_grids(scale):
+    rng = np.random.default_rng(2718)
+    target = rng.uniform(-3., 3., (40, 3)) * scale
+    source = np.concatenate((target[:8], rng.uniform(-3., 3., (12, 3)) * scale))
+    rotation = np.array([[0., 1., 0.], [0., 0., 1.], [-1., 0., 0.]])
+    actual = build_reciprocal_grid_map(source, rotation, tolerance=scale, target_q_cart=target)
+    assert actual.mapping.tolist() == _reference_cell_map(source, rotation, scale, target)
+
+
+def test_extreme_integer_cell_keeps_python_integer_neighbor_search(monkeypatch):
+    from valleyscope.symmetry import plane_wave_action as action
+
+    calls = []
+    original = action._lookup_q_vector
+
+    def counted(*args):
+        calls.append(1)
+        return original(*args)
+
+    monkeypatch.setattr(action, "_lookup_q_vector", counted)
+    q = np.array([[float(-(2**63)), 0., 0.]])
+    result = build_reciprocal_grid_map(q, np.eye(3), tolerance=1.)
+    assert result.mapping.tolist() == [0]
+    assert len(calls) == 1
+
+
 _ROT_Z_90 = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
 _ROT_X_180 = np.array([[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]])
 
