@@ -876,8 +876,12 @@ def test_generic_irrep_source_blocked_negative_toy_fixture(tmp_path):
     assert not (out_dir / "valley_reduced_ebr_mapping.json").exists()
 
 
-def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
-    """analyze_hsp wires a trusted generic match into reduced EBR mapping."""
+def test_generic_irrep_analyze_hsp_orchestration_with_injected_evidence(tmp_path, monkeypatch):
+    """Exercise analyze_hsp orchestration with injected subgroup/readiness data.
+
+    Synthetic source characters and producer reports isolate argument wiring,
+    summary output, and downstream mapping behavior from numerical trust.
+    """
     from valleyscope.analysis.database_ingestion_record import (
         load_database_ingestion_record_from_directory,
     )
@@ -1155,12 +1159,12 @@ def test_generic_irrep_positive_analyze_hsp_workflow_e2e(tmp_path, monkeypatch):
     assert bad_mapping["problem_instance_count"] == 1
 
 
-def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
-    """Real runtime spec builder path produces same outputs as table_file.
+def test_table_file_spec_file_orchestration_equivalence(tmp_path, monkeypatch):
+    """Compare table/spec output wiring with injected workflow evidence.
 
-    Only ``_load_ebr_data_from_irreptables`` is monkeypatched — the
-    actual ``build_reduced_table_from_spec_file`` runs for real through
-    the spec → source payload → reduce → validate pipeline.
+    The runtime spec builder executes with a stubbed source-data loader.
+    Subgroup, readiness, character, and projected-HSP producers are also
+    stubbed, so this covers orchestration rather than numerical acceptance.
     """
     from valleyscope.analysis.database_ingestion_record import (
         load_database_ingestion_record_from_directory,
@@ -1168,7 +1172,7 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
     import valleyscope.workflows.analyze_hsp as workflow_mod
     import valleyscope.analysis.irreptables_runtime_table_builder as builder_mod
 
-    # --- HDF5 fixture (same P4 toy as the table_file E2E test) ---
+    # --- HDF5 fixture (same P4 toy as the table_file orchestration test) ---
     h5_path = tmp_path / "wf.h5"
     structure = tmp_path / "CONTCAR"
     write_square_poscar(structure)
@@ -1309,7 +1313,7 @@ def test_table_file_spec_file_e2e_equivalence(tmp_path, monkeypatch):
         lambda **_: None,
     )
 
-    # Common monkeypatches (same as table_file E2E test).
+    # Common producer stubs (same as table_file orchestration test).
     monkeypatch.setattr(
         workflow_mod, "_build_symmetry_adapted_valley_report",
         lambda **_: symmetry_adapted_report,
@@ -1881,9 +1885,12 @@ def test_missing_characters_block_match():
     assert "incomplete" in result["reason"]
 
 
-def test_reviewed_table_source_payload_positive_full_pipeline():
-    """Real reviewed-table source payload drives the full generic chain:
-    matcher -> EBR -> reduced mapping -> database ingestion."""
+def test_reviewed_table_downstream_orchestration_blocks_unresolved_setting():
+    """Use reviewed characters with synthetic readiness/C-prime fixtures.
+
+    Downstream consumers retain candidates but reject final mapping when the
+    standard setting is unresolved; this does not certify numerical producers.
+    """
     from valleyscope.irreps.tables import (
         load_standard_irrep_table,
         match_table_operations,
@@ -2078,9 +2085,8 @@ def test_reviewed_table_source_payload_positive_full_pipeline():
         "irreps": [f"GammaM:{irr}" for irr in bp_irreps],
         "ebrs": [{"label": "EBR_X", "vector": [1, 1]}],
     }
-    # The real pipeline produces an UNRESOLVED standard-setting certificate
-    # (Phase E incomplete), so fail-closed promotion blocks.  No fictitious
-    # certificate is injected; this documents the exact remaining blocker.
+    # This isolated fixture has an unresolved standard-setting certificate,
+    # so downstream promotion must block despite its injected readiness data.
     result = build_reduced_ebr_mapping(ebr_export_bundle=ebr_bundle, table=table_def)
     assert result["status"] == "blocked"
     assert result["solutions"] == []
@@ -2106,9 +2112,8 @@ def test_reviewed_table_source_payload_positive_full_pipeline():
     assert record["reduced_ebr_mapping_status"] == "blocked"
 
 
-def test_spinful_p3_analyze_hsp_unmocked_feasibility(tmp_path):
-    """Feasibility test: fully unmocked spinful P3 analyze_hsp E2E is blocked
-    by toy fixture limitations. Documents exact blocker for future work."""
+def test_higher_symmetry_structure_cannot_use_forced_p3_source(tmp_path):
+    """A detected SG191 input cannot claim trusted matching to a forced P3 source."""
     h5_path = tmp_path / "wf.h5"
     structure = tmp_path / "CONTCAR"
     write_simple_poscar(structure)
@@ -2168,17 +2173,15 @@ def test_spinful_p3_analyze_hsp_unmocked_feasibility(tmp_path):
     assert "valley_irrep_matching" not in summary
     resolved = summary["valley_resolved_irreps"]
 
-    # Document the blocker: toy fixture cannot produce trusted generic matches.
+    # The configured source is incompatible with the detected physical group.
     matched_count = sum(
         1
         for row in resolved.get("rows", [])
         if isinstance(row, dict) and row.get("matching_status") == "matched"
     )
 
-    # Blocker assertion: no matched generic rows from toy spinful fixture.
     assert matched_count == 0, (
-        "BLOCKER CLEARED: toy fixture unexpectedly produced trusted "
-        "generic matches - fully unmocked E2E may now be feasible"
+        "incompatible P3 source must not produce trusted generic matches"
     )
 
     # The one-atom hexagonal toy structure is higher symmetry than SG143/P3.

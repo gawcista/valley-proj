@@ -1030,7 +1030,6 @@ def test_ingestion_record_excludes_non_ready_bundles():
 
 def test_ingestion_record_with_reduced_ebr_mapping():
     """Reduced EBR mapping adds status and classification counts."""
-    summary = {"target_kpoints": [], "iband": [], "input": {}}
     payloads = [
         _authoritative_unitary_ingestion_payload(
             bundle_id=f"b_{index}",
@@ -1057,7 +1056,7 @@ def test_ingestion_record_with_reduced_ebr_mapping():
         ],
     }
     record = build_database_ingestion_record(
-        valley_summary=summary,
+        valley_summary=cprime_summary_for_export(export),
         valley_ebr_export_bundle=export,
         valley_reduced_ebr_mapping=mapping,
     )
@@ -1152,6 +1151,7 @@ def test_cli_collect_database_record_returns_nonzero_for_invalid_record(tmp_path
     assert record["validation_errors"]
 
 
+@pytest.mark.dev_docs
 def test_schema_doc_documents_database_ingestion_record():
     """Public schema documents the explicit offline ingestion-record CLI."""
     schema = Path("docs/schema.md").read_text(encoding="utf-8")
@@ -1484,7 +1484,7 @@ def test_centered_ingestion_has_no_final_result_for_non_lattice_transform(
 def _make_ingestion_record(
     status="has_final_reduced_ebr_results", run_id="run_0000"
 ):
-    return {
+    record = {
         "schema_version": "1.3.0",
         "record_status": status,
         "space_group_international": "P321",
@@ -1514,6 +1514,16 @@ def _make_ingestion_record(
         "reduced_ebr_table_status": "loaded",
         "validation_errors": [],
     }
+    if status != "has_final_reduced_ebr_results":
+        record["final_reduced_ebr_result_count"] = 0
+        record["reduced_ebr_records"] = []
+        record["reduced_ebr_classification_counts"]["atomic_compatible"] = 0
+        record["reduced_ebr_mapping_status"] = "not_available"
+        record["reduced_ebr_table_status"] = "not_available"
+    if status == "no_reduced_ebr_input":
+        record["reduced_table_validation_candidate_bundle_count"] = 0
+        record["valley_irrep_records"] = []
+    return record
 
 
 def _write_blocked_public_run(run_dir: Path) -> Path:
@@ -1565,9 +1575,10 @@ def test_database_index_builder_two_records():
     assert index["status_counts"]["no_reduced_ebr_input"] == 1
     assert index[
         "reduced_table_validation_candidate_bundle_count_total"
-    ] == 4
-    assert index["final_reduced_ebr_result_count_total"] == 2
-    assert index["reduced_ebr_classification_counts_total"]["atomic_compatible"] == 2
+    ] == 2
+    assert index["final_reduced_ebr_result_count_total"] == 1
+    assert index["reduced_ebr_classification_counts_total"]["atomic_compatible"] == 1
+    assert index["validation_errors"] == []
     # Flattened records have run_id provenance.
     assert index["runs"][0]["run_id"] == "run_0000"
     assert index["runs"][1]["run_id"] == "run_0001"
@@ -1591,7 +1602,7 @@ def test_database_index_builder_two_records():
         assert "run_id" in rr
         assert "source_record" in rr
         assert rr["source_input"]["kind"] == "ingestion_record_file"
-    assert len(index["reduced_ebr_records"]) == 2
+    assert len(index["reduced_ebr_records"]) == 1
 
 
 def test_database_index_aggregates_indeterminate_truncated_classification():
@@ -1599,6 +1610,11 @@ def test_database_index_aggregates_indeterminate_truncated_classification():
 
     record = _make_ingestion_record()
     record["final_reduced_ebr_result_count"] = 2
+    record["reduced_ebr_records"].append({
+        "bundle_id": "b_truncated",
+        "status": "indeterminate_truncated",
+        "classification": "indeterminate_truncated",
+    })
     record["reduced_ebr_classification_counts"] = {
         "atomic_compatible": 1,
         "in_integer_span_no_nonnegative_witness": 0,
@@ -1628,10 +1644,15 @@ def test_database_index_uses_stage_owned_aggregates_only():
         "final_mapping_excluded_bundle_count": 1,
         "input_excluded_instance_count": 3,
         "valley_irrep_records": [],
-        "reduced_ebr_records": [{"bundle_id": "b"}],
-        "input_excluded_ebr_records": [{"source_instance_id": "i"}],
+        "reduced_ebr_records": [{
+            "bundle_id": "b", "status": "solved_exact",
+            "classification": "atomic-compatible-candidate",
+        }],
+        "input_excluded_ebr_records": [
+            {"source_instance_id": f"i_{idx}"} for idx in range(3)
+        ],
         "final_mapping_excluded_records": [{"bundle_id": "blocked"}],
-        "reduced_ebr_classification_counts": {},
+        "reduced_ebr_classification_counts": {"atomic_compatible": 1},
         "validation_errors": [],
     }
 
@@ -2478,8 +2499,9 @@ def test_reduced_ebr_records_pick_up_table_provenance():
         },
     )
     record = build_database_ingestion_record(
-        valley_summary={"target_kpoints": ["GammaM", "KM"], "iband": [1, 2],
-                        "input": {}},
+        valley_summary=cprime_summary_for_export(
+            export, target_kpoints=["GammaM", "KM"], iband=[1, 2],
+        ),
         valley_ebr_export_bundle=export,
         valley_reduced_ebr_mapping=mapping,
     )

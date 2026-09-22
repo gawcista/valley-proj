@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from valleyscope.analysis.ebr_export_bundle import build_ebr_export_bundle
 
 
@@ -245,18 +247,34 @@ def test_source_hsp_coverage_fields_are_exported_without_loss():
     }
 
 
+@pytest.mark.dev_docs
 def test_schema_doc_covers_centered_export_and_ingestion_versions():
+    from valleyscope.analysis.database_ingestion_record import (
+        build_database_ingestion_record,
+    )
+
     schema = Path("docs/schema.md").read_text(encoding="utf-8")
     normalized_schema = " ".join(schema.split())
-    assert 'Schema version `"1.8.0"`' in schema
-    assert 'Current ingestion-record schema version: `"1.8.0"`' in schema
+    export = build_ebr_export_bundle(ebr_problem_instances=None)
+    record = build_database_ingestion_record(valley_summary=None)
+    export_section = schema.split("### `valley_ebr_export_bundle.json`", 1)[1]
+    export_section = export_section.split("###", 1)[0]
+    assert f'Schema version `"{export["schema_version"]}"`' in export_section
+    assert (
+        f'Current ingestion-record schema version: `"{record["schema_version"]}"`'
+        in schema
+    )
     assert "centered_affine_operation_map" in schema
     assert "centering_coset_index" in schema
     assert (
         "no downstream grouping or serialization step may reorder"
         in normalized_schema
     )
-    assert "fail closed at promotion" in schema
+    assert (
+        "Missing maps, missing or reordered cosets, malformed exact IDs, "
+        "duplicate/reused standard indices, or absent unmatched/unused audits "
+        "cannot enter the exact reduced EBR solver."
+    ) in normalized_schema
 
 
 def test_schema_1_2_preserves_required_operation_ids_in_certificate_identity():

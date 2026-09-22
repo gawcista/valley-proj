@@ -32,3 +32,6 @@ include = ["valleyscope*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+  "dev_docs: local development-document checks (opt in with VALLEYSCOPE_RUN_DEV_DOC_TESTS=1)",
+]

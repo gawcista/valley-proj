@@ -179,6 +179,7 @@ def build_database_ingestion_record(
     # --- valley_ebr_export_bundle (optional) ---
     validation_candidate_count = 0
     valley_irrep_records: list[dict[str, Any]] = []
+    summary_validated_bundle_ids: set[str] = set()
 
     if valley_ebr_export_bundle is not None:
         bundles = valley_ebr_export_bundle.get("bundles", [])
@@ -205,6 +206,9 @@ def build_database_ingestion_record(
                     if cprime_error is not None:
                         errors.append(cprime_error)
                         continue
+                    bundle_id = bundle.get("bundle_id")
+                    if isinstance(bundle_id, str) and bundle_id:
+                        summary_validated_bundle_ids.add(bundle_id)
                     validation_candidate_count += 1
                     if (
                         unitary_bundle_claims_valley_sewing_completion(bundle)
@@ -253,6 +257,7 @@ def build_database_ingestion_record(
         valid_solutions = _authoritative_mapping_solutions(
             solutions=solutions,
             valley_ebr_export_bundle=valley_ebr_export_bundle,
+            summary_validated_bundle_ids=summary_validated_bundle_ids,
             reduced_ebr_input=reduced_ebr_input,
             errors=errors,
         )
@@ -477,12 +482,13 @@ def _validate_bundle_cprime_against_summary(
         return "summary C-prime acceptance matrix is malformed"
     valley = str(bundle.get("valley", ""))
     by_scope: dict[tuple[str, str], dict[str, Any]] = {}
+    duplicate_scopes: set[tuple[str, str]] = set()
     for row in acceptance_matrix:
         if not isinstance(row, dict):
             continue
         key = (str(row.get("kpoint", "")), str(row.get("valley", "")))
         if key in by_scope:
-            return "summary C-prime acceptance matrix has duplicate scope"
+            duplicate_scopes.add(key)
         by_scope[key] = row
     bundle_links = bundle.get("cprime_identity_by_kpoint")
     irreps = bundle.get("irreps_by_kpoint")
@@ -525,7 +531,10 @@ def _validate_bundle_cprime_against_summary(
                     "summary C-prime scope missing for "
                     f"{scope_key}/{scope_valley}"
                 )
-        row = by_scope.get((str(kpoint), str(scope_valley)))
+        scope_key = (str(kpoint), str(scope_valley))
+        if scope_key in duplicate_scopes:
+            return f"summary C-prime acceptance matrix has duplicate scope for {kpoint}/{scope_valley}"
+        row = by_scope.get(scope_key)
         if not isinstance(row, dict) or not isinstance(identity, dict):
             return (
                 f"summary C-prime scope missing for {kpoint}/{scope_valley}"
@@ -558,6 +567,7 @@ def _authoritative_mapping_solutions(
     *,
     solutions: object,
     valley_ebr_export_bundle: dict[str, Any] | None,
+    summary_validated_bundle_ids: set[str],
     reduced_ebr_input: dict[str, Any] | None,
     errors: list[str],
 ) -> list[dict[str, Any]]:
@@ -610,12 +620,20 @@ def _authoritative_mapping_solutions(
             continue
         bundle_id = solution.get("bundle_id")
         display_id = bundle_id if isinstance(bundle_id, str) else "<unknown>"
+        if not isinstance(bundle_id, str) or not bundle_id.strip():
+            errors.append("mapping solution has invalid bundle_id")
+            continue
         if bundle_id in duplicate_solution_ids:
             continue
         bundle = ready_by_id.get(bundle_id) if isinstance(bundle_id, str) else None
         if bundle is None:
             errors.append(
                 f"mapping solution {display_id}: no matching ready export bundle"
+            )
+            continue
+        if bundle_id not in summary_validated_bundle_ids:
+            errors.append(
+                f"mapping solution {display_id}: summary C-prime binding did not validate"
             )
             continue
         if not _has_passed_promotion_provenance(solution):

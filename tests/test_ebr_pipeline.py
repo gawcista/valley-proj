@@ -768,6 +768,7 @@ def test_reduced_ebr_mapping_ignores_irrep_records():
     assert r["status"] == "solved_exact"  # Provenance ignored; decomposition succeeds.
 
 
+@pytest.mark.dev_docs
 def test_schema_doc_documents_irrep_records_by_kpoint():
     """docs/schema.md must document the new irrep_records_by_kpoint field."""
     schema = Path("docs/schema.md").read_text(encoding="utf-8")

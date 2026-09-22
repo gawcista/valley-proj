@@ -5,6 +5,7 @@ import pytest
 # Benchmark ingestion record anchor tests
 # -----------------------------------------------------------------------
 
+@pytest.mark.dev_docs
 def test_benchmark_ingestion_record_docs():
     """Smoke doc and benchmark matrix must cover ingestion record anchors and state offline-only."""
     smoke_path = Path("docs/benchmarks/database_ingestion_record_smoke.md")

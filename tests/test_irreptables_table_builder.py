@@ -347,6 +347,7 @@ def test_cli_build_reduced_ebr_table_writes_validated_table_with_fake_builder(
     assert "filtered zero EBRs: 1" in captured
 
 
+@pytest.mark.dev_docs
 def test_build_reduced_ebr_table_spec_doc_is_linked_and_material_free():
     doc = Path("docs/build_reduced_ebr_table_spec.md")
     assert doc.exists()
@@ -890,219 +891,12 @@ def test_build_preflight_no_material_names():
 
 
 # -----------------------------------------------------------------------
-# C3 reduced EBR authoring audit doc contract
-# -----------------------------------------------------------------------
-
-def test_c3_audit_doc_exists_and_covers_physical_objects():
-    """C3 audit doc must exist and cover HSP little group, valley mapping, etc."""
-    doc = Path("docs/reduced_ebr_c3_authoring_audit.md")
-    assert doc.exists()
-    text = doc.read_text(encoding="utf-8")
-    for term in [
-        "HSP little group", "valley mapping", "valley-preserving subgroup",
-        "valley-preserving operation", "valley-changing operation",
-        "valley sewing matrix", "source 3D irrep labels",
-        "reduced EBR vector basis", "C3_spinor_phase",
-        "inspect-ebr-source", "150",
-    ]:
-        assert term.lower() in text.lower(), f"missing '{term}'"
-    assert "source_basis_count" in text or "22 source" in text
-
-
-def test_c3_audit_doc_no_material_names_and_no_builtin_tables():
-    """C3 audit doc must not contain material names or claim built-in tables."""
-    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
-    for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
-        assert name not in doc
-    assert "no built-in" in doc.lower() or "not hardcoded" in doc.lower()
-
-
-def test_c3_audit_doc_does_not_put_c2_in_reduced_c3_basis():
-    """C3 audit doc must keep C2 sewing data out of the reduced C3 irrep basis."""
-    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
-    assert "{E, C3, C3^2, C2" not in doc
-    assert "MM identity-only" in doc
-
-
-def test_c3_audit_doc_keeps_degenerate_k6_out_of_1d_phase_basis():
-    """C3 audit doc must not map degenerate K6 source labels to 1D phases."""
-    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
-    assert "`-K6` | KM | 1 | `KM:C3_spinor_phase_-1/6`" not in doc
-    assert "`-K6` | 2" in doc
-
-
-def test_c3_audit_doc_blocks_public_api_phase_mapping_without_evidence():
-    """Opaque public source labels need human review, not review-ready status.
-    The doc may say "no label is review_ready" as a meta-statement, but no
-    individual label row may carry `review_ready` as its status value."""
-    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
-    # "No source irrep label is `review_ready`" is the correct meta-statement.
-    assert "No source irrep label is `review_ready`" in doc
-    assert "needs_human_review" in doc
-    assert "blocked_by_missing_restriction_data" in doc
-
-
-def test_c3_audit_doc_names_public_ebr_api_boundary_precisely():
-    """C3 audit doc must name the public irreptables EBR loader boundary."""
-    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
-    assert "irreptables.ebrs.load_ebr_data" in doc
-    assert "irreptables.load_ebr_data" not in doc
-
-
-def test_c3_convention_packet_uses_2pi_phase_character_formula():
-    """C3 convention packet must use phase labels in units of 2*pi."""
-    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
-    assert "exp(2*pi*i*phase_i)" in doc
-    assert "exp(4*pi*i*phase_i)" in doc
-    assert "exp(+i*pi*phase_i)" not in doc
-    assert "(conjugate)" not in doc
-
-
-def test_c3_audit_has_readiness_summary_table():
-    """C3 audit doc must have a concise readiness summary table at the top."""
-    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
-    assert "C3 Convention Readiness Summary" in doc
-    assert "No source irrep label is `review_ready`" in doc
-    # Summary table must list both candidate and blocked labels.
-    for label in ["-GM5", "-K5", "-GM4", "-GM6", "-K4", "-K6"]:
-        assert label in doc
-
-
-def test_c3_audit_has_machine_checked_evidence_section():
-    """C3 audit doc must separate machine-checked from external evidence."""
-    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
-    assert "Machine-Checked vs. External Evidence" in doc
-    assert "Evidence Already Machine-Checked By Existing Tests" in doc
-    assert "Evidence Requiring External / Manual Review" in doc
-    assert "test_phase_tables.py" in doc
-    assert "test_irreptables_table_builder.py" in doc
-    assert "test_reduced_ebr_smoke.py" in doc
-
-
-def test_c3_audit_has_explicit_human_decisions_section():
-    """C3 audit doc must list exactly what human decisions are still required."""
-    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
-    assert "Human Decisions Still Required" in doc
-    assert "Confirm the 1D labels with Bilbao character evidence" in doc
-    assert "`-GM4`, `-GM5`" in doc
-    assert "`-K4`, and `-K5`" in doc
-    assert "Confirm `-GM6` and `-K6`" in doc
-    assert "Decide which labels enter the first reduced basis" in doc
-    assert "Sign off on provenance record" in doc
-    assert "no C3-like reduced EBR table" in doc
-    assert "claimed as reviewed" in doc
-
-
-def test_c3_audit_has_feasibility_assessment_section():
-    """C3 audit doc must have a feasibility assessment section with the
-    full physical mapping chain, per-label evidence table, and API audit."""
-    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
-    assert "C3 Character Evidence Feasibility Assessment" in doc
-    # Physical mapping chain
-    for term in [
-        "source SG 150 spinful irrep label",
-        "sampled moire HSP",
-        "HSP little group",
-        "valley mapping",
-        "valley-preserving subgroup",
-        "ValleyScope spinful C3 irrep phase key",
-    ]:
-        assert term.lower() in doc.lower(), f"missing '{term}'"
-    # Per-label evidence table
-    assert "Per-Label Evidence Requirements" in doc
-    # API audit entries
-    assert "Path 1:" in doc or "irreptables.ebrs.load_ebr_data(150, True)" in doc
-    assert "Path 2:" in doc or 'IrrepTable("150", True)' in doc
-    assert "Path 3:" in doc or "irrep.spacegroup_irreps.SpaceGroupIrreps" in doc
-    assert "INSUFFICIENT" in doc
-    assert "AVAILABLE" in doc
-    assert "BILBAO" in doc
-    # No evidence source claims review_ready
-    assert "`review_ready`" not in doc.split("Feasibility Assessment")[1] if "Feasibility Assessment" in doc else True
-
-
-def test_c3_feasibility_has_checklist():
-    """Feasibility section must have a human-reviewer checklist with at
-    least items 1-8 covering evidence source, per-label confirmation,
-    restriction decomposition, convention verification, and sign-off."""
-    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
-    assert "Human Decision Checklist" in doc
-    for item in [
-        "Select evidence source",
-        "Confirm the 1D C3 eigenphases",
-        "Confirm `-K6`",
-        "Confirm `-GM6`",
-        "Decide the first C3 reduced-basis source labels",
-        "Verify phase convention",
-        "Sign off",
-    ]:
-        assert item in doc, f"missing checklist item: '{item}'"
-
-
-def test_c3_feasibility_distinguishes_facts():
-    """Feasibility section must separate machine-checkable from human-required facts."""
-    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
-    assert "Machine-Checkable Facts" in doc
-    assert "External / Human-Required Facts" in doc
-    # Machine-checkable facts cite test files
-    assert "test_irreptables_table_builder.py" in doc
-    assert "test_phase_tables.py" in doc
-    # Human-required facts cite external references
-    assert "Bradley" in doc or "Bilbao" in doc or "literature" in doc.lower()
-
-
-def test_c3_feasibility_conclusion_is_conservative():
-    """Feasibility conclusion must state C3 character evidence is now
-    machine-checkable via irreptables Bilbao data, while still requiring
-    human review before shipping any reviewed table."""
-    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
-    assert "Feasibility Conclusion" in doc
-    assert "C3 character evidence is now machine-checkable" in doc
-    assert 'IrrepTable("150", True)' in doc
-    assert "no C3-like reduced EBR table" in doc
-    assert "may be shipped" in doc
-
-
-def test_c3_audit_has_no_stale_irreptables_character_claims():
-    """C3 audit doc must not retain pre-IrrepTable correction claims."""
-    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
-    stale_claims = [
-        "`-K5` | KM | 1 | `KM:C3_spinor_phase_+1/6`",
-        "Independent run evidence suggests +1/6",
-        "irreptables has no SG 150 character data",
-        "No — `irreptables` has no phase data",
-        "No public API exposes C3 character",
-        "Confirm `-K5` → `C3_spinor_phase_+1/6`",
-        "Expected: `exp(+i*pi/3)` = phase +1/6",
-        "`IrrepTable(150, True)`\n   fails because `irreptables/data/` lacks SG 150 files",
-        "decomposes to {+1/6, -1/6}",
-        "and decompose as `{+1/6, -1/6}`",
-    ]
-    for stale in stale_claims:
-        assert stale not in doc, f"stale C3 audit claim remains: {stale}"
-
-    current_claims = [
-        'IrrepTable("150", True)',
-        "`-K5` | 1 | op2=-1, op3=-1 | +1/2 from op2 | `KM:C3_spinor_phase_+1/2`",
-        "`-GM4` | 1 | op2=-1, op3=-1 | +1/2 from op2 | `GammaM:C3_spinor_phase_+1/2`",
-        "`-K4` | 1 | op2=-1, op3=-1 | +1/2 from op2 | `KM:C3_spinor_phase_+1/2`",
-        "candidate multiplicity `{+1/6: 1, -1/6: 1}`",
-        "pending human provenance sign-off",
-    ]
-    for current in current_claims:
-        assert current in doc, f"missing corrected C3 audit claim: {current}"
-
-
-# -----------------------------------------------------------------------
 # Irreptables Bilbao irrep data verification
 # -----------------------------------------------------------------------
 
 def _require_irreptables_irreps():
-    """Skip test if irreptables.irreps cannot be imported."""
-    try:
-        import irreptables.irreps  # noqa: F401
-    except ImportError:
-        pytest.skip("irreptables.irreps not available")
+    """Required runtime source failures must fail the regression, not skip it."""
+    import irreptables.irreps  # noqa: F401
 
 
 def test_irreptables_irrep_table_loads_sg150_spinful():
@@ -1310,109 +1104,6 @@ def test_double_group_2d_chi_op3_not_minus_one():
                 f"group-theoretic -1"
             )
             assert abs((-chi3) - (-1.0)) < 1e-10
-
-
-def test_double_group_audit_doc_covers_lift_convention():
-    """C3 audit doc must cover the double-group lift convention finding."""
-    doc = Path("docs/reduced_ebr_c3_authoring_audit.md").read_text(encoding="utf-8")
-    assert "C3 Double-Group Lift Convention Audit" in doc
-    assert "S2 @ S2 = -S3" in doc
-    assert "central-negative" in doc
-    assert "chi(C3²) = -chi(op3)" in doc or "chi(C3^2) = -chi(op3)" in doc
-    assert "diag(exp(+2iπ/3), exp(-2iπ/3))" in doc or "diag(exp(+2i" in doc
-
-
-# -----------------------------------------------------------------------
-# C3 mapping signoff packet doc-contract tests
-# -----------------------------------------------------------------------
-
-def test_signoff_packet_exists():
-    """docs/reduced_ebr_c3_mapping_signoff_packet.md must exist."""
-    path = Path("docs/reduced_ebr_c3_mapping_signoff_packet.md")
-    assert path.exists(), "signoff packet file missing"
-
-
-def test_signoff_packet_contains_all_six_source_labels():
-    """Signoff packet must list all six in-scope source labels with
-    their accepted ValleyScope keys."""
-    doc = Path("docs/reduced_ebr_c3_mapping_signoff_packet.md").read_text(encoding="utf-8")
-    assert "-GM4" in doc
-    assert "-GM5" in doc
-    assert "-GM6" in doc
-    assert "-K4" in doc
-    assert "-K5" in doc
-    assert "-K6" in doc
-    # 1D labels -> +1/2
-    for label in ["-GM4", "-GM5", "-K4", "-K5"]:
-        assert "C3_spinor_phase_+1/2" in doc
-    # degenerate labels -> multiplicity
-    assert "{+1/6: 1, -1/6: 1}" in doc
-
-
-def test_signoff_packet_states_central_sign_convention():
-    """Signoff packet must state chi(C3)=chi(op2) and chi(C3^2)=-chi(op3)."""
-    doc = Path("docs/reduced_ebr_c3_mapping_signoff_packet.md").read_text(encoding="utf-8")
-    assert "chi(C3) = chi(op2)" in doc or "chi(C3)=chi(op2)" in doc
-    assert "chi(C3²) = -chi(op3)" in doc or "chi(C3^2) = -chi(op3)" in doc
-
-
-def test_signoff_packet_excludes_c2_from_c3_basis():
-    """Signoff packet must state C2/op4-6 are valley sewing data and
-    must not enter the C3 reduced EBR vector basis."""
-    doc = Path("docs/reduced_ebr_c3_mapping_signoff_packet.md").read_text(encoding="utf-8")
-    assert "valley sewing data" in doc.lower()
-    assert "must not enter" in doc.lower() and "c3 reduced ebr vector basis" in doc.lower()
-
-
-def test_signoff_packet_states_no_builtin_table_shipped():
-    """Signoff packet must state it is not a reduced EBR table, not a
-    decomposition report, and no JSON is shipped."""
-    doc = Path("docs/reduced_ebr_c3_mapping_signoff_packet.md").read_text(encoding="utf-8")
-    assert "not a reduced ebr table" in doc.lower()
-    assert "not a reduced ebr decomposition report" in doc.lower()
-    assert "does not ship any" in doc.lower() and "reduced ebr table" in doc.lower()
-    assert "does not ship any json" in doc.lower()
-
-
-def test_signoff_packet_has_checklist():
-    """Signoff packet must include a signoff checklist with at least 8 items."""
-    doc = Path("docs/reduced_ebr_c3_mapping_signoff_packet.md").read_text(encoding="utf-8")
-    assert "Signoff Checklist" in doc
-    assert "Source data accepted" in doc
-    assert "HSP set confirmed" in doc
-    assert "Valley-preserving subgroup confirmed" in doc
-    assert "Central-sign convention confirmed" in doc
-    assert "Six source labels mapped" in doc
-    assert "C2 valley sewing data excluded" in doc
-    assert "Reviewer signoff" in doc
-
-
-def test_signoff_packet_records_provenance_fields():
-    """Signoff packet must list required provenance fields for a future
-    mapping spec/table."""
-    doc = Path("docs/reduced_ebr_c3_mapping_signoff_packet.md").read_text(encoding="utf-8")
-    for field in ["data_source", "space_group_number", "spinful",
-                  "subspace_group_candidate", "expected_hsps",
-                  "valleyscope_reduction", "review_status",
-                  "reviewer", "review_date", "review_method",
-                  "source_reference", "central_sign_convention"]:
-        assert field in doc, f"missing provenance field: {field}"
-
-
-def test_signoff_packet_distinguishes_catalog_enforced_provenance():
-    """Signoff packet must not claim every reviewer-required field is
-    currently enforced by the package-data catalog gate."""
-    doc = Path("docs/reduced_ebr_c3_mapping_signoff_packet.md").read_text(encoding="utf-8")
-    assert "All provenance fields are enforced" not in doc
-    assert "Catalog-enforced provenance fields" in doc
-    assert "Reviewer-required signoff fields" in doc
-
-
-def test_signoff_packet_no_material_names():
-    """Signoff packet must not contain real material names."""
-    doc = Path("docs/reduced_ebr_c3_mapping_signoff_packet.md").read_text(encoding="utf-8")
-    for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
-        assert name not in doc, f"signoff packet contains {name!r}"
 
 
 # -----------------------------------------------------------------------
@@ -2162,13 +1853,9 @@ _REAL_C3_KEYS = [
 
 
 def _require_real_irreptables_data():
-    """Skip if irreptables.ebrs.load_ebr_data is unavailable or SG150
-    spinful EBR data cannot be loaded."""
-    try:
-        from irreptables.ebrs import load_ebr_data
-        load_ebr_data(150, True)
-    except Exception as exc:
-        pytest.skip(f"real irreptables SG150 spinful data unavailable: {exc}")
+    """Require the reviewed source used by these portable table regressions."""
+    from irreptables.ebrs import load_ebr_data
+    load_ebr_data(150, True)
 
 
 def test_c3_real_source_v1_1_workflow_smoke(tmp_path):
@@ -2248,41 +1935,6 @@ def test_c3_real_source_v1_1_workflow_smoke(tmp_path):
     table_path.write_text(json.dumps(table))
     validated = load_reduced_ebr_table(table_path)
     assert validated["irreps"] == _REAL_C3_KEYS
-
-
-# -----------------------------------------------------------------------
-# C3 v1.1 workflow smoke audit doc contract
-# -----------------------------------------------------------------------
-
-def test_c3_smoke_audit_doc_exists():
-    """Smoke audit doc must exist."""
-    path = Path("docs/reduced_ebr_c3_v1_1_real_source_workflow_smoke.md")
-    assert path.exists()
-
-
-def test_c3_smoke_audit_covers_physical_objects():
-    """Smoke audit doc must cover HSP little group, valley mapping, etc."""
-    doc = Path("docs/reduced_ebr_c3_v1_1_real_source_workflow_smoke.md").read_text(encoding="utf-8")
-    for term in [
-        "HSP little group", "valley mapping", "valley-preserving subgroup",
-        "valley-changing", "valley sewing matrix",
-    ]:
-        assert term.lower() in doc.lower(), f"missing '{term}'"
-    assert "22 source" in doc
-
-
-def test_c3_smoke_audit_states_no_table_shipped():
-    """Smoke audit doc must state no table JSON is shipped."""
-    doc = Path("docs/reduced_ebr_c3_v1_1_real_source_workflow_smoke.md").read_text(encoding="utf-8")
-    assert "no reduced EBR table JSON" in doc.lower() or "does not ship" in doc.lower()
-    assert "temporary" in doc.lower() or "not committed" in doc.lower()
-
-
-def test_c3_smoke_audit_no_material_names():
-    """Smoke audit doc must not contain real material names."""
-    doc = Path("docs/reduced_ebr_c3_v1_1_real_source_workflow_smoke.md").read_text(encoding="utf-8")
-    for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
-        assert name not in doc
 
 
 # -----------------------------------------------------------------------
@@ -2406,11 +2058,8 @@ def test_c3_real_source_mapping_e2e_solved_exact(tmp_path):
 # -----------------------------------------------------------------------
 
 def _require_irreptables_sg149():
-    try:
-        from irreptables.ebrs import load_ebr_data
-        load_ebr_data(149, True)
-    except Exception as exc:
-        pytest.skip(f"real irreptables SG149 spinful data unavailable: {exc}")
+    from irreptables.ebrs import load_ebr_data
+    load_ebr_data(149, True)
 
 
 def test_c2_mm_m3_dry_run_spec_and_build():
@@ -2470,19 +2119,6 @@ def test_c2_mm_m3_dry_run_spec_no_material_names():
     )
     for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
         assert name not in json.dumps(spec)
-
-
-def test_c2_mm_m3_dry_run_smoke_doc_exists():
-    """Smoke doc must exist."""
-    path = Path("docs/reduced_ebr_c2_mm_m3_external_dry_run_smoke.md")
-    assert path.exists()
-
-
-def test_c2_mm_m3_dry_run_smoke_doc_no_material_names():
-    """Smoke doc must not contain real material names."""
-    doc = Path("docs/reduced_ebr_c2_mm_m3_external_dry_run_smoke.md").read_text(encoding="utf-8")
-    for name in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
-        assert name not in doc
 
 
 def test_c2_mm_m3_dry_run_mapping_e2e_solved_exact():

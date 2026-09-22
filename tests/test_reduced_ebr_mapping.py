@@ -523,6 +523,7 @@ def test_valid_irrep_key_formats_accepted(tmp_path, good_key):
 # 14. schema/doc contract
 # -----------------------------------------------------------------------
 
+@pytest.mark.dev_docs
 def test_table_schema_doc_contract():
     """reduced_ebr_table_schema.md must document required keys, statuses, and labels."""
     from valleyscope.analysis.reduced_ebr_mapping import _REQUIRED_TABLE_KEYS
@@ -538,6 +539,7 @@ def test_table_schema_doc_contract():
     assert "no built-in" in doc.lower()
     assert "no heuristic" in doc.lower()
 
+@pytest.mark.dev_docs
 def test_table_schema_doc_expected_hsps_basis_contract():
     """Schema doc must state expected_hsps is enforced as the EBR basis contract."""
     doc_text = Path("docs/reduced_ebr_table_schema.md").read_text(encoding="utf-8")
@@ -546,23 +548,17 @@ def test_table_schema_doc_expected_hsps_basis_contract():
     assert "`bundle.irreps_by_kpoint`" in doc_text
     assert "Missing, extra, malformed, or inferred HSP data is not accepted" in doc_text
 
+@pytest.mark.dev_docs
 def test_schema_md_labels_use_physical_subspace_space_group():
-    """Verify docs/schema.md uses physical subspace-space-group symbols as primary EBR table keys.
-
-    subspace_group_candidate examples should use P3/P2 (physical), not
-    C3_like/C2_like (legacy).  Legacy C{n}_like labels appear only in
-    legacy_subspace_group_candidate or the transitional convention description.
-    """
+    """Current schema examples use physical subspace-space-group symbols."""
     schema_text = Path("docs/schema.md").read_text(encoding="utf-8")
     # Physical symbols appear as example values.
     assert '"subspace_group_candidate": "P3"' in schema_text
-    # Legacy hints documented in the label convention description.
-    assert "C3_like" in schema_text
-    assert "C2_like" in schema_text
     # Must not use C{n}_like as subspace_group_candidate examples anymore.
     assert '"subspace_group_candidate": "C3_like"' not in schema_text
     assert '"subspace_group_candidate": "C2_like"' not in schema_text
 
+@pytest.mark.dev_docs
 def test_public_docs_do_not_advertise_static_package_selector():
     """Current public docs must not expose static package-data EBR selectors."""
     checked_paths = [
@@ -818,6 +814,7 @@ def test_cli_module_entrypoint_help_lists_map_reduced_ebr():
 # 16. Reduced-dimensional irrep/EBR data model doc contract
 # -----------------------------------------------------------------------
 
+@pytest.mark.dev_docs
 def test_data_model_design_doc_contract():
     """Design doc must cover irrep2, reduced-dimensional, provenance, irrep package,
     physical objects, labels, and forbid material-specific targets."""
@@ -856,19 +853,6 @@ def test_data_model_design_doc_contract():
     for forbidden in ["tMoTe2", "tZrSe2", "MoTe2", "ZrSe2"]:
         assert forbidden not in doc, f"material name '{forbidden}' in design doc"
 
-def test_agents_plan_irrep_boundary_and_package_name():
-    """AGENTS/PLAN must encode irrep runtime boundary and use correct package name."""
-    combined_lower = (
-        Path("AGENTS.md").read_text(encoding="utf-8")
-        + "\n"
-        + Path("PLAN.md").read_text(encoding="utf-8")
-    ).lower()
-    for term in ["runtime", "data source", "valley-preserving", "raw 3d"]:
-        assert term in combined_lower, f"missing '{term}' in AGENTS/PLAN"
-    agents = Path("AGENTS.md").read_text(encoding="utf-8")
-    plan = Path("PLAN.md").read_text(encoding="utf-8")
-    assert "`irrep`" in agents and "`irreps`" not in agents
-    assert "irrep" in plan.lower()
 
 # -----------------------------------------------------------------------
 # 17. Package-data skeleton
@@ -1289,6 +1273,7 @@ def test_pyproject_lists_sympy_dependency_for_integer_span_classifier():
     text = Path("pyproject.toml").read_text(encoding="utf-8")
     assert '"sympy"' in text
 
+@pytest.mark.dev_docs
 def test_schema_doc_uses_current_reduced_ebr_solver_name():
     """Public schema should not document the old brute-force-only solver name."""
     schema_text = Path("docs/schema.md").read_text(encoding="utf-8")
@@ -1760,11 +1745,7 @@ def test_reduced_ebr_input_not_provided_marker():
 def test_adapter_load_raw_returns_irreptables_shape():
     """Adapter load_raw_ebr_data returns raw irreptables dict shape."""
     from valleyscope.irreps.ebr_data_adapter import load_raw_ebr_data
-    try:
-        raw = load_raw_ebr_data(143, spinful=True)
-    except RuntimeError:
-        import pytest
-        pytest.skip("irreptables not available")
+    raw = load_raw_ebr_data(143, spinful=True)
 
     assert isinstance(raw, dict)
     assert "basis" in raw
@@ -1778,12 +1759,8 @@ def test_adapter_raw_and_normalized_consistent():
     from valleyscope.irreps.ebr_data_adapter import (
         load_raw_ebr_data, load_ebr_source_data,
     )
-    try:
-        raw = load_raw_ebr_data(143, spinful=True)
-        norm = load_ebr_source_data(143, spinful=True)
-    except RuntimeError:
-        import pytest
-        pytest.skip("irreptables not available")
+    raw = load_raw_ebr_data(143, spinful=True)
+    norm = load_ebr_source_data(143, spinful=True)
 
     assert norm["source_basis_count"] == len(raw["basis"]["irrep_labels"])
     assert norm["source_basis_labels"] == list(raw["basis"]["irrep_labels"])

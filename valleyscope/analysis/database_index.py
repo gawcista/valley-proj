@@ -37,6 +37,14 @@ _CLASSIFICATION_FIELDS = (
     "outside_integer_span",
     "indeterminate_truncated",
 )
+_FINAL_CLASSIFICATIONS = {
+    "atomic-compatible-candidate": ("atomic_compatible", "solved_exact"),
+    "in_integer_span_no_nonnegative_witness": (
+        "in_integer_span_no_nonnegative_witness", "no_exact_solution",
+    ),
+    "outside_integer_span": ("outside_integer_span", "no_exact_solution"),
+    "indeterminate_truncated": ("indeterminate_truncated", "indeterminate_truncated"),
+}
 _SOURCE_INPUT_KINDS = {
     "ingestion_record_file",
     "analyze_output_directory",
@@ -85,11 +93,13 @@ def _validate_ingestion_record(record: object) -> list[str]:
         errors.append("schema_version must be a nonempty string")
 
     record_status = record.get("record_status")
-    if record_status not in _RECORD_STATUSES:
+    if not isinstance(record_status, str) or record_status not in _RECORD_STATUSES:
         errors.append(f"record_status is not recognized: {record_status!r}")
 
     if not isinstance(record.get("validation_errors"), list):
         errors.append("validation_errors must be a list")
+    elif any(not isinstance(error, str) for error in record["validation_errors"]):
+        errors.append("validation_errors entries must be strings")
 
     if (
         "ebr_export_status" in record
@@ -104,17 +114,77 @@ def _validate_ingestion_record(record: object) -> list[str]:
     for field in _COLLECTION_FIELDS:
         if not isinstance(record.get(field), list):
             errors.append(f"{field} must be a list")
+        elif any(not isinstance(row, dict) for row in record[field]):
+            errors.append(f"{field} entries must be objects")
 
     counts = record.get("reduced_ebr_classification_counts")
     if not isinstance(counts, dict):
         errors.append("reduced_ebr_classification_counts must be an object")
     else:
         for field, value in counts.items():
+            if field not in _CLASSIFICATION_FIELDS:
+                errors.append(f"unrecognized reduced EBR classification count: {field}")
             if not _is_nonnegative_integer(value):
                 errors.append(
                     "reduced_ebr_classification_counts."
                     f"{field} must be a nonnegative integer"
                 )
+    if not errors:
+        errors.extend(_validate_record_consistency(record))
+    return errors
+
+
+def _validate_record_consistency(record: dict[str, Any]) -> list[str]:
+    """Validate offline row/count semantics, not numerical representation trust."""
+    errors: list[str] = []
+    for count_field, rows_field in (
+        ("final_reduced_ebr_result_count", "reduced_ebr_records"),
+        ("final_mapping_excluded_bundle_count", "final_mapping_excluded_records"),
+        ("input_excluded_instance_count", "input_excluded_ebr_records"),
+    ):
+        if record[count_field] != len(record[rows_field]):
+            errors.append(f"{count_field} does not match {rows_field} length")
+
+    actual_counts = dict.fromkeys(_CLASSIFICATION_FIELDS, 0)
+    final_ids: set[str] = set()
+    for idx, row in enumerate(record["reduced_ebr_records"]):
+        bundle_id = row.get("bundle_id")
+        if not isinstance(bundle_id, str) or not bundle_id.strip():
+            errors.append(f"reduced_ebr_records[{idx}].bundle_id must be a nonempty string")
+        elif bundle_id in final_ids:
+            errors.append(f"duplicate final bundle_id: {bundle_id}")
+        else:
+            final_ids.add(bundle_id)
+        classification = row.get("classification")
+        if not isinstance(classification, str) or classification not in _FINAL_CLASSIFICATIONS:
+            errors.append(f"reduced_ebr_records[{idx}].classification is not recognized")
+            continue
+        field, expected_status = _FINAL_CLASSIFICATIONS[classification]
+        actual_counts[field] += 1
+        if row.get("status") != expected_status:
+            errors.append(f"reduced_ebr_records[{idx}].status conflicts with classification")
+    counts = record["reduced_ebr_classification_counts"]
+    for field, expected_count in actual_counts.items():
+        # Older compact records may omit zero-valued classification counters.
+        if counts.get(field, 0) != expected_count:
+            errors.append(f"reduced_ebr_classification_counts.{field} does not match final rows")
+
+    final_count = record["final_reduced_ebr_result_count"]
+    candidate_count = record["reduced_table_validation_candidate_bundle_count"]
+    if final_count > candidate_count:
+        errors.append("final result count exceeds validation-candidate bundle count")
+    status = record["record_status"]
+    if status == "invalid_missing_summary":
+        if any(record[field] for field in (*_COUNT_FIELDS, *_COLLECTION_FIELDS)):
+            errors.append("invalid record must not contain result counts or rows")
+    else:
+        expected_status = (
+            "has_final_reduced_ebr_results" if final_count else
+            "has_reduced_table_validation_candidates" if candidate_count else
+            "no_reduced_ebr_input"
+        )
+        if status != expected_status:
+            errors.append("record_status conflicts with stage-owned counts")
     return errors
 
 
