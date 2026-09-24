@@ -22,6 +22,19 @@ def load_reduced_ebr_table(path: str | Path) -> dict:
     vector entries, or undocumented irrep key formats.
     """
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    return validate_reduced_ebr_table(raw)
+
+
+def validate_reduced_ebr_table(raw: object) -> dict:
+    """Validate table structure without coercing or mutating its payload.
+
+    Return the original dict, including extra provenance fields. This does
+    not establish reviewed provenance, physical compatibility or readiness.
+    Boolean vector entries are not integer multiplicities. Malformed input
+    raises ValueError, identically for JSON and direct-dict callers.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError("reduced EBR table must be a mapping")
     missing = _REQUIRED_TABLE_KEYS - set(raw)
     if missing:
         raise ValueError(f"reduced EBR table missing keys: {sorted(missing)}")
@@ -80,7 +93,7 @@ def load_reduced_ebr_table(path: str | Path) -> dict:
                 f"EBR '{label}' vector length {len(vector)} "
                 f"!= irrep count {n_irreps}"
             )
-        if not all(isinstance(v, int) and v >= 0 for v in vector):
+        if not all(isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in vector):
             raise ValueError(
                 f"EBR '{label}' vector must be nonnegative integers"
             )

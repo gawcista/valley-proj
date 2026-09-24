@@ -2,6 +2,7 @@
 
 import h5py
 import numpy as np
+import pytest
 
 from valleyscope.analysis.ebr_problem_instances import build_ebr_problem_instances
 
@@ -70,3 +71,36 @@ def test_generated_numerical_chain_reaches_public_standard_outputs(tmp_path):
     assert "diagnostics_h5" not in result["outputs"]
     assert result["ingestion"]["validation_errors"] == []
     assert result["ingestion"]["final_reduced_ebr_result_count"] == 2
+
+
+@pytest.mark.parametrize("invalid_entry", [True, False])
+def test_malformed_auto_table_blocks_only_affected_numerical_bundle(
+    tmp_path, monkeypatch, invalid_entry,
+):
+    """Corrupt one real reduced table, never the numerical evidence or readiness."""
+    import valleyscope.analysis.irreptables_runtime_table_builder as builder
+    original_builder = builder.build_auto_canonical_reduced_ebr_table
+    table_count = 0
+
+    def corrupt_first_table(**kwargs):
+        nonlocal table_count
+        table = original_builder(**kwargs)
+        table_count += 1
+        if table_count == 1:
+            table["ebrs"][0]["vector"][0] = invalid_entry
+        return table
+
+    monkeypatch.setattr(builder, "build_auto_canonical_reduced_ebr_table", corrupt_first_table)
+    result = run_numerical_workflow(tmp_path)
+    mapping = result["reports"]["valley_reduced_ebr_mapping_json"]
+    assert table_count == 2
+    assert mapping["status"] == "partial"
+    assert mapping["table_status"] == "partial"
+    assert len(mapping["solutions"]) == 1
+    assert mapping["solutions"][0]["status"] == "solved_exact"
+    assert len(mapping["excluded_bundles"]) == 1
+    assert "vector must be nonnegative integers" in mapping["excluded_bundles"][0]["reason"]
+    assert mapping["solutions"][0]["bundle_id"] != mapping["excluded_bundles"][0]["bundle_id"]
+    assert result["ingestion"]["validation_errors"] == []
+    assert result["ingestion"]["final_reduced_ebr_result_count"] == 1
+    assert result["ingestion"]["final_mapping_excluded_bundle_count"] == 1

@@ -192,7 +192,7 @@ def build_reduced_table_from_runtime_source(
                 f"EBR '{label}' vector length {len(vector)} != "
                 f"source basis length {n_source}"
             )
-        if not all(isinstance(v, int) and v >= 0 for v in vector):
+        if not all(isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in vector):
             raise ValueError(
                 f"EBR '{label}' vector must be nonnegative integers"
             )

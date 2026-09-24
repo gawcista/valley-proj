@@ -54,6 +54,14 @@ def test_solver_rejects_negative_target_or_ebr_entries():
         classify_bundle([1, 0], [[1, -1]], ["EBR_A"], 6)
 
 
+@pytest.mark.parametrize("value", [True, False])
+def test_solver_keeps_rejecting_boolean_target_and_ebr_entries(value):
+    with pytest.raises(ValueError, match="target"):
+        classify_bundle([1, value], [[1, 0]], ["EBR_A"], 6)
+    with pytest.raises(ValueError, match="EBR vector"):
+        classify_bundle([1, 0], [[1, value]], ["EBR_A"], 6)
+
+
 def test_integer_span_bounds_and_witness_search():
     in_span, signed = check_integer_span([0, 1], [[1, 0], [1, 1]])
     assert in_span is True

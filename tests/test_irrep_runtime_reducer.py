@@ -295,6 +295,20 @@ def test_ebr_vectors_preserve_exact_nonnegative_integers():
     assert ebr_b["vector"] == [1, 1, 0]  # [1,1,0,0] -> reduced [1,1,0]
 
 
+@pytest.mark.parametrize("value", [True, False])
+@pytest.mark.parametrize("source_index", [0, 3])
+def test_reducer_rejects_boolean_entries_even_in_filtered_source_rows(value, source_index):
+    vector = [1, 0, 1, 1]
+    vector[source_index] = value
+    with pytest.raises(ValueError, match="vector must be nonnegative integers"):
+        build_reduced_table_from_runtime_source(
+            source_payload=_source_payload(ebrs=[{"label": "bad", "vector": vector}]),
+            expected_hsps=_HSP,
+            allowed_irrep_keys=_KEYS,
+            subspace_group_candidate="P3",
+        )
+
+
 # -----------------------------------------------------------------------
 # 10. No material names
 # -----------------------------------------------------------------------

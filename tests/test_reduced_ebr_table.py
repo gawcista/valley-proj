@@ -2,6 +2,7 @@
 
 import importlib
 import json
+from copy import deepcopy
 from pathlib import Path
 import subprocess
 import sys
@@ -39,6 +40,98 @@ def test_loader_preserves_full_payload_and_validation_errors(tmp_path, table_pay
     path.write_text(json.dumps(table_payload), encoding="utf-8")
     with pytest.raises(ValueError, match="vector must have at least one positive entry"):
         loader(path)
+
+
+@pytest.mark.parametrize("entrypoint", ["loader", "legacy_loader", "mapping", "builder"])
+@pytest.mark.parametrize("invalid_entry", [True, False, -1, 1.0, "1", None])
+def test_table_entrypoints_reject_noninteger_vector_entries(
+    tmp_path, table_payload, entrypoint, invalid_entry,
+):
+    """Structural unit test: a positive entry must not hide an invalid one."""
+    table_payload["irreps"] = ["GM:GM1", "GM:GM2"]
+    table_payload["ebrs"][0]["vector"] = [1, invalid_entry]
+    before = deepcopy(table_payload)
+    with pytest.raises(ValueError, match="vector must be nonnegative integers"):
+        if entrypoint in {"loader", "legacy_loader"}:
+            module = "reduced_ebr_table" if entrypoint == "loader" else "reduced_ebr_mapping"
+            loader = importlib.import_module(f"valleyscope.analysis.{module}").load_reduced_ebr_table
+            path = tmp_path / "table.json"
+            path.write_text(json.dumps(table_payload), encoding="utf-8")
+            loader(path)
+        elif entrypoint == "mapping":
+            from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
+            build_reduced_ebr_mapping(ebr_export_bundle={"bundles": []}, table=table_payload)
+        else:
+            from valleyscope.analysis.irreptables_runtime_table_builder import _validate_reduced_table_dict
+            _validate_reduced_table_dict(table_payload)
+    assert table_payload == before
+
+
+@pytest.mark.parametrize("invalid_table", [None, True, 1, "table", [], [["ebrs"]]])
+def test_loader_rejects_nonobject_json(tmp_path, invalid_table):
+    from valleyscope.analysis.reduced_ebr_table import load_reduced_ebr_table
+    path = tmp_path / "table.json"
+    path.write_text(json.dumps(invalid_table), encoding="utf-8")
+    with pytest.raises(ValueError, match="table must be a mapping"):
+        load_reduced_ebr_table(path)
+
+
+def test_dict_validation_preserves_payload_without_promoting_it(table_payload):
+    from valleyscope.analysis.reduced_ebr_table import validate_reduced_ebr_table
+    before = deepcopy(table_payload)
+    assert validate_reduced_ebr_table(table_payload) is table_payload
+    assert table_payload == before
+
+
+def test_mapping_validates_supplied_table_even_without_export(table_payload):
+    from valleyscope.analysis.reduced_ebr_mapping import build_reduced_ebr_mapping
+    table_payload["ebrs"][0]["vector"] = [True]
+    with pytest.raises(ValueError, match="vector must be nonnegative integers"):
+        build_reduced_ebr_mapping(ebr_export_bundle=None, table=table_payload)
+
+
+@pytest.mark.parametrize("invalid_table", [[], {}, {"expected_hsps": None}])
+def test_direct_table_consumers_reject_malformed_structure(invalid_table):
+    from valleyscope.analysis.reduced_ebr_mapping import (
+        build_reduced_ebr_mapping, promote_bundle_for_solve,
+    )
+    with pytest.raises(ValueError, match="table"):
+        build_reduced_ebr_mapping(ebr_export_bundle={"bundles": []}, table=invalid_table)
+    result = promote_bundle_for_solve(bundle={}, table=invalid_table)
+    assert result["promoted"] is False
+    assert result["promoted_bundle"] is None
+    assert result["blocker_reasons"][0]["code"] == "table_structure_invalid"
+
+
+@pytest.mark.parametrize("invalid_entry", [True, False])
+def test_promotion_blocks_boolean_table_before_physical_validation(table_payload, invalid_entry):
+    """No synthetic readiness: malformed tables are rejected even with no bundle evidence."""
+    from valleyscope.analysis.reduced_ebr_mapping import promote_bundle_for_solve
+    table_payload["irreps"] = ["GM:GM1", "GM:GM2"]
+    table_payload["ebrs"][0]["vector"] = [1, invalid_entry]
+    result = promote_bundle_for_solve(bundle={}, table=table_payload)
+    assert result["promoted"] is False
+    assert result["promoted_bundle"] is None
+    assert result["irrep_vector"] is None
+    assert result["canonical_state"] == "sampled_basis"
+    assert [row["code"] for row in result["blocker_reasons"]] == ["table_structure_invalid"]
+    assert "vector must be nonnegative integers" in result["blocker_reasons"][0]["detail"]
+    assert set(result["validation_report"].values()) == {"not_attempted"}
+
+
+@pytest.mark.parametrize("invalid_entry", [True, False])
+def test_cli_rejects_boolean_table_without_writing_mapping(tmp_path, table_payload, invalid_entry, capsys):
+    from valleyscope.cli import main
+    table_payload["irreps"] = ["GM:GM1", "GM:GM2"]
+    table_payload["ebrs"][0]["vector"] = [1, invalid_entry]
+    table_path, bundle_path, output_path = (
+        tmp_path / name for name in ("table.json", "bundle.json", "mapping.json")
+    )
+    table_path.write_text(json.dumps(table_payload), encoding="utf-8")
+    bundle_path.write_text(json.dumps({"bundles": []}), encoding="utf-8")
+    assert main(["map-reduced-ebr", str(bundle_path), str(table_path), "-o", str(output_path)]) == 1
+    assert "vector must be nonnegative integers" in capsys.readouterr().err
+    assert not output_path.exists()
 
 
 def _run_isolated(script, *args, stdlib_only=False):

@@ -15,6 +15,7 @@ from valleyscope.analysis.reduced_ebr_table import (
     _REQUIRED_TABLE_KEYS,
     _validate_irrep_key_format,
     load_reduced_ebr_table,
+    validate_reduced_ebr_table,
 )
 
 from valleyscope.irreps.magnetic_groups import derive_type_ii_bns_number
@@ -192,6 +193,20 @@ def promote_bundle_for_solve(
         "hsp_basis_check": "not_attempted",
         "irrep_basis_check": "not_attempted",
     }
+
+    try:
+        validate_reduced_ebr_table(table)
+    except ValueError as exc:
+        return {
+            "promoted": False,
+            "promoted_bundle": None,
+            "blocker_reasons": [_blocker("table_structure_invalid", str(exc))],
+            "validation_report": report,
+            "canonical_state": "sampled_basis",
+            "irrep_vector": None,
+            "table_provenance": {},
+            "certificate_identity": {},
+        }
 
     # ---- A. Table provenance basics ----
     prov = table.get("provenance", {})
@@ -2772,14 +2787,20 @@ def build_reduced_ebr_mapping(
     Parameters
     ----------
     ebr_export_bundle : output of build_ebr_export_bundle
-    table : validated reduced EBR table dict (from load_reduced_ebr_table)
+    table : reduced EBR table dict; structure is revalidated before use
     max_coefficient : int, max coefficient per EBR in brute-force search
     reduced_ebr_input : optional compact non-path provenance documenting
         which reduced-EBR input source was used (table_file or spec_file).
+
+    Raises ValueError for malformed table structure, even without a bundle.
+    Structurally valid tables still require independent physical promotion.
     """
     max_coefficient = int(max_coefficient)
     if max_coefficient < 0:
         raise ValueError("max_coefficient must be nonnegative")
+
+    if table is not None:
+        validate_reduced_ebr_table(table)
 
     if ebr_export_bundle is None:
         return _status("not_evaluated", "no export bundle available",
@@ -3059,6 +3080,7 @@ def build_auto_reduced_ebr_mapping(
                     build_auto_time_reversal_reduced_ebr_table
                 ),
             )
+            validate_reduced_ebr_table(table)
         except Exception as exc:
             reason = f"{type(exc).__name__}: {exc}"
             excluded.append({
