@@ -353,7 +353,7 @@ def _build_reduced_ebr_table(args) -> int:
     from valleyscope.analysis.irreptables_runtime_table_builder import (
         build_reduced_table_from_spec_file,
     )
-    from valleyscope.analysis.reduced_ebr_mapping import (
+    from valleyscope.analysis.reduced_ebr_table import (
         load_reduced_ebr_table,
     )
     from valleyscope.reports.json_report import write_json

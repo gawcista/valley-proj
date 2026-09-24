@@ -331,7 +331,7 @@ def _optional_mapping(spec: Mapping[str, object], key: str) -> dict[str, object]
 
 
 def _validate_reduced_table_dict(table: Mapping[str, object]) -> None:
-    from valleyscope.analysis.reduced_ebr_mapping import load_reduced_ebr_table
+    from valleyscope.analysis.reduced_ebr_table import load_reduced_ebr_table
 
     tmp = tempfile.NamedTemporaryFile(
         mode="w",
