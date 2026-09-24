@@ -139,6 +139,7 @@ def _check_cli_provenance(report: dict[str, object], cwd: Path) -> bool:
 
 
 def _check_installed_acceptance(report: dict[str, object]) -> bool:
+    from tests.noncommuting_numerical_chain import run_installed_noncommuting_acceptance
     from tests.portable_numerical_chain import run_installed_numerical_acceptance
     from tests.portable_acceptance_chain import (
         run_installed_portable_acceptance,
@@ -153,7 +154,13 @@ def _check_installed_acceptance(report: dict[str, object]) -> bool:
     numerical = run_installed_numerical_acceptance()
     report["portable_numerical_acceptance"] = numerical
     print("portable numerical acceptance: " + json.dumps(numerical, sort_keys=True))
-    return summary["validation_errors"] == numerical["validation_errors"] == []
+    noncommuting = run_installed_noncommuting_acceptance()
+    report["noncommuting_numerical_acceptance"] = noncommuting
+    print("noncommuting numerical acceptance: " + json.dumps(noncommuting, sort_keys=True))
+    return (
+        summary["validation_errors"] == numerical["validation_errors"]
+        == noncommuting["validation_errors"] == []
+    )
 
 
 def _check_environment(report: dict[str, object]) -> bool:

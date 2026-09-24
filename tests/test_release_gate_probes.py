@@ -43,6 +43,11 @@ def test_installed_acceptance_requires_numerical_spinful_workflow():
     assert numerical["observed_hsps"] == ["GM", "K", "KA", "M"]
     assert numerical["final_reduced_ebr_result_count"] == 2
     assert numerical["broken_coefficients_final_result_count"] == 0
+    noncommuting = report["noncommuting_numerical_acceptance"]
+    assert noncommuting["source_space_group"] == 99
+    assert noncommuting["required_operations_by_hsp"] == {"GM": 8, "X": 4, "M": 8}
+    assert noncommuting["final_reduced_ebr_result_count"] == 1
+    assert noncommuting["broken_coefficients_final_result_count"] == 0
 
 
 @pytest.mark.parametrize("optimization", ["-O", "-OO"])
