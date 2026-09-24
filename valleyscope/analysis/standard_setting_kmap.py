@@ -13,8 +13,9 @@ the certificate validates the coordinate convention.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, asdict
+from functools import lru_cache
 import numpy as np
 
 
@@ -2334,6 +2335,47 @@ def _table_operations_match_hall(
     )
 
 
+@dataclass(frozen=True)
+class _HallType:
+    hall_number: int
+    number: int
+    hall_symbol: str
+    international_short: str
+
+
+class _HallCatalogUnavailable(ValueError):
+    """A complete Hall type catalog could not be read."""
+
+
+@lru_cache(maxsize=1)
+def _hall_type_catalog(query: Callable[[int], object]) -> tuple[_HallType, ...]:
+    """Snapshot static metadata only, never source operations or trust results.
+
+    Key by the provider callable so replacing the spglib API cannot reuse its
+    predecessor's catalog. Only a complete successful read is cached; upstream
+    exceptions propagate unchanged. Store immutable scalar copies, not mutable
+    provider objects. The installed database is static for the process lifetime.
+    """
+    rows = []
+    for hall_number in range(1, 531):
+        raw = query(hall_number)
+        number = getattr(raw, "number", None)
+        returned_hall = getattr(raw, "hall_number", None)
+        hall_symbol = getattr(raw, "hall_symbol", None)
+        international_short = getattr(raw, "international_short", None)
+        if (
+            not isinstance(number, int) or isinstance(number, bool)
+            or not 1 <= number <= 230
+            or not isinstance(returned_hall, int) or isinstance(returned_hall, bool)
+            or returned_hall != hall_number
+            or not isinstance(hall_symbol, str) or not hall_symbol.strip()
+            or not isinstance(international_short, str) or not international_short.strip()
+        ):
+            raise _HallCatalogUnavailable(f"invalid Hall type entry {hall_number}")
+        rows.append(_HallType(hall_number, number, hall_symbol, international_short))
+    return tuple(rows)
+
+
 def derive_irreptables_standard_setting_identity(
     table: object,
     sg_number: object,
@@ -2372,11 +2414,14 @@ def derive_irreptables_standard_setting_identity(
         result["reason"] = "spglib_unavailable"
         return result
 
-    candidates: list[tuple[int, object]] = []
-    for hall_number in range(1, 531):
-        sg_type = spglib.get_spacegroup_type(hall_number)
-        if sg_type is not None and int(sg_type.number) == sg_number:
-            candidates.append((hall_number, sg_type))
+    try:
+        catalog = _hall_type_catalog(spglib.get_spacegroup_type)
+    except _HallCatalogUnavailable:
+        result["reason"] = "spglib_hall_catalog_unavailable"
+        return result
+    candidates = [
+        (row.hall_number, row) for row in catalog if row.number == sg_number
+    ]
     result["candidate_hall_numbers"] = [number for number, _ in candidates]
     if not candidates:
         result["status"] = "no_match"
