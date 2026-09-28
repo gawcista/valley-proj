@@ -2,55 +2,52 @@
 
 [中文说明](README.zh.md)
 
-ValleyScope is a high-throughput post-processing workflow for **valley
-projection, valley-projected irreps, and reduced EBR analysis in
-two-dimensional moire materials**. It extracts selected VASP wavefunctions,
-resolves their parent-layer momentum-valley content, identifies the symmetry
-of each valley-projected subspace, and prepares or solves reduced-dimensional
-EBR problems using reviewed Bilbao/irreptables conventions.
+ValleyScope analyzes the valley character and symmetry representations of
+VASP wavefunctions in two-dimensional moiré materials. It resolves the
+contribution of parent-layer valleys to a selected band subspace, determines
+the symmetries that preserve each valley, and assigns irreducible
+representations (irreps) at moiré high-symmetry points (HSPs).
 
-ValleyScope reports physical evidence and explicit blockers. It does not turn
-high valley weight or a few symmetry eigenvalues into an automatic topology
-label.
+These irreps can then be compared with elementary band representations
+(EBRs), reduced to the same valley subspace and HSP basis. The result describes
+the symmetry content of the selected states. It is not, by itself, a
+classification of their topology over the full moiré Brillouin zone.
 
 ## Supported Scope
 
-The primary supported and validated calculation domain is:
+The present implementation is intended for:
 
 - VASP plane-wave wavefunctions, read from `WAVECAR` or a ValleyScope HDF5
   intermediate;
-- nonmagnetic, spin-orbit-coupled two-dimensional moire systems with parent
+- nonmagnetic, spin-orbit-coupled two-dimensional moiré systems with parent
   time-reversal symmetry (TRS) and the default VASP Cartesian spin frame
   `SAXIS=[0,0,1]`;
-- selected moire high-symmetry points (HSPs), target bands, parent-layer
-  valley centers, and a moire or bilayer structure for symmetry detection.
+- selected moiré HSPs and target bands, with specified parent-layer valley
+  centers and a moiré or bilayer structure for determining spatial symmetries.
 
-The workflow is general in lattice, space group, HSP set, valley orbit, and
-valley-projected subspace space group. Real materials are validation fixtures,
-not branches in the production method.
+The construction uses the lattice and symmetry operations of the supplied
+system, without material-specific rules or a prescribed number of valleys.
+Numerical tests cover particular cases, not every space group or band manifold.
 
 The calculation assumptions above are not fully recoverable from a
 `WAVECAR` or compact HDF5 file alone. Users must ensure that the source
 calculation belongs to this domain. Magnetic systems, spin-space-group
 treatments, non-SOC noncollinear calculations, and arbitrary spin axes are not
-currently claimed as validated production inputs.
+within the validated scope.
 
-## Physical Workflow
+## Physical Method
 
 ```text
-VASP WAVECAR / ValleyScope HDF5
--> q-cut momentum-valley projection
--> valley mapping and valley-projected subspace symmetry
--> HSP little group and valley-preserving subgroup
--> symmetry representations restricted to the valley-preserving subgroup
--> valley-preserving irreps
--> reduced-dimensional EBR data in Bilbao/irreptables conventions
--> exact-integer reduced EBR decomposition
+Plane-wave coefficients
+  → parent-valley projection
+  → symmetry of each valley-projected subspace
+  → HSP little-group representations
+  → comparison with reduced EBRs
 ```
 
 ### Momentum-Valley Projection
 
-For a moire Bloch state at momentum \(\mathbf k_M\), each plane-wave component
+For a moiré Bloch state at momentum \(\mathbf k_M\), each plane-wave component
 has momentum
 
 ```math
@@ -59,7 +56,9 @@ has momentum
 
 ValleyScope compares the in-plane component of \(\mathbf q\) with configured
 parent-layer valley centers modulo the corresponding monolayer reciprocal
-lattice. A q-cut window defines a seed projector \(P_a^0\) for valley \(a\).
+lattice. The distance is the shortest Cartesian distance over reciprocal
+lattice translations, including for nonorthogonal lattices. A q-cut window
+defines a seed projector \(P_a^0\) for valley \(a\).
 For a normalized state,
 
 ```math
@@ -75,16 +74,17 @@ a topological invariant.
 For near-degenerate target bands, individual VASP eigenvectors are
 gauge-dependent. ValleyScope therefore analyzes the whole target subspace,
 including its projected valley matrices and a valley-adapted basis. Detailed
-subspace weights, assignments, and projector-quality evidence are retained by
-the debug profile.
+subspace weights, valley assignments, and deviations from projector
+orthogonality and covariance are available with `output.profile: debug`.
 
 Two projector modes are available:
 
 - `fixed_center` (default) uses fixed parent-layer valley centers. These seed
-  projectors enter symmetry and irrep readiness.
+  projectors are used to test subspace symmetry and assign irreps.
 - `k_resolved_parent_valley` uses dynamic centers for parent-valley weight
-  reporting across the moire Brillouin zone. It does not replace the
-  fixed-center projectors in irrep or EBR readiness.
+  reporting at the sampled moiré momenta. Symmetry and EBR analysis still
+  starts from fixed-center seed projectors. This reporting option does not
+  validate valley character throughout the Brillouin zone.
 
 ### Valley-Preserving Symmetry
 
@@ -107,75 +107,88 @@ The seed-projector covariance test is
 D_g P_a^0 D_g^\dagger \approx P_{\pi_g(a)}^0 .
 ```
 
-An operation that maps \(a\) to another valley is a **valley-changing
-operation**. It contributes valley-orbit and **valley sewing matrix** data; it
-must not be forced into the single-valley irrep of \(G_k^{(a)}\).
-When an independently validated unitary valley sewing operation connects an
-observed source row to an unsampled row, ValleyScope can transport the actual
-projected subspace, re-match the target representation, and complete the
-valley-resolved unitary irrep vector. This completion requires recomputable
-coefficient, projector, affine-operation, and reciprocal-grid evidence.
+An operation that maps \(a\) to another valley is a valley-changing operation.
+Its action relates the two subspaces through a valley sewing matrix; it is
+not part of the single-valley representation of \(G_k^{(a)}\). Where this
+unitary relation has been verified from the wavefunctions, it can determine
+the representation at a symmetry-related, unsampled point. The transported
+subspace is checked against the target little-group irreps, with its origin
+recorded separately from directly sampled states.
 
-ValleyScope restricts each symmetry representation to the actual
-valley-preserving operation set and matches double-valued irreps for SOC
-wavefunctions. Matching uses a validated standard-setting certificate that
-relates the computed affine space-group operations and reciprocal coordinates
-to the Bilbao/irreptables convention. Rotation matrices or user labels alone
-do not establish this convention.
+ValleyScope matches the representation on the full valley-preserving subgroup,
+using double-valued irreps for SOC wavefunctions. This includes multidimensional
+irreps, not only eigenvalues of a rotation generator. Comparison with
+Bilbao/irreptables requires a consistent crystallographic setting: basis,
+origin, affine operations, and the complete translation lattice. Matching
+rotation matrices or space-group names alone is insufficient.
 
 ### Time Reversal
 
-Parent TRS does **not** imply that a one-valley subspace is TR-invariant. In
-general, time reversal relates distinct time-reversed valleys:
+Parent TRS does not imply that a one-valley subspace is TR-invariant. When
+time reversal exchanges valleys, each valley is first described by the
+unitary irreps of its own valley-preserving subgroup.
 
-- a single-valley irrep is a unitary irrep of its valley-preserving subgroup;
-- unitary valley-sewing completion is distinct from time reversal;
-- time-reversal completion is a separate inter-valley construction;
-- a one-valley result is not matched to a grey group by default;
-- joint grey-group data are used only when the required antiunitary and
-  inter-valley evidence is present and validated.
+For a parent-TRS calculation, an unsampled time-reversed irrep may be inferred
+from a verified source irrep and the reviewed time-reversal pairing in the
+source tables. This algebraic inference is distinct from both unitary valley
+sewing and a numerical test of antiunitary sewing between wavefunctions.
+Directly sampled and inferred irreps remain distinguishable in the results.
+
+A joint description including time reversal (a grey-group corepresentation)
+requires additional antiunitary and inter-valley checks. Failure of those
+checks does not by itself invalidate a separately verified single-valley
+unitary representation.
 
 Enable `analysis.time_reversal.enabled` only for input known to come from a
-parent-TRS calculation. Missing or inconsistent sewing evidence remains an
-explicit blocker.
+parent-TRS calculation. A symmetry relation is left unresolved when the
+information needed to establish it is missing or inconsistent.
 
 ### Reduced EBR Analysis
 
-Raw three-dimensional EBR data are not a ValleyScope answer. ValleyScope uses
-reviewed Bilbao/irreptables source conventions and reduces them to the same
-physical basis used by the valley calculation:
+EBRs of the parent three-dimensional space group cannot be compared directly
+with single-valley irreps. ValleyScope uses reviewed Bilbao/irreptables data
+for the valley-projected subspace space group and restricts them to the same
+HSP and valley-preserving irrep basis as the wavefunction calculation:
 
 ```text
 source EBR data
--> certified valley-projected subspace space group
+-> valley-projected subspace space group in a verified standard setting
 -> sampled source-HSP basis
 -> restriction to the valley-preserving subgroup
 -> multiplicities in the matched valley-preserving irrep basis
 -> reduced EBR matrix
 ```
 
-The resulting integer vector is solved with the pure Python/SymPy exact
-integer solver. Results distinguish an exact nonnegative EBR combination,
-membership in the integer span without a nonnegative witness, exclusion from
-the integer span, an indeterminate bounded search, and a blocked calculation.
-None of these classifications alone is a Chern-number statement.
+The irrep multiplicities form an integer vector, and the reduced EBR vectors
+form the columns of an integer matrix. ValleyScope solves for their
+coefficients using exact arithmetic in Python/SymPy. It distinguishes a
+nonnegative integer EBR combination, integer-span membership without a
+nonnegative combination, exclusion from the integer span, an inconclusive
+bounded search, and insufficient physical information.
 
-### Trust Criteria
+A nonnegative combination establishes compatibility with the reduced EBRs
+at the HSPs considered. It does not establish a globally equivalent set of
+localized Wannier functions. Conversely, exclusion from the integer span is
+relative to the chosen subspace, HSP basis, and reviewed EBR generators;
+it is not a Chern-number calculation.
 
-High valley purity is useful but not sufficient for a trusted irrep or EBR
-result. Promotion also requires the relevant evidence to pass, including:
+### Conditions for Assigning Irreps
+
+High valley purity does not ensure that a band subspace carries a symmetry
+representation. The calculation also checks:
 
 - target-subspace closure and representation unitarity;
 - seed-projector covariance under the full valley mapping;
 - a well-defined valley-projected subspace and \(G_k^{(a)}\);
-- complete, unambiguous operation and source-HSP mappings;
-- a validated standard setting and reviewed irrep/EBR provenance;
-- conservative spinful and, when used, antiunitary sewing evidence.
+- complete mappings of plane waves, symmetry operations, and source HSPs;
+- agreement with the crystallographic setting and irrep/EBR source tables;
+- the double-group multiplication law and, when used, antiunitary sewing.
 
-A clean fixed-center seed basis may be used directly. Otherwise ValleyScope
-may construct a symmetry-adapted valley basis. Failed or incomplete evidence
-stays diagnostic-only or blocked; tolerances should not be relaxed merely to
-obtain a label.
+A fixed-center seed basis can be used directly if it satisfies these conditions.
+Otherwise, ValleyScope attempts a symmetry-adapted valley basis. If neither
+construction satisfies the conditions, the affected irrep or EBR result is
+not assigned. The residuals and reasons remain available for inspection;
+changing the output profile does not change these requirements.
 
 ## Installation
 
@@ -198,8 +211,8 @@ From a source checkout, `python -m valleyscope.cli --help` is equivalent.
 
 ## Quick Start
 
-The normal workflow extracts a compact HDF5 file once, then analyzes that
-file.
+Extract the selected wavefunctions into a compact HDF5 file once, then use
+that file for subsequent analyses.
 
 ### 1. Extract Selected WAVECAR Data
 
@@ -283,8 +296,7 @@ valleyscope analyze-hsp analyze.yaml
 
 ### Example screen summary
 
-The standard profile prints the same result-first text written to
-`valley_summary.txt`. Its main sections are:
+The terminal and `valley_summary.txt` show the same summary:
 
 ```text
 Run and projection context
@@ -295,15 +307,17 @@ Readiness blockers and warnings
 Public output files
 ```
 
-The run context includes lines such as `qcut mode:` and the effective q-cut.
-The standard `Valley projection summary` is the compact
-`valley_projection_summary`; the same record also keeps canonical
-`valley_resolved_irreps`, `reduced_ebr_summary`, and
-`readiness_blocker_summary`. Common projection states include
-`fixed_center_not_captured`, `not_derived`, and `unreliable`. The debug profile
-retains `Valley subspace analysis`; `S_min` is the
-minimum target-valley-subspace weight, alongside `min_concentration`,
-`assigned_valleys`, and
+Read the valley weights together with the subspace symmetry and irrep results.
+`qcut mode:` records how the momentum window was defined. In JSON,
+`Valley projection summary` corresponds to `valley_projection_summary`; irreps, EBR
+results, and unresolved conditions appear in `valley_resolved_irreps`,
+`reduced_ebr_summary`, and `readiness_blocker_summary`.
+
+Projection status labels include `fixed_center_not_captured`, `not_derived`,
+and `unreliable`. In particular, a low weight in a fixed-center window does
+not establish that a state has no parent-valley origin. The debug sections
+`Valley subspaces` and `Valley subspace analysis` include `S_min`
+(minimum target-valley-subspace weight), `min_concentration`, `assigned_valleys`, and
 `valley_weights_adapted`.
 
 ## Inputs and Configuration
@@ -315,63 +329,63 @@ An analysis needs:
 - monolayer reciprocal-lattice information and physically defined valley
   centers, including layer transforms when needed;
 - target HSP labels and `analysis.iband` values that exist in the HDF5 file;
-- a moire or bilayer POSCAR/CONTCAR at
+- a moiré or bilayer POSCAR/CONTCAR at
   `symmetry.operations.structure_file` for spglib operation detection.
 
 The monolayer structure defines parent-layer reciprocal coordinates; the
-moire or bilayer structure defines the symmetry operations. They are not
+moiré or bilayer structure defines the symmetry operations. They are not
 interchangeable.
 
 Use `output.profile: standard` for routine runs and `output.profile: debug`
-when detailed projector, representation, closure, HSP-star, or sewing evidence
-is needed. Advanced source-table and standard-setting overrides are
-intentionally omitted here: use the current CLI help and parser in
-`valleyscope/io/config.py` when preparing reviewed inputs.
+to inspect projector residuals, representation matrices, subspace closure,
+HSP stars, or sewing matrices. Advanced source-table and standard-setting
+options are described by the CLI help and the configuration parser in
+[`valleyscope/io/config.py`](valleyscope/io/config.py). They do not remove the
+need to verify the physical conventions of the input.
 
 ## Outputs
 
-The standard profile emphasizes these public surfaces:
+The standard output contains:
 
 | File | Purpose |
 | --- | --- |
-| `valley_summary.txt` | Result-first human-readable summary; read this first |
-| `valley_summary.json` | Compact machine-readable record with projection, canonical irrep, authoritative reduced-EBR, and blocker summaries |
+| `valley_summary.txt` | Valley weights, subspace symmetries, irreps, EBR results, and unresolved conditions |
+| `valley_summary.json` | The corresponding structured results for further analysis |
 | `valley_weights.csv` | Quick scan of raw per-(kpoint, VASP band) valley weights |
-| `valley_ebr_export_bundle.json` | Written only when at least one ready bundle exists |
+| `valley_ebr_export_bundle.json` | Irrep vectors and supporting symmetry data; written when at least one EBR input satisfies the export conditions |
 | `valley_reduced_ebr_mapping.json` | Written only when reduced EBR mapping is enabled and evaluated |
 
-`valley_resolved_irreps` contains one canonical record per sampled
+`valley_resolved_irreps` contains one record per sampled
 `(kpoint, valley)`, including the valley-projected subspace space group, HSP
-little group, valley-preserving operation IDs, readiness, blockers, and
-`irrep_multiplicities`.
+little group, valley-preserving operations, irrep multiplicities
+(`irrep_multiplicities`), and the conditions that permit or prevent assignment.
 
 Raw rows in `valley_weights.csv` are useful for screening, but individual rows
 inside a near-degenerate band subspace are gauge-dependent. Interpret them
-together with the subspace and readiness information in the summary.
+together with the subspace analysis, rather than as invariant band labels.
 
 The debug profile retains detailed JSON/HDF5 evidence such as
 `diagnostics.h5`, symmetry reports, restricted representation data, and
-irrep/EBR provenance. These are debugging surfaces, not files that every user
-must inspect.
-Database ingestion reads complete EBR bundle and mapping evidence from the
-standalone public files; the compact summary does not duplicate those payloads.
-Some debug tables may be header-only when no row satisfies their physical
-scope; that alone is not a run failure.
+irrep/EBR source information. They are useful when a representation cannot be
+assigned. Some tables are header-only when no state falls within the relevant
+physical scope; this alone does not mean that the calculation failed.
+Offline result collection reads the separate EBR export and mapping files as
+well as the summary, so keep these files together.
 
 ## Running Reduced EBR Mapping
 
-`analysis.reduced_ebr.enabled` is off by default. For ready canonical bundles,
-the analyzer can build reviewed reduced tables from the installed
-`irreptables` source, or consume a user-supplied validated reduced table or
-reviewed mapping specification. All paths must pass the same group, setting,
-spin, HSP, irrep, and provenance checks before the exact solver runs.
+Reduced EBR analysis is off by default. To request it, add
+`reduced_ebr: {enabled: true}` under `analysis` in `analyze.yaml`.
+The analyzer can construct reduced tables from the installed `irreptables`
+source, or read a reviewed reduced table or mapping specification supplied by
+the user. In each case, the group, setting, spin convention, HSP basis,
+irreps, and table origin must agree with the wavefunction calculation.
 
-Authoritative evaluation runs inside `analyze-hsp`, where the producer-owned
-representation evidence is available for recomputation. An exported JSON
-bundle retains identity links for audit and downstream transport, but those
-links alone cannot re-establish numerical trust. Therefore the standalone
-command is a fail-closed compatibility audit when given only serialized JSON;
-it does not promote an identity-only bundle to an authoritative solution:
+Run this analysis within `analyze-hsp`, while the wavefunctions and numerical
+representations are available for checking. The separate command below checks
+compatibility of exported data. JSON identifiers alone cannot reproduce the
+wavefunction-level checks, so they are not sufficient for it to assign a
+physically validated EBR result:
 
 ```bash
 valleyscope map-reduced-ebr \
@@ -380,7 +394,52 @@ valleyscope map-reduced-ebr \
   --output valley_reduced_ebr_mapping.json
 ```
 
-ValleyScope does not ship ad hoc or unreviewed production EBR tables.
+ValleyScope does not supply ad hoc or unreviewed EBR tables.
+
+## Collecting Results Across Calculations
+
+Completed calculations can be collected into a JSON record or a multi-run
+index for comparison:
+
+```bash
+valleyscope collect-database-record ./valley_analysis \
+  --output ./database_ingestion_record.json
+
+valleyscope collect-database-index ./run_a/valley_analysis ./run_b/valley_analysis \
+  --output ./database_index.json
+```
+
+The collector keeps final EBR results separate from incomplete inputs and
+excluded results. It checks consistency with the current calculation summary,
+but does not recompute symmetry matrices from the wavefunctions. Inputs must
+be listed explicitly. This is offline result collection, not a database
+service or an automated calculation scheduler.
+
+## Numerical Checks and Present Results
+
+Small generated spinor wavefunctions test the numerical calculation from
+projection through irrep assignment and exact reduced EBR comparison. The
+[`P3` example](tests/test_portable_numerical_chain.py) checks two
+time-reversed valleys. The [`P4mm` example](tests/test_noncommuting_numerical_chain.py)
+checks noncommuting, two-dimensional double-valued representations at
+\(\Gamma\), \(X\), and \(M\). In both examples, normalized valley-pure
+states that fail spatial-symmetry closure are rejected.
+The P4mm example has one valley and a symmorphic space group; it does not
+test valley-changing mirrors or nonsymmorphic translation phases.
+
+Local material regressions at code revision `49cc142` gave:
+
+| Calculation | Valley-resolved result for the selected band subspace |
+| --- | --- |
+| tMoTe₂ | Both \(K\) and \(K'\) irrep vectors lie outside the integer span of the reviewed reduced EBRs (`outside_integer_span`) |
+| tZrSe₂ | Each of the three \(M\) valleys admits a nonnegative exact reduced EBR combination (`solved_exact`) |
+
+These are results for specific band selections and HSPs, not universal
+statements about either material. The tMoTe₂ result is not a direct Chern
+calculation; the tZrSe₂ result does not establish global Wannierizability.
+Some optional time-reversal or joint grey-group results remain unresolved.
+Large material wavefunctions and their outputs are not distributed with the
+repository; the generated tests can be run without them.
 
 ## Limits and Non-Goals
 
@@ -390,7 +449,7 @@ ValleyScope currently does not provide:
 - built-in unreviewed EBR tables or heuristic floating-point EBR fitting;
 - compatibility relations;
 - Berry curvature, Wilson loops, or Chern numbers;
-- automatic full-moire-Brillouin-zone valley-goodness validation;
+- automatic validation of valley character throughout the moiré Brillouin zone;
 - a topology conclusion from HSP data alone.
 
 ## Development
@@ -402,6 +461,23 @@ python -m pip install -e ".[test]"
 python -m pytest -q
 ```
 
-The public command surface is defined in `valleyscope/cli.py`, configuration
-parsing in `valleyscope/io/config.py`, and public output selection in
-`valleyscope/reports/analysis_outputs.py`.
+To run the small spinful numerical examples alone:
+
+```bash
+python -m pytest -q tests/test_portable_numerical_chain.py tests/test_noncommuting_numerical_chain.py
+```
+
+The tests generate their own small wavefunction files. Tests for local
+development notes are skipped by default and do not require those notes in a
+public checkout. An additional installed-package check builds and tests an
+isolated copy of the committed revision:
+
+```bash
+python -m pip install build
+python scripts/release_gate.py --checkout .
+```
+
+Run it from a clean checkout; it may download dependencies. Commands are defined in
+[`valleyscope/cli.py`](valleyscope/cli.py), configuration parsing in
+[`valleyscope/io/config.py`](valleyscope/io/config.py), and output selection in
+[`valleyscope/reports/analysis_outputs.py`](valleyscope/reports/analysis_outputs.py).
