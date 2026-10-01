@@ -24,6 +24,7 @@ _STANDARD_SUMMARY_KEYS = {
     "symmetry_analysis",
     "cprime",
     "valley_resolved_irreps",
+    "valley_chern_mod",
     "reduced_ebr_summary",
     "readiness_blocker_summary",
     "warnings",

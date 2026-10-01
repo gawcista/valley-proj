@@ -22,6 +22,7 @@ from valleyscope.analysis.database_ingestion_record import (
     load_database_ingestion_record_from_directory,
 )
 from valleyscope.workflows.analyze_hsp import analyze_hsp
+from tests.rotation_chern_acceptance import assert_rotation_chern_summary
 
 
 # Independently specified reciprocal stars, not obtained from irrep tables
@@ -136,6 +137,10 @@ def run_numerical_workflow(root: Path, **kwargs) -> dict[str, object]:
 def assert_numerical_positive(result: dict[str, object]) -> dict[str, object]:
     """Check numerical scope, reviewed irreps and exact downstream results."""
     reports = result["reports"]
+    chern = assert_rotation_chern_summary(
+        reports["valley_summary_json"], valleys={"plus", "minus"}, modulus=3,
+        expected_hsp_powers={"GM": 1, "K": 1, "KA": 1},
+    )
     symmetry = reports["symmetry_report_json"]
     assert symmetry["spacegroup_number"] == 143
     assert symmetry["detected_operation_count"] == 3
@@ -222,13 +227,18 @@ def assert_numerical_positive(result: dict[str, object]) -> dict[str, object]:
         "required_operations_by_hsp": required_counts,
         "plane_waves_per_kpoint": 6, "bands": 4,
         "final_reduced_ebr_result_count": 2,
+        "rotation_chern_positive": chern,
         "validation_errors": [],
     }
 
 
-def assert_broken_coefficients_blocked(result: dict[str, object]) -> None:
+def assert_broken_coefficients_blocked(result: dict[str, object]) -> dict[str, object]:
     """High valley purity and a good Gram matrix cannot replace closure."""
     reports = result["reports"]
+    chern = assert_rotation_chern_summary(
+        reports["valley_summary_json"], valleys={"plus", "minus"}, modulus=3,
+        expected_hsp_powers={"GM": 1, "K": 1, "KA": 1}, blocked=True,
+    )
     with result["outputs"]["valley_weights_csv"].open(encoding="utf-8") as handle:
         weights = list(csv.DictReader(handle))
     assert len(weights) == 16
@@ -252,6 +262,7 @@ def assert_broken_coefficients_blocked(result: dict[str, object]) -> None:
     assert summary["valley_ebr_export_bundle"]["bundle_count"] == 0
     assert summary["valley_ebr_export_bundle"]["bundles"] == []
     assert summary["valley_reduced_ebr_mapping"]["solutions"] == []
+    return chern
 
 
 def run_installed_numerical_acceptance(workdir: Path | None = None) -> dict[str, object]:
@@ -260,7 +271,7 @@ def run_installed_numerical_acceptance(workdir: Path | None = None) -> dict[str,
         with tempfile.TemporaryDirectory(prefix="valleyscope_numerical_") as tmp:
             return run_installed_numerical_acceptance(Path(tmp))
     summary = assert_numerical_positive(run_numerical_workflow(workdir / "positive"))
-    assert_broken_coefficients_blocked(
+    summary["rotation_chern_broken_coefficients"] = assert_broken_coefficients_blocked(
         run_numerical_workflow(workdir / "broken", broken_coefficients=True)
     )
     summary["broken_coefficients_final_result_count"] = 0

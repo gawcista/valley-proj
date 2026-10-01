@@ -103,6 +103,7 @@ def write_analysis_outputs(
     spinor_source_basis_certificate: dict[str, object] | None = None,
     double_space_group_lift_certificates: dict[str, object] | None = None,
     scoped_representation_evidence: dict[str, object] | None = None,
+    valley_chern_mod: dict[str, object] | None = None,
 ) -> dict[str, object]:
     output_dir = config.output.directory
     prepare_analysis_output_directory(config)
@@ -201,6 +202,7 @@ def write_analysis_outputs(
             double_space_group_lift_certificates
         ),
         scoped_representation_evidence=scoped_representation_evidence,
+        valley_chern_mod=valley_chern_mod,
     )
     return outputs
 
@@ -361,6 +363,7 @@ def _write_summary_outputs(
     spinor_source_basis_certificate: dict[str, object] | None = None,
     double_space_group_lift_certificates: dict[str, object] | None = None,
     scoped_representation_evidence: dict[str, object] | None = None,
+    valley_chern_mod: dict[str, object] | None = None,
 ) -> None:
     # valley_summary.txt/json are the main user entry.  In standard profile
     # they are always written.  In debug profile the write_summary_* flags
@@ -404,6 +407,7 @@ def _write_summary_outputs(
             double_space_group_lift_certificates
         ),
         scoped_representation_evidence=scoped_representation_evidence,
+        valley_chern_mod=valley_chern_mod,
     )
     summary_text = render_summary_text(summary_payload)
     if "valley_summary_txt" in summary_path_plan:

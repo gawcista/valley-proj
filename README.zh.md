@@ -5,6 +5,7 @@
 ValleyScope 用于分析二维莫尔材料中 VASP 波函数的能谷成分与对称性表示。
 它从选定的能带子空间中分辨母层各能谷（valley）的贡献，确定保持每个谷的
 对称操作，并求取莫尔高对称点（HSP）处的不可约表示（irrep）。
+若存在保持单谷的旋转对称性，还可给出该子空间陈数模旋转阶数的条件性约束。
 
 这些不可约表示可进一步与约化到同一谷子空间和高对称点基底的基本能带表示
 （elementary band representation，EBR）比较。所得结果描述的是选定态的
@@ -119,6 +120,26 @@ ValleyScope 在完整的谷保持子群上匹配不可约表示（valley-preserv
 仅当输入确定来自保持时间反演对称性的计算时，才启用
 `analysis.time_reversal.enabled`。若所需信息缺失或不一致，相应的对称关系
 将保留为未确定，而不是强行赋予表示标签。
+
+### 条件性的谷陈数余数
+
+旋转本征值可以约束陈数模 \(n\) 的余数，理论依据见
+[Fang、Gilbert 与 Bernevig，Phys. Rev. B 86, 115112 (2012)](https://doi.org/10.1103/PhysRevB.86.115112)。
+ValleyScope 从实际保持单谷的绕 \(+z\) 旋转中，自动选择
+\(n=2,3,4,6\) 中的最高阶，并组合所需旋转不变动量处的子空间旋转矩阵
+行列式。所得余数对应**整个选定的谷子空间**，不逐条赋予能带陈数。
+层面内的二重轴、交换不同谷的旋转以及螺旋操作不用于这一 \(C_{nz}\) 约束。
+计算包含自旋旋转相位；若使用经过验证的时间反演推导，会与直接采样的证据
+分别标明来源。
+
+例如，`C = 1 (mod 3)` 的前提是整个莫尔布里渊区上存在光滑、恒秩的谷子空间，
+且满足一致的布洛赫边界衔接与所用旋转对称性。高对称点计算本身不证明这些
+全局条件，也不能区分相差 \(n\) 的整数，因此不会给出完整整数陈数。
+
+这一分析不依赖约化 EBR 开关或求解结果，也不增加必填输入。若没有保持单谷
+的旋转，状态为 `not_applicable`；若缺少必需的高对称点或可信表示证据，
+状态为 `blocked`，保留原因但不填入数值余数。能够计算的结果始终标为
+`conditional`，而 `global_valley_subspace_status` 保持 `not_evaluated`。
 
 ### 约化 EBR 分析
 
@@ -269,6 +290,7 @@ valleyscope analyze-hsp analyze.yaml
 Run and projection context
 Valley projection by sampled state
 Valley-projected subspace space group and trusted HSP irreps
+Valley Chern residues from rotation eigenvalues
 Authoritative reduced EBR results
 Readiness blockers and warnings
 Public output files
@@ -278,6 +300,7 @@ Public output files
 窗口的定义方式。JSON 中的 `valley_projection_summary` 对应谷投影摘要；
 不可约表示、EBR 结果和未满足的条件分别记录在 `valley_resolved_irreps`、
 `reduced_ebr_summary` 和 `readiness_blocker_summary` 中。
+独立的 `valley_chern_mod` 报告记录条件性旋转余数及其适用性或缺失证据。
 
 投影状态标签包括 `fixed_center_not_captured`、`not_derived` 和 `unreliable`。
 其中，固定中心窗口内权重低，并不能证明该态不来自相应母层能谷。
@@ -316,7 +339,7 @@ valley_weights_adapted: 适配基中的谷权重
 
 | 文件 | 用途 |
 | --- | --- |
-| `valley_summary.txt` | 谷权重、子空间对称性、不可约表示、EBR 结果和未满足的条件 |
+| `valley_summary.txt` | 谷权重、子空间对称性、不可约表示、条件性陈数余数、EBR 结果和未满足的条件 |
 | `valley_summary.json` | 便于后续分析的结构化结果 |
 | `valley_weights.csv` | 各 k 点、各 VASP 能带的原始谷权重 |
 | `valley_ebr_export_bundle.json` | 不可约表示向量与相应对称性数据；至少一组 EBR 输入满足导出条件时写出 |
@@ -325,6 +348,11 @@ valley_weights_adapted: 适配基中的谷权重
 `valley_resolved_irreps` 为每个采样的 `(kpoint, valley)` 保留一条记录，
 包含谷投影子空间的空间群、高对称点小群、谷保持操作、不可约表示重数
 （`irrep_multiplicities`），以及允许或阻止表示赋值的条件。
+
+摘要 schema `2.2.0` 在两种输出模式下都包含 `valley_chern_mod`。每条谷记录
+保留状态、模数、余数、子空间秩、旋转操作，以及本征值证据或阻断原因。
+缺失余数使用 `null`，不能解释为零。这一扩展不改变 EBR 导出、匹配和
+ingestion 的 schema，也不会使原本被阻断的 EBR 结果变为可接受。
 
 `valley_weights.csv` 便于快速筛查，但近简并子空间内单条能带的权重依赖
 规范选择，应结合子空间分析解释，不能将其视为不随规范改变的能带标签。
@@ -402,9 +430,9 @@ ValleyScope 当前不提供：
 - 将原始三维 EBR 分解作为谷分辨结果；
 - 内置未经审查的 EBR 表，或用启发式浮点拟合代替整数求解；
 - 能带表示的相容关系分析；
-- 贝里曲率、Wilson 环路或陈数计算；
+- 贝里曲率、Wilson 环路或完整整数陈数计算；
 - 整个莫尔布里渊区内谷特征的自动检验；
-- 仅依据高对称点数据作出的拓扑结论。
+- 仅依据高对称点数据作出的无条件拓扑结论。
 
 ## 开发
 
@@ -429,7 +457,12 @@ python -m pip install build
 python scripts/release_gate.py --checkout .
 ```
 
-请在没有未提交改动的源码目录中运行；这一检查可能下载依赖。命令定义见
+请在没有未提交改动的源码目录中运行；这一检查可能下载依赖。安装后的 P3
+和 P4mm 旋量对样例也检查整谷子空间的条件性旋转余数。空间对称性闭合失败时，
+余数必须保持不可用，不能填为零。这些是局域表示的检查，不是对整个 mBZ
+上 valley 子空间的验证。
+
+命令定义见
 [`valleyscope/cli.py`](valleyscope/cli.py)，配置解析见
 [`valleyscope/io/config.py`](valleyscope/io/config.py)，输出选择见
 [`valleyscope/reports/analysis_outputs.py`](valleyscope/reports/analysis_outputs.py)。

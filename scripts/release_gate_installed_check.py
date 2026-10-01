@@ -144,7 +144,12 @@ def _check_installed_acceptance(report: dict[str, object]) -> bool:
     from tests.portable_acceptance_chain import (
         run_installed_portable_acceptance,
     )
+    from tests.rotation_chern_acceptance import run_rotation_chern_arithmetic_acceptance
 
+    arithmetic = run_rotation_chern_arithmetic_acceptance()
+    report["rotation_chern_arithmetic_acceptance"] = arithmetic
+    print("rotation Chern arithmetic acceptance (not numerical trust): "
+          + json.dumps(arithmetic, sort_keys=True))
     summary = run_installed_portable_acceptance()
     report["portable_acceptance"] = summary
     print(

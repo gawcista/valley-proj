@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tarfile
 import zipfile
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -43,11 +44,141 @@ def test_installed_acceptance_requires_numerical_spinful_workflow():
     assert numerical["observed_hsps"] == ["GM", "K", "KA", "M"]
     assert numerical["final_reduced_ebr_result_count"] == 2
     assert numerical["broken_coefficients_final_result_count"] == 0
+    assert numerical["rotation_chern_positive"]["schema_version"] == "2.2.0"
+    assert numerical["rotation_chern_positive"]["rows"] == [
+        {"valley": "minus", "modulus": 3, "residue": 0,
+         "status": "conditional", "subspace_rank": 2},
+        {"valley": "plus", "modulus": 3, "residue": 0,
+         "status": "conditional", "subspace_rank": 2},
+    ]
+    assert numerical["rotation_chern_broken_coefficients"]["status"] == "blocked"
     noncommuting = report["noncommuting_numerical_acceptance"]
     assert noncommuting["source_space_group"] == 99
     assert noncommuting["required_operations_by_hsp"] == {"GM": 8, "X": 4, "M": 8}
     assert noncommuting["final_reduced_ebr_result_count"] == 1
     assert noncommuting["broken_coefficients_final_result_count"] == 0
+    assert noncommuting["rotation_chern_positive"]["rows"] == [
+        {"valley": "center", "modulus": 4, "residue": 0,
+         "status": "conditional", "subspace_rank": 2},
+    ]
+    for acceptance in (numerical, noncommuting):
+        for control in ("rotation_chern_positive", "rotation_chern_broken_coefficients"):
+            assert acceptance[control]["global_valley_subspace_status"] == "not_evaluated"
+        assert all(row["residue"] is None and row["status"] == "blocked"
+                   for row in acceptance["rotation_chern_broken_coefficients"]["rows"])
+
+
+@pytest.fixture(scope="module", params=["p3", "p4mm"])
+def numerical_chern_controls(request, tmp_path_factory):
+    """Amortize real numerical runs across acceptance-validator unit probes."""
+    from tests.noncommuting_numerical_chain import (
+        assert_noncommuting_negative, assert_noncommuting_positive,
+        run_noncommuting_workflow,
+    )
+    from tests.portable_numerical_chain import (
+        assert_broken_coefficients_blocked, assert_numerical_positive,
+        run_numerical_workflow,
+    )
+
+    runner, positive, negative = (
+        (run_numerical_workflow, assert_numerical_positive, assert_broken_coefficients_blocked)
+        if request.param == "p3" else
+        (run_noncommuting_workflow, assert_noncommuting_positive, assert_noncommuting_negative)
+    )
+    root = tmp_path_factory.mktemp(f"gate_chern_{request.param}")
+    return {
+        "positive": (runner(root / "positive"), positive),
+        "negative": (runner(root / "negative", broken_coefficients=True), negative),
+    }
+
+
+@pytest.mark.parametrize("mutation", [
+    "missing_report", "missing_residue", "wrong_residue", "null_residue",
+    "wrong_status", "wrong_modulus", "wrong_rank", "missing_evidence",
+    "wrong_global_status", "old_schema", "missing_valley",
+])
+def test_numerical_acceptance_rejects_corrupted_chern_output(numerical_chern_controls, mutation):
+    """Validator unit negatives; mutated reports are not new physics evidence."""
+    original, validator = numerical_chern_controls["positive"]
+    result = deepcopy(original)
+    summary = result["reports"]["valley_summary_json"]
+    report = summary["valley_chern_mod"]
+    row = report["rows"][0]
+    if mutation == "missing_report":
+        del summary["valley_chern_mod"]
+    elif mutation == "missing_residue":
+        del row["residue"]
+    elif mutation == "wrong_residue":
+        row["residue"] = 1
+    elif mutation == "null_residue":
+        row["residue"] = None
+    elif mutation == "wrong_status":
+        row["status"] = "blocked"
+    elif mutation == "wrong_modulus":
+        row["modulus"] = 2
+    elif mutation == "wrong_rank":
+        row["subspace_rank"] = 1
+    elif mutation == "missing_evidence":
+        row["eigenvalue_evidence"] = []
+    elif mutation == "wrong_global_status":
+        report["global_valley_subspace_status"] = "validated"
+    elif mutation == "old_schema":
+        summary["schema_version"] = "2.1.0"
+    else:
+        report["rows"].pop()
+    with pytest.raises((AssertionError, KeyError)):
+        validator(result)
+
+
+@pytest.mark.parametrize("mutation", ["zero_filled_residue", "conditional_status", "missing_blocker"])
+def test_numerical_acceptance_rejects_unblocked_broken_chern_output(numerical_chern_controls, mutation):
+    """A real closure failure must retain blocked/null in the checked output."""
+    original, validator = numerical_chern_controls["negative"]
+    result = deepcopy(original)
+    row = result["reports"]["valley_summary_json"]["valley_chern_mod"]["rows"][0]
+    if mutation == "zero_filled_residue":
+        row["residue"] = 0
+    elif mutation == "conditional_status":
+        row["status"] = "conditional"
+    else:
+        row["blocking_reasons"] = []
+    with pytest.raises((AssertionError, KeyError)):
+        validator(result)
+
+
+@pytest.fixture
+def arithmetic_only_gate(monkeypatch):
+    """Isolate arithmetic dispatch; the unpatched numerical gate is tested above."""
+    for module, name in (
+        ("tests.portable_acceptance_chain", "run_installed_portable_acceptance"),
+        ("tests.portable_numerical_chain", "run_installed_numerical_acceptance"),
+        ("tests.noncommuting_numerical_chain", "run_installed_noncommuting_acceptance"),
+    ):
+        monkeypatch.setattr(f"{module}.{name}", lambda: {"validation_errors": []})
+    return _check_installed_acceptance
+
+
+def test_installed_gate_executes_nonzero_rotation_arithmetic(arithmetic_only_gate):
+    report = {}
+    assert arithmetic_only_gate(report)
+    assert report["rotation_chern_arithmetic_acceptance"] == {
+        "scope": "arithmetic_only_not_numerical_trust",
+        "rows": [
+            {"modulus": order, "residue": 1, "spinful": spinful,
+             "subspace_rank": 1 if spinful else 2}
+            for spinful in (False, True) for order in (2, 3, 4, 6)
+        ],
+    }
+
+
+def test_installed_gate_rejects_constant_zero_arithmetic(arithmetic_only_gate, monkeypatch):
+    """Mutation unit probe: a zero-returning installed formula cannot pass."""
+    monkeypatch.setattr(
+        "valleyscope.analysis.rotation_chern_math.rotation_chern_residue",
+        lambda *args, **kwargs: 0,
+    )
+    with pytest.raises(AssertionError):
+        arithmetic_only_gate({})
 
 
 @pytest.mark.parametrize("optimization", ["-O", "-OO"])

@@ -1551,6 +1551,20 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             subspace_payload=subspace_payload,
         )
 
+    from valleyscope.analysis.valley_chern import build_valley_chern_report
+
+    valley_chern_mod = build_valley_chern_report(
+        symmetry_payload=symmetry_payload,
+        valley_names=sector_names,
+        valley_irrep_matching=valley_irrep_matching,
+        cprime_validation_context=cprime_validation_context,
+        kpoint_frac_by_name=kpoint_frac_by_name,
+        time_reversal_orbit_report=time_reversal_orbit_report,
+        spinful=spinor_wf,
+        use_2d_momentum_only=config.projection.use_2d_momentum_only,
+        k_tolerance=config.symmetry.tolerance.hsp_little_group_k_residual,
+    )
+
     outputs = write_analysis_outputs(
         config=config,
         qcut=qcut,
@@ -1583,6 +1597,7 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
             double_space_group_lift_certificates
         ),
         scoped_representation_evidence=scoped_representation_evidence,
+        valley_chern_mod=valley_chern_mod,
     )
     return outputs
 

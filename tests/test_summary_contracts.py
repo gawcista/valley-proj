@@ -359,7 +359,7 @@ def test_summary_text_renders_qcut_fraction_for_relative_mode(tmp_path):
         output_paths={},
     )
 
-    assert summary["schema_version"] == "2.1.0"
+    assert summary["schema_version"] == "2.2.0"
     assert summary["qcut"]["fraction"] == pytest.approx(0.2)
     text = render_summary_text(summary)
     assert "qcut mode: relative_min_valley_distance" in text
@@ -1451,7 +1451,7 @@ def test_standard_summary_builds_compact_authoritative_result_surfaces(
         },
     )
 
-    assert summary["schema_version"] == "2.1.0"
+    assert summary["schema_version"] == "2.2.0"
     reduced = summary["reduced_ebr_summary"]
     assert reduced["trusted_bundle_count"] == 1
     assert reduced["trusted_bundle_counts_by_physical_object_kind"] == {

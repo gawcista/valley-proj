@@ -22,6 +22,7 @@ from valleyscope.analysis.database_ingestion_record import (
     load_database_ingestion_record_from_directory,
 )
 from valleyscope.workflows.analyze_hsp import analyze_hsp
+from tests.rotation_chern_acceptance import assert_rotation_chern_summary
 
 
 # Hand-specified stars, closed under the local little group and time reversal.
@@ -193,6 +194,10 @@ def _assert_numerical_matrices(result: dict[str, object]) -> None:
 def assert_noncommuting_positive(result: dict[str, object]) -> dict[str, object]:
     """Require reviewed 2D irreps and exact downstream EBR/ingestion."""
     reports = result["reports"]
+    chern = assert_rotation_chern_summary(
+        reports["valley_summary_json"], valleys={"center"}, modulus=4,
+        expected_hsp_powers={"GM": 1, "M": 1, "X": 2},
+    )
     rows = reports["valley_summary_json"]["valley_resolved_irreps"]["rows"]
     assert len(rows) == 3
     assert {row["kpoint"] for row in rows} == set(STARS)
@@ -234,12 +239,17 @@ def assert_noncommuting_positive(result: dict[str, object]) -> dict[str, object]
         "required_operations_by_hsp": SCOPE_SIZES,
         "plane_waves_per_kpoint": 4, "bands": 2,
         "final_reduced_ebr_result_count": 1, "validation_errors": [],
+        "rotation_chern_positive": chern,
     }
 
 
-def assert_noncommuting_negative(result: dict[str, object]) -> None:
+def assert_noncommuting_negative(result: dict[str, object]) -> dict[str, object]:
     """Good purity, normalization and TR cannot replace spatial closure."""
     reports = result["reports"]
+    chern = assert_rotation_chern_summary(
+        reports["valley_summary_json"], valleys={"center"}, modulus=4,
+        expected_hsp_powers={"GM": 1, "M": 1, "X": 2}, blocked=True,
+    )
     with result["outputs"]["valley_weights_csv"].open(encoding="utf-8") as handle:
         weights = list(csv.DictReader(handle))
     assert len(weights) == 6
@@ -277,6 +287,7 @@ def assert_noncommuting_negative(result: dict[str, object]) -> None:
     else:
         assert summary["valley_ebr_export_bundle"]["bundles"] == []
         assert summary["valley_reduced_ebr_mapping"]["solutions"] == []
+    return chern
 
 
 def run_installed_noncommuting_acceptance(workdir: Path | None = None) -> dict[str, object]:
@@ -285,7 +296,7 @@ def run_installed_noncommuting_acceptance(workdir: Path | None = None) -> dict[s
         with tempfile.TemporaryDirectory(prefix="valleyscope_noncommuting_") as tmp:
             return run_installed_noncommuting_acceptance(Path(tmp))
     summary = assert_noncommuting_positive(run_noncommuting_workflow(workdir / "positive"))
-    assert_noncommuting_negative(
+    summary["rotation_chern_broken_coefficients"] = assert_noncommuting_negative(
         run_noncommuting_workflow(workdir / "negative", broken_coefficients=True)
     )
     summary["broken_coefficients_final_result_count"] = 0

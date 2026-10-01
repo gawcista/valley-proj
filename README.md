@@ -7,6 +7,8 @@ VASP wavefunctions in two-dimensional moiré materials. It resolves the
 contribution of parent-layer valleys to a selected band subspace, determines
 the symmetries that preserve each valley, and assigns irreducible
 representations (irreps) at moiré high-symmetry points (HSPs).
+When a valley-preserving rotation is present, it also reports a conditional
+constraint on the subspace Chern number modulo the rotation order.
 
 These irreps can then be compared with elementary band representations
 (EBRs), reduced to the same valley subspace and HSP basis. The result describes
@@ -142,6 +144,31 @@ unitary representation.
 Enable `analysis.time_reversal.enabled` only for input known to come from a
 parent-TRS calculation. A symmetry relation is left unresolved when the
 information needed to establish it is missing or inconsistent.
+
+### Conditional Valley Chern Residues
+
+Rotation eigenvalues can constrain a Chern number modulo \(n\), as derived by
+[Fang, Gilbert and Bernevig, Phys. Rev. B 86, 115112 (2012)](https://doi.org/10.1103/PhysRevB.86.115112).
+ValleyScope automatically selects the highest-order actual valley-preserving
+rotation about \(+z\) among \(n=2,3,4,6\), and combines the determinants of
+the subspace rotation matrices at the required invariant momenta. The result
+is for the **whole selected valley subspace**, not its individual bands.
+In-plane twofold axes, valley-changing rotations and screw operations do not
+supply this \(C_{nz}\) constraint.
+Spinful rotation phases and any validated time-reversal inference are included;
+inferred evidence is identified separately from sampled evidence.
+
+A result such as `C = 1 (mod 3)` is conditional on the existence of a smooth,
+constant-rank valley subspace throughout the mBZ, with consistent Bloch boundary
+identifications and the stated rotation symmetry. The HSP calculation does not
+establish these global conditions, and cannot distinguish integers that differ
+by \(n\). No full integer Chern number is assigned.
+
+This analysis runs independently of the reduced EBR option and introduces no
+required inputs. Without a valley-preserving rotation it is `not_applicable`;
+missing required HSPs or unverified representation evidence give `blocked`,
+with reasons and no numerical residue. Available numerical results are always
+`conditional`, while `global_valley_subspace_status` remains `not_evaluated`.
 
 ### Reduced EBR Analysis
 
@@ -302,6 +329,7 @@ The terminal and `valley_summary.txt` show the same summary:
 Run and projection context
 Valley projection by sampled state
 Valley-projected subspace space group and trusted HSP irreps
+Valley Chern residues from rotation eigenvalues
 Authoritative reduced EBR results
 Readiness blockers and warnings
 Public output files
@@ -311,7 +339,9 @@ Read the valley weights together with the subspace symmetry and irrep results.
 `qcut mode:` records how the momentum window was defined. In JSON,
 `Valley projection summary` corresponds to `valley_projection_summary`; irreps, EBR
 results, and unresolved conditions appear in `valley_resolved_irreps`,
-`reduced_ebr_summary`, and `readiness_blocker_summary`.
+`reduced_ebr_summary`, and `readiness_blocker_summary`. The separate
+`valley_chern_mod` report records conditional rotation residues and their
+applicability or missing evidence.
 
 Projection status labels include `fixed_center_not_captured`, `not_derived`,
 and `unreliable`. In particular, a low weight in a fixed-center window does
@@ -349,7 +379,7 @@ The standard output contains:
 
 | File | Purpose |
 | --- | --- |
-| `valley_summary.txt` | Valley weights, subspace symmetries, irreps, EBR results, and unresolved conditions |
+| `valley_summary.txt` | Valley weights, subspace symmetries, irreps, conditional Chern residues, EBR results, and unresolved conditions |
 | `valley_summary.json` | The corresponding structured results for further analysis |
 | `valley_weights.csv` | Quick scan of raw per-(kpoint, VASP band) valley weights |
 | `valley_ebr_export_bundle.json` | Irrep vectors and supporting symmetry data; written when at least one EBR input satisfies the export conditions |
@@ -359,6 +389,12 @@ The standard output contains:
 `(kpoint, valley)`, including the valley-projected subspace space group, HSP
 little group, valley-preserving operations, irrep multiplicities
 (`irrep_multiplicities`), and the conditions that permit or prevent assignment.
+
+Summary schema `2.2.0` includes `valley_chern_mod` in both output profiles.
+Each valley row records its status, modulus, residue, subspace rank, rotation,
+and supporting eigenvalue evidence or blocking reasons. A missing residue is
+`null`, not zero. This addition does not change the EBR export, mapping, or
+ingestion schemas, and does not promote a blocked EBR result.
 
 Raw rows in `valley_weights.csv` are useful for screening, but individual rows
 inside a near-degenerate band subspace are gauge-dependent. Interpret them
@@ -448,9 +484,9 @@ ValleyScope currently does not provide:
 - raw three-dimensional EBR decomposition as a valley-resolved result;
 - built-in unreviewed EBR tables or heuristic floating-point EBR fitting;
 - compatibility relations;
-- Berry curvature, Wilson loops, or Chern numbers;
+- Berry curvature, Wilson loops, or full integer Chern numbers;
 - automatic validation of valley character throughout the moiré Brillouin zone;
-- a topology conclusion from HSP data alone.
+- an unconditional topology conclusion from HSP data alone.
 
 ## Development
 
@@ -477,7 +513,13 @@ python -m pip install build
 python scripts/release_gate.py --checkout .
 ```
 
-Run it from a clean checkout; it may download dependencies. Commands are defined in
+Run it from a clean checkout; it may download dependencies. The installed P3
+and P4mm spin-pair examples also check the
+conditional whole-subspace rotation residues. States that fail spatial-symmetry
+closure must retain an unavailable residue, not zero. These are local
+representation checks, not validation of a valley subspace throughout the mBZ.
+
+Commands are defined in
 [`valleyscope/cli.py`](valleyscope/cli.py), configuration parsing in
 [`valleyscope/io/config.py`](valleyscope/io/config.py), and output selection in
 [`valleyscope/reports/analysis_outputs.py`](valleyscope/reports/analysis_outputs.py).

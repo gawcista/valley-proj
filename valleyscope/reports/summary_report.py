@@ -11,7 +11,7 @@ import numpy as np
 from valleyscope.io.config import AppConfig
 from valleyscope.reports.json_report import _json_default
 
-_SCHEMA_VERSION = "2.1.0"
+_SCHEMA_VERSION = "2.2.0"
 
 _REDUCED_EBR_CLASSIFICATIONS = (
     "atomic-compatible-candidate",
@@ -86,6 +86,7 @@ def build_summary_payload(
     spinor_source_basis_certificate: dict[str, Any] | None = None,
     double_space_group_lift_certificates: dict[str, Any] | None = None,
     scoped_representation_evidence: dict[str, Any] | None = None,
+    valley_chern_mod: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     eigen_rows = [] if symmetry_rows is None else symmetry_rows
     warnings = _collect_warnings(subspace_payload, symmetry_payload, eigen_rows)
@@ -135,6 +136,15 @@ def build_summary_payload(
         "qcut": qcut_payload,
         "valley_projection_summary": projection_rows,
         "cprime": cprime,
+        "valley_chern_mod": valley_chern_mod if valley_chern_mod is not None else {
+            "status": "not_evaluated",
+            "global_valley_subspace_status": "not_evaluated",
+            "interpretation": (
+                "Total-subspace residues are conditional on a globally defined valley "
+                "subspace; they do not determine an integer Chern number."
+            ),
+            "rows": [],
+        },
         "warnings": warnings,
         "output_profile": config.output.profile,
         "output_files": output_files,
@@ -662,6 +672,7 @@ def _render_standard_summary_text(summary: dict[str, Any]) -> str:
 
     _render_standard_projection(lines, summary)
     _render_standard_irreps(lines, summary)
+    _render_valley_chern_mod(lines, summary.get("valley_chern_mod", {}))
     _render_standard_reduced_ebr(lines, summary)
     _render_standard_blockers(lines, summary)
 
@@ -678,6 +689,34 @@ def _render_standard_summary_text(summary: dict[str, Any]) -> str:
         "Set output.profile: debug for full diagnostic tables and artifacts."
     )
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_valley_chern_mod(lines: list[str], report: dict[str, Any]) -> None:
+    _section(lines, "Valley Chern residues from rotation eigenvalues")
+    lines.append(f"status: {report.get('status', 'not_evaluated')}")
+    lines.append(
+        "global valley subspace: "
+        f"{report.get('global_valley_subspace_status', 'not_evaluated')}"
+    )
+    lines.append(
+        "Total-subspace residues are conditional on a globally defined valley "
+        "subspace; they do not determine an integer Chern number."
+    )
+    interpretation = report.get("interpretation")
+    if interpretation:
+        lines.append(str(interpretation))
+    for row in report.get("rows", []):
+        status = row.get("status", "blocked")
+        prefix = f"{row.get('valley', '')}: {status}"
+        if status == "conditional":
+            lines.append(
+                f"{prefix}; C = {row.get('residue')} (mod {row.get('modulus')}); "
+                "conditional on a globally defined valley subspace"
+            )
+        else:
+            reasons = row.get("blocking_reasons", [])
+            lines.append(f"{prefix}; " + ("; ".join(reasons) or "no residue available"))
+    lines.append("")
 
 
 def _render_standard_projection(
@@ -1325,6 +1364,8 @@ def _render_debug_summary_text(summary: dict[str, Any]) -> str:
     resolved_irreps = summary.get("valley_resolved_irreps")
     if isinstance(resolved_irreps, dict):
         _render_valley_resolved_irreps(lines, resolved_irreps)
+
+    _render_valley_chern_mod(lines, summary.get("valley_chern_mod", {}))
 
     projected_reps = summary.get("valley_projected_representations")
     if isinstance(projected_reps, dict):
