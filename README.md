@@ -450,6 +450,9 @@ excluded results. It checks consistency with the current calculation summary,
 but does not recompute symmetry matrices from the wavefunctions. Inputs must
 be listed explicitly. This is offline result collection, not a database
 service or an automated calculation scheduler.
+Database persistence and cluster execution remain outside the implemented
+workflow; their design will depend on where the wavefunctions are computed
+and how the completed calculations are collected.
 
 ## Numerical Checks and Present Results
 
@@ -463,6 +466,14 @@ states that fail spatial-symmetry closure are rejected.
 The P4mm example has one valley and a symmorphic space group; it does not
 test valley-changing mirrors or nonsymmorphic translation phases.
 
+For the rank-two valley subspaces in these examples, the rotation analysis
+gives conditional residues of zero modulo 3 (P3) and modulo 4 (P4mm).
+The symmetry-breaking controls give `blocked` with a `null` residue, not zero.
+These checks also run against the installed package. Separate determinant
+tests cover nonzero residues for each allowed rotation order, with and
+without spin; they test the formula, not a nonzero-Chern wavefunction over
+the full Brillouin zone.
+
 Local material regressions at code revision `49cc142` gave:
 
 | Calculation | Valley-resolved result for the selected band subspace |
@@ -470,9 +481,31 @@ Local material regressions at code revision `49cc142` gave:
 | tMoTe₂ | Both \(K\) and \(K'\) irrep vectors lie outside the integer span of the reviewed reduced EBRs (`outside_integer_span`) |
 | tZrSe₂ | Each of the three \(M\) valleys admits a nonnegative exact reduced EBR combination (`solved_exact`) |
 
-These are results for specific band selections and HSPs, not universal
-statements about either material. The tMoTe₂ result is not a direct Chern
-calculation; the tZrSe₂ result does not establish global Wannierizability.
+For the same retained tMoTe₂ wavefunctions and selected bands, a subsequent
+rotation analysis gives \(C_K=1\pmod 3\) and \(C_{K'}=2\pmod 3\) for the
+selected rank-one valley
+subspaces. Both results are conditional. A required unsampled HSP is supplied
+by reviewed time-reversal inference from the opposite valley, rather than by
+an additional wavefunction sample. These residues do not distinguish
+\(C=1\) from \(C=-2\), or \(C=-1\) from \(C=2\), respectively.
+
+A projection control on the retained tMoTe₂ wavefunctions replaces the
+\(K/K'\) centers with \(\Gamma\) or the three \(M\) centers. Across three
+sampled HSPs and the existing q-cut scan, the \(K/K'\) windows capture most
+of the selected states, while the alternative windows remain below the
+unchanged capture threshold. The \(\Gamma\) weight is nearly zero. The
+nonzero \(M\)-window weight at the configured q-cut comes mainly from
+intersections with the other layer's periodic \(K/K'\) windows; it is not a
+measurement of a parent-layer
+\(M\)-valley Bloch-state occupation. The check includes the spectrum of the
+projector restricted to the full target subspace, not just individual-band
+weights. A small generated example of this cross-layer window overlap is
+included in [the projection controls](tests/test_projection_controls.py).
+
+These are results for specific band selections, HSPs, and projection windows,
+not universal statements about either material. The tMoTe₂ EBR result is not
+a Chern calculation, and its rotation residues do not determine full integer
+Chern numbers. The tZrSe₂ result does not establish global Wannierizability.
 Some optional time-reversal or joint grey-group results remain unresolved.
 Large material wavefunctions and their outputs are not distributed with the
 repository; the generated tests can be run without them.
