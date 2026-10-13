@@ -11,31 +11,25 @@ When a valley-preserving rotation is present, it also reports a conditional
 constraint on the subspace Chern number modulo the rotation order.
 
 These irreps can then be compared with elementary band representations
-(EBRs), reduced to the same valley subspace and HSP basis. The result describes
-the symmetry content of the selected states. It is not, by itself, a
-classification of their topology over the full moiré Brillouin zone.
+(EBRs), reduced to the same valley subspace and HSP basis. The comparison
+describes the symmetry content of the selected states at these momenta.
 
 ## Supported Scope
 
 The present implementation is intended for:
 
-- VASP plane-wave wavefunctions, read from `WAVECAR` or a ValleyScope HDF5
-  intermediate;
+- VASP plane-wave wavefunctions extracted from `WAVECAR` into a ValleyScope
+  HDF5 file for analysis;
 - nonmagnetic, spin-orbit-coupled two-dimensional moiré systems with parent
   time-reversal symmetry (TRS) and the default VASP Cartesian spin frame
   `SAXIS=[0,0,1]`;
 - selected moiré HSPs and target bands, with specified parent-layer valley
   centers and a moiré or bilayer structure for determining spatial symmetries.
 
-The construction uses the lattice and symmetry operations of the supplied
-system, without material-specific rules or a prescribed number of valleys.
-Numerical tests cover particular cases, not every space group or band manifold.
-
-The calculation assumptions above are not fully recoverable from a
-`WAVECAR` or compact HDF5 file alone. Users must ensure that the source
-calculation belongs to this domain. Magnetic systems, spin-space-group
-treatments, non-SOC noncollinear calculations, and arbitrary spin axes are not
-within the validated scope.
+The construction follows the lattice, symmetry operations, and valley centers
+of the supplied system. The numerical examples below give the cases tested
+so far. Users should check the source calculation's magnetic state, SOC,
+time-reversal symmetry, and spin frame against the conditions above.
 
 ## Physical Method
 
@@ -69,9 +63,8 @@ W_a = \langle\psi|P_a^0|\psi\rangle,
 W_{\rm val} = \sum_a W_a .
 ```
 
-This is momentum-space parent-valley projection, not full monolayer Bloch-state
-unfolding. `W_val` depends on the physical valley centers and q-cut, and is not
-a topological invariant.
+`W_val` measures the weight captured by the chosen parent-valley momentum
+windows. Its value depends on the valley centers and q-cut radius.
 
 For near-degenerate target bands, individual VASP eigenvectors are
 gauge-dependent. ValleyScope therefore analyzes the whole target subspace,
@@ -85,8 +78,7 @@ Two projector modes are available:
   projectors are used to test subspace symmetry and assign irreps.
 - `k_resolved_parent_valley` uses dynamic centers for parent-valley weight
   reporting at the sampled moiré momenta. Symmetry and EBR analysis still
-  starts from fixed-center seed projectors. This reporting option does not
-  validate valley character throughout the Brillouin zone.
+  starts from fixed-center seed projectors.
 
 ### Valley-Preserving Symmetry
 
@@ -110,24 +102,21 @@ D_g P_a^0 D_g^\dagger \approx P_{\pi_g(a)}^0 .
 ```
 
 An operation that maps \(a\) to another valley is a valley-changing operation.
-Its action relates the two subspaces through a valley sewing matrix; it is
-not part of the single-valley representation of \(G_k^{(a)}\). Where this
+Its action relates the two subspaces through a valley sewing matrix. Where this
 unitary relation has been verified from the wavefunctions, it can determine
 the representation at a symmetry-related, unsampled point. The transported
 subspace is checked against the target little-group irreps, with its origin
 recorded separately from directly sampled states.
 
 ValleyScope matches the representation on the full valley-preserving subgroup,
-using double-valued irreps for SOC wavefunctions. This includes multidimensional
-irreps, not only eigenvalues of a rotation generator. Comparison with
-Bilbao/irreptables requires a consistent crystallographic setting: basis,
-origin, affine operations, and the complete translation lattice. Matching
-rotation matrices or space-group names alone is insufficient.
+using double-valued irreps for SOC wavefunctions, including multidimensional
+irreps. Comparison with Bilbao/irreptables requires a consistent
+crystallographic setting: basis, origin, affine operations, and the complete
+translation lattice.
 
 ### Time Reversal
 
-Parent TRS does not imply that a one-valley subspace is TR-invariant. When
-time reversal exchanges valleys, each valley is first described by the
+When time reversal exchanges valleys, each valley is first described by the
 unitary irreps of its own valley-preserving subgroup.
 
 For a parent-TRS calculation, an unsampled time-reversed irrep may be inferred
@@ -137,9 +126,8 @@ sewing and a numerical test of antiunitary sewing between wavefunctions.
 Directly sampled and inferred irreps remain distinguishable in the results.
 
 A joint description including time reversal (a grey-group corepresentation)
-requires additional antiunitary and inter-valley checks. Failure of those
-checks does not by itself invalidate a separately verified single-valley
-unitary representation.
+requires additional antiunitary and inter-valley checks. Their results are
+recorded alongside the independently assessed single-valley unitary representations.
 
 Enable `analysis.time_reversal.enabled` only for input known to come from a
 parent-TRS calculation. A symmetry relation is left unresolved when the
@@ -152,28 +140,27 @@ Rotation eigenvalues can constrain a Chern number modulo \(n\), as derived by
 ValleyScope automatically selects the highest-order actual valley-preserving
 rotation about \(+z\) among \(n=2,3,4,6\), and combines the determinants of
 the subspace rotation matrices at the required invariant momenta. The result
-is for the **whole selected valley subspace**, not its individual bands.
-In-plane twofold axes, valley-changing rotations and screw operations do not
-supply this \(C_{nz}\) constraint.
+is for the **whole selected valley subspace**. The selected operation must be
+a finite-order, valley-preserving rotation about the out-of-plane axis.
 Spinful rotation phases and any validated time-reversal inference are included;
 inferred evidence is identified separately from sampled evidence.
 
 A result such as `C = 1 (mod 3)` is conditional on the existence of a smooth,
 constant-rank valley subspace throughout the mBZ, with consistent Bloch boundary
-identifications and the stated rotation symmetry. The HSP calculation does not
-establish these global conditions, and cannot distinguish integers that differ
-by \(n\). No full integer Chern number is assigned.
+identifications and the stated rotation symmetry. The result specifies the
+congruence class \(C=r+mn\), with integer \(m\). Its `conditional` status
+records these global assumptions.
 
-This analysis runs independently of the reduced EBR option and introduces no
-required inputs. Without a valley-preserving rotation it is `not_applicable`;
-missing required HSPs or unverified representation evidence give `blocked`,
-with reasons and no numerical residue. Available numerical results are always
+This analysis uses the existing wavefunction and symmetry inputs and runs
+independently of the reduced EBR option. Without a valley-preserving rotation
+it is `not_applicable`; missing required HSPs or unverified representation
+evidence give `blocked`,
+with reasons and a `null` residue. Available numerical results are always
 `conditional`, while `global_valley_subspace_status` remains `not_evaluated`.
 
 ### Reduced EBR Analysis
 
-EBRs of the parent three-dimensional space group cannot be compared directly
-with single-valley irreps. ValleyScope uses reviewed Bilbao/irreptables data
+ValleyScope uses reviewed Bilbao/irreptables data
 for the valley-projected subspace space group and restricts them to the same
 HSP and valley-preserving irrep basis as the wavefunction calculation:
 
@@ -194,15 +181,14 @@ nonnegative combination, exclusion from the integer span, an inconclusive
 bounded search, and insufficient physical information.
 
 A nonnegative combination establishes compatibility with the reduced EBRs
-at the HSPs considered. It does not establish a globally equivalent set of
-localized Wannier functions. Conversely, exclusion from the integer span is
-relative to the chosen subspace, HSP basis, and reviewed EBR generators;
-it is not a Chern-number calculation.
+at the HSPs considered. Integer-span membership is defined relative to the
+chosen valley subspace, HSP basis, and reviewed EBR generators. Establishing
+a global Wannier description additionally requires information about the
+Bloch subspace throughout the Brillouin zone.
 
 ### Conditions for Assigning Irreps
 
-High valley purity does not ensure that a band subspace carries a symmetry
-representation. The calculation also checks:
+Assigning a symmetry representation to a valley subspace requires:
 
 - target-subspace closure and representation unitarity;
 - seed-projector covariance under the full valley mapping;
@@ -212,10 +198,10 @@ representation. The calculation also checks:
 - the double-group multiplication law and, when used, antiunitary sewing.
 
 A fixed-center seed basis can be used directly if it satisfies these conditions.
-Otherwise, ValleyScope attempts a symmetry-adapted valley basis. If neither
-construction satisfies the conditions, the affected irrep or EBR result is
-not assigned. The residuals and reasons remain available for inspection;
-changing the output profile does not change these requirements.
+Otherwise, ValleyScope attempts a symmetry-adapted valley basis. If both
+constructions fail, the affected irrep or EBR result is reported as unresolved.
+Both output profiles apply the same physical requirements and retain the
+residuals and reasons for unresolved results.
 
 ## Installation
 
@@ -238,8 +224,26 @@ From a source checkout, `python -m valleyscope.cli --help` is equivalent.
 
 ## Quick Start
 
-Extract the selected wavefunctions into a compact HDF5 file once, then use
-that file for subsequent analyses.
+Moiré supercells contain many atoms and consequently many bands, while a
+study often focuses on just a few bands near the energy range of interest.
+For that selected subspace, ValleyScope extracts the specified bands at the
+required k points from the large `WAVECAR` and saves their complete plane-wave
+coefficients, including the spinor components for SOC states, and associated
+data in a compact HDF5 file. Select the complete target band manifold,
+including near-degenerate partners; the later symmetry-closure checks assess
+its suitability for representation analysis. Subsequent valley
+projection, symmetry, and reduced EBR analyses read this HDF5 file. Extracting
+it once reduces the data to store and transfer between computers and allows
+the same wavefunctions to be reused across analyses.
+
+The HDF5 file also connects wavefunction extraction with the common analysis
+methods. It stores the coefficients, lattice, reciprocal vectors, k points,
+energies, and band indices used downstream. This organization provides a
+route to other DFT programs: a future extractor for Quantum ESPRESSO (QE),
+for example, could supply the corresponding data in the same format. Extending
+the symmetry analysis also requires matching and validating that program's
+coordinate, Bloch-phase, normalization, and spinor conventions. The current
+extractor reads VASP `WAVECAR` files.
 
 ### 1. Extract Selected WAVECAR Data
 
@@ -266,6 +270,9 @@ output:
 ```bash
 valleyscope extract-wavecar extract.yaml
 ```
+
+This writes `wavefunctions.h5` with the selected bands and k points. The
+analysis configuration below uses it as `input.wavefunction_h5`.
 
 ### 2. Analyze the HSP Wavefunctions
 
@@ -344,8 +351,8 @@ results, and unresolved conditions appear in `valley_resolved_irreps`,
 applicability or missing evidence.
 
 Projection status labels include `fixed_center_not_captured`, `not_derived`,
-and `unreliable`. In particular, a low weight in a fixed-center window does
-not establish that a state has no parent-valley origin. The debug sections
+and `unreliable`. A low fixed-center weight means that the chosen window
+captures little of the state at that sampled momentum. The debug sections
 `Valley subspaces` and `Valley subspace analysis` include `S_min`
 (minimum target-valley-subspace weight), `min_concentration`, `assigned_valleys`, and
 `valley_weights_adapted`.
@@ -363,15 +370,14 @@ An analysis needs:
   `symmetry.operations.structure_file` for spglib operation detection.
 
 The monolayer structure defines parent-layer reciprocal coordinates; the
-moiré or bilayer structure defines the symmetry operations. They are not
-interchangeable.
+moiré or bilayer structure defines the symmetry operations.
 
 Use `output.profile: standard` for routine runs and `output.profile: debug`
 to inspect projector residuals, representation matrices, subspace closure,
 HSP stars, or sewing matrices. Advanced source-table and standard-setting
 options are described by the CLI help and the configuration parser in
-[`valleyscope/io/config.py`](valleyscope/io/config.py). They do not remove the
-need to verify the physical conventions of the input.
+[`valleyscope/io/config.py`](valleyscope/io/config.py). Choose them consistently
+with the physical conventions of the input.
 
 ## Outputs
 
@@ -393,18 +399,18 @@ little group, valley-preserving operations, irrep multiplicities
 Summary schema `2.2.0` includes `valley_chern_mod` in both output profiles.
 Each valley row records its status, modulus, residue, subspace rank, rotation,
 and supporting eigenvalue evidence or blocking reasons. A missing residue is
-`null`, not zero. This addition does not change the EBR export, mapping, or
-ingestion schemas, and does not promote a blocked EBR result.
+`null`. EBR export, mapping, and ingestion retain their own schemas and
+physical acceptance conditions.
 
 Raw rows in `valley_weights.csv` are useful for screening, but individual rows
 inside a near-degenerate band subspace are gauge-dependent. Interpret them
-together with the subspace analysis, rather than as invariant band labels.
+together with the subspace analysis.
 
 The debug profile retains detailed JSON/HDF5 evidence such as
 `diagnostics.h5`, symmetry reports, restricted representation data, and
-irrep/EBR source information. They are useful when a representation cannot be
-assigned. Some tables are header-only when no state falls within the relevant
-physical scope; this alone does not mean that the calculation failed.
+irrep/EBR source information. They help explain unresolved representation
+assignments. Some tables are header-only when no state falls within the relevant
+physical scope; the accompanying summary records the outcome.
 Offline result collection reads the separate EBR export and mapping files as
 well as the summary, so keep these files together.
 
@@ -419,9 +425,8 @@ irreps, and table origin must agree with the wavefunction calculation.
 
 Run this analysis within `analyze-hsp`, while the wavefunctions and numerical
 representations are available for checking. The separate command below checks
-compatibility of exported data. JSON identifiers alone cannot reproduce the
-wavefunction-level checks, so they are not sufficient for it to assign a
-physically validated EBR result:
+compatibility of exported data; physical validation uses the wavefunctions
+and numerical representations available in `analyze-hsp`:
 
 ```bash
 valleyscope map-reduced-ebr \
@@ -430,7 +435,7 @@ valleyscope map-reduced-ebr \
   --output valley_reduced_ebr_mapping.json
 ```
 
-ValleyScope does not supply ad hoc or unreviewed EBR tables.
+The reduced tables retain their reviewed source and crystallographic setting.
 
 ## Collecting Results Across Calculations
 
@@ -447,12 +452,10 @@ valleyscope collect-database-index ./run_a/valley_analysis ./run_b/valley_analys
 
 The collector keeps final EBR results separate from incomplete inputs and
 excluded results. It checks consistency with the current calculation summary,
-but does not recompute symmetry matrices from the wavefunctions. Inputs must
-be listed explicitly. This is offline result collection, not a database
-service or an automated calculation scheduler.
-Database persistence and cluster execution remain outside the implemented
-workflow; their design will depend on where the wavefunctions are computed
-and how the completed calculations are collected.
+using the stored symmetry results. Inputs are listed explicitly. Database
+persistence and cluster scheduling are future extensions whose design will
+depend on where the wavefunctions are computed and how completed calculations
+are collected.
 
 ## Numerical Checks and Present Results
 
@@ -463,16 +466,15 @@ time-reversed valleys. The [`P4mm` example](tests/test_noncommuting_numerical_ch
 checks noncommuting, two-dimensional double-valued representations at
 \(\Gamma\), \(X\), and \(M\). In both examples, normalized valley-pure
 states that fail spatial-symmetry closure are rejected.
-The P4mm example has one valley and a symmorphic space group; it does not
-test valley-changing mirrors or nonsymmorphic translation phases.
+The P4mm example covers one valley in a symmorphic space group, including
+the action of noncommuting little-group operations.
 
 For the rank-two valley subspaces in these examples, the rotation analysis
 gives conditional residues of zero modulo 3 (P3) and modulo 4 (P4mm).
-The symmetry-breaking controls give `blocked` with a `null` residue, not zero.
+The symmetry-breaking controls give `blocked` with a `null` residue.
 These checks also run against the installed package. Separate determinant
 tests cover nonzero residues for each allowed rotation order, with and
-without spin; they test the formula, not a nonzero-Chern wavefunction over
-the full Brillouin zone.
+without spin. These determinant tests check the rotation formula.
 
 Local material regressions at code revision `49cc142` gave:
 
@@ -483,11 +485,10 @@ Local material regressions at code revision `49cc142` gave:
 
 For the same retained tMoTe₂ wavefunctions and selected bands, a subsequent
 rotation analysis gives \(C_K=1\pmod 3\) and \(C_{K'}=2\pmod 3\) for the
-selected rank-one valley
-subspaces. Both results are conditional. A required unsampled HSP is supplied
-by reviewed time-reversal inference from the opposite valley, rather than by
-an additional wavefunction sample. These residues do not distinguish
-\(C=1\) from \(C=-2\), or \(C=-1\) from \(C=2\), respectively.
+selected rank-one valley subspaces. Both results are conditional. A required
+unsampled HSP is supplied
+by reviewed time-reversal inference from the opposite valley. The allowed
+integers are \(C_K=1+3m\) and \(C_{K'}=2+3m'\), with integers \(m,m'\).
 
 A projection control on the retained tMoTe₂ wavefunctions replaces the
 \(K/K'\) centers with \(\Gamma\) or the three \(M\) centers. Across three
@@ -495,31 +496,16 @@ sampled HSPs and the existing q-cut scan, the \(K/K'\) windows capture most
 of the selected states, while the alternative windows remain below the
 unchanged capture threshold. The \(\Gamma\) weight is nearly zero. The
 nonzero \(M\)-window weight at the configured q-cut comes mainly from
-intersections with the other layer's periodic \(K/K'\) windows; it is not a
-measurement of a parent-layer
-\(M\)-valley Bloch-state occupation. The check includes the spectrum of the
-projector restricted to the full target subspace, not just individual-band
-weights. A small generated example of this cross-layer window overlap is
+intersections with the other layer's periodic \(K/K'\) windows. It measures
+capture within these momentum windows. The check includes both individual-band
+weights and the spectrum of the projector restricted to the full target
+subspace. A small generated example of this cross-layer window overlap is
 included in [the projection controls](tests/test_projection_controls.py).
 
-These are results for specific band selections, HSPs, and projection windows,
-not universal statements about either material. The tMoTe₂ EBR result is not
-a Chern calculation, and its rotation residues do not determine full integer
-Chern numbers. The tZrSe₂ result does not establish global Wannierizability.
-Some optional time-reversal or joint grey-group results remain unresolved.
-Large material wavefunctions and their outputs are not distributed with the
-repository; the generated tests can be run without them.
-
-## Limits and Non-Goals
-
-ValleyScope currently does not provide:
-
-- raw three-dimensional EBR decomposition as a valley-resolved result;
-- built-in unreviewed EBR tables or heuristic floating-point EBR fitting;
-- compatibility relations;
-- Berry curvature, Wilson loops, or full integer Chern numbers;
-- automatic validation of valley character throughout the moiré Brillouin zone;
-- an unconditional topology conclusion from HSP data alone.
+These material results refer to the stated band selections, HSPs, and projection
+windows. Some optional time-reversal or joint grey-group results remain
+unresolved. The public tests generate small wavefunctions; the larger material
+calculations and their outputs are retained locally.
 
 ## Development
 
@@ -537,9 +523,8 @@ python -m pytest -q tests/test_portable_numerical_chain.py tests/test_noncommuti
 ```
 
 The tests generate their own small wavefunction files. Tests for local
-development notes are skipped by default and do not require those notes in a
-public checkout. An additional installed-package check builds and tests an
-isolated copy of the committed revision:
+development notes run when explicitly enabled. An additional installed-package
+check builds and tests an isolated copy of the committed revision:
 
 ```bash
 python -m pip install build
@@ -549,8 +534,8 @@ python scripts/release_gate.py --checkout .
 Run it from a clean checkout; it may download dependencies. The installed P3
 and P4mm spin-pair examples also check the
 conditional whole-subspace rotation residues. States that fail spatial-symmetry
-closure must retain an unavailable residue, not zero. These are local
-representation checks, not validation of a valley subspace throughout the mBZ.
+closure return `blocked` with a `null` residue. These checks exercise the
+sampled little-group representations and their rotation determinants.
 
 Commands are defined in
 [`valleyscope/cli.py`](valleyscope/cli.py), configuration parsing in
