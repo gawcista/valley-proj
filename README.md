@@ -235,6 +235,12 @@ The direct runtime dependencies and their roles are:
 through irrep. The test extra adds pytest; building a ValleyScope wheel or
 source distribution uses `build` and `setuptools>=68`.
 
+The Python 3.10 reference environment verified by the full test suite and
+installed-package checks uses Python 3.10.20, NumPy 2.2.6, h5py 3.16.0,
+PyYAML 6.0.3, spglib 2.7.0, SymPy 1.14.0, and SciPy 1.15.3, together with
+the fixed irrep/irreptables versions above. Versions of the other
+packages are resolved by pip for the chosen Python interpreter.
+
 The helper above downloads the official irrep 3.3.0 wheel, verifies its fixed
 SHA256, and builds the local revision `3.3.0+valleyscope.1`. Its source change
 is a single f-string quote correction in `Storage.generate_name`, allowing

@@ -203,6 +203,11 @@ python -m pip install --find-links dist/compat -e .
 `pip` 同时安装这些包的依赖，包括 irrep 所需的 SciPy。测试额外依赖 pytest；
 构建 ValleyScope 的 wheel 或源码分发包使用 `build` 和 `setuptools>=68`。
 
+通过完整测试及安装后检查的 Python 3.10 参照环境为：Python 3.10.20、
+NumPy 2.2.6、h5py 3.16.0、PyYAML 6.0.3、spglib 2.7.0、SymPy 1.14.0、
+SciPy 1.15.3，以及上表固定版本的 irrep/irreptables。其余包的安装版本由
+pip 根据所选 Python 解释器解析。
+
 上述脚本下载官方 irrep 3.3.0 wheel，核对固定的 SHA256，生成本地修订版
 `3.3.0+valleyscope.1`。源码只修改 `Storage.generate_name` 中一行 f-string
 的引号，使其可以在 Python 3.10 中导入。表示表、EBR 数据和数值方法保持
