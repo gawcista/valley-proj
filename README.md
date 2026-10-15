@@ -322,6 +322,59 @@ valleyscope extract-wavecar extract.yaml
 This writes `wavefunctions.h5` with the selected bands and k points. The
 analysis configuration below uses it as `input.wavefunction_h5`.
 
+The extractor streams selected-band coefficients into HDF5 and reconstructs
+the plane-wave G list in bounded candidate chunks. The default serial path
+uses this memory-saving workflow. The complete plane-wave basis, spinor
+components, normalization arithmetic, and requested band and k-point order
+are preserved, with coefficients stored as `complex128`. A completed HDF5
+file replaces the output atomically; a failed extraction preserves an
+existing output.
+
+Optional execution settings belong under the same `extract` section:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `workers` | `1` | Positive integer process limit, or `auto` to use the CPU and memory allowance |
+| `memory_gb` | Detected allowance | Optional finite positive memory budget in GiB, capped by detected available memory |
+| `g_chunk_size` | `65536` | Positive integer number of candidate G vectors per chunk; memory planning can reduce it |
+
+For a node allocation, explicitly enable `auto` in `extract.yaml`:
+
+```yaml
+extract:
+  workers: auto
+  g_chunk_size: 65536
+```
+
+CPU affinity and `SLURM_CPUS_PER_TASK` cap the process count. Available host,
+cgroup, and Slurm memory constrain the execution budget; `memory_gb` can
+lower that budget. The planner estimates working memory conservatively and
+actual RSS can exceed the estimate. When available memory cannot be detected,
+parallel extraction requires an explicit `memory_gb` value. Parallel speed
+depends on the selected states and storage throughput.
+
+For example, submit a Slurm job with one task and 64 CPUs, after activating
+the Python environment where ValleyScope is installed:
+
+```bash
+#!/bin/bash
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=64
+#SBATCH --mem=64G
+
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+srun valleyscope extract-wavecar extract.yaml
+```
+
+Choose the memory allocation for the input and cluster. Extraction uses one
+local process pool for separate G-reconstruction and coefficient phases,
+with a single HDF5 writer. It uses Python multiprocessing and the existing
+dependencies. Timing output reports G-list reconstruction and a combined
+coefficient read, normalization, and write stage.
+
 ### 2. Analyze the HSP Wavefunctions
 
 Create `analyze.yaml`:

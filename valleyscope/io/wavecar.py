@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 
 from valleyscope.geometry.lattice import Lattice, reciprocal_from_direct
+from valleyscope.io.g_vectors import enumerate_g_vectors
 
 HBAR2_OVER_2M_EV_A2 = 3.80998212
 
@@ -46,8 +47,12 @@ class GVectorAdjustment:
 
 
 class WavecarReader:
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, *, g_chunk_size: int = 65536,
+                 executor=None, max_in_flight: int = 1):
         self.path = Path(path)
+        self.g_chunk_size = g_chunk_size
+        self.executor = executor
+        self.max_in_flight = max_in_flight
         self._handle = self.path.open("rb")
         first_raw = self._handle.read(3 * np.dtype(np.float64).itemsize)
         if len(first_raw) != 3 * np.dtype(np.float64).itemsize:
@@ -200,6 +205,7 @@ class WavecarReader:
             )
 
         # 3. Automatic adjustment
+        del arr
         return self._adjust_encut(
             k_frac, nplane_record, count_at_header, header_encut, ecut_adjust_tol, reciprocal
         )
@@ -207,46 +213,22 @@ class WavecarReader:
     def _generate_g_vectors_with_encut(
         self, k_frac: np.ndarray, encut: float, reciprocal: np.ndarray
     ) -> np.ndarray:
-        """Generate G-vectors for a specific ENCUT in VASP loop order."""
-        direct = self.header.lattice.direct_cart
-        gcut = np.sqrt(encut / HBAR2_OVER_2M_EV_A2)
-        max_indices = np.ceil(gcut * np.linalg.norm(direct, axis=1) / (2.0 * np.pi)).astype(int) + 1
-        vectors: list[list[int]] = []
-        for k_raw in range(2 * max_indices[2] + 1):
-            k = _wrap_fft_index(k_raw, max_indices[2])
-            for j_raw in range(2 * max_indices[1] + 1):
-                j = _wrap_fft_index(j_raw, max_indices[1])
-                for i_raw in range(2 * max_indices[0] + 1):
-                    i = _wrap_fft_index(i_raw, max_indices[0])
-                    g_frac = np.array([i, j, k], dtype=float)
-                    q_cart = (g_frac + k_frac) @ reciprocal
-                    energy = HBAR2_OVER_2M_EV_A2 * float(q_cart @ q_cart)
-                    if energy < encut:
-                        vectors.append([i, j, k])
-        return np.asarray(vectors, dtype=int)
+        vectors, _ = enumerate_g_vectors(
+            self.header.lattice.direct_cart, reciprocal, k_frac, encut,
+            chunk_size=self.g_chunk_size, executor=self.executor,
+            max_in_flight=self.max_in_flight,
+        )
+        return vectors
 
     def _generate_g_vectors_with_energies(
         self, k_frac: np.ndarray, encut: float, reciprocal: np.ndarray
-    ) -> tuple[list[list[int]], list[float]]:
-        """Generate G-vectors and their kinetic energies in VASP loop order."""
-        direct = self.header.lattice.direct_cart
-        gcut = np.sqrt(encut / HBAR2_OVER_2M_EV_A2)
-        max_indices = np.ceil(gcut * np.linalg.norm(direct, axis=1) / (2.0 * np.pi)).astype(int) + 1
-        vectors: list[list[int]] = []
-        energies: list[float] = []
-        for k_raw in range(2 * max_indices[2] + 1):
-            k = _wrap_fft_index(k_raw, max_indices[2])
-            for j_raw in range(2 * max_indices[1] + 1):
-                j = _wrap_fft_index(j_raw, max_indices[1])
-                for i_raw in range(2 * max_indices[0] + 1):
-                    i = _wrap_fft_index(i_raw, max_indices[0])
-                    g_frac = np.array([i, j, k], dtype=float)
-                    q_cart = (g_frac + k_frac) @ reciprocal
-                    energy = HBAR2_OVER_2M_EV_A2 * float(q_cart @ q_cart)
-                    if energy < encut:
-                        vectors.append([i, j, k])
-                        energies.append(energy)
-        return vectors, energies
+    ) -> tuple[None, np.ndarray]:
+        """Collect cutoff-search energies without retaining unused G vectors."""
+        return enumerate_g_vectors(
+            self.header.lattice.direct_cart, reciprocal, k_frac, encut,
+            chunk_size=self.g_chunk_size, executor=self.executor,
+            max_in_flight=self.max_in_flight, include_vectors=False,
+        )
 
     def _adjust_encut(
         self,
@@ -264,7 +246,7 @@ class WavecarReader:
 
         # Collect candidate G-vectors up to header_encut + ecut_adjust_tol
         max_encut = header_encut + ecut_adjust_tol
-        raw_vectors, raw_energies = self._generate_g_vectors_with_energies(
+        _, raw_energies = self._generate_g_vectors_with_energies(
             k_frac, max_encut, reciprocal
         )
 

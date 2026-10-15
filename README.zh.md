@@ -278,6 +278,54 @@ valleyscope extract-wavecar extract.yaml
 该命令将选定能带和 k 点保存为 `wavefunctions.h5`。下面的分析配置通过
 `input.wavefunction_h5` 读取这个文件。
 
+抽取过程将选定能带的系数逐步写入 HDF5，并分块重建平面波 G 列表。
+默认串行路径采用这一节省内存的流程，保留完整平面波基底、旋量分量、
+归一化计算次序，以及指定的能带和 k 点顺序，系数使用 `complex128` 保存。
+完成的 HDF5 文件通过原子替换发布；抽取失败时保留已有输出。
+
+可在同一个 `extract` 配置下加入执行选项：
+
+| 选项 | 默认值 | 含义 |
+| --- | --- | --- |
+| `workers` | `1` | 正整数进程数上限；`auto` 根据 CPU 和内存额度决定进程数 |
+| `memory_gb` | 检测到的额度 | 可选的有限正数内存预算，单位 GiB，并受检测到的可用内存限制 |
+| `g_chunk_size` | `65536` | 每块候选 G 向量数量，取正整数；内存规划可进一步减小它 |
+
+使用整节点分配时，在 `extract.yaml` 中显式启用 `auto`：
+
+```yaml
+extract:
+  workers: auto
+  g_chunk_size: 65536
+```
+
+CPU affinity 与 `SLURM_CPUS_PER_TASK` 共同限制进程数。主机可用内存、
+cgroup 和 Slurm 内存额度约束执行预算，`memory_gb` 可进一步降低预算。
+资源规划采用保守的工作内存估计，实际 RSS 可能超过估计值。
+无法检测可用内存时，并行抽取需要显式设置 `memory_gb`。
+并行效果取决于所选态与存储吞吐量。
+
+例如，在已激活 ValleyScope 安装环境的条件下，提交一个任务、64 个 CPU
+的 Slurm 作业：
+
+```bash
+#!/bin/bash
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=64
+#SBATCH --mem=64G
+
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+srun valleyscope extract-wavecar extract.yaml
+```
+
+内存申请量应根据输入和集群条件选择。抽取使用一个本地进程池，分阶段处理
+G 列表重建与波函数系数，由单一写入进程生成 HDF5；执行依赖 Python
+多进程机制和已有依赖包。计时输出分别报告 G 列表重建，以及合并的系数
+读取、归一化与写入阶段耗时。
+
 ### 2. 分析高对称点波函数
 
 创建 `analyze.yaml`：

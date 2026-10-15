@@ -17,6 +17,19 @@ extract:
   # Noncollinear/SOC spinor records are detected from coefficient record length.
   spin_index: 1
 
+  # Serial extraction streams bands into complex128 HDF5 and chunks G candidates.
+  # Set workers: auto for a node allocation, or a positive integer process limit.
+  # CPU affinity, Slurm CPUs, and available memory cap the effective worker count.
+  workers: 1
+
+  # Positive candidate count per G-vector chunk; planning may reduce this value.
+  g_chunk_size: 65536
+
+  # Optional finite positive budget in GiB, capped by host/cgroup/Slurm memory.
+  # Estimates guide working-set planning; actual RSS can exceed the estimate.
+  # Required for parallel extraction when available memory cannot be detected.
+  # memory_gb: 32
+
   # Maximum allowed |delta_Ecut| in eV for automatic G-list reconstruction
   # cutoff adjustment (default 0.0 = strict exact-match only).
   # Start from 0.005 eV or 0.01 eV.  Values near 0.05 eV or larger are
