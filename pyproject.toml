@@ -13,14 +13,15 @@ dependencies = [
   "PyYAML",
   "spglib",
   "irreptables==3.1.0",
-  # irreptables imports irrep.utility. Build this Python 3.10-compatible
-  # local revision with scripts/build_irrep_compat_wheel.py (see README).
-  "irrep==3.3.0+valleyscope.1",
+  # irreptables imports irrep.utility. Official irrep 3.3 uses Python 3.12
+  # f-string syntax; let pip select a compatible public release.
+  "irrep>=3.1.1,<3.3; python_version < '3.12'",
+  "irrep>=3.1.1,<3.4; python_version >= '3.12'",
   "sympy",
 ]
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = ["pytest", "setuptools>=68"]
 
 [project.scripts]
 valleyscope = "valleyscope.cli:main"

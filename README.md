@@ -205,17 +205,18 @@ residuals and reasons for unresolved results.
 
 ## Installation
 
-ValleyScope requires Python 3.10 or newer. Use a dedicated environment for
-the wavefunction analysis:
+ValleyScope requires Python 3.10 or newer. In your chosen Python environment,
+clone the source and install it with:
 
 ```bash
 git clone https://github.com/gawcista/valley-proj.git
 cd valley-proj
-python -m venv .venv
-source .venv/bin/activate
-python scripts/build_irrep_compat_wheel.py --output-dir dist/compat
-python -m pip install --find-links dist/compat -e .
+python -m pip install -e .
 ```
+
+A dedicated Conda or virtual environment is useful when other calculations
+on the same machine have different package requirements. Installation uses
+the active Python interpreter and its configured package index.
 
 ### Dependencies
 
@@ -229,33 +230,33 @@ The direct runtime dependencies and their roles are:
 | spglib | Installed by pip | Spatial symmetry operations of the supplied structure |
 | SymPy | Installed by pip | Exact-integer reduced EBR decomposition |
 | irreptables | `3.1.0` | Standard little-group irreps and source EBR data |
-| irrep | `3.3.0+valleyscope.1` | Utility functions imported by irreptables |
+| irrep | `>=3.1.1,<3.3` on Python 3.10/3.11; `>=3.1.1,<3.4` on Python 3.12+ | Utility functions imported by irreptables |
 
 `pip` also installs the dependencies of these packages, including SciPy
-through irrep. The test extra adds pytest; building a ValleyScope wheel or
-source distribution uses `build` and `setuptools>=68`.
+through irrep. The test extra adds pytest and setuptools for package-metadata
+checks; building a ValleyScope wheel or source distribution uses `build`
+and `setuptools>=68`.
 
 The Python 3.10 reference environment verified by the full test suite and
 installed-package checks uses Python 3.10.20, NumPy 2.2.6, h5py 3.16.0,
 PyYAML 6.0.3, spglib 2.7.0, SymPy 1.14.0, and SciPy 1.15.3, together with
-the fixed irrep/irreptables versions above. Versions of the other
-packages are resolved by pip for the chosen Python interpreter.
+irrep 3.2.0 and irreptables 3.1.0. Versions of the other packages are
+resolved by pip for the chosen Python interpreter.
 
-The helper above downloads the official irrep 3.3.0 wheel, verifies its fixed
-SHA256, and builds the local revision `3.3.0+valleyscope.1`. Its source change
-is a single f-string quote correction in `Storage.generate_name`, allowing
-the package to import on Python 3.10. The representation tables, EBR data,
-and numerical methods retain their upstream contents. The wheel preserves
-the upstream license and records the source URLs, hashes, and change in
-`valleyscope_patch.json` in its distribution metadata. Package versions can
+Python environment markers select a compatible public irrep release during
+installation. Python 3.10/3.11 use the earlier release series; Python 3.12+
+also allow 3.3, whose f-string syntax requires the newer interpreter.
+An already installed version satisfying the active requirements can be reused.
+The allowed ranges describe dependency selection; numerical checks establish
+the tested combinations. Source and installed-package CI cover Python 3.10,
+3.11, 3.12, and 3.13, including actual irrep-table and EBR analyses.
+
+The reviewed representation and EBR source data remain at irreptables 3.1.0.
+To record the environment used for a calculation, save the installed package
+versions, for example with `python -m pip freeze`. Package versions can also
 be inspected with `python -m pip show irrep irreptables`.
-
-For an offline build of this dependency, provide the official wheel with
-`--source-wheel /path/to/irrep-3.3.0-py3-none-any.whl`; the same SHA256 check
-applies. Keep the generated wheel available through `--find-links` when
-installing ValleyScope. A fully offline installation also needs wheels for
-the remaining dependencies. Source and installed-package CI cover Python
-3.10 and 3.13.
+Offline clusters need the required packages available through a configured
+local wheelhouse or package mirror.
 
 Check the installed commands:
 
@@ -556,8 +557,7 @@ calculations and their outputs are retained locally.
 Install the test dependency and run the suite:
 
 ```bash
-python scripts/build_irrep_compat_wheel.py --output-dir dist/compat
-python -m pip install --find-links dist/compat -e ".[test]"
+python -m pip install -e ".[test]"
 python -m pytest -q
 ```
 
@@ -576,8 +576,8 @@ python -m pip install build
 python scripts/release_gate.py --checkout .
 ```
 
-Run it from a clean checkout; it builds the same irrep compatibility wheel
-and may download dependencies. The installed P3
+Run it from a clean checkout; it installs the declared public dependencies
+and may download them. The installed P3
 and P4mm spin-pair examples also check the
 conditional whole-subspace rotation residues. States that fail spatial-symmetry
 closure return `blocked` with a `null` residue. These checks exercise the

@@ -175,16 +175,16 @@ EBR 组合、属于整数张成但无非负组合、不属于整数张成、有�
 
 ## 安装
 
-ValleyScope 要求 Python 3.10 或更高版本。建议为波函数分析建立独立环境：
+ValleyScope 要求 Python 3.10 或更高版本。在选好的 Python 环境中，克隆源码并安装：
 
 ```bash
 git clone https://github.com/gawcista/valley-proj.git
 cd valley-proj
-python -m venv .venv
-source .venv/bin/activate
-python scripts/build_irrep_compat_wheel.py --output-dir dist/compat
-python -m pip install --find-links dist/compat -e .
+python -m pip install -e .
 ```
+
+若同一台机器上的其他计算需要不同版本的包，建议使用独立的 Conda 或虚拟环境。
+安装使用当前激活的 Python 解释器及其配置的软件源。
 
 ### 依赖环境
 
@@ -198,28 +198,28 @@ python -m pip install --find-links dist/compat -e .
 | spglib | 由 pip 安装 | 输入结构的空间对称操作 |
 | SymPy | 由 pip 安装 | 约化 EBR 的精确整数分解 |
 | irreptables | `3.1.0` | 标准小群不可约表示与源 EBR 数据 |
-| irrep | `3.3.0+valleyscope.1` | irreptables 调用的辅助函数 |
+| irrep | Python 3.10/3.11：`>=3.1.1,<3.3`；Python 3.12+：`>=3.1.1,<3.4` | irreptables 调用的辅助函数 |
 
-`pip` 同时安装这些包的依赖，包括 irrep 所需的 SciPy。测试额外依赖 pytest；
-构建 ValleyScope 的 wheel 或源码分发包使用 `build` 和 `setuptools>=68`。
+`pip` 同时安装这些包的依赖，包括 irrep 所需的 SciPy。测试额外依赖 pytest，
+并用 setuptools 检查包元数据；构建 ValleyScope 的 wheel 或源码分发包使用
+`build` 和 `setuptools>=68`。
 
 通过完整测试及安装后检查的 Python 3.10 参照环境为：Python 3.10.20、
 NumPy 2.2.6、h5py 3.16.0、PyYAML 6.0.3、spglib 2.7.0、SymPy 1.14.0、
-SciPy 1.15.3，以及上表固定版本的 irrep/irreptables。其余包的安装版本由
+SciPy 1.15.3、irrep 3.2.0、irreptables 3.1.0。其余包的安装版本由
 pip 根据所选 Python 解释器解析。
 
-上述脚本下载官方 irrep 3.3.0 wheel，核对固定的 SHA256，生成本地修订版
-`3.3.0+valleyscope.1`。源码只修改 `Storage.generate_name` 中一行 f-string
-的引号，使其可以在 Python 3.10 中导入。表示表、EBR 数据和数值方法保持
-上游内容。生成的 wheel 保留上游许可证，并在分发包元数据的
-`valleyscope_patch.json` 中记录来源地址、哈希与修改内容。
-可用 `python -m pip show irrep irreptables` 查看安装版本。
+安装时，Python 环境标记会自动选择兼容的官方 irrep 版本。
+Python 3.10/3.11 使用较早的版本系列；Python 3.12+ 还可使用采用新版
+f-string 语法的 3.3 系列。环境中已经安装且符合要求的版本可以继续使用。
+允许的版本范围用于依赖选择，数值检查确定具体受测组合。
+源码测试与安装包 CI 覆盖 Python 3.10、3.11、3.12、3.13，并实际执行
+表示表和 EBR 分析。
 
-离线构建这一依赖时，可通过
-`--source-wheel /path/to/irrep-3.3.0-py3-none-any.whl` 指定官方 wheel，脚本仍会
-执行相同的 SHA256 校验。安装 ValleyScope 时应通过 `--find-links` 指向生成的
-wheel 所在目录。完全离线安装还需要备齐其余依赖的 wheel。源码测试与安装包
-CI 覆盖 Python 3.10 和 3.13。
+受审查的不可约表示和 EBR 源数据保持为 irreptables 3.1.0。
+为复现具体计算，可保存其安装包版本，例如运行 `python -m pip freeze`。
+也可用 `python -m pip show irrep irreptables` 查看版本。
+离线集群需要通过配置好的本地 wheel 目录或软件镜像提供所需依赖。
 
 检查已安装命令：
 
@@ -490,8 +490,7 @@ P4mm 样例覆盖对称型空间群中的单谷子空间，包括非对易小群
 安装测试依赖并运行测试：
 
 ```bash
-python scripts/build_irrep_compat_wheel.py --output-dir dist/compat
-python -m pip install --find-links dist/compat -e ".[test]"
+python -m pip install -e ".[test]"
 python -m pytest -q
 ```
 
@@ -509,8 +508,8 @@ python -m pip install build
 python scripts/release_gate.py --checkout .
 ```
 
-请在没有未提交改动的源码目录中运行；这一检查会构建相同的 irrep 兼容 wheel，
-并可能下载依赖。安装后的 P3
+请在没有未提交改动的源码目录中运行；这一检查安装声明的官方依赖，
+并可能下载这些包。安装后的 P3
 和 P4mm 旋量对样例也检查整谷子空间的条件性旋转余数。空间对称性闭合失败时，
 返回 `blocked`，余数为 `null`。这些检查考察采样点的小群表示及其旋转行列式。
 
