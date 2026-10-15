@@ -175,7 +175,8 @@ EBR 组合、属于整数张成但无非负组合、不属于整数张成、有�
 
 ## 安装
 
-ValleyScope 要求 Python 3.10 或更高版本。在选好的 Python 环境中，克隆源码并安装：
+ValleyScope 要求 Python 3.10 或更高版本，editable 安装使用 pip 21.3 或更高版本。
+在选好的 Python 环境中，克隆源码并安装：
 
 ```bash
 git clone https://github.com/gawcista/valley-proj.git
@@ -208,6 +209,8 @@ python -m pip install -e .
 NumPy 2.2.6、h5py 3.16.0、PyYAML 6.0.3、spglib 2.7.0、SymPy 1.14.0、
 SciPy 1.15.3、irrep 3.2.0、irreptables 3.1.0。其余包的安装版本由
 pip 根据所选 Python 解释器解析。
+本轮检查使用 Linux x86_64。额外检查确认，预装的兼容版本 irrep 3.1.1
+会在安装后保留；pip 21.3.1 也可在已有源码目录中完成 editable 安装。
 
 安装时，Python 环境标记会自动选择兼容的官方 irrep 版本。
 Python 3.10/3.11 使用较早的版本系列；Python 3.12+ 还可使用采用新版

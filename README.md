@@ -205,8 +205,8 @@ residuals and reasons for unresolved results.
 
 ## Installation
 
-ValleyScope requires Python 3.10 or newer. In your chosen Python environment,
-clone the source and install it with:
+ValleyScope requires Python 3.10 or newer and pip 21.3 or newer for editable
+installation. In your chosen Python environment, clone the source and install it with:
 
 ```bash
 git clone https://github.com/gawcista/valley-proj.git
@@ -242,6 +242,9 @@ installed-package checks uses Python 3.10.20, NumPy 2.2.6, h5py 3.16.0,
 PyYAML 6.0.3, spglib 2.7.0, SymPy 1.14.0, and SciPy 1.15.3, together with
 irrep 3.2.0 and irreptables 3.1.0. Versions of the other packages are
 resolved by pip for the chosen Python interpreter.
+These checks used Linux x86_64. Additional checks with preinstalled
+irrep 3.1.1 verify that a compatible existing version is retained; pip 21.3.1
+also completes the editable installation in an existing checkout.
 
 Python environment markers select a compatible public irrep release during
 installation. Python 3.10/3.11 use the earlier release series; Python 3.12+
