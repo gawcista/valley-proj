@@ -10,6 +10,8 @@ artifact audits reject forbidden local material.
 from __future__ import annotations
 
 import io
+import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -18,10 +20,12 @@ import tarfile
 import zipfile
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from scripts.release_gate import (
+    _build_irrep_dependency,
     _checkout_clean,
     _extract_head_archive,
     _audit_archive,
@@ -29,10 +33,115 @@ from scripts.release_gate import (
     _snapshot_matches_head,
 )
 from scripts.release_gate_installed_check import (
+    _check_irrep_compatibility,
     _check_installed_acceptance,
     _check_import_provenance,
     _module_in_venv,
 )
+
+
+def test_dependency_build_uses_snapshot_helper(tmp_path):
+    """A tiny CLI fixture tests subprocess wiring, not upstream wheel validity."""
+    snapshot = tmp_path / "snapshot"
+    scripts = snapshot / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "build_irrep_compat_wheel.py").write_text(
+        "import argparse\nfrom pathlib import Path\n"
+        "p = argparse.ArgumentParser()\np.add_argument('--output-dir', type=Path)\n"
+        "out = p.parse_args().output_dir\nout.mkdir(parents=True)\n"
+        "(out / 'irrep-3.3.0+valleyscope.1-py3-none-any.whl').write_bytes(b'fixture')\n"
+    )
+    output = tmp_path / "dependency wheels"
+    wheel = _build_irrep_dependency(sys.executable, snapshot, output)
+    assert wheel.parent == output
+    assert wheel.read_bytes() == b"fixture"
+
+
+def test_dependency_build_rejects_missing_artifact(tmp_path):
+    scripts = tmp_path / "snapshot" / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "build_irrep_compat_wheel.py").write_text("pass\n")
+    with pytest.raises(SystemExit, match="dependency wheel"):
+        _build_irrep_dependency(sys.executable, scripts.parent, tmp_path / "out")
+
+
+@pytest.fixture
+def compat_distribution(tmp_path, monkeypatch):
+    """Explicit validator unit fixture; the real wheel is checked by the gate."""
+    import scripts.release_gate_installed_check as check
+
+    site = tmp_path / "site-packages"
+    storage = site / "irrep" / "storage.py"
+    storage.parent.mkdir(parents=True)
+    storage.write_bytes(b"# unit fixture\n")
+    expected = dict(check.IRREP_PATCH_EVIDENCE)
+    expected["patched_file_sha256"] = hashlib.sha256(storage.read_bytes()).hexdigest()
+    monkeypatch.setattr(check, "IRREP_PATCH_EVIDENCE", expected)
+    monkeypatch.setattr(check, "_venv_site_packages", lambda: [site])
+    real_import = check.importlib.import_module
+    monkeypatch.setattr(
+        check.importlib, "import_module",
+        lambda name: SimpleNamespace(__file__=str(storage))
+        if name == "irrep.storage" else real_import(name),
+    )
+
+    class Distribution:
+        version = "3.3.0+valleyscope.1"
+        provenance = json.dumps(expected)
+
+        def read_text(self, name):
+            assert name == "valleyscope_patch.json"
+            return self.provenance
+
+        def locate_file(self, name):
+            return site / name
+
+    distribution = Distribution()
+    monkeypatch.setattr(check.importlib.metadata, "distribution", lambda name: distribution)
+    monkeypatch.setattr(check.importlib.metadata, "version", lambda name: "3.1.0")
+    return distribution, storage
+
+
+def test_installed_irrep_patch_positive(compat_distribution):
+    report = {}
+    assert _check_irrep_compatibility(report)
+    assert report["irrep_compatibility"]["version"] == "3.3.0+valleyscope.1"
+
+
+@pytest.mark.parametrize("mutation", [
+    "upstream_version", "missing_notice", "malformed_notice", "wrong_origin",
+    "tampered_storage", "outside_venv", "wrong_tables", "shadow_import",
+])
+def test_installed_irrep_patch_rejects_conflicting_evidence(
+    compat_distribution, mutation, tmp_path, monkeypatch,
+):
+    import scripts.release_gate_installed_check as check
+
+    distribution, storage = compat_distribution
+    if mutation == "upstream_version":
+        distribution.version = "3.3.0"
+    elif mutation == "missing_notice":
+        distribution.provenance = None
+    elif mutation == "malformed_notice":
+        distribution.provenance = "{"
+    elif mutation == "wrong_origin":
+        notice = json.loads(distribution.provenance)
+        notice["upstream_wheel_sha256"] = "0" * 64
+        distribution.provenance = json.dumps(notice)
+    elif mutation == "tampered_storage":
+        storage.write_bytes(b"# different code\n")
+    elif mutation == "outside_venv":
+        monkeypatch.setattr(check, "_venv_site_packages", lambda: [tmp_path / "other"])
+    elif mutation == "shadow_import":
+        real_import = check.importlib.import_module
+        monkeypatch.setattr(
+            check.importlib, "import_module",
+            lambda name: SimpleNamespace(__file__=str(tmp_path / "shadow" / "storage.py"))
+            if name == "irrep.storage" else real_import(name),
+        )
+    else:
+        monkeypatch.setattr(check.importlib.metadata, "version", lambda name: "9.0")
+    assert not _check_irrep_compatibility({})
 
 
 def test_installed_acceptance_requires_numerical_spinful_workflow():

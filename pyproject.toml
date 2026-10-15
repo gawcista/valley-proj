@@ -12,11 +12,10 @@ dependencies = [
   "h5py",
   "PyYAML",
   "spglib",
-  "irreptables",
-  # irreptables 3.1.0 imports irrep.utility at runtime but fails to declare
-  # it in its own metadata; declare it here so a fresh environment installs
-  # cleanly (clean-install defect fix).
-  "irrep",
+  "irreptables==3.1.0",
+  # irreptables imports irrep.utility. Build this Python 3.10-compatible
+  # local revision with scripts/build_irrep_compat_wheel.py (see README).
+  "irrep==3.3.0+valleyscope.1",
   "sympy",
 ]
 

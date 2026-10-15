@@ -218,6 +218,18 @@ def _create_fresh_venv(python: str, venv_dir: Path) -> Path:
     return venv_dir / "bin" / "python"
 
 
+def _build_irrep_dependency(python: str, srctree: Path, output_dir: Path) -> Path:
+    """Build the pinned compatibility dependency with this snapshot's helper."""
+    wheel = output_dir / "irrep-3.3.0+valleyscope.1-py3-none-any.whl"
+    result = _run([
+        python, srctree / "scripts" / "build_irrep_compat_wheel.py",
+        "--output-dir", output_dir,
+    ])
+    if result.returncode != 0 or not wheel.is_file():
+        raise SystemExit("FAIL: irrep compatibility dependency wheel build failed")
+    return wheel
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -299,11 +311,15 @@ def main(argv: list[str] | None = None) -> int:
             f"no forbidden local material)"
         )
 
+    dependency_wheel = _build_irrep_dependency(
+        args.python, srctree, workspace / "compat-wheels",
+    )
     venv_python = _create_fresh_venv(args.python, workspace / "venv")
     wheel = next(path for path in artifacts if path.suffix == ".whl")
     if _run([
         venv_python, "-m", "pip", "install",
-        "--disable-pip-version-check", str(wheel),
+        "--disable-pip-version-check", "--no-cache-dir",
+        "--find-links", str(dependency_wheel.parent), str(wheel),
     ]).returncode != 0:
         raise SystemExit("FAIL: wheel install into fresh environment failed")
 

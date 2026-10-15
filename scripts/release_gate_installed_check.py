@@ -14,6 +14,7 @@ closed).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.metadata
 import importlib.util
 import json
@@ -45,6 +46,48 @@ RUNTIME_DEPENDENCIES = (
     "sympy",
 )
 FORBIDDEN_MODULES = ("irrep.ebrs", "ortools", "irrep2")
+IRREP_PATCH_EVIDENCE = {
+    "upstream_version": "3.3.0",
+    "local_version": "3.3.0+valleyscope.1",
+    "upstream_wheel_sha256": "cf23d8f77471dcf7d2efe6029f47f17ddcd29597ec332ec77747001414b0f54f",
+    "patched_file": "irrep/storage.py",
+    "original_file_sha256": "35453a71a9d896ed207b29e49207b968dfd569cc0c1fecc68999a4ec89faada8",
+    "patched_file_sha256": "a9d2ee5bf5a184eed7ec6bb73f5cafadabef7939625ebde16599409f5559a84a",
+}
+
+
+def _check_irrep_compatibility(report: dict[str, object]) -> bool:
+    """Check installed distribution provenance and the actual patched source."""
+    try:
+        distribution = importlib.metadata.distribution("irrep")
+        if distribution.version != IRREP_PATCH_EVIDENCE["local_version"]:
+            raise ValueError(f"unexpected irrep distribution: {distribution.version}")
+        if importlib.metadata.version("irreptables") != "3.1.0":
+            raise ValueError("expected irreptables 3.1.0")
+        notice_text = distribution.read_text("valleyscope_patch.json")
+        notice = json.loads(notice_text or "null")
+        if not isinstance(notice, dict) or any(
+            notice.get(key) != value for key, value in IRREP_PATCH_EVIDENCE.items()
+        ):
+            raise ValueError("missing or conflicting irrep patch provenance")
+        storage = Path(distribution.locate_file("irrep/storage.py")).resolve()
+        if not _module_in_venv(storage, _venv_site_packages()):
+            raise ValueError(f"irrep storage source is outside this venv: {storage}")
+        digest = hashlib.sha256(storage.read_bytes()).hexdigest()
+        if digest != IRREP_PATCH_EVIDENCE["patched_file_sha256"]:
+            raise ValueError("installed irrep/storage.py differs from the reviewed patch")
+        imported_storage = importlib.import_module("irrep.storage")
+        if Path(imported_storage.__file__).resolve() != storage:
+            raise ValueError("runtime irrep.storage is shadowed by another source tree")
+    except (ImportError, OSError, ValueError, TypeError) as exc:
+        print(f"FAIL: irrep compatibility dependency: {exc}", file=sys.stderr)
+        return False
+    report["irrep_compatibility"] = {
+        "version": distribution.version, "storage_path": str(storage),
+        "storage_sha256": digest, "provenance": notice,
+    }
+    print("irrep compatibility dependency: " + json.dumps(report["irrep_compatibility"], sort_keys=True))
+    return True
 
 
 def _module_in_venv(module_path: Path, site_packages: list[Path]) -> bool:
@@ -289,6 +332,8 @@ def main(argv: list[str] | None = None) -> int:
         "gated_commit": args.commit,
     }
     if not _check_import_provenance(report):
+        return 1
+    if not _check_irrep_compatibility(report):
         return 1
     if not _check_cli_provenance(report, cwd=tests_dir.parent):
         return 1
