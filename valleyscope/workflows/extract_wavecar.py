@@ -87,8 +87,9 @@ def extract_wavecar_to_h5(config_path: str | Path) -> Path:
     if len({str(item["name"]) for item in kpoints}) != len(kpoints):
         raise ValueError("extract.kpoints names must be unique")
 
+    identity = _stat_identity(wavecar_path.stat())
     with WavecarReader(wavecar_path) as reader:
-        identity = _stat_identity(os.fstat(reader._handle.fileno()))
+        _check_source(reader, identity)
         if min(bands_vasp) < 1 or max(bands_vasp) > reader.header.nbands:
             raise ValueError("band_index out of range in extract.bands_vasp")
         max_nplane = max(reader.read_band_header(int(item["vasp_index"]) - 1, spin_index=spin_index).nplane_record

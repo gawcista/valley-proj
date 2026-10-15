@@ -333,6 +333,28 @@ def test_changed_source_does_not_publish_partial_extraction(tmp_path, monkeypatc
     assert set(tmp_path.iterdir()) == before
 
 
+def test_source_change_while_reading_initial_header_is_rejected(tmp_path, monkeypatch):
+    fixture = _write_wavecar(tmp_path / "WAVECAR")
+    replacement = _write_wavecar(tmp_path / "replacement", rtag=45210, nspinor=1)
+    config, output = _write_config(tmp_path, fixture)
+    output.write_bytes(b"previous output")
+    original = WavecarReader._read_record
+    changed = False
+
+    def replace_during_header(self, record_index, *args, **kwargs):
+        nonlocal changed
+        if record_index == 1 and not changed:
+            import shutil
+            shutil.copyfile(replacement.path, self.path)
+            changed = True
+        return original(self, record_index, *args, **kwargs)
+
+    monkeypatch.setattr(WavecarReader, "_read_record", replace_during_header)
+    with pytest.raises(ValueError, match="WAVECAR changed"):
+        extraction.extract_wavecar_to_h5(config)
+    assert output.read_bytes() == b"previous output"
+
+
 @pytest.mark.parametrize("alias", ["same_path", "hardlink"])
 def test_input_cannot_be_used_as_output(tmp_path, alias):
     fixture = _write_wavecar(tmp_path / "WAVECAR")
