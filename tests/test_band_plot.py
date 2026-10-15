@@ -224,3 +224,100 @@ def test_zero_weight_single_point_segments_keep_a_visible_base_state(tmp_path, m
     monkeypatch.setattr(Figure, "savefig", observe)
     plotter()(write_document(tmp_path, document))
     assert visible and all(visible)
+
+
+@pytest.mark.parametrize("filename", ["valley_fat_bands.png", "valley_fat_bands.pdf",
+                                      "valley_fat_bands.metadata.json"])
+def test_plot_output_collision_preserves_source_json_before_rendering(tmp_path, monkeypatch, filename):
+    pytest.importorskip("matplotlib")
+    from matplotlib.figure import Figure
+
+    source = tmp_path / filename
+    encoded = json.dumps(projection_document()).encode()
+    source.write_bytes(encoded)
+    rendered = []
+    savefig = Figure.savefig
+
+    def record_render(figure, *args, **kwargs):
+        rendered.append(True)
+        return savefig(figure, *args, **kwargs)
+
+    monkeypatch.setattr(Figure, "savefig", record_render)
+    with pytest.raises(ValueError, match="input"):
+        plotter()(source)
+    assert source.read_bytes() == encoded
+    assert list(tmp_path.iterdir()) == [source]
+    assert not rendered
+
+
+def test_plot_output_symlink_collision_preserves_source(tmp_path):
+    pytest.importorskip("matplotlib")
+    source = write_document(tmp_path, projection_document())
+    encoded = source.read_bytes()
+    destination = tmp_path / "figures"
+    destination.mkdir()
+    link = destination / "valley_fat_bands.metadata.json"
+    link.symlink_to(source)
+    with pytest.raises(ValueError, match="input"):
+        plotter()(source, output_directory=destination)
+    assert source.read_bytes() == encoded
+    assert link.is_symlink()
+    assert list(destination.iterdir()) == [link]
+
+
+def test_blocked_plot_destination_preserves_prior_outputs_before_rendering(tmp_path, monkeypatch):
+    pytest.importorskip("matplotlib")
+    from matplotlib.figure import Figure
+
+    destination = tmp_path / "figures"
+    destination.mkdir()
+    png = destination / "valley_fat_bands.png"
+    pdf = destination / "valley_fat_bands.pdf"
+    metadata = destination / "valley_fat_bands.metadata.json"
+    png.write_bytes(b"prior PNG")
+    pdf.mkdir()
+    (pdf / "preserved").write_bytes(b"directory contents")
+    metadata.write_bytes(b"prior metadata")
+    rendered = []
+    savefig = Figure.savefig
+
+    def record_render(figure, *args, **kwargs):
+        rendered.append(True)
+        return savefig(figure, *args, **kwargs)
+
+    monkeypatch.setattr(Figure, "savefig", record_render)
+    with pytest.raises((ValueError, OSError)):
+        plotter()(write_document(tmp_path, projection_document()), output_directory=destination)
+    assert png.read_bytes() == b"prior PNG"
+    assert (pdf / "preserved").read_bytes() == b"directory contents"
+    assert metadata.read_bytes() == b"prior metadata"
+    assert sorted(path.name for path in destination.iterdir()) == sorted([png.name, pdf.name, metadata.name])
+    assert not rendered
+
+
+@pytest.mark.parametrize("prior_outputs", [True, False])
+def test_second_publication_failure_rolls_back_output_set(tmp_path, monkeypatch, prior_outputs):
+    pytest.importorskip("matplotlib")
+    module = importlib.import_module("valleyscope.reports.band_plot")
+    destination = tmp_path / "figures"
+    destination.mkdir()
+    names = ["valley_fat_bands.png", "valley_fat_bands.pdf", "valley_fat_bands.metadata.json"]
+    previous = {name: f"previous {name}".encode() for name in names} if prior_outputs else {}
+    for name, contents in previous.items():
+        (destination / name).write_bytes(contents)
+    replace = module.os.replace
+    failed = False
+
+    def fail_second_publication(source, target, *args, **kwargs):
+        nonlocal failed
+        target = Path(target)
+        if target.parent == destination.resolve() and target.name == names[1] and not failed:
+            failed = True
+            raise OSError("simulated second publication failure")
+        return replace(source, target, *args, **kwargs)
+
+    monkeypatch.setattr(module.os, "replace", fail_second_publication)
+    with pytest.raises(OSError, match="second publication"):
+        module.plot_valley_bands(write_document(tmp_path, projection_document()), output_directory=destination)
+    assert failed
+    assert {path.name: path.read_bytes() for path in destination.iterdir()} == previous

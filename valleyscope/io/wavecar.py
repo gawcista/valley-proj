@@ -265,38 +265,40 @@ class WavecarReader:
         sorted_idx = np.argsort(raw_energies)
         sorted_energies = np.asarray(raw_energies)[sorted_idx]
 
-        # ecut_recon is placed between the target_count-th and (target_count+1)-th
+        # Strict E < ENCUT gives the exact-count interval (last_included,
+        # first_excluded]. Intersect that whole interval with the unchanged
+        # adjustment budget; its midpoint need not belong to the budget.
+        last_included = float(sorted_energies[target_count - 1])
         if target_count < len(sorted_energies):
-            ecut_recon = (sorted_energies[target_count - 1] + sorted_energies[target_count]) / 2.0
+            first_excluded = float(sorted_energies[target_count])
+            preferred_cutoff = (last_included + first_excluded) / 2.0
         else:
-            ecut_recon = sorted_energies[-1] + _TINY_ENERGY_EV
-
-        delta = ecut_recon - header_encut
-
-        if abs(delta) > ecut_adjust_tol + 1e-10:
-            closest_achievable = len(sorted_energies)
-            if target_count < len(sorted_energies):
-                lower_boundary_delta = sorted_energies[target_count - 1] - header_encut
-                upper_boundary_delta = sorted_energies[target_count] - header_encut
-            else:
-                lower_boundary_delta = float("inf")
-                upper_boundary_delta = float("inf")
+            # Candidates were enumerated with E < max_encut; max_encut itself
+            # remains an admissible upper endpoint when all are needed.
+            first_excluded = max_encut
+            preferred_cutoff = last_included + _TINY_ENERGY_EV
+        budget_lower, budget_upper = header_encut - ecut_adjust_tol, max_encut
+        # Keep subtraction rounding from exceeding the configured |delta|.
+        if header_encut - budget_lower > ecut_adjust_tol:
+            budget_lower = float(np.nextafter(budget_lower, header_encut))
+        if budget_upper - header_encut > ecut_adjust_tol:
+            budget_upper = float(np.nextafter(budget_upper, header_encut))
+        feasible_lower = max(float(np.nextafter(last_included, np.inf)), budget_lower)
+        feasible_upper = min(first_excluded, budget_upper)
+        if feasible_lower > feasible_upper:
             raise ValueError(
-                f"Reconstruction cutoff delta {delta:+.6f} eV (midpoint) exceeds "
-                f"ecut_adjust_tol={ecut_adjust_tol:.4f} eV.\n"
+                f"No exact-count reconstruction cutoff within ecut_adjust_tol="
+                f"{ecut_adjust_tol:.6g} eV; the interval/budget intersection "
+                f"is empty or the boundary is degenerate.\n"
                 f"  Header ENCUT: {header_encut:.4f} eV\n"
                 f"  Generated at header ENCUT: {count_at_header} G-vectors\n"
                 f"  Target G count: {target_count}\n"
-                f"  Closest achievable count within tolerance: {closest_achievable}\n"
-                f"  Lower boundary delta_Ecut: {lower_boundary_delta:+.6f} eV "
+                f"  Lower boundary delta_Ecut: {last_included - header_encut:+.6f} eV "
                 f"(energy of last included G-vector minus header ENCUT)\n"
-                f"  Upper boundary delta_Ecut: {upper_boundary_delta:+.6f} eV "
-                f"(energy of first excluded G-vector minus header ENCUT)\n"
-                f"  Suggested action: if the mismatch is a genuine cutoff-boundary "
-                f"reconstruction issue, increase ecut_adjust_tol. "
-                f"Otherwise check WAVECAR variant, lattice convention, G-list ordering, "
-                f"and k-point convention."
+                f"  Upper boundary delta_Ecut: {first_excluded - header_encut:+.6f} eV"
             )
+        ecut_recon = float(np.clip(preferred_cutoff, feasible_lower, feasible_upper))
+        delta = ecut_recon - header_encut
 
         # Regenerate with adjusted ENCUT
         arr = self._generate_g_vectors_with_encut(k_frac, ecut_recon, reciprocal)

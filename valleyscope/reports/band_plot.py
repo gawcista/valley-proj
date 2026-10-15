@@ -6,6 +6,7 @@ import hashlib
 import math
 import os
 from pathlib import Path
+import shutil
 import tempfile
 
 import numpy as np
@@ -175,6 +176,15 @@ def plot_valley_bands(result_path, *, output_directory=None, energy_reference_eV
                         else energy_reference_eV, "energy_reference_eV")
     if type(label_bands) is not bool:
         raise ValueError("label_bands must be boolean")
+    destination = Path(output_directory).resolve() if output_directory is not None else source.parent
+    names = {"png": "valley_fat_bands.png", "pdf": "valley_fat_bands.pdf",
+             "metadata": "valley_fat_bands.metadata.json"}
+    for filename in names.values():
+        target = destination / filename
+        if target.resolve() == source:
+            raise ValueError(f"Plot output would replace an input: {target}")
+        if target.exists() and not target.is_file():
+            raise ValueError(f"Plot output destination is not a file: {target}")
     try:
         from matplotlib.backends.backend_agg import FigureCanvasAgg
         from matplotlib.figure import Figure
@@ -244,9 +254,6 @@ def plot_valley_bands(result_path, *, output_directory=None, energy_reference_eV
         axes[-1].set_xlabel("Path distance (Å⁻¹)")
         fig.suptitle(f"{document['projection']['projector_mode']} · reference {reference:g} eV\n"
                      "Marker area = absolute weight / full-state norm (100 pt² = 1)", fontsize=11)
-        destination = Path(output_directory).resolve() if output_directory is not None else source.parent
-        names = {"png": "valley_fat_bands.png", "pdf": "valley_fat_bands.pdf",
-                 "metadata": "valley_fat_bands.metadata.json"}
         metadata = {
             "document_kind": "valley_projection_plot", "schema_version": "1.0.0",
             "source_result": str(source), "energy_reference_eV": reference,
@@ -265,8 +272,25 @@ def plot_valley_bands(result_path, *, output_directory=None, energy_reference_eV
             fig.savefig(stage / names["pdf"])
             (stage / names["metadata"]).write_text(json.dumps(metadata, indent=2, allow_nan=False) + "\n",
                                                    encoding="utf-8")
+            previous = {}
             for filename in names.values():
-                os.replace(stage / filename, destination / filename)
+                target = destination / filename
+                if target.exists() or target.is_symlink():
+                    backup = stage / f"previous-{filename}"
+                    shutil.copy2(target, backup, follow_symlinks=False)
+                    previous[filename] = backup
+            published = []
+            try:
+                for filename in names.values():
+                    os.replace(stage / filename, destination / filename)
+                    published.append(filename)
+            except BaseException:
+                for filename in reversed(published):
+                    if filename in previous:
+                        os.replace(previous[filename], destination / filename)
+                    else:
+                        (destination / filename).unlink()
+                raise
         return {key: str(destination / filename) for key, filename in names.items()}
     finally:
         fig.clear()
