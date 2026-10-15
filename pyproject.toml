@@ -22,6 +22,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest", "setuptools>=68"]
+plot = ["matplotlib>=3.6"]
 
 [project.scripts]
 valleyscope = "valleyscope.cli:main"

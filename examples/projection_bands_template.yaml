@@ -1,0 +1,51 @@
+# Replace all geometry, valley centers and band selections with your physical input.
+input:
+  wavefunction_h5: ./selected_wavefunctions.h5
+  monolayer_poscars:
+    parent: ./parent.vasp
+
+layer_transforms:
+  parent:
+    # Row-vector convention: M_moire = P^T A_parent.
+    supercell_matrix:
+      - [4, 1, 0]
+      - [-1, 4, 0]
+      - [0, 0, 1]
+
+analysis:
+  kpoints: [path_0, path_1, path_2]
+  # Original one-based VASP band IDs, in the desired order.
+  iband: {start: 101, end: 120}
+
+valley_centers:
+  coordinate_mode: layer_frac
+  centers:
+    - {name: center_a, layer: parent, frac: [0.25, 0.0, 0.0]}
+    - {name: center_b, layer: parent, frac: [-0.25, 0.0, 0.0]}
+    - {name: center_c, layer: parent, frac: [0.0, 0.25, 0.0]}
+
+valley_subspaces:
+  - {name: valley_A, centers: [center_a]}
+  - {name: valley_B, centers: [center_b]}
+  - {name: valley_C, centers: [center_c]}
+
+projection:
+  projector_mode: fixed_center
+  # Optional reporting comparison: k_resolved_parent_valley.
+  qcut_fraction: 0.20
+  overlap_policy: warn_exclude
+  use_2d_momentum_only: true
+
+path:
+  # Zero-based occurrences in analysis.kpoints; e.g. [2] breaks before path_2.
+  break_before: []
+  ticks:
+    - {index: 0, label: start}
+    - {index: 2, label: end}
+
+plot:
+  # Explicit eV value subtracted from serialized band energies when plotting.
+  energy_reference_eV: 0.0
+
+output:
+  directory: ./valley_projection

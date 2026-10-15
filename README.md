@@ -16,7 +16,16 @@ describes the symmetry content of the selected states at these momenta.
 
 ## Supported Scope
 
-The present implementation is intended for:
+The standalone `project-bands` workflow resolves parent-valley weights along
+any explicitly sampled path for nonmagnetic scalar VASP states (`ISPIN=1`)
+and supported SOC spinors. Scalar weights refer to each spatial eigenstate,
+with no spin multiplicity factor. The projection inputs are selected-band
+HDF5 coefficients, parent geometry and configured valley windows. Symmetry
+operations, irrep tables and representation certificates belong to the
+separate HSP analysis. Collinear `ISPIN=2` and non-SOC noncollinear inputs
+are outside the standalone projection scope.
+
+The symmetry/irrep/EBR workflow `analyze-hsp` is intended for:
 
 - VASP plane-wave wavefunctions extracted from `WAVECAR` into a ValleyScope
   HDF5 file for analysis;
@@ -270,6 +279,16 @@ valleyscope analyze-hsp --help
 
 From a source checkout, `python -m valleyscope.cli --help` is equivalent.
 
+Install the optional plotting dependency when producing figures:
+
+```bash
+python -m pip install -e ".[plot]"
+valleyscope project-bands --help
+valleyscope plot-valley-bands --help
+```
+
+Projection and HSP analysis import Matplotlib only when plotting is requested.
+
 ## Quick Start
 
 Moiré supercells contain many atoms and consequently many bands, while a
@@ -384,7 +403,62 @@ with a single HDF5 writer. It uses Python multiprocessing and the existing
 dependencies. Timing output reports G-list reconstruction and a combined
 coefficient read, normalization, and write stage.
 
-### 2. Analyze the HSP Wavefunctions
+### 2. Project Bands Along a Sampled Path
+
+Copy [the projection template](examples/projection_bands_template.yaml) to
+`projection.yaml`, then supply the HDF5 path, physical parent lattice and
+layer transforms, valley centers, k-point names and original VASP band IDs.
+All selected states retain their full plane-wave and supported spinor
+coefficients. Run projection and then render the serialized result:
+
+```bash
+valleyscope project-bands projection.yaml
+valleyscope plot-valley-bands valley_projection/valley_projection.json
+valleyscope plot-valley-bands valley_projection/valley_projection.json \
+  --output-directory figures --energy-reference-eV 0.0 --label-bands
+```
+
+The projection writes `valley_projection.json`, `valley_projection.txt` and
+`valley_weights.csv`. Its distinct JSON document has
+`document_kind: valley_projection` and `schema_version: 1.0.0`. It records
+each path occurrence, original band ID, energy, norm and raw/normalized
+weights; subspace, irrep, EBR and Chern stages have status `not_requested`.
+The plot command reads this JSON and writes `valley_fat_bands.png`,
+`valley_fat_bands.pdf` and `valley_fat_bands.metadata.json`. The original
+HDF5 and WAVECAR are unnecessary for replotting.
+
+Each configured valley has its own panel, followed by residual and overlap
+diagnostics. Grey energy bands remain visible at zero valley weight. All
+panels use the same energy and marker-area scales: marker area represents
+the absolute window probability divided by the full-state norm
+`N = sum(abs(C)**2)`, summing supported spinor components. Valley weights
+retain their absolute coverage; the configured valleys are never rescaled
+to sum to one. Same-valley centers form a union. `warn_exclude` removes
+cross-valley overlap from individual valley weights and reports it as
+`W_overlap`; `error` rejects overlapping windows. The accounting is
+`W_val + W_overlap + W_res = N`. Center-resolved windows are momentum
+diagnostics and may overlap; they describe no layer population.
+
+`fixed_center` compares `k + G_M` with fixed physical parent centers using
+the shortest Cartesian parent-periodic distance and strict `distance < qcut`.
+For comparison, `k_resolved_parent_valley` uses
+`Q_a(k) = Q_a + (k - kfold_a)` to label a selected folded momentum family.
+This mode reports momentum-window weights; reference Bloch-state tracking
+and band unfolding require additional physical data. Distinct configured
+valleys remain distinct even when dynamic windows coincide. HSP readiness
+continues to use fixed-center seeds.
+
+`analysis.kpoints` defines path occurrence order. `path.break_before` contains
+zero-based occurrence indices that begin new segments; a repeated endpoint
+alone keeps its existing segment. `path.ticks` supplies `{index, label}`
+entries. Distances use Cartesian reciprocal coordinates in Å⁻¹. Set the
+finite eV value `plot.energy_reference_eV` (default `0.0`) or override it
+with `--energy-reference-eV`; the plot metadata records the value subtracted
+from every energy. `--label-bands` displays original VASP band IDs.
+Near-degenerate eigenstates keep their original band energies and vectors;
+degenerate-block weight traces provide the basis-independent interpretation.
+
+### 3. Analyze the HSP Wavefunctions
 
 Create `analyze.yaml`:
 
@@ -491,7 +565,7 @@ with the physical conventions of the input.
 
 ## Outputs
 
-The standard output contains:
+For `analyze-hsp`, the standard output contains:
 
 | File | Purpose |
 | --- | --- |

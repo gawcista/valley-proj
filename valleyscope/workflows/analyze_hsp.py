@@ -131,6 +131,7 @@ from valleyscope.projection.sector_projectors import (
     build_sector_projectors,
 )
 from valleyscope.projection.weights import compute_valley_weights
+from valleyscope.projection.kpoint import project_kpoint
 from valleyscope.projection.folded_center import (
     build_folded_center_report,
     folded_center_report_to_dict,
@@ -348,22 +349,18 @@ def analyze_hsp(config_path: str | Path) -> dict[str, object]:
                 wavefunctions.metadata.lattice.reciprocal_cart,
                 use_2d=config.projection.use_2d_momentum_only,
             )
-        reporting_projectors = build_sector_projectors(
+        reporting_projectors, weights = project_kpoint(
             q_cart,
+            source_coefficients,
             reporting_centers,
             config.valley_subspaces,
             monolayer_recip,
             qcut,
             use_2d=config.projection.use_2d_momentum_only,
             overlap_policy=config.projection.overlap_policy,
-            emit_warnings=False,
             distance_cache=k_distance_cache,
         )
         projectors_by_kpoint[kpoint_name] = reporting_projectors
-        weights = compute_valley_weights(
-            source_coefficients,
-            reporting_projectors,
-        )
 
         # --- Readiness seed projectors (always fixed_center) ---
         # Seed matrices, projector symmetry-consistency, symmetry-adapted

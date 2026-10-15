@@ -11,6 +11,17 @@ def main(argv: list[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
     analyze = subparsers.add_parser("analyze-hsp", help="Run HSP valley projection diagnostics")
     analyze.add_argument("config", type=Path)
+    project = subparsers.add_parser(
+        "project-bands", help="Compute scalar or SOC valley weights along a sampled band path",
+    )
+    project.add_argument("config", type=Path)
+    plot = subparsers.add_parser(
+        "plot-valley-bands", help="Plot fat bands from a saved projection result",
+    )
+    plot.add_argument("result", type=Path)
+    plot.add_argument("--output-directory", type=Path, default=None)
+    plot.add_argument("--energy-reference-eV", type=float, default=None)
+    plot.add_argument("--label-bands", action="store_true")
     extract = subparsers.add_parser("extract-wavecar", help="Extract selected WAVECAR coefficients to V1 HDF5")
     extract.add_argument("config", type=Path)
     extract.add_argument(
@@ -25,6 +36,24 @@ def main(argv: list[str] | None = None) -> int:
     _add_scaffold_spec_parser(subparsers)
     _add_validate_spec_parser(subparsers)
     args = parser.parse_args(argv)
+    if args.command == "project-bands":
+        from valleyscope.workflows.project_bands import project_bands
+
+        outputs = project_bands(args.config)
+        print(str(outputs["summary_text"]), end="")
+        print(f"Wrote projection result to {outputs['result_path']}")
+        return 0
+    if args.command == "plot-valley-bands":
+        from valleyscope.reports.band_plot import plot_valley_bands
+
+        outputs = plot_valley_bands(
+            args.result, output_directory=args.output_directory,
+            energy_reference_eV=args.energy_reference_eV,
+            label_bands=args.label_bands,
+        )
+        for name, path in outputs.items():
+            print(f"{name}: {path}")
+        return 0
     if args.command == "analyze-hsp":
         from valleyscope.workflows.analyze_hsp import analyze_hsp
 

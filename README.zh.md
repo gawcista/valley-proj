@@ -13,7 +13,14 @@ ValleyScope 用于分析二维莫尔材料中 VASP 波函数的能谷成分与�
 
 ## 支持范围
 
-当前实现面向以下计算条件：
+独立的 `project-bands` 工作流支持非磁标量 VASP 态（`ISPIN=1`）及已支持的
+SOC 旋量，可沿明确给定的采样路径计算母层谷权重。标量权重逐个空间本征态
+计算，不乘自旋简并因子。投影输入为选定能带的 HDF5 系数、母层几何与配置的
+谷窗口；空间对称操作、不可约表示表和表示证书用于独立的 HSP 分析。
+独立投影的适用范围限于上述标量态和 SOC 旋量，`ISPIN=2` 共线态与非 SOC
+非共线态需另行支持。
+
+对称性、不可约表示与 EBR 工作流 `analyze-hsp` 面向以下计算条件：
 
 - 从 VASP `WAVECAR` 抽取并保存为 ValleyScope HDF5 的平面波波函数；
 - 非磁、含自旋轨道耦合（SOC）、完整体系具有时间反演对称性（TRS），且使用
@@ -233,6 +240,16 @@ valleyscope analyze-hsp --help
 
 在源码目录中，`python -m valleyscope.cli --help` 等价。
 
+需要生成图片时，安装可选绘图依赖：
+
+```bash
+python -m pip install -e ".[plot]"
+valleyscope project-bands --help
+valleyscope plot-valley-bands --help
+```
+
+投影和 HSP 分析仅在请求绘图时导入 Matplotlib。
+
 ## 快速开始
 
 莫尔超胞包含大量原子，相应的能带数量也很大，而具体研究通常只关注目标
@@ -333,7 +350,52 @@ G 列表重建与波函数系数，由单一写入进程生成 HDF5；执行依�
 多进程机制和已有依赖包。计时输出分别报告 G 列表重建，以及合并的系数
 读取、归一化与写入阶段耗时。
 
-### 2. 分析高对称点波函数
+### 2. 沿采样路径投影能带
+
+将[投影模板](examples/projection_bands_template.yaml)复制为 `projection.yaml`，
+填写 HDF5 路径、物理母层晶格与层变换、谷中心、k 点名称和原始 VASP 能带
+编号。各选定态保留完整平面波系数及适用的旋量分量。先运行投影，再绘制
+序列化结果：
+
+```bash
+valleyscope project-bands projection.yaml
+valleyscope plot-valley-bands valley_projection/valley_projection.json
+valleyscope plot-valley-bands valley_projection/valley_projection.json \
+  --output-directory figures --energy-reference-eV 0.0 --label-bands
+```
+
+投影写出 `valley_projection.json`、`valley_projection.txt` 和
+`valley_weights.csv`。独立 JSON 文档使用 `document_kind: valley_projection`
+和 `schema_version: 1.0.0`，记录各路径出现位置、原始能带编号、能量、范数及
+原始/归一化权重；子空间、irrep、EBR 与陈数阶段均为 `not_requested`。
+绘图命令读取这一 JSON，写出 `valley_fat_bands.png`、`valley_fat_bands.pdf`
+与 `valley_fat_bands.metadata.json`。重新绘图只需保留 JSON。
+
+各配置谷分别占一个面板，最后一个面板展示残余和重叠诊断。灰色能带线使
+零谷权重的态仍然可见。全部面板共用能量与标记面积标尺：标记面积表示窗口
+绝对概率除以完整态范数 `N = sum(abs(C)**2)`，并对适用的旋量分量求和。
+各谷保留相对于完整态的覆盖率；配置谷之间不会再归一化到总和为一。
+同一谷的多个中心按并集计算。`warn_exclude` 从单谷权重排除跨谷重叠，并以
+`W_overlap` 单独记录；`error` 拒绝重叠窗口。权重满足
+`W_val + W_overlap + W_res = N`。按中心记录的窗口属于可相互重叠的动量
+诊断，其物理含义限于相应窗口的捕获权重。
+
+`fixed_center` 使用最短笛卡尔母层周期距离，将 `k + G_M` 与固定物理母层
+中心比较，严格采用 `distance < qcut`。可选比较模式
+`k_resolved_parent_valley` 使用 `Q_a(k) = Q_a + (k - kfold_a)` 标记选定的
+折叠动量族，输出该动量窗口的权重。参考布洛赫态跟踪和能带展开需要额外
+物理数据。动态窗口重合时，各配置谷仍分别保留。HSP 就绪性继续采用固定
+中心的初始投影算符。
+
+`analysis.kpoints` 决定路径的出现顺序。`path.break_before` 使用从零开始的
+出现位置索引，表示新分段的起点；单独重复端点仍属于当前分段。
+`path.ticks` 使用 `{index, label}` 条目。距离由笛卡尔倒空间坐标计算，单位
+为 Å⁻¹。通过 `plot.energy_reference_eV` 设置有限 eV 参考值（默认 `0.0`），
+或用 `--energy-reference-eV` 覆盖；绘图元数据记录从全部能量扣除的参考值。
+`--label-bands` 显示原始 VASP 能带编号。近简并本征态保留原始能量与本征矢；
+简并块权重的迹提供与块内基底选择无关的解释。
+
+### 3. 分析高对称点波函数
 
 创建 `analyze.yaml`：
 
@@ -437,7 +499,7 @@ valley_weights_adapted: 适配基中的谷权重
 
 ## 输出
 
-标准输出包括：
+`analyze-hsp` 的标准输出包括：
 
 | 文件 | 用途 |
 | --- | --- |

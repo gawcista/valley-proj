@@ -26,6 +26,8 @@ from pathlib import Path
 
 CLI_COMMANDS = (
     "analyze-hsp",
+    "project-bands",
+    "plot-valley-bands",
     "extract-wavecar",
     "map-reduced-ebr",
     "collect-database-record",
@@ -185,6 +187,7 @@ def _check_cli_provenance(report: dict[str, object], cwd: Path) -> bool:
 
 
 def _check_installed_acceptance(report: dict[str, object]) -> bool:
+    from tests.projection_acceptance import run_installed_projection_acceptance
     from tests.noncommuting_numerical_chain import run_installed_noncommuting_acceptance
     from tests.portable_numerical_chain import run_installed_numerical_acceptance
     from tests.portable_acceptance_chain import (
@@ -192,6 +195,9 @@ def _check_installed_acceptance(report: dict[str, object]) -> bool:
     )
     from tests.rotation_chern_acceptance import run_rotation_chern_arithmetic_acceptance
 
+    projection = run_installed_projection_acceptance()
+    report["projection_acceptance"] = projection
+    print("installed projection-only acceptance: " + json.dumps(projection, sort_keys=True))
     arithmetic = run_rotation_chern_arithmetic_acceptance()
     report["rotation_chern_arithmetic_acceptance"] = arithmetic
     print("rotation Chern arithmetic acceptance (not numerical trust): "
@@ -210,7 +216,7 @@ def _check_installed_acceptance(report: dict[str, object]) -> bool:
     print("noncommuting numerical acceptance: " + json.dumps(noncommuting, sort_keys=True))
     return (
         summary["validation_errors"] == numerical["validation_errors"]
-        == noncommuting["validation_errors"] == []
+        == noncommuting["validation_errors"] == projection["validation_errors"] == []
     )
 
 
