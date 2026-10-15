@@ -62,7 +62,12 @@ def _worker_thread_limits(enabled):
                     os.environ[key] = value
 
 
-def extract_wavecar_to_h5(config_path: str | Path) -> Path:
+def extract_wavecar_to_h5(config_path: str | Path, *, workers: int | str = 1) -> Path:
+    """Extract serially unless the caller explicitly selects concurrency.
+
+    The CLI supplies ``workers='auto'`` only for its explicit --workers=auto
+    option. YAML worker settings never enable parallel execution.
+    """
     path = Path(config_path)
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     input_raw, extract_raw, output_raw = (raw.get(key, {}) for key in ("input", "extract", "output"))
@@ -94,7 +99,10 @@ def extract_wavecar_to_h5(config_path: str | Path) -> Path:
             raise ValueError("band_index out of range in extract.bands_vasp")
         max_nplane = max(reader.read_band_header(int(item["vasp_index"]) - 1, spin_index=spin_index).nplane_record
                          for item in kpoints)
-        plan = plan_extraction(extract_raw, record_length=reader.header.record_length, max_nplane=max_nplane)
+        if "workers" in extract_raw:
+            print("Ignoring extract.workers in YAML; concurrency is selected by the command-line --workers=auto option.")
+        runtime_options = {**extract_raw, "workers": workers}
+        plan = plan_extraction(runtime_options, record_length=reader.header.record_length, max_nplane=max_nplane)
         print(f"WAVECAR extraction: workers={plan.workers}, memory budget={plan.memory_bytes / 1024**3:.3f} GiB, "
               f"G chunk={plan.chunk_size} candidates (estimated working-set limits)")
         output_h5.parent.mkdir(parents=True, exist_ok=True)

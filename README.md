@@ -319,8 +319,9 @@ output:
 valleyscope extract-wavecar extract.yaml
 ```
 
-This writes `wavefunctions.h5` with the selected bands and k points. The
-analysis configuration below uses it as `input.wavefunction_h5`.
+This command runs serially and writes the selected bands and k points to
+`wavefunctions.h5`. The analysis configuration below uses it as
+`input.wavefunction_h5`.
 
 The extractor streams selected-band coefficients into HDF5 and reconstructs
 the plane-wave G list in bounded candidate chunks. The default serial path
@@ -334,17 +335,25 @@ Optional execution settings belong under the same `extract` section:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `workers` | `1` | Positive integer process limit, or `auto` to use the CPU and memory allowance |
 | `memory_gb` | Detected allowance | Optional finite positive memory budget in GiB, capped by detected available memory |
 | `g_chunk_size` | `65536` | Positive integer number of candidate G vectors per chunk; memory planning can reduce it |
 
-For a node allocation, explicitly enable `auto` in `extract.yaml`:
+For example, the candidate chunk size can be set in `extract.yaml`:
 
 ```yaml
 extract:
-  workers: auto
   g_chunk_size: 65536
 ```
+
+For a node allocation, enable automatic parallel extraction explicitly:
+
+```bash
+valleyscope extract-wavecar extract.yaml --workers=auto
+```
+
+The CLI selects concurrency through `--workers=auto` and defaults to serial
+execution. Legacy `extract.workers` YAML entries are ignored with a runtime
+notice.
 
 CPU affinity and `SLURM_CPUS_PER_TASK` cap the process count. Available host,
 cgroup, and Slurm memory constrain the execution budget; `memory_gb` can
@@ -366,11 +375,11 @@ export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
-srun valleyscope extract-wavecar extract.yaml
+srun valleyscope extract-wavecar extract.yaml --workers=auto
 ```
 
-Choose the memory allocation for the input and cluster. Extraction uses one
-local process pool for separate G-reconstruction and coefficient phases,
+Choose the memory allocation for the input and cluster. Parallel extraction
+uses one local process pool for separate G-reconstruction and coefficient phases,
 with a single HDF5 writer. It uses Python multiprocessing and the existing
 dependencies. Timing output reports G-list reconstruction and a combined
 coefficient read, normalization, and write stage.

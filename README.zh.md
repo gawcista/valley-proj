@@ -275,7 +275,7 @@ output:
 valleyscope extract-wavecar extract.yaml
 ```
 
-该命令将选定能带和 k 点保存为 `wavefunctions.h5`。下面的分析配置通过
+该命令按串行方式将选定能带和 k 点保存为 `wavefunctions.h5`。下面的分析配置通过
 `input.wavefunction_h5` 读取这个文件。
 
 抽取过程将选定能带的系数逐步写入 HDF5，并分块重建平面波 G 列表。
@@ -287,17 +287,24 @@ valleyscope extract-wavecar extract.yaml
 
 | 选项 | 默认值 | 含义 |
 | --- | --- | --- |
-| `workers` | `1` | 正整数进程数上限；`auto` 根据 CPU 和内存额度决定进程数 |
 | `memory_gb` | 检测到的额度 | 可选的有限正数内存预算，单位 GiB，并受检测到的可用内存限制 |
 | `g_chunk_size` | `65536` | 每块候选 G 向量数量，取正整数；内存规划可进一步减小它 |
 
-使用整节点分配时，在 `extract.yaml` 中显式启用 `auto`：
+例如，可在 `extract.yaml` 中设置候选 G 向量分块大小：
 
 ```yaml
 extract:
-  workers: auto
   g_chunk_size: 65536
 ```
+
+使用整节点分配时，通过命令行显式启用自动并行抽取：
+
+```bash
+valleyscope extract-wavecar extract.yaml --workers=auto
+```
+
+命令行通过 `--workers=auto` 选择并行，默认串行执行。旧配置中的
+`extract.workers` YAML 项会被忽略，并在运行时提示。
 
 CPU affinity 与 `SLURM_CPUS_PER_TASK` 共同限制进程数。主机可用内存、
 cgroup 和 Slurm 内存额度约束执行预算，`memory_gb` 可进一步降低预算。
@@ -318,10 +325,10 @@ export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
-srun valleyscope extract-wavecar extract.yaml
+srun valleyscope extract-wavecar extract.yaml --workers=auto
 ```
 
-内存申请量应根据输入和集群条件选择。抽取使用一个本地进程池，分阶段处理
+内存申请量应根据输入和集群条件选择。并行抽取使用一个本地进程池，分阶段处理
 G 列表重建与波函数系数，由单一写入进程生成 HDF5；执行依赖 Python
 多进程机制和已有依赖包。计时输出分别报告 G 列表重建，以及合并的系数
 读取、归一化与写入阶段耗时。

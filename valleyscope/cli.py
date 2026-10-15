@@ -13,6 +13,10 @@ def main(argv: list[str] | None = None) -> int:
     analyze.add_argument("config", type=Path)
     extract = subparsers.add_parser("extract-wavecar", help="Extract selected WAVECAR coefficients to V1 HDF5")
     extract.add_argument("config", type=Path)
+    extract.add_argument(
+        "--workers", choices=("auto",), default=None,
+        help="Enable resource-limited parallel extraction with --workers=auto (default: serial)",
+    )
     _add_map_reduced_ebr_parser(subparsers)
     _add_collect_database_record_parser(subparsers)
     _add_collect_database_index_parser(subparsers)
@@ -33,7 +37,7 @@ def main(argv: list[str] | None = None) -> int:
             extract_wavecar_to_h5,
         )
 
-        output = extract_wavecar_to_h5(args.config)
+        output = extract_wavecar_to_h5(args.config, workers=args.workers or 1)
         print(f"Wrote selected wavefunctions to {output}")
         return 0
     if args.command == "map-reduced-ebr":

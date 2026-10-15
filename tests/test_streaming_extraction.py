@@ -211,10 +211,11 @@ def test_spawned_cli_workers_match_serial_datasets_exactly(tmp_path, rtag, nspin
         "    return original(self, *args, **kwargs)\n"
         "WavecarReader.read_band_coefficients = observed\n"
         "if __name__ == '__main__':\n"
-        "    raise SystemExit(main(['extract-wavecar', sys.argv[1]]))\n",
+        "    raise SystemExit(main(['extract-wavecar', sys.argv[1], '--workers=auto']))\n",
         encoding="utf-8",
     )
     environment = os.environ.copy()
+    environment["SLURM_CPUS_PER_TASK"] = "2"
     environment.update({key: "1" for key in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS")})
     project_root = Path(__file__).resolve().parents[1]
     environment["PYTHONPATH"] = str(project_root) + os.pathsep + environment.get("PYTHONPATH", "")
@@ -286,7 +287,7 @@ def test_truncated_record_keeps_existing_output_and_removes_temporary_files(tmp_
     original_entries = set(tmp_path.iterdir())
 
     with pytest.raises(ValueError, match="WAVECAR record"):
-        extraction.extract_wavecar_to_h5(config)
+        extraction.extract_wavecar_to_h5(config, workers=workers)
 
     assert output.read_bytes() == original_bytes
     assert set(tmp_path.iterdir()) == original_entries
@@ -307,7 +308,7 @@ def test_invalid_resource_config_does_not_modify_existing_output(tmp_path, key, 
     original_entries = set(tmp_path.iterdir())
 
     with pytest.raises(ValueError, match=rf"extract\.{key}"):
-        extraction.extract_wavecar_to_h5(config)
+        extraction.extract_wavecar_to_h5(config, **({"workers": value} if key == "workers" else {}))
 
     assert output.read_bytes() == b"previous successful output"
     assert set(tmp_path.iterdir()) == original_entries
@@ -377,7 +378,32 @@ def test_parallel_extraction_restores_native_thread_environment(tmp_path, monkey
     config, output = _write_config(tmp_path, fixture, workers=2, memory_gb=2)
     monkeypatch.setenv("OMP_NUM_THREADS", "3")
     monkeypatch.delenv("BLIS_NUM_THREADS", raising=False)
-    extraction.extract_wavecar_to_h5(config)
+    extraction.extract_wavecar_to_h5(config, workers=2)
     assert os.environ["OMP_NUM_THREADS"] == "3"
     assert "BLIS_NUM_THREADS" not in os.environ
     _assert_complete_values(output, fixture)
+
+
+@pytest.mark.parametrize("yaml_workers", ["auto", 4, "invalid"])
+def test_cli_without_workers_flag_always_extracts_serially(tmp_path, monkeypatch, capsys, yaml_workers):
+    from valleyscope.cli import main
+
+    fixture = _write_wavecar(tmp_path / "WAVECAR")
+    config, output = _write_config(tmp_path, fixture, workers=yaml_workers)
+
+    def unexpected_pool(*args, **kwargs):
+        pytest.fail("CLI started a process pool without --workers=auto")
+
+    monkeypatch.setattr(extraction, "ProcessPoolExecutor", unexpected_pool)
+    assert main(["extract-wavecar", str(config)]) == 0
+    assert "workers=1," in capsys.readouterr().out
+    _assert_complete_values(output, fixture)
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "2", "invalid"])
+def test_cli_rejects_workers_values_other_than_auto(tmp_path, value):
+    from valleyscope.cli import main
+
+    with pytest.raises(SystemExit) as error:
+        main(["extract-wavecar", str(tmp_path / "unused.yaml"), f"--workers={value}"])
+    assert error.value.code == 2

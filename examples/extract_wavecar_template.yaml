@@ -18,9 +18,10 @@ extract:
   spin_index: 1
 
   # Serial extraction streams bands into complex128 HDF5 and chunks G candidates.
-  # Set workers: auto for a node allocation, or a positive integer process limit.
+  # Default: serial. Parallel extraction is enabled only by CLI flag --workers=auto:
+  # valleyscope extract-wavecar extract.yaml --workers=auto
   # CPU affinity, Slurm CPUs, and available memory cap the effective worker count.
-  workers: 1
+  # Legacy extract.workers YAML values are ignored with a runtime notice.
 
   # Positive candidate count per G-vector chunk; planning may reduce this value.
   g_chunk_size: 65536
