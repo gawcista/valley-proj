@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import subprocess
-import sys
 import tempfile
 
 import h5py
@@ -87,12 +85,14 @@ def verify_projection_result(path: Path) -> dict:
 
 
 def run_installed_projection_acceptance() -> dict:
+    # The gate checks installed import/console provenance independently. Keep
+    # numerical acceptance in the caller's current package import context so
+    # the same production fixture also runs in a clean source test environment.
+    from valleyscope.cli import main
+
     with tempfile.TemporaryDirectory(prefix="valleyscope-projection-installed-") as name:
         directory = Path(name)
         config = make_projection_inputs(directory)
-        console = Path(sys.executable).parent / "valleyscope"
-        run = subprocess.run([str(console), "project-bands", str(config)],
-                             capture_output=True, text=True, cwd=directory)
-        if run.returncode:
-            raise AssertionError(f"Installed projection CLI failed: {run.stdout}\n{run.stderr}")
+        if main(["project-bands", str(config)]) != 0:
+            raise AssertionError("Projection CLI acceptance failed")
         return verify_projection_result(directory / "output/valley_projection.json")
